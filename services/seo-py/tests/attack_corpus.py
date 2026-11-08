@@ -180,12 +180,13 @@ def cases():
                 yield base, name, f(value, kind)
 
 
-COMPOSED_EVERY = 11            # a deterministic one-in-11 subset of the ordered pairs keeps the suite reasonable
+COMPOSED_EVERY = 11            # the fast sample: a deterministic one-in-11 subset of the ordered pairs
 
 
-def composed_cases():
-    """Two obfuscations, the second applied to the first's output (round 11): a deterministic subset of every
-    ordered pair of different obfuscations that both apply to the value's kind (selected by SHA-256, so stable)."""
+def composed_cases(every: int = 1):
+    """Two obfuscations, the second applied to the first's output. ``every=1`` (the default since round 12) is EVERY
+    ordered pair of different obfuscations that both apply to the value's kind (18,826 cases, about 10-20 s);
+    ``every=COMPOSED_EVERY`` is round 11's deterministic SHA-256-selected sample (about one in 11)."""
     for base, (kind, value) in BASES.items():
         names = sorted(APPLIES[kind])
         for a in names:
@@ -193,7 +194,7 @@ def composed_cases():
                 if a == b:
                     continue
                 h = hashlib.sha256(f"{base}|{a}|{b}".encode()).digest()
-                if h[0] % COMPOSED_EVERY == 0:
+                if every == 1 or h[0] % every == 0:
                     yield base, f"{a}+{b}", OBFUSCATIONS[b](OBFUSCATIONS[a](value, kind), kind)
 
 

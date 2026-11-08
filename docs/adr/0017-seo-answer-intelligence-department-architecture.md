@@ -629,7 +629,7 @@ GSC-12. **Limitations (honest).**
      the read visibly (`GSC_PROTOCOL_ERROR`) instead of being half-read.
    - Names in queries are not detected as such; they are safe only because no query text is kept. Address-shaped
      queries, PO boxes, PMB numbers, rural routes, ZIP+4, a state with a ZIP, UK and Canadian postcodes, French
-     leading forms (`350 rue …`) and any query over 512 characters are `pii_suspect` since rules `2026-11-08.11`
+     leading forms (`350 rue …`) and any query over 512 characters are `pii_suspect` since rules `2026-11-08.12`
      (ADR 0047, "Personal data"); the id / token word rule no longer drops model numbers, tire sizes, decimals or
      years (`24acc636a003`, `225/65r17`, `3.5`, `2012`). Not caught: bare named streets with no suffix (`1200
      broadway`, `123 n main`), landmark or building-name addresses, streets with more than three name words or an
@@ -644,7 +644,8 @@ GSC-12. **Limitations (honest).**
      the full word rules on secret-chunked queries; URL-safe base64 (with a tell); cards across short filler
      tokens; spelled-out digit runs; a table-driven attack corpus (`tests/attack_corpus.py`). Not caught: dotted
      octal / hex IPv4, "dot" hosts with uncommon TLDs, split base64 of binary data, an address spaced out character
-     by character, filler placed inside spelled-out number words (the one composed-corpus residual class, 0.29%).
+     by character, three or more stacked obfuscations (the attack corpus tests every single obfuscation and every
+     ordered pair, 18,826 cases, and all are dropped since round 12).
      Round 11: no length rule on joined letter-digit text (spec queries kept); 9+ digits across filler tokens;
      homoglyph, enclosed and Spanish spelled digits; spaced / "dot" IPv4. Not caught: base64 under 12 characters, a random password written as a plain word. Over-dropped: a non-address shaped
      like `<number> <word> st|ave|dr…` or `<number> <word> court|place|way` at the end of a query. Osei keeps no query

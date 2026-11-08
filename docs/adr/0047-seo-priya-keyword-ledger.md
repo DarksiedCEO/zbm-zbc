@@ -145,7 +145,7 @@ account and developer token: a founder decision, not built.
 
 A query that ADR 0017's classifier calls `pii_suspect` (e-mails in any spelling, one phone-like run of 7+ digits not
 an ISO date, id- or secret-like words, and — added in review round 1, reworked in rounds 2 to 4,
-`search_performance` rules `2026-11-08.11`, so Osei's query classes use it too — address forms and over-long text):
+`search_performance` rules `2026-11-08.12`, so Osei's query classes use it too — address forms and over-long text):
 - an id- or secret-like word (round 4 narrowed this from the log templater's rule, which dropped model numbers, tire
   sizes, decimals and years — `24acc636a003`, `225/65r17`, `3.5`, `2012` — as ids): an e-mail in any spelling, a
   UUID, 16+ hex characters, a JWT-like dotted token, 20+ token characters, anything over 40 characters, a
@@ -220,10 +220,16 @@ an ISO date, id- or secret-like words, and — added in review round 1, reworked
   separators (each character / each group), English, Spanish and mixed spelled digits, reversal, filler letters /
   tokens, interleaving and case changes. **Single obfuscation: 478 generated cases, all dropped** (round 10's text
   said 388 cases — the count was 390 with its two pinned gaps; both gaps are closed now). **Composed mode** (two
-  obfuscations, a deterministic SHA-256-selected one-in-11 subset of every ordered pair): **1,748 cases, 5 kept
-  (0.29%)**, all in ONE pinned class — filler letters or tokens placed INSIDE spelled-out number words
-  (`thre-ab-e se-ab-ven …`). Risk: low; it needs a deliberate two-step obfuscation and its output is no longer a
-  readable number. The tests pin it (`tests/test_query_privacy_r11.py`: residual ≤ 1% and only that class);
+  obfuscations, the second applied to the first's output). Round 11 tested a one-in-11 sample (1,748 cases, 5
+  kept); the round-12 reviewer ran **every ordered pair (18,826 cases)** and found 57 kept (0.30%) in classes the
+  sample had missed — filler digit runs written with homoglyph letters, a single spelled word in a 9+ digit run,
+  homoglyph digits next to spelled words, and spelled words with a filler or an interleaved character inside them.
+  Round 12 closed all of them (filler runs on the homoglyph view; one spelled word enough in a 9+ digit run;
+  spelled digits looked for again with the most repeated short filler token, or an interleaved character at
+  alternating positions, removed). **All 18,826 pairs are now dropped, and the committed test runs every pair**
+  (`tests/test_query_privacy_r12.py::test_all_composed_pairs_drop`, in the default counted suite, about 10-20 s),
+  with round 11's sample kept as a fast check. No composed residual class remains pinned. What is still untested:
+  three or more obfuscations stacked, and obfuscations not in the corpus;
   7+ digits in one run stay the digit-run rule's;
 - a street address: a house number (at the start, or after a space not preceded by `top` / `best`), an optional
   direction, 1-3 street-name tokens (none a stop or quantity word such as `near`, `in`, `best`, `hour`, `bedroom`,

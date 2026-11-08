@@ -48,10 +48,12 @@ import lookalikes
 from agents import logs as logs_mod
 
 AGENT, TASK = "osei", "search_performance"
-VERSION = "2026-11-08.11"                     # query classes, templating and the aggregation rules below
+VERSION = "2026-11-08.12"                     # query classes, templating and the aggregation rules below
 # 2026-11-08.1 (Priya review round 1, M3): street addresses, unit / apartment numbers, PO boxes, ZIP+4 and a ZIP next
 #    to a US state are pii_suspect (looks_like_address)
 # 2026-11-08.2 (review round 2): the address rule needs address structure (it over-dropped service queries)
+# 2026-11-08.12 (review round 12): filler digit runs on the homoglyph view; one spelled word enough in a 9+ digit
+#    run; spelled digits looked for again with a repeated filler token or an interleaved character removed
 # 2026-11-08.11 (review round 11): no length rule on joined letter-digit text (spec queries kept); 9+ digits across
 #    filler tokens; homoglyph and enclosed digits; Spanish and mixed spelled digits; spaced / "dot" IPv4
 # 2026-11-08.10 (review round 10): one shared character normalisation (clean_text) for the classifier and Priya's
@@ -462,8 +464,8 @@ _NUMBER_WORDS = {"zero": "0", "oh": "0", "one": "1", "two": "2", "three": "3", "
                  # round 11: Spanish
                  "cero": "0", "uno": "1", "una": "1", "dos": "2", "tres": "3", "cuatro": "4", "cinco": "5",
                  "seis": "6", "siete": "7", "ocho": "8", "nueve": "9"}
-_SPELLED = re.compile(r"(?:(?:\b(?:" + "|".join(_NUMBER_WORDS) + r")\b|\d+|\b[lioszb|]\b)[\s\-,.]*"
-                      r"(?:(?!(?:" + "|".join(_NUMBER_WORDS) + r")\b)[a-z]{1,3}\b[\s\-,.]*)?){7,}")
+_SPELLED = re.compile(r"(?:(?:\b(?:" + "|".join(_NUMBER_WORDS) + r")\b|\d+|\b[lioszb|]\b)[\s\-,.()\[\]]*"
+                      r"(?:(?!(?:" + "|".join(_NUMBER_WORDS) + r")\b)[a-z]{1,3}\b[\s\-,.()\[\]]*)?){7,}")
 _HOMO1 = {"l": "1", "i": "1", "|": "1", "o": "0", "s": "5", "b": "8", "z": "2"}
 # number words run together once every separator is gone ("f i v e f i v e ...", reversed too; round 11)
 _NUMWORD_CONCAT = re.compile(r"(?:" + "|".join(sorted(_NUMBER_WORDS, key=len, reverse=True)) + r"|\d){7,}")
@@ -473,18 +475,51 @@ def spelled_digits(folded: str) -> str:
     """Runs of 7+ tokens that are spelled-out digits (English or Spanish) or digits, with at least two spelled
     ones, as digits ("four one one one ..." -> "4111...", "4 one 1 one ..."; rounds 10-11), else ""."""
     out = []
+
+    def enough(toks) -> bool:
+        # round 12: two spelled words, or one when the run holds 9+ digits ("(5) (5) (5) 0 (1) zero 0 (1) (9) (9)")
+        words = sum(1 for t in toks if t in _NUMBER_WORDS)
+        return words >= 2 or (words >= 1 and len(toks) >= 9)
     for m in _SPELLED.finditer(folded):
         toks = [t for t in re.findall(r"[a-z]+|\d+|\|", m.group())
                 if t in _NUMBER_WORDS or t.isdigit() or t in _HOMO1]           # filler tokens dropped
-        if sum(1 for t in toks if t in _NUMBER_WORDS) >= 2:
+        if enough(toks):
             out.append("".join(_NUMBER_WORDS.get(t) or _HOMO1.get(t, t) for t in toks))
-    squashed = re.sub(r"[^a-z0-9]", "", folded)
-    for text in (squashed, squashed[::-1]):
-        for m in _NUMWORD_CONCAT.finditer(text):
-            toks = re.findall("|".join(sorted(_NUMBER_WORDS, key=len, reverse=True)) + r"|\d", m.group())
-            if sum(1 for t in toks if t in _NUMBER_WORDS) >= 2:
-                out.append("".join(_NUMBER_WORDS.get(t, t) for t in toks))
+    for view in _defilled_views(folded):
+        squashed = re.sub(r"[^a-z0-9]", "", view)
+        for text in (squashed, squashed[::-1]):
+            for m in _NUMWORD_CONCAT.finditer(text):
+                toks = re.findall("|".join(sorted(_NUMBER_WORDS, key=len, reverse=True)) + r"|\d", m.group())
+                if enough(toks):
+                    out.append("".join(_NUMBER_WORDS.get(t, t) for t in toks))
     return " ".join(out)
+
+
+def _defilled_views(folded: str) -> list:
+    """The query as it is, and (round 12) with a repeated filler removed: the most repeated short token that is not a
+    number word or digits (" x ", "-ab-": "cuat x ro u x no" -> "cuat ro u no"), and the most frequent character when
+    it makes up a quarter or more of the letters (interleaving: "fxoxuxrx" -> "four"). Used only to look for
+    spelled-out digit runs, which need 7+ number tokens in a row."""
+    views = [folded]
+    toks = [t for t in re.split(r"[\s\-]+", folded) if t]
+    short = [t for t in toks if len(t) <= 3 and t not in _NUMBER_WORDS and not t.isdigit()]
+    if short:
+        tok, n = max(((t, short.count(t)) for t in set(short)), key=lambda x: (x[1], x[0]))
+        if n >= 3:
+            views.append(" ".join(t for t in toks if t != tok))
+    letters = [c for c in folded if c.isalpha()]
+    if letters:
+        ch, n = max(((c, letters.count(c)) for c in set(letters)), key=lambda x: (x[1], x[0]))
+        if n >= 0.25 * len(letters) and n >= 6:
+            views.append(folded.replace(ch, ""))
+
+            def deinterleave(w: str) -> str:   # positional: "sxixxx" -> "six" (a global removal would give "si")
+                for start in (1, 0):
+                    if len(w) >= 3 and all(c == ch for c in w[start::2]):
+                        return w[1 - start::2]
+                return w.replace(ch, "")
+            views.append(" ".join(deinterleave(w) for w in folded.split()))
+    return views
 
 
 # round 11: letters used as digits ("4lll llll", "SSS-OlO-Ol99"): l i | -> 1, o -> 0, s -> 5, b -> 8, z -> 2
@@ -665,7 +700,8 @@ def classify_query(q: str, brands: list, _depth: int = 0) -> str:
             or card_like(folded) or split_secret(folded) or looks_like_address(folded) \
             or (spelled and (longest_digit_run(spelled) >= PII_DIGIT_RUN or card_like(spelled))) \
             or filler_digit_run(folded) >= FILLER_DIGIT_RUN \
-            or (glyphs and (longest_digit_run(glyphs) >= 9 or card_like(glyphs))):
+            or (glyphs and (longest_digit_run(glyphs) >= 9 or card_like(glyphs)
+                            or filler_digit_run(glyphs) >= FILLER_DIGIT_RUN)):
         return "pii_suspect"
     squashed = re.sub(r"[^a-z0-9]", "", folded)
     if any(b in squashed for b in brands):

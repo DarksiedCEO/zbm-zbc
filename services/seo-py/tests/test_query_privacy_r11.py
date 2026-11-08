@@ -48,19 +48,8 @@ def test_single_obfuscation_corpus_has_no_residual():
     assert len(allc) >= 470 and kept == []
 
 
-# The one composed residual class, disclosed in ADR 0047 / ADR 0017 / Priya LIMITS: a filler letter or token placed
-# INSIDE spelled-out number words ("thre-ab-e se-ab-ven ..."). Risk: low — it needs a deliberate two-step
-# obfuscation that no search engine user types by accident, and the result is not a readable number either.
-def _pinned_composed(name: str) -> bool:
-    a, b = name.split("+")
-    spelled = {"spelled_out", "spelled_spanish", "spelled_mixed"}
-    filler = {"filler_letters", "filler_tokens"}
-    return (a in spelled and b in filler) or (a in filler and b in spelled)
-
-
-def test_composed_corpus_residual_is_under_one_percent_and_pinned():
-    allc = list(ac.composed_cases())
+def test_composed_sample_has_no_residual():
+    """The fast sample (round 11's one-in-11 subset); the full run is in tests/test_query_privacy_r12.py."""
+    allc = list(ac.composed_cases(every=ac.COMPOSED_EVERY))
     kept = [(b, n) for b, n, t in allc if sp.classify_query(t, ["acme"]) != "pii_suspect"]
-    assert len(allc) >= 1500
-    assert len(kept) <= 0.01 * len(allc), kept
-    assert all(_pinned_composed(n) for _b, n in kept), [k for k in kept if not _pinned_composed(k[1])]
+    assert len(allc) >= 1500 and kept == [], kept
