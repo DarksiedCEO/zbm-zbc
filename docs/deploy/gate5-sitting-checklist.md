@@ -237,3 +237,10 @@ file. The inventory and the step-1 baseline must come from the Railway
 connector's describe output, as the original baseline did: CLI variable lists
 omit sealed names and return values. No CLI-to-baseline converter is provided;
 the connector must be connected, with founder approval, before the sitting.
+
+## Capacity step moved (founder decision, 2026-11-07)
+
+The `capacity` runner step now runs after `portal` and gates only `admission`.
+It needs fresh byte counts and measured one-client growth, which exist only after
+the portal is live. A capacity HOLD leaves admission closed and blocks nothing
+else. Begin the step only with that evidence in hand: a FAIL close stops the run.

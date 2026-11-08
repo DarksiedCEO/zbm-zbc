@@ -133,6 +133,15 @@ class Runner(unittest.TestCase):
             with self.assertRaisesRegex(sr.Refused, 'PREVIOUS_STEP_NOT_PASS'):
                 self.call('begin', 'capacity', '--run', str(self.run), '--plan', str(self.plan))
 
+    def test_capacity_gates_only_admission(self):
+        needs = {s['name']: s['needs'] for s in sr.STEPS}
+        self.assertEqual(needs['decisions'], ('baseline',))
+        self.assertEqual(needs['capacity'], ('portal',))
+        self.assertEqual(needs['admission'], ('capacity',))
+        self.assertEqual([n for n, v in needs.items() if 'capacity' in v], ['admission'])
+        names = [s['name'] for s in sr.STEPS]
+        self.assertEqual(names[-2:], ['capacity', 'admission'])
+
     def test_baseline_pass_prints_no_ids(self):
         with patch.object(sr, 'open_blockers', lambda name: []):
             self.call('begin', 'baseline', '--run', str(self.run), '--plan', str(self.plan))
@@ -149,7 +158,7 @@ class Runner(unittest.TestCase):
                 sr.verify('baseline', ev, self.run, json.loads(self.plan.read_text()))
 
     def test_writer_step_argv_and_proof(self):
-        prior = ['baseline', 'capacity', 'decisions', 'merge', 'new-resources', 'closed-configuration']
+        prior = ['baseline', 'decisions', 'merge', 'new-resources', 'closed-configuration']
         for n in prior:
             sr.write_new(self.run / (n + '.json'), {'step': n, 'status': 'PASS'})
         binding = Path(self.tmp.name) / 'binding.json'; binding.write_text('{}')

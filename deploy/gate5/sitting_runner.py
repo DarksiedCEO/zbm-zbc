@@ -41,9 +41,7 @@ STEPS = [
         'Confirm environment created after 2025-10-16 and rollback deployments still redeployable',
         'Read back auto-deploy OFF for all 7 existing services (D07); no start command on the four owners (D03); schedules UNKNOWN stay untouched (D13)'],
         'None: read-only.', 'baseline'),
-    step('capacity', 'local', ['baseline'], ['Run capacity_report on fresh all-five source sizes and measured one-client growth'],
-        'None: read-only. Admission stays closed.', 'capacity'),
-    step('decisions', 'local', ['capacity'], ['Every open_decisions.json entry RESOLVED; frozen plan inputs unchanged'],
+    step('decisions', 'local', ['baseline'], ['Every open_decisions.json entry RESOLVED; frozen plan inputs unchanged'],
         'None.', 'decisions'),
     step('merge', 'operator', ['decisions'], ['Approve exact reviewed head and CI; squash merge with auto-deploy confirmed off for every repo-connected service'],
         'Revert commit on main; repo-connected services must not auto-deploy.', 'attest'),
@@ -86,7 +84,11 @@ STEPS = [
     step('portal', 'operator', ['schedule-removal'], ['Packages-only session: publish approved portal image; verify digest and anonymous pull; logout',
         'Approved service/domain/cost; settings before first deploy; public health; acceptance flow'],
         'Remove portal domain and service after founder inspection; package deletion only with founder approval.', 'attest'),
-    step('admission', 'operator', ['portal'], ['Alert inbox evidence, operator-run report, live Stripe configuration, SOW 4.1 price, capacity report, explicit founder GO'],
+    # Capacity gates only admission: it needs measured one-client growth, which exists only after
+    # the portal is live. A HOLD leaves the step unclosed and admission closed; nothing else waits on it.
+    step('capacity', 'local', ['portal'], ['Run capacity_report on fresh all-five source sizes and measured one-client growth; begin only with that evidence in hand'],
+        'None: read-only. Admission stays closed.', 'capacity'),
+    step('admission', 'operator', ['capacity'], ['Alert inbox evidence, operator-run report, live Stripe configuration, SOW 4.1 price, capacity report, explicit founder GO'],
         'Admission stays closed.', 'attest'),
 ]
 BY_NAME = {s['name']: s for s in STEPS}
