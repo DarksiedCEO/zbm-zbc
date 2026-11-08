@@ -332,7 +332,11 @@ _R = {
     "CITATION_MENTION_UNCONFIRMED": ("Possible mention, not confirmed", "No page change is suggested: your brand "
                                      "name is also an everyday word, so these answers may not be about you. Add "
                                      "context or negative terms to the prompt set to confirm.",
-                                     (("engine", "token"), ("prompt_index", "prompt"), ("usable_answers", "num"))),
+                                     (("engine", "token"), ("prompt_index", "prompt"), ("usable_answers", "num"),
+                                      ("mention_rate", "rate"))),
+    "CITATION_INCONCLUSIVE": ("Could not tell whether you were cited", "Nothing to change yet: the engine's citations "
+                              "for these answers were redirect links that were not followed.",
+                              (("engine", "token"), ("prompt_index", "prompt"), ("usable_answers", "num"))),
     "CITATION_PARTIAL_CITATION": ("Cited in some answers", "Monitor and keep the cited pages current.",
                                   (("engine", "token"), ("prompt_index", "prompt"), ("usable_answers", "num"),
                                    ("citation_rate", "rate"), ("mention_rate", "rate"))),
@@ -492,6 +496,9 @@ def _detail_items(code: str, detail: dict, ctx: _Ctx) -> list:
             model = {"t": "list", "v": items, "more": len(v) > LIST_MAX}
         elif kind == "rate":
             p = _pct(v)
+            if v is None and isinstance(detail.get(key + "_unknown"), str):
+                # round 3: a rate the evidence cannot give is shown as UNKNOWN, never as 0% and never dropped
+                model = {"t": "text", "v": "UNKNOWN (the brand terms found may not refer to you)"}
             if p is not None:
                 ci = detail.get(key.replace("_rate", "_ci95"))
                 if isinstance(ci, list) and len(ci) == 2 and all(_pct(x) for x in ci):

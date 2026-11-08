@@ -156,11 +156,13 @@ until a first live call; Callum treats every URL on `vertexaisearch.cloud.google
 **Brand matching** (`src/agents/brand_mention.py`, prompt set `brand_term_rules`): whole words, case-insensitive
 unless `case_sensitive`; possessives match (`Acme's`), plurals do not (`Acmes`); optional `context_terms` (one must
 appear in the answer) and `negative_terms` (a match within 40 characters of a whole-word occurrence of one is
-discarded); whitespace (NBSP, runs of spaces) is normalised first. A single-word
-alphabetic term is treated as possibly a common word (no dictionary is bundled) unless `common_word: false`; without
-disambiguation its Mentioned-Not-Cited hits are `LOW_CONFIDENCE`, kept out of the headline rate and the MNC list.
-In the audit the same hits are not counted as mentions; a prompt whose only mentions are unconfirmed is
-`MENTION_UNCONFIRMED` ("Possible mention, not confirmed" in the client report, no page recommendation).
+discarded); whitespace (NBSP, runs of spaces) is normalised first. Mentions are confirmed by default; a single-word
+term is unconfirmed only when it is on the bundled common-word list (`src/agents/common_words.txt`, self-authored) or
+declared `common_word: true`, or it is capitalised and matched only in lower case — and the answer does not name the
+client's domain, cite the client or name another brand term. Unconfirmed hits are `LOW_CONFIDENCE` in citation runs
+and `MENTION_UNCONFIRMED` in the audit ("Possible mention, not confirmed", mention rate UNKNOWN, no page
+recommendation). A prompt set with such a term and no rule returns `warnings` on create and read, and the methodology
+names it.
 
 **Not built — setting any of these refuses start:** `SEO_RENDERER`,
 `SEO_SEARCH_CONSOLE_CREDENTIALS_FILE` (renamed: use `SEO_GSC_SERVICE_ACCOUNT_FILE`), `SEO_BING_WEBMASTER_KEY_FILE`, `SEO_PROMPT_VOLUME_PROVIDER`, `SEO_ZERO_DAY_URL`,

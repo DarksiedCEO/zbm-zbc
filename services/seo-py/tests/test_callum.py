@@ -867,3 +867,135 @@ def test_the_audit_never_turns_a_common_word_mention_into_a_client_page_recommen
     p2, md2 = _apple_audit(tmp_path / "b", "Apple sells the iPhone.", [{"term": "Apple", "context_terms": ["iPhone"]}])
     assert p2["class"] == "MENTIONED_NOT_CITED" and p2["mentioned"] == 3 and "mentioned_unconfirmed" not in p2
     assert "Mentioned but not cited" in md2
+
+
+# ---------------------------------------------------------------------------------------------- round 3: real runs
+
+from pathlib import Path  # noqa: E402
+
+from agents import osei as osei_mod  # noqa: E402
+from agents import probes  # noqa: E402
+from clock import FixedClock  # noqa: E402
+
+GOLDEN_CALLUM = Path(__file__).resolve().parent / "golden" / "callum"
+
+
+def audit_prompt(brand, texts, cites=("https://competitor.test/a",), domain="acme.com", rules=None, extra_terms=()):
+    """The REAL audit classification (probes.run_callum) over scripted answers: one prompt, one per text."""
+    ps = {"prompt_set_id": "seo-pst-" + "a" * 40, "name": "core", "version": 1, "sha256": "b" * 64,
+          "brand_terms": [brand, *extra_terms], "competitor_domains": ["competitor.test"],
+          "prompts": ["who is the best rug cleaner"], "engines": ["openai"]}
+    if rules:
+        ps["brand_term_rules"] = rules
+    answers = [answer(text=t, cites=list(c) if isinstance(c, (list, tuple)) else [c])
+               for t, c in zip(texts, cites if len(cites) == len(texts) else [cites] * len(texts))]
+    env = probes.run_callum({"openai": Scripted(*answers)}, ps, domain, len(texts), lambda **k: None,
+                            osei_mod.Osei(FixedClock(base.T0)))
+    return env, env["facts"]["engines"]["openai"]["prompts"][0]
+
+
+@pytest.mark.parametrize("brand,text", [("Acme", "Acme cleans rugs well."), ("HubSpot", "HubSpot runs the CRM."),
+                                        ("Ünïcorn", "Ünïcorn sells shoes."), ("Acme", "Try Acme (acme.com) today."),
+                                        ("Acme", "Try acme (acme.com) today.")])
+def test_single_word_brands_not_on_the_list_or_confirmed_by_the_domain_are_mentions(brand, text):
+    # round 3 item 1: confirmed by default (the a4af277 behaviour), through the real audit and Callum classifiers
+    env, p = audit_prompt(brand, [text] * 3)
+    assert p["class"] == "MENTIONED_NOT_CITED" and p["mentioned"] == 3 and p["mention_rate"] == 1.0, p
+    assert "mentioned_unconfirmed" not in p and "may be ordinary words" not in env["methodology"]
+    r = callum.classify(collected(*[(0, answer(text=text, cites=["https://competitor.test/a"]))] * 3),
+                        {**PS, "brand_terms": [brand]}, "acme.com", off(), "seo-cit-" + "c" * 40,
+                        "2026-10-09T18:00:00Z", "2026-10-09T19:00:00Z")
+    assert [x["confidence"] for x in r["rows"] if x["class"] == "MENTIONED_NOT_CITED"] == ["HIGH"] * 3
+
+
+def test_a_common_word_brand_and_a_lowercase_only_match_are_unconfirmed_with_an_unknown_rate():
+    env, p = audit_prompt("Apple", ["Bake an apple pie."] * 3)
+    assert p["class"] == "MENTION_UNCONFIRMED" and p["mentioned"] == 0 and p["mentioned_unconfirmed"] == 3
+    assert p["mention_rate"] is None and p["mention_ci95"] is None and p["mention_rate_unknown"]
+    assert "Apple" in env["methodology"] and "may be ordinary words" in env["methodology"]
+    assert "MENTION_UNCONFIRMED" in env["methodology"]
+    _, low = audit_prompt("HubSpot", ["hubspot is a word here."] * 3)                 # (b): lowercase only
+    assert low["class"] == "MENTION_UNCONFIRMED" and low["mention_rate"] is None
+    _, two = audit_prompt("HubSpot", ["hubspot and HubSpot CRM."] * 3)              # one match as written
+    assert two["class"] == "MENTIONED_NOT_CITED"
+    _, other = audit_prompt("Apple", ["apple pie from Z Best Media."] * 3, extra_terms=("Z Best Media",))
+    assert other["class"] == "MENTIONED_NOT_CITED" and other["mentioned"] == 3      # another brand term confirms
+
+
+def test_a_partly_cited_prompt_never_shows_a_zero_mention_rate_from_unconfirmed_mentions():
+    # an answer that cites the client confirms its own mention; the others stay unconfirmed
+    env, p = audit_prompt("Apple", ["apple pie"] * 3,
+                          cites=[["https://acme.com/pie"], ["https://acme.com/pie"], ["https://competitor.test/a"]])
+    assert p["cited"] == 2 and p["mentioned"] == 2 and p["mention_rate"] == round(2 / 3, 4) and p["class"] == "STRENGTH"
+    assert p["mentioned_unconfirmed"] == 1 and "mention_rate_unknown" not in p
+
+
+def _report_md(env) -> str:
+    import client_report as cr
+    import report_fixtures as fx
+    view = fx._view("acme.com", ["/"], [env], outcome="OK")
+    data, _ = cr.render(view, "acme", "markdown")
+    return data.decode("utf-8")
+
+
+def test_golden_a_real_classification_renders_the_mentioned_but_not_cited_item():
+    # round 3 item 4: classification through to the client report, compared byte for byte
+    env, p = audit_prompt("Acme", ["Acme cleans rugs well."] * 3)
+    md = _report_md(env)
+    path = GOLDEN_CALLUM / "classified_mnc.md"
+    if os.environ.get("UPDATE_GOLDEN") == "1":
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(md, encoding="utf-8")
+    assert md == path.read_text(encoding="utf-8"), "classified_mnc.md differs (UPDATE_GOLDEN=1 to regenerate)"
+    assert "Mentioned but not cited" in md and "Publish a clear, crawlable page" in md and "competitor.test" in md
+    unconfirmed = _report_md(audit_prompt("Apple", ["Bake an apple pie."] * 3)[0])
+    assert "Mentioned but not cited" not in unconfirmed and "Possible mention, not confirmed" in unconfirmed
+    assert "UNKNOWN (the brand terms found may not refer to you)" in unconfirmed and "0.0%" not in unconfirmed
+
+
+def test_the_negative_term_check_is_bounded_by_structure_not_quadratic():
+    # round 3 item 5: a crafted answer with thousands of brand matches and negatives; the work per brand match is a
+    # bisect plus at most a window's worth of candidates, counted (no timing assertion)
+    text = ("Apple pie " * 5000) + ("Apple ships " * 5000)
+    rule = [{"term": "Apple", "negative_terms": ["pie"]}]
+    stats: dict = {}
+    r = callum.brand_mention.mention(text, ["Apple"], rule, stats=stats)
+    assert r["mentioned"] is True
+    brand_matches_checked = 5000 + 1                       # every "Apple pie", then the first "Apple ships" is kept
+    assert stats["negative_checks"] <= brand_matches_checked * 2, stats
+
+
+def test_a_failed_resolution_after_a_lookalike_hop_is_flagged_and_unresolved_low_mentions_are_inconclusive():
+    cited = "https://t.co/X1"
+    failed = FetchResult(url=cited, state="TOO_MANY_REDIRECTS", final_url=None,
+                         redirects=[{"url": cited, "status": 301}, {"url": "https://аcme.com/a", "status": 302}])
+    r = callum.classify(collected((0, answer(text="x", cites=[cited]))), PS, "acme.com", resolver({cited: failed}),
+                        "seo-cit-" + "c" * 40, "2026-10-09T18:00:00Z", "2026-10-09T19:00:00Z")
+    assert r["rows"][0]["class"] == "OPPORTUNITY_URL"
+    assert r["rows"][0]["flags"] == ["RESOLUTION_FAILED", "LOOKALIKE_HOP"]
+    g = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/Z"
+    rc = callum.classify(collected((0, answer(text="apple pie", cites=[g]))), {**PS, "brand_terms": ["Apple"]},
+                         "acme.com", off(), "seo-cit-" + "c" * 40, "2026-10-09T18:00:00Z", "2026-10-09T19:00:00Z")
+    assert [(x["class"], x["reason"]) for x in rc["rows"]][-1] == ("INCONCLUSIVE", "MENTION_WITH_UNRESOLVED_CITATIONS")
+    _, p = audit_prompt("Apple", ["apple pie"] * 3, cites=(g,))                 # the audit agrees
+    assert p["class"] == "INCONCLUSIVE" and p["unresolved_citation_answers"] == 3
+    _, ph = audit_prompt("Acme", ["Acme cleans rugs."] * 3, cites=(g,))
+    assert ph["class"] == "INCONCLUSIVE"                                         # high-confidence too
+    assert "Could not tell whether you were cited" in _report_md(audit_prompt("Acme", ["Acme."] * 3, cites=(g,))[0])
+
+
+def test_a_prompt_set_with_a_common_word_brand_warns_on_create_and_on_read(h):
+    made = h.ok(h.post("/tenants/zbm/prompt-sets", {"request_id": rid(), "name": "fruit", "brand_terms": ["Apple"],
+                                                    "prompts": ["best phone"], "engines": ["openai"]}), 201)
+    assert [w["term"] for w in made["warnings"]] == ["Apple"]
+    assert made["warnings"][0]["code"] == "BRAND_TERM_MAY_BE_COMMON_WORD"
+    read = h.ok(h.get(f"/tenants/zbm/prompt-sets/{made['prompt_set_id']}"))
+    assert read["warnings"] == made["warnings"]
+    fixed = h.ok(h.post("/tenants/zbm/prompt-sets", {"request_id": rid(), "name": "fruit", "brand_terms": ["Apple"],
+                                                     "prompts": ["best phone"], "engines": ["openai"],
+                                                     "brand_term_rules": [{"term": "Apple",
+                                                                           "context_terms": ["iPhone"]}]}), 201)
+    assert "warnings" not in fixed
+    plain = h.ok(h.post("/tenants/zbm/prompt-sets", {"request_id": rid(), "name": "acme", "brand_terms": ["Acme"],
+                                                     "prompts": ["best rugs"], "engines": ["openai"]}), 201)
+    assert "warnings" not in plain

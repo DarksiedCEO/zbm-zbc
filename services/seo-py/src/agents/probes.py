@@ -16,7 +16,8 @@ Callum's classes, per engine and prompt (from the answers actually sampled):
   INSUFFICIENT_EVIDENCE fewer than 3 usable answers (refusals / errors)
   ABSENT                neither mentioned nor cited and no sources cited at all
   MENTION_UNCONFIRMED   not cited, and the only mentions are LOW confidence (agents/brand_mention.py: a term that may be
-                        a common word, no disambiguation configured): never MENTIONED_NOT_CITED (round 2 item 4)
+                        a common word, not confirmed by the answer): never MENTIONED_NOT_CITED; mention rate UNKNOWN
+  INCONCLUSIVE          not cited, but every not-cited mention had a citation that is an unresolved redirect
 
 Provider text is DATA: it is scanned for brand terms and URLs, never followed as an instruction, and dropped; the report
 keeps its SHA-256, the cited hosts (bounded), whether the tenant's site was cited and at which position. Without a
@@ -43,6 +44,8 @@ from primitives import Killed
 
 AGENT_CALLUM, AGENT_NAOMI = "callum", "naomi"
 MIN_USABLE = 3
+# hosts whose citation URLs are redirects to an unknown page (agents/callum.py): the whole host, any path (round 1 M3)
+REDIRECTOR_HOSTS = frozenset({"vertexaisearch.cloud.google.com"})
 MAX_DRIFT_KEYS = 20
 Z95 = 1.959963984540054
 _URL = re.compile(r"https?://[^\s<>\"')\]]+")
@@ -57,8 +60,12 @@ METHODOLOGY = ("Each prompt of prompt set {ps} v{ver} (sha256 {sha}) sent {n} ti
                "nor is one the model attached that its search did not return, except for an engine that returns no "
                "structured citations (Perplexity returns them). Rates exclude "
                "refusals and errors; intervals are 95% Wilson score intervals over usable answers. Classes: "
-               "STRENGTH (cited in >= half), MENTIONED_NOT_CITED, OPPORTUNITY (others cited, not us), ABSENT, "
-               "INSUFFICIENT_EVIDENCE (< {m} usable answers).")
+               "STRENGTH (cited in >= half), MENTIONED_NOT_CITED, MENTION_UNCONFIRMED (named only as a word that may "
+               "not be the brand; mention rate unknown), OPPORTUNITY (others cited, not us), ABSENT, INCONCLUSIVE "
+               "(not cited, but a citation was an unresolved redirect), INSUFFICIENT_EVIDENCE (< {m} usable "
+               "answers).")
+WARN_COMMON = (" Brand terms that may be ordinary words and have no disambiguation rule (their mentions count only when "
+               "the answer confirms them): {terms}.")
 LIMITS = ["One sample of N answers at one time from one account; answer engines vary by user, location, time and "
           "model version. These are observations, not search truth.",
           "No prompt-volume source is connected: how often real users ask these prompts is unknown.",
@@ -169,7 +176,9 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
             other_hosts: dict = {}
             sample_versions = set()
             injection_like = 0
-            unconfirmed = 0                               # LOW-confidence mentions, kept out of "mentioned"
+            # LOW-confidence mentions (kept out of "mentioned"), and the not-cited mentions that are certain / that
+            # had an unresolved redirect citation (round 3)
+            xc = {"unconfirmed": 0, "certain_high": 0, "certain_low": 0, "unresolved": 0}
             positions: list = []
             hashes: list = []
             zero_sources = 0
@@ -226,12 +235,8 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
                 for k in getattr(a, "unmodelled_keys", ()) or ():
                     if isinstance(k, str) and len(drift_keys) < MAX_DRIFT_KEYS:
                         drift_keys.add(k[:40])
-                said = brand_mention.mention(a.text, prompt_set["brand_terms"], prompt_set.get("brand_term_rules"))
-                if said["confidence"] == brand_mention.HIGH:
-                    tally["mentioned"] += 1
-                elif said["mentioned"]:
-                    unconfirmed += 1
                 pos = None
+                redirected = False
                 for c in cites:
                     m = domain_match.match(c["host"], domain)
                     if m in (domain_match.EXACT, domain_match.SUBDOMAIN):
@@ -240,9 +245,23 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
                         tally["lookalike_citations"] += 1
                     else:
                         other_hosts[c["host"]] = other_hosts.get(c["host"], 0) + 1
+                        redirected = redirected or (c["host"] or "").lower().rstrip(".") in REDIRECTOR_HOSTS
                 positions.append(pos)
                 if pos is not None:
                     tally["cited"] += 1
+                # after the citations: an answer that cites the client confirms its own mention (round 3)
+                said = brand_mention.mention(a.text, prompt_set["brand_terms"], prompt_set.get("brand_term_rules"),
+                                             domain=domain, client_cited=pos is not None)
+                if said["confidence"] == brand_mention.HIGH:
+                    tally["mentioned"] += 1
+                elif said["mentioned"]:
+                    xc["unconfirmed"] += 1
+                if said["mentioned"] and pos is None:
+                    # not cited for certain only when no citation is an unresolved redirect (Callum's rule)
+                    if redirected:
+                        xc["unresolved"] += 1
+                    else:
+                        xc["certain_high" if said["confidence"] == brand_mention.HIGH else "certain_low"] += 1
                 if meter is not None and getattr(meter, "over_reserve", False):
                     # one request cost more than COST_GUARD_MULTIPLE x the reserve: stop spending (AEGIS round 2)
                     stop, stop_detail = "ENGINE_BUDGET_EXHAUSTED", "COST_ABOVE_RESERVE"
@@ -254,7 +273,7 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
             for code, k in errors_by.items():
                 errors_seen[code] = errors_seen.get(code, 0) + k
             results.append({**_prompt_result(pi, prompt, n, tally, errors_by, other_hosts, competitors, sample_versions,
-                                             injection_like, positions, hashes, unconfirmed),
+                                             injection_like, positions, hashes, xc),
                             "zero_source_answers": zero_sources})
         if stop is None and not answers_total and errors_total:
             # every request failed: never OK (AEGIS H2). The reason is the most frequent error code.
@@ -294,7 +313,9 @@ def _refused_prompt(pi: int, n: int, kind: str) -> dict:
 
 
 def _prompt_result(pi, prompt, n, tally, errors_by, other_hosts, competitors, sample_versions, injection_like,
-                   positions, hashes, unconfirmed: int = 0) -> dict:
+                   positions, hashes, xc: Optional[dict] = None) -> dict:
+    xc = xc or {}
+    unconfirmed = xc.get("unconfirmed", 0)
     k = tally["answers"]
     rate_m = tally["mentioned"] / k if k else None
     rate_c = tally["cited"] / k if k else None
@@ -312,6 +333,11 @@ def _prompt_result(pi, prompt, n, tally, errors_by, other_hosts, competitors, sa
         cls = "PARTIAL_CITATION"
     if unconfirmed and cls in ("OPPORTUNITY", "ABSENT"):
         cls = "MENTION_UNCONFIRMED"                   # round 2 item 4: never a page recommendation from "apple pie"
+    # round 3: a not-cited verdict needs certainty; when every not-cited mention had an unresolved redirect citation
+    # the prompt is INCONCLUSIVE (as in Callum's citation runs), whatever the mention's confidence
+    if xc.get("unresolved") and (cls == "MENTIONED_NOT_CITED" and not xc.get("certain_high")
+                                 or cls == "MENTION_UNCONFIRMED" and not xc.get("certain_low")):
+        cls = "INCONCLUSIVE"
     top = sorted(other_hosts.items(), key=lambda kv: (-kv[1], kv[0]))[:10]
     cited_at = [p for p in positions if p is not None]
     out = {
@@ -328,6 +354,12 @@ def _prompt_result(pi, prompt, n, tally, errors_by, other_hosts, competitors, sa
         "answers_sha256": hashes[:50]}
     if unconfirmed:                                   # present only when there is one: otherwise byte-identical
         out["mentioned_unconfirmed"] = unconfirmed
+        if not tally["mentioned"]:
+            # round 3: the only mentions are unconfirmed, so the mention rate is UNKNOWN, never 0%
+            out["mention_rate"], out["mention_ci95"] = None, None
+            out["mention_rate_unknown"] = "MENTIONS_UNCONFIRMED"
+    if xc.get("unresolved"):
+        out["unresolved_citation_answers"] = xc["unresolved"]
     return out
 
 
@@ -338,6 +370,9 @@ def run_callum(engines: dict, prompt_set: Optional[dict], domain: str, n: int, g
                         limitations=LIMITS, reason="NO_PROMPT_SET")
     methodology = METHODOLOGY.format(ps=prompt_set["name"], ver=prompt_set["version"], sha=prompt_set["sha256"][:16],
                                      n=n, domain=domain, m=MIN_USABLE)
+    common = brand_mention.warnings(prompt_set["brand_terms"], prompt_set.get("brand_term_rules"))
+    if common:                                        # round 3: never a silent change
+        methodology += WARN_COMMON.format(terms=", ".join(common))
     per_engine, findings, not_connected = {}, [], set()
     try:
         for eng in prompt_set["engines"]:
@@ -396,12 +431,15 @@ def _class_finding(engine: str, p: dict) -> dict:
     decision, sev = {"STRENGTH": ("WATCH", "info"), "MENTIONED_NOT_CITED": ("TEST", "medium"),
                      "OPPORTUNITY": ("TEST", "medium"), "ABSENT": ("WATCH", "low"),
                      "PARTIAL_CITATION": ("WATCH", "low"), "MENTION_UNCONFIRMED": ("INSUFFICIENT_EVIDENCE", "low"),
+                     "INCONCLUSIVE": ("INSUFFICIENT_EVIDENCE", "info"),
                      "INSUFFICIENT_EVIDENCE": ("INSUFFICIENT_EVIDENCE", "info")}[cls]
     return finding(f"CITATION_{cls}", sev, "measured", decision, capability="P4",
                    detail={"engine": engine, "prompt_index": p["prompt_index"], "usable_answers": p["answers"],
                            "citation_rate": p["citation_rate"], "citation_ci95": p["citation_ci95"],
                            "mention_rate": p["mention_rate"], "mention_ci95": p["mention_ci95"],
-                           "refusals": p["refusals"], "errors": p["errors"], "other_sources": p["other_sources"][:5]})
+                           "refusals": p["refusals"], "errors": p["errors"], "other_sources": p["other_sources"][:5],
+                           **({"mention_rate_unknown": p["mention_rate_unknown"]} if p.get("mention_rate_unknown")
+                              else {})})
 
 
 def run_naomi(prompt_volume_port, prompt_set: Optional[dict]) -> dict:

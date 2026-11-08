@@ -25,7 +25,7 @@ import traceback
 from pathlib import Path
 from typing import Optional
 
-from agents import RunContext, bots, delia, entity_check, osei, probes, roman, selene
+from agents import RunContext, bots, brand_mention, delia, entity_check, osei, probes, roman, selene
 from agents.prompt_guard import personal_data
 from clock import iso
 from envelope import CAPABILITIES, DATA_CLASSES, DECISIONS, EFFECT_CLASSES, envelope, sha, worst_outcome
@@ -131,8 +131,17 @@ class AuditsMixin:
             ps = self.prompt_sets.get(psid)
             if ps is None or ps["tenant_id"] != tid:
                 raise NotFound(R("PROMPT_SET_NOT_FOUND"))
-            return {"prompt_set_id": psid, "tenant_id": tid, "current": ps["current"],
-                    "versions": {k: {**v, "prompts": list(v["prompts"])} for k, v in ps["versions"].items()}}
+            out = {"prompt_set_id": psid, "tenant_id": tid, "current": ps["current"],
+                   "versions": {k: {**v, "prompts": list(v["prompts"])} for k, v in ps["versions"].items()}}
+            cur = ps["versions"][str(ps["current"])]
+            common = brand_mention.warnings(cur["brand_terms"], cur.get("brand_term_rules"))
+            if common:                                 # round 3: shown on create and on every read, never silent
+                out["warnings"] = [{"code": "BRAND_TERM_MAY_BE_COMMON_WORD", "term": t,
+                                    "effect": "mentions count only when the answer confirms them (the domain, a "
+                                              "client citation or another brand term); add context_terms, "
+                                              "negative_terms or case_sensitive, or common_word: false"}
+                                   for t in common]
+            return out
 
     # ------------------------------------------------------------------ audits
 

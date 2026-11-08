@@ -107,7 +107,8 @@ B4. **Exact-URL resolution** (`callum.Resolver`, OFF unless `SEO_CALLUM_RESOLVE_
     the run's kill switches before every hop). The landing URL decides, with two exceptions (review round 1):
     **M1** a citation on a LOOKALIKE host — or, since review round 2, one whose redirect chain passes through a
     lookalike host at ANY hop (the resolver records every hop's host, `chain.hop_hosts`; flag `LOOKALIKE_HOP`), e.g.
-    `t.co` or the Gemini redirector → lookalike → client — is `LOOKALIKE_URL` wherever it lands
+    `t.co` or the Gemini redirector → lookalike → client — is `LOOKALIKE_URL` wherever it lands (when resolution
+    fails after a lookalike hop the row keeps its class and adds `LOOKALIKE_HOP`, round 3)
     (`CITED_HOST_LOOKALIKE`); one that
     redirects ONTO the client is flagged `REDIRECTED_ONTO_CLIENT` and raises `CALLUM_LOOKALIKE_REDIRECTS_ONTO_CLIENT`
     (high, WATCH) — a lookalike forwarding to the client is suspicious, never a credit. **M2** a third-party page whose
@@ -139,19 +140,31 @@ B5a. **Brand matching** (review round 1 L1, `agents/brand_mention.py`, shared wi
     `case_sensitive`, `context_terms` — one must appear in the answer — `negative_terms` — a match is discarded
     when a whole-word occurrence of one, found on the full text (never on a slice: round 2), lies within 40
     characters of the brand span — and `common_word`). Whitespace (NBSP, tabs, runs of spaces) is normalised to one
-    space in the answer and in every term before matching. No dictionary is bundled, so a single-word alphabetic term
-    is treated as possibly a common word unless the tenant sets `common_word: false` (fail closed). A mention made only
-    by such a term with no disambiguation is `MENTIONED_NOT_CITED` `confidence: LOW_CONFIDENCE`
+    space in the answer and in every term before matching (negatives looked up by `bisect` in their sorted positions:
+    linear overall, never quadratic). **Confirmed by default (review round 3, restoring the a4af277 behaviour for
+    ordinary brands):** a single-word term is unconfirmed-prone only when (a) it is on the bundled common-English list
+    (`agents/common_words.txt`, self-authored for this repository, ~300 words, no third-party licence) or declared
+    `common_word: true`, or (b) it is written with a capital (`HubSpot`) and every match in the answer is all lower
+    case. `Acme`, `HubSpot`, `Ünïcorn` matched as written, and every multi-word term, are confirmed. A prone match is
+    still confirmed when the same answer names the client's domain (`Acme (acme.com)`), cites the client, or names
+    another brand term of the set. A mention made only by unconfirmed terms is `MENTIONED_NOT_CITED`
+    `confidence: LOW_CONFIDENCE`
     (`BRAND_TERM_MAY_BE_COMMON_WORD`): its own `mentioned_not_cited_low_confidence` rate (`headline: false`), the
     `CALLUM_MENTIONED_NOT_CITED_LOW_CONFIDENCE` finding, never in the headline rate or the MNC list. The audit summary
     (review round 2) applies the same rule: a LOW-confidence mention is not counted in `mentioned` / `mention_rate`;
     a prompt not cited whose only mentions are LOW is class `MENTION_UNCONFIRMED` (finding
     `CITATION_MENTION_UNCONFIRMED`, INSUFFICIENT_EVIDENCE), shown in the client report as "Possible mention, not
     confirmed" with no page recommendation, never "Mentioned but not cited"; `mentioned_unconfirmed` is added to the
-    prompt's result only when non-zero, so an audit without such mentions is byte-identical to before. NOTE: the
-    fail-closed rule treats every single-word brand (e.g. `Acme`) as possibly common until the tenant sets
-    `common_word: false` or a disambiguation rule. A prompt set without rules
-    keeps its content and hash exactly as before.
+    prompt's result only when non-zero. When a prompt's ONLY mentions are unconfirmed its mention rate is UNKNOWN
+    (`mention_rate: null`, `mention_rate_unknown`; the client report prints "UNKNOWN", never 0%), and Callum's
+    Mentioned-Not-Cited rate likewise (`value: null`, `unknown: MENTIONS_UNCONFIRMED`). An answer that cites the
+    client confirms its own mention, so a partly cited prompt keeps a real mention rate. A not-cited verdict needs
+    certainty in the audit as in Callum: when every not-cited mention (either confidence) had a citation on a
+    redirector host, the prompt is `INCONCLUSIVE` ("Could not tell whether you were cited"). **Never silent:** a
+    prompt set whose term is on the list (or declared common) with no rule carries `warnings`
+    (`BRAND_TERM_MAY_BE_COMMON_WORD`) in every create and read response, and the audit and citation-run methodology
+    name those terms. The audit methodology's class list names MENTION_UNCONFIRMED and INCONCLUSIVE. A prompt set
+    without rules keeps its content and hash exactly as before.
 B6. **Metrics with provenance and confidence.** Per engine × prompt, per engine and in total: usable answers,
     refusals, inconclusive calls, URL counts per class, zero-citation answers, and the Mentioned-Not-Cited and
     cited-strength rates as `{value, k, n, ci95 (Wilson), interval, directional}` — `directional` under 3 usable
@@ -198,8 +211,8 @@ B8. **Citation runs: the near-real-time tier** (`svc_citations.py`, separate fro
   execution) for Anthropic;
 - (34) SUPERSEDED by review round 1 M2: a third-party page whose single canonical names the client's page is its
   own class, `CANONICAL_TO_CLIENT`, never a STRENGTH_URL (the third party controls the tag);
-- (35) a single-word alphabetic brand term is treated as possibly a common word unless the tenant says otherwise
-  (review round 1 L1);
+- (35) a single-word brand term is confirmed unless it is on the bundled common-word list or matched only in lower
+  case where it is written with a capital (review round 3; round 1's "every single word" default was a regression);
 - (36) a Google answer without `modelVersion` is refused, not counted under the asked model (review round 1 L2).
 
 ## What is NOT built (deliberately)

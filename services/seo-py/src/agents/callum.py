@@ -48,7 +48,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from agents import brand_mention, domain_match, split_url
 from agents.prompt_guard import personal_data
-from agents.probes import MIN_USABLE, _switch_code, extract_citations, wilson
+from agents.probes import MIN_USABLE, REDIRECTOR_HOSTS, WARN_COMMON, _switch_code, extract_citations, wilson
 from answer_adapter import PROTOCOL_ERROR_STOP_AFTER, STOP_CODES, EngineError
 from clock import iso
 from envelope import envelope, finding, observed
@@ -69,8 +69,8 @@ MAX_EVIDENCE_PER_ITEM = 3
 # hosts whose URLs are a redirect to the cited page, not the page itself (google_engine.py: the grounding chunk
 # URIs of the Gemini API). The WHOLE host is a redirector, whatever the path (review round 1 M3): the format of
 # Gemini's grounding URIs is UNVERIFIED until a first live call (the docs show truncated examples only), so no path
-# is trusted to be the page. A citation on one is INCONCLUSIVE until resolved, never OPPORTUNITY.
-REDIRECTOR_HOSTS = frozenset({"vertexaisearch.cloud.google.com"})
+# is trusted to be the page. A citation on one is INCONCLUSIVE until resolved, never OPPORTUNITY. The host list is
+# REDIRECTOR_HOSTS in agents/probes.py (one list for the audit and the citation runs).
 LIMITS = ["One sample of N answers per prompt and engine, at one time, from one account: answer engines vary by user, "
           "location, time and model version. Observations, not search truth.",
           "Cited means attributed by the engine's own structured citations (each engine's rule is in its adapter); "
@@ -313,16 +313,21 @@ def classify_citation(url: str, domain: str, competitors: list, res: dict) -> di
              "redirects": res.get("redirects"), "hop_hosts": list(res.get("hop_hosts") or [])}
     flags: list = []
     cited_host = _host(url)
+    hop_lookalike = any(h and domain_match.match(h, domain) == domain_match.LOOKALIKE
+                        for h in (res.get("hop_hosts") or [])[1:])
     if res.get("state") == "RESOLVED":
         decide, via = res["final_url"], "redirect" if res.get("redirects") else "direct"
     elif is_redirector(url):
         return {"class": "INCONCLUSIVE", "reason": "CITED_URL_UNRESOLVED", "via": None, "chain": chain,
                 "flags": ["REDIRECTOR_" + ("NOT_FOLLOWED" if res.get("state") in ("OFF", "CAP_REACHED", "KILLED")
-                                           else "FAILED")], "competitor": False}
+                                           else "FAILED")] + (["LOOKALIKE_HOP"] if hop_lookalike else []),
+                "competitor": False}
     else:
         decide, via = url, "direct"
         if res.get("state") in ("FAILED", "KILLED"):
             flags.append("RESOLUTION_" + res["state"])
+            if hop_lookalike:                         # round 3: the chain passed a lookalike before it failed
+                flags.append("LOOKALIKE_HOP")
     host = _host(decide)
     if not host:
         return {"class": "INCONCLUSIVE", "reason": "CITED_URL_UNREADABLE", "via": None, "chain": chain,
@@ -332,8 +337,6 @@ def classify_citation(url: str, domain: str, competitors: list, res: dict) -> di
                 "flags": ["REDIRECTOR_DID_NOT_REDIRECT"], "competitor": False}
     m = domain_match.match(host, domain)
     on_client = m in (domain_match.EXACT, domain_match.SUBDOMAIN)
-    hop_lookalike = any(h and domain_match.match(h, domain) == domain_match.LOOKALIKE
-                        for h in (res.get("hop_hosts") or [])[1:])
     cited_lookalike = bool(cited_host) and domain_match.match(cited_host, domain) == domain_match.LOOKALIKE
     if cited_lookalike or (hop_lookalike and res.get("state") == "RESOLVED"):
         # M1 / round 2 item 1: a citation on a lookalike host, or one whose redirect chain passes through a lookalike
@@ -467,7 +470,7 @@ def classify(engines: dict, prompt_set: dict, domain: str, resolver: Resolver, r
             strength = "STRENGTH_URL" in classes
             if strength:
                 k["strength"] += 1
-            said = brand_mention.mention(text, terms, term_rules)
+            said = brand_mention.mention(text, terms, term_rules, domain=domain, client_cited=strength)
             if said["mentioned"] and not strength:
                 if "INCONCLUSIVE" in classes:
                     k["inconclusive_answers"] += 1
@@ -500,6 +503,15 @@ def _rate(k: int, n: int) -> dict:
             "interval": "wilson_95", "directional": n < MIN_USABLE}
 
 
+def _mnc_rate(mnc: int, low: int, n: int) -> dict:
+    """The headline Mentioned-Not-Cited rate; UNKNOWN (value null), never 0%, when the only not-cited mentions are
+    unconfirmed (review round 3)."""
+    r = _rate(mnc, n)
+    if mnc == 0 and low:
+        r = {**r, "value": None, "unknown": "MENTIONS_UNCONFIRMED"}
+    return r
+
+
 def _metrics(per: dict, ps: dict, run_id: str, engines: dict) -> dict:
     out: dict = {"by_engine_prompt": [], "by_engine": {}, "totals": {}}
     tot: dict = {"usable": 0, "mnc": 0, "mnc_low": 0, "strength": 0, "refusals": 0, "failed": 0,
@@ -516,7 +528,7 @@ def _metrics(per: dict, ps: dict, run_id: str, engines: dict) -> dict:
             "canonical_to_client_urls": k["canonical_to_client_urls"],
             "lookalike_urls": k["lookalike_urls"], "lookalike_redirects_onto_client": k["lookalike_onto_client"],
             "inconclusive_urls": k["inconclusive_urls"], "zero_citation_answers": k["zero_citation_answers"],
-            "mentioned_not_cited": _rate(k["mnc"], k["usable"]), "cited_strength": _rate(k["strength"], k["usable"]),
+            "mentioned_not_cited": _mnc_rate(k["mnc"], k["mnc_low"], k["usable"]), "cited_strength": _rate(k["strength"], k["usable"]),
             "mentioned_not_cited_low_confidence": {**_rate(k["mnc_low"], k["usable"]), "headline": False},
             "mention_with_unresolved_citations": k["inconclusive_answers"],
             "mixed_model_versions": len(k["versions"]) > 1, "provenance": prov})
@@ -525,14 +537,14 @@ def _metrics(per: dict, ps: dict, run_id: str, engines: dict) -> dict:
             e[x] += k[x]
             tot[x] += k[x]
     for eng, e in out["by_engine"].items():
-        e["mentioned_not_cited"] = _rate(e["mnc"], e["usable"])
+        e["mentioned_not_cited"] = _mnc_rate(e["mnc"], e["mnc_low"], e["usable"])
         e["cited_strength"] = _rate(e["strength"], e["usable"])
         e["mentioned_not_cited_low_confidence"] = {**_rate(e["mnc_low"], e["usable"]), "headline": False}
         e["provenance"] = {"data_class": "measured", "source": "answer_engine_samples", "run_id": run_id,
                            "engine": eng, "prompt_set_sha256": ps["sha256"], "rules": VERSION,
                            "note": "pooled over prompts: prompts are not a random sample, so the interval is "
                                    "directional"}
-    out["totals"] = {**tot, "mentioned_not_cited": _rate(tot["mnc"], tot["usable"]),
+    out["totals"] = {**tot, "mentioned_not_cited": _mnc_rate(tot["mnc"], tot["mnc_low"], tot["usable"]),
                      "cited_strength": _rate(tot["strength"], tot["usable"]),
                      "mentioned_not_cited_low_confidence": {**_rate(tot["mnc_low"], tot["usable"]),
                                                             "headline": False},
@@ -620,6 +632,9 @@ def run(engines: dict, prompt_set: Optional[dict], domain: str, n: int, guard: C
         return envelope(AGENT, TASK, "INSUFFICIENT_EVIDENCE", [], methodology="No prompt set was given.",
                         limitations=LIMITS, reason="NO_PROMPT_SET")
     methodology = method.format(ps=prompt_set["name"], ver=prompt_set["version"])
+    common = brand_mention.warnings(prompt_set["brand_terms"], prompt_set.get("brand_term_rules"))
+    if common:                                        # round 3: never a silent change
+        methodology += WARN_COMMON.format(terms=", ".join(common))
     now = clock.now()
     observed_at, refresh_due = iso(now), iso(now + REFRESH_INTERVAL)
     collected: dict = {}
