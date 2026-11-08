@@ -142,13 +142,18 @@ through the Chrome UX Report (CrUX) API and the CrUX History API. Lena reads it 
   project-wide bound today; with N replicas each would get its own 100 a minute (scale follow-up: a shared limiter,
   or 100 / N per replica, before seo-py runs more than one replica); a wait that would pass the deadline stops the read `CRUX_RATE_LIMITED`
   `client_pacing` without sending. Tested structurally on the injected clock (sliding-window counts), no wall clock.
-  **Recommended go-live values (corrected in round 2):** per run **12 + 6 × paths**, at most 60 — the origins cost
-  6 alone and up to 12 with the twin (3 records + 3 histories each), each path 6 (`lena.calls_needed`; a test runs
-  0..8 paths at exactly that cap and finds every query sent). At the 60 ceiling that covers 8 paths; a 9th or later
-  path's queries are the ones left `NOT_QUERIED CRUX_BUDGET_EXHAUSTED` (listed, never silent; tested). Retries are
-  calls too (up to 2 more per query on 429 / 5xx / timeouts): the formula covers a run where every query succeeds
-  first time; on a bad day the last queries are the ones not sent, in the priority order above. Per day about 2,000;
-  per tenant per day about 200.
+  **Recommended go-live values (corrected in rounds 2 and 3):** per run
+  **`SEO_CRUX_CALLS_PER_RUN` = calls_needed(N) + R × K = (12 + 6 × N) + 2 × 5 = 22 + 6 × N** for N audited paths
+  (`lena.recommended_cap`): calls_needed(N) = 12 + 6 × N is every query of a clean run (origins 6, up to 12 with the
+  twin: 3 records + 3 histories each; each path 6; `lena.calls_needed`); R = 2 is the client's actual retries per
+  query (`crux_client.DEFAULT_ATTEMPTS` 3 − 1; retries only on 429 / 5xx / timeouts and each is a call); K = 5 is how
+  many queries of one run may each use both retries and the run still sends every query. Tested for N = 0, 3 and 8
+  with the twin and 1, 2, 5 and 10 injected retryable errors (every query sent); one retry past the headroom leaves
+  exactly the last query `NOT_QUERIED CRUX_BUDGET_EXHAUSTED`. The config ceiling 120 covers N ≤ 16 (the default
+  `SEO_AUDIT_MAX_PAGES` 10 needs 82). With the cap that large, raise `SEO_CRUX_DEADLINE_SECONDS` to **120**: 82 calls
+  paced at 100 a minute take about 48 s, plus backoff (1 s, 3 s) for retried queries. **A query the cap cuts off —
+  before its first attempt or between its retries — is reported `NOT_QUERIED` with reason `CRUX_BUDGET_EXHAUSTED`
+  (and `attempts_sent`), never `FAILED`** (round 3). Per day about 2,000; per tenant per day about 200.
 - **L2 — extra fields.** Every documented required field is still validated strictly; unknown extra fields are
   accepted and ignored (never read, never passed on), at most 16 per object (more: that object is malformed), and
   counted in `extra_fields_ignored` per answer and in the section's counts. **Go-live canary:** the first hand-run
@@ -219,5 +224,5 @@ of the key is accepted by this endpoint.
    after go-live needs a mapping note, before go-live it is free).
 2. Should a POOR / NEEDS_IMPROVEMENT p75 become a finding (decision WATCH or ACT, data class `measured` with a
    third-party source label), or stay data only as built?
-3. Budgets for go-live: the review recommends per run 12 + 6 × paths (≤ 60, plus retry headroom), per day ~2,000,
-   per tenant per day ~200.
+3. Budgets for go-live: per run (12 + 6 × paths) + 2 × 5 = 22 + 6 × paths (`lena.recommended_cap`; ≤ 120, so up to
+   16 paths), deadline 120 s, per day ~2,000, per tenant per day ~200.

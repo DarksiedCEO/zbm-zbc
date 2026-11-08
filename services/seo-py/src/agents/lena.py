@@ -195,9 +195,19 @@ def twin_of(domain: str) -> str | None:
 
 def calls_needed(paths: int, twin: bool = True) -> int:
     """The most queries one run makes when every query succeeds first time: per origin (the audited one, and its twin
-    when asked) 3 records + 3 histories, then per audited path 3 records + 3 histories. Retries are extra calls on
-    top (at most ``attempts - 1`` more per query). The recommended per-run cap, 12 + 6 x paths, is this with a twin."""
+    when asked) 3 records + 3 histories, then per audited path 3 records + 3 histories."""
     return 6 * (2 if twin else 1) + 6 * paths
+
+
+RETRIES_PER_QUERY = cx.DEFAULT_ATTEMPTS - 1      # R: at most 2 retries per query (429 / 5xx / timeouts)
+RETRIED_QUERIES_TOLERATED = 5                    # K: how many queries of one run may each use every retry
+
+
+def recommended_cap(paths: int, twin: bool = True) -> int:
+    """The recommended SEO_CRUX_CALLS_PER_RUN: calls_needed(paths) + R x K = (12 + 6 x paths) + 2 x 5 with a twin, so
+    a run still sends every query when up to K of its queries each need all R retries. Above the config ceiling (120,
+    i.e. more than 16 paths) the last queries are left NOT_QUERIED CRUX_BUDGET_EXHAUSTED."""
+    return calls_needed(paths, twin) + RETRIES_PER_QUERY * RETRIED_QUERIES_TOLERATED
 
 
 def plan(origin: str, urls: list, twin: str | None = None) -> list:
@@ -237,13 +247,21 @@ def run(read, origin: str, paths: list, periods: int, today: str, retrieved_at: 
             if o is not None and o["state"] == "INSUFFICIENT_FIELD_DATA":
                 results[k] = {"state": "NOT_QUERIED", "reason": "ORIGIN_HAS_NO_FIELD_DATA"}
                 return
+        before = getattr(read, "requests", 0)
         try:
             if method == "record":
                 results[k] = shape_record(read.record(kind, target, ff), today, retrieved_at)
             else:
                 results[k] = shape_history(read.history(kind, target, ff, periods), today, retrieved_at)
         except cx.CruxError as e:
-            results[k] = {"state": "FAILED", "reason": e.code, "detail": e.detail}
+            if e.code == "CRUX_BUDGET_EXHAUSTED":
+                # the call cap ran out before this query got an answer (round-3 review): it is a query not made,
+                # reported NOT_QUERIED like every later one, never FAILED; ``attempts_sent`` says if retries of it
+                # had already gone out
+                results[k] = {"state": "NOT_QUERIED", "reason": e.code,
+                              "attempts_sent": getattr(read, "requests", 0) - before}
+            else:
+                results[k] = {"state": "FAILED", "reason": e.code, "detail": e.detail}
             if e.code in cx.STOPPING:
                 state["stopped"] = {"code": e.code, "detail": e.detail}
 

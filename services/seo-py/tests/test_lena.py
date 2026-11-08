@@ -606,22 +606,66 @@ def test_wrapped_errors_carry_no_request_and_no_key(boom):
 # ====================================================================== round 2: sizing, twin rule, traceback locals
 
 @pytest.mark.parametrize("n", range(0, 9))
-def test_the_recommended_per_run_cap_covers_every_query_up_to_60(n):
+def test_calls_needed_is_every_query_of_a_clean_run(n):
     paths = [f"/p{i}" for i in range(n)]
-    cap = 12 + 6 * n                                                   # the documented formula (ADR 0050), <= 60 here
-    assert cap == lena.calls_needed(n, twin=True) and cap <= 60
+    need = lena.calls_needed(n, twin=True)
+    assert need == 12 + 6 * n and lena.calls_needed(n, twin=False) == need - 6
+    sec = run(FakeCrux(), paths=paths, twin=W, max_calls=need)
+    assert sec["stopped"] is None and sec["counts"]["not_queried"] == 0 and sec["calls"] == need
+
+
+def _retry_script(fake, failures: int):
+    """``failures`` retryable 503s, at most R per query (a query with R failures still gets its last attempt): the
+    first query uses both retries, then the next, and so on."""
+    st = {"spent": 0, "query": None, "here": 0}
+
+    def on(fk, req):
+        if req.content != st["query"]:
+            st["query"], st["here"] = req.content, 0
+        if st["spent"] < failures and st["here"] < lena.RETRIES_PER_QUERY:
+            st["spent"] += 1
+            st["here"] += 1
+            fk.script.insert(0, (503, {}))
+    fake.on_request = on
+
+
+@pytest.mark.parametrize("n", [0, 3, 8])
+@pytest.mark.parametrize("failures", [1, 2, 5, 10])
+def test_retryable_errors_at_the_recommended_cap_still_send_every_query(n, failures):
+    paths = [f"/p{i}" for i in range(n)]
+    cap = lena.recommended_cap(n, twin=True)
+    assert cap == (12 + 6 * n) + lena.RETRIES_PER_QUERY * lena.RETRIED_QUERIES_TOLERATED == 12 + 6 * n + 10
+    assert lena.RETRIES_PER_QUERY == cx.DEFAULT_ATTEMPTS - 1 == 2 and cap <= 120
     fake = FakeCrux()
-    sec = run(fake, paths=paths, twin=W, max_calls=cap)
-    assert sec["stopped"] is None and sec["counts"]["not_queried"] == 0 and sec["calls"] == cap
-    assert lena.calls_needed(n, twin=False) == cap - 6
+    _retry_script(fake, failures)                    # 10 failures = 5 queries each using both retries (R x K)
+    sec = run(fake, paths=paths, twin=W, max_calls=cap, deadline_s=120)   # the recommended deadline
+    assert sec["stopped"] is None and sec["counts"]["not_queried"] == 0 and sec["counts"]["failed"] == 0
+    assert sec["counts"]["with_data"] == lena.calls_needed(n) and sec["calls"] == lena.calls_needed(n) + failures
 
 
-def test_past_eight_paths_the_60_cap_leaves_the_last_urls_listed_not_queried():
-    paths = [f"/p{i}" for i in range(9)]
-    sec = run(FakeCrux(), paths=paths, twin=W, max_calls=60)
-    assert sec["stopped"]["code"] == "CRUX_BUDGET_EXHAUSTED" and sec["calls"] == 60
+@pytest.mark.parametrize("n", [0, 3, 8])
+def test_one_call_short_the_skipped_query_is_not_queried_never_failed(n):
+    paths = [f"/p{i}" for i in range(n)]
+    cap = lena.recommended_cap(n, twin=True)
+    fake = FakeCrux()
+    _retry_script(fake, 11)                          # one retry more than the headroom
+    sec = run(fake, paths=paths, twin=W, max_calls=cap, deadline_s=120)   # the recommended deadline
+    assert sec["calls"] == cap and sec["counts"]["failed"] == 0 and sec["counts"]["not_queried"] == 1
     last = sec["targets"][-1]["form_factors"]["TABLET"]["history"]
-    assert last == {"state": "NOT_QUERIED", "reason": "CRUX_BUDGET_EXHAUSTED"}
+    assert last["state"] == "NOT_QUERIED" and last["reason"] == "CRUX_BUDGET_EXHAUSTED"
+    fake = FakeCrux()
+    sec = run(fake, paths=paths, twin=W, max_calls=lena.calls_needed(n) - 1)      # no errors, one call short
+    last = sec["targets"][-1]["form_factors"]["TABLET"]["history"]
+    assert last == {"state": "NOT_QUERIED", "reason": "CRUX_BUDGET_EXHAUSTED", "attempts_sent": 0}
+    assert sec["counts"]["failed"] == 0 and lena.outcome(sec) == ("PARTIAL", "CRUX_BUDGET_EXHAUSTED")
+
+
+def test_a_query_cut_off_mid_retries_by_the_cap_is_not_queried_with_its_attempts():
+    fake = FakeCrux()
+    fake.script = [(503, {})]
+    sec = run(fake, paths=(), max_calls=1)
+    first = sec["targets"][0]["form_factors"]["PHONE"]["current"]
+    assert first == {"state": "NOT_QUERIED", "reason": "CRUX_BUDGET_EXHAUSTED", "attempts_sent": 1}
 
 
 @pytest.mark.parametrize("domain,twin", [
@@ -684,3 +728,7 @@ def test_no_traceback_frame_local_holds_the_key_after_a_forced_error(boom):
             assert not _holds_key(v), (boom, tb.tb_frame.f_code.co_name, name)
         tb = tb.tb_next
     assert frames >= 1 and e.__context__ is None and e.__cause__ is None
+
+
+def test_recommended_cap_against_the_config_ceiling():
+    assert lena.recommended_cap(10) == 82 and lena.recommended_cap(16) == 118 <= 120 < lena.recommended_cap(17)

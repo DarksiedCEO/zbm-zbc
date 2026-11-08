@@ -103,6 +103,7 @@ MAX_BODY = 1024 * 1024
 MAX_BINS = 10
 MAX_METRICS_IN_ANSWER = 64                                         # unknown metric names are ignored, but bounded
 RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+DEFAULT_ATTEMPTS = 3                     # HTTP attempts per query (the service never changes it): at most 2 retries
 AUTH_STATUSES = frozenset({"PERMISSION_DENIED", "UNAUTHENTICATED"})
 AUTH_REASONS = frozenset({"API_KEY_INVALID", "SERVICE_DISABLED", "API_KEY_SERVICE_BLOCKED",
                           "API_KEY_HTTP_REFERRER_BLOCKED", "API_KEY_IP_ADDRESS_BLOCKED",
@@ -529,7 +530,8 @@ class CruxClient:
     connected = True
     provider = PROVIDER
 
-    def __init__(self, key: ApiKey, *, timeout_s: float = 10.0, deadline_s: float = 60.0, attempts: int = 3,
+    def __init__(self, key: ApiKey, *, timeout_s: float = 10.0, deadline_s: float = 60.0,
+                 attempts: int = DEFAULT_ATTEMPTS,
                  backoff_s: tuple = (1.0, 3.0), max_calls: int = 0,
                  transport: httpx.BaseTransport | None = None, network_backend=None,
                  monotonic: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep,
