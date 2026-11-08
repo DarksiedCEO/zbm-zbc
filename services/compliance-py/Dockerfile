@@ -1,0 +1,69 @@
+# compliance-py (Compliance 38) — production image for Railway (docs/deploy/railway.md).
+# Build context: the repository root.
+#   docker build -f services/compliance-py/Dockerfile -t zbm/compliance-py .
+#
+# Base: python:3.12-slim pinned by the image index digest ADR 0011 records (2026-10-02), the base delivery-py's images
+# already build from and CI has built (Python 3.12 is one of the two versions every service's suite runs on).
+# Dependencies: deploy/python/requirements.lock.txt — this service's requirements.txt pins without pytest, every
+# transitive dependency pinned and installed with --require-hashes, wheels only.
+# Runs as uid/gid 10001; the code is root-owned and read-only to it. deploy/docker/zbm-entrypoint.sh maps Railway's
+# PORT onto the service's own port variable and prepares the data directory; every launch guard is the service's own
+# (src/serve.py, src/launch_guard.py) and unchanged.
+# State: COMPLIANCE_DATA_DIR (the volume; one process per directory, flock). Bind: COMPLIANCE_BIND_ADDR.
+# ADR 0024: at start the service prints its readiness (expired rules and the gates they affect); with
+# COMPLIANCE_SCHEDULER_ENABLED=1 its in-process scheduler runs the internal controls and the Change Watcher.
+FROM python:3.12-slim@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN groupadd --gid 10001 zbm \
+    && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin zbm \
+    && mkdir -p /data /run/zbm-secrets \
+    && chown 10001:10001 /data /run/zbm-secrets \
+    && chmod 0700 /data /run/zbm-secrets
+
+COPY deploy/python/requirements.lock.txt /tmp/requirements.lock.txt
+RUN python -m venv /opt/venv \
+    && /opt/venv/bin/pip install --require-hashes --no-deps --only-binary=:all: -r /tmp/requirements.lock.txt \
+    && rm /tmp/requirements.lock.txt
+
+COPY deploy/docker/zbm-entrypoint.sh /usr/local/bin/zbm-entrypoint
+RUN chmod 0755 /usr/local/bin/zbm-entrypoint
+
+# Dormant maintenance package; no enabled credentials or automatic activation.
+COPY deploy/docker/maintenance/launcher.py deploy/docker/maintenance/backup_config.py deploy/docker/maintenance/app_env_names.json /opt/zbm-maintenance/
+RUN chown -R 0:0 /opt/zbm-maintenance \
+    && chmod 0755 /opt/zbm-maintenance \
+    && chmod 0644 /opt/zbm-maintenance/launcher.py /opt/zbm-maintenance/backup_config.py /opt/zbm-maintenance/app_env_names.json \
+    && /usr/local/bin/python3 -I -B -c 'import sys; assert sys.version_info[:2] == (3, 12); sys.path.insert(0, "/opt/zbm-maintenance"); import backup_config; assert len(backup_config.MEMBERS) == 5; compile(open("/opt/zbm-maintenance/launcher.py").read(), "launcher.py", "exec")' \
+    && test -x /usr/bin/setpriv \
+    && /usr/bin/setpriv --help > /tmp/zbm-setpriv-help \
+    && for flag in reuid regid clear-groups no-new-privs bounding-set inh-caps ambient-caps; do grep -q -- "--$flag" /tmp/zbm-setpriv-help || exit 1; done \
+    && rm /tmp/zbm-setpriv-help
+# Explicit cold owner package; startup never downloads executables.
+ARG TARGETARCH
+COPY deploy/docker/maintenance/cold /opt/zbm-maintenance/cold
+COPY deploy/docker/maintenance/cold_config.py deploy/docker/maintenance/application-prerequisites.json deploy/docker/maintenance/binary-manifest.json /opt/zbm-maintenance/
+COPY deploy/docker/maintenance/vendor /opt/zbm-maintenance/bin
+RUN test "$TARGETARCH" = amd64 && test "$(uname -m)" = x86_64 \
+    && echo "20d4142678d0d95ec11a4759def1b73fd9190abc9ca19e4b62d067c0b387e639  /opt/zbm-maintenance/bin/restic" | sha256sum -c - \
+    && chown -R 0:0 /opt/zbm-maintenance \
+    && chmod -R go-w /opt/zbm-maintenance \
+    && chmod 0755 /opt/zbm-maintenance/bin/restic
+ENV BACKUP_LAUNCH_ENABLED=0
+COPY services/compliance-py/src /app/services/compliance-py/src
+COPY services/compliance-py/seed /app/services/compliance-py/seed
+
+# Dormant one-shot pre-supervisor commissioning; default entrypoint is unchanged.
+COPY deploy/gate5/compliance_commission.py /app/deploy/gate5/compliance_commission.py
+RUN chown 0:0 /app/deploy/gate5/compliance_commission.py \
+    && chmod 0644 /app/deploy/gate5/compliance_commission.py \
+    && /opt/venv/bin/python -I -B -c 'from pathlib import Path; p=Path("/app/deploy/gate5/compliance_commission.py"); assert (p.resolve().parents[2]/"services/compliance-py/seed/compliance_obligations_seed.json").is_file(); compile(p.read_text(), str(p), "exec")'
+
+WORKDIR /app/services/compliance-py/src
+ENV COMPLIANCE_DATA_DIR=/data/compliance
+USER 10001:10001
+ENTRYPOINT ["/usr/local/bin/zbm-entrypoint", "--port-var", "COMPLIANCE_PORT", "--state-dir-var", "COMPLIANCE_DATA_DIR", "--", "/opt/venv/bin/python", "-m", "api"]

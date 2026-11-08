@@ -117,6 +117,8 @@ class PayoutsMixin:
                                                                               else TaxAgentAnswer(False)):
                 if oid not in out["rows"]:
                     out["rows"][oid] = self._rows_reasons(g, (oid,), "FIN-08")
+        # AEGIS r10 R10-1: the brand whose deposit each payable draws on (generic reasons: batches are read by callers)
+        out["clients"] = self._campaign_outflow(g, {p["campaign_id"] for ps in payees.values() for p in ps}, full=False)
         out["bank_1020"] = g.call("bank_feed", "balance", ("zbc", "1020"), lambda: bank.balance("zbc", "1020"),
                                   BankBalance(False))
         out["rail_balance"] = {}
@@ -136,10 +138,18 @@ class PayoutsMixin:
         return t is not None and timedelta(0) <= self._now() - t <= timedelta(hours=max_h) or \
             (t is not None and self._now() - t < timedelta(0) and t - self._now() <= timedelta(minutes=5))
 
+    # AEGIS r4 INFO-3: a Compliance hold is enforced on the client's own invoice (no receipt, no vendor payment, held
+    # status); it is not a reconciliation break, so it does not turn FC-02 red and freeze every payout
+    COMPLIANCE_LEGS = ("compliance_hold", "compliance_unverified")
+    # RTM-05: breaks whose notes only Andre's token reads (a refund of a sanctions-held payment is OFAC-relevant)
+    PRIVATE_LEGS = COMPLIANCE_LEGS
+
     def _open_breaks(self) -> list[dict]:
         out = []
         today = self._today_la()
         for b in self.db["breaks"].values():
+            if b.get("leg") in self.COMPLIANCE_LEGS:
+                continue
             if b["status"] == "open":
                 out.append(b)
             elif b["status"] == "explained" and (b.get("clears_by") or "") < today.isoformat():
@@ -244,6 +254,11 @@ class PayoutsMixin:
         elif not rul.allowed or rul.gate != "payout" or rul.subject_id != p["submission_id"]:
             out.append(R.item("COMPLIANCE_HOLD", "Compliance payout ruling no longer allows this payable",
                               [p["payable_id"]]))
+        # AEGIS r10 R10-1: no current ALLOW for the brand whose deposit funds it (or not asked): excluded
+        asked = inputs.get("clients") or {}
+        for r in asked.get(p["campaign_id"]) if p["campaign_id"] in asked else [R.item(
+                "DEPENDENCY_UNAVAILABLE:compliance_38", "Compliance (38) cannot confirm the client's activation: refused")]:
+            out.append({**r, "evidence_ids": sorted(set(r["evidence_ids"]) | {p["payable_id"]})})
         return out
 
     def _payee_reasons(self, payee: dict, inputs: dict) -> tuple[list[dict], bool]:
@@ -413,7 +428,8 @@ class PayoutsMixin:
                                    and p["payable_id"] not in live_now), key=lambda p: p["payable_id"])
                 good = []
                 for p in payables:
-                    rs = self._payable_reasons(p, inputs)
+                    rs = self._payable_reasons(p, inputs) + self._local_hold_reasons(p["campaign_id"],
+                                                                                      [p["payable_id"]])   # R11-5
                     if rs:
                         excluded.append({"payee_id": pid, "payable_ids": [p["payable_id"]], "reasons": rs})
                     else:
@@ -528,6 +544,13 @@ class PayoutsMixin:
     def _needs_second(self, b: dict) -> bool:
         return bool(self.cfg.second_approver_token) and M.D(b["totals"]["net"]) >= self.cfg.dual_human_threshold
 
+    def _batch_campaigns(self, batch_id: str) -> list[str]:
+        """R10-1: the campaigns whose deposits a batch's items draw on (read under the lock)."""
+        with self.lock:
+            b = self.db["batches"].get(batch_id) or {}
+            return sorted({self.db["payables"][pid]["campaign_id"] for iid in b.get("item_ids", [])
+                           for pid in self.db["items"][iid]["payable_ids"] if pid in self.db["payables"]})
+
     def _approve_batch(self, op: Op, b: dict, request_id: str, second: Optional[dict]) -> dict:
         """Both approvals present (or only Andre's needed): the batch is approved, bound to its content hash."""
         now = self._now()
@@ -557,6 +580,9 @@ class PayoutsMixin:
         """Andre's decision. Above the dual-human threshold the second approver approves on a SEPARATE request with
         a separate identity (``second_approval``, AEGIS N17-13); whichever of the two comes second completes the
         approval. Andre's approval alone is recorded as ``andre_approval`` and the batch stays ``proposed``."""
+        g_cmp = Gather(self, f"bdec|{request_id}|compliance", "andre", batch_id)
+        client_reasons = (self._campaigns_reasons(g_cmp, self._batch_campaigns(batch_id), full=True)
+                          if body.get("decision") == "approve" else [])
         with self.lock:
             key, h, ent = self._idem("andre", request_id, f"batch/{batch_id}", body)
             if ent:
@@ -584,6 +610,12 @@ class PayoutsMixin:
                 return resp
             if b.get("andre_approval"):
                 raise Conflict("Andre already approved this batch; it waits for the second approver")
+            client_reasons = client_reasons or R.dedupe([r for c in self._batch_campaigns(batch_id)
+                                                         for r in self._local_hold_reasons(c)])     # R11-5
+            if client_reasons:
+                # AEGIS r10 R10-1: a brand of this batch is not a current ALLOW (on a sanctions ground Andre reads the
+                # OFAC warning here): nothing is approved; reject the batch and let the next run exclude it
+                raise Refused("batch approval refused", client_reasons, ledger_event_ids=g_cmp.events)
             andre_ap = {"at": iso(self._now()), "content_sha256": b["content_sha256"], "request_id": request_id,
                         "note_sha256": sha(body.get("note")) if body.get("note") else None}
             b = {**b, "andre_approval": andre_ap}
@@ -609,6 +641,9 @@ class PayoutsMixin:
 
     def second_approve_batch(self, request_id: str, batch_id: str, body: dict) -> dict:
         """The second human approver's own request (own token, own actor ``second_approver``), AEGIS N17-13."""
+        g_cmp = Gather(self, f"bdec2|{request_id}|compliance", "second_approver", batch_id)
+        client_reasons = (self._campaigns_reasons(g_cmp, self._batch_campaigns(batch_id), full=False)
+                          if body.get("decision") == "approve" else [])
         with self.lock:
             key, h, ent = self._idem("second_approver", request_id, f"batch2/{batch_id}", body)
             if ent:
@@ -630,6 +665,8 @@ class PayoutsMixin:
                 raise Conflict("batch content changed since you read it (content_sha256 mismatch); nothing approved")
             if b.get("second_approval"):
                 raise Conflict("the second approver already approved this batch")
+            if client_reasons:
+                raise Refused("batch approval refused", client_reasons, ledger_event_ids=g_cmp.events)   # R10-1
             if body["decision"] == "reject":
                 self._end_batch(op, b, "rejected", "batch_rejected")
                 resp = {"batch_id": batch_id, "status": "rejected", "by": "second_approver",
@@ -736,6 +773,8 @@ class PayoutsMixin:
                 rs = []
                 for p in pays:
                     rs += self._payable_reasons(p, inputs)
+                    # AEGIS r11 R11-5: Finance's own holds re-read under the lock (one booked during the gather counts)
+                    rs += self._local_hold_reasons(p["campaign_id"], [p["payable_id"]])
                     if p["status"] != "batched" or p.get("batch_item_id") != it["item_id"] or \
                             p["current_amount"] != it["payable_amounts"].get(p["payable_id"]):
                         rs.append(R.item("CERT_CHANGED", "payable changed since Andre approved the batch (clawback or "

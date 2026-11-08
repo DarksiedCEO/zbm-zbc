@@ -32,7 +32,8 @@ release, no float, only verified views paid, only Andre approves rules and rate 
    (`FIN_BIND_ADDR`), port 8410 (`FIN_PORT`); no new dependency (pinned versions of BUILD_CONTRACTS §0).
 2. **Identities never interchangeable.** Bearer `FIN_SERVICE_TOKEN` (required to start, ≥ 32 printable ASCII);
    caller `X-FIN-Caller-Token` from `FIN_CALLER_TOKENS` (compliance_38, clipper_network, verification_integrity,
-   creative_production, onboarding, legal_37, scheduler, rail_gateway, bank_feed, and since Oct 10 2026 seo_02 —
+   creative_production, onboarding, legal_37, scheduler, rail_gateway, bank_feed, payout_rail_gateway (ADR 0023),
+   and since Oct 10 2026 seo_02 —
    Search & Answer Intelligence (2), ADR 0017 W3-2; since AEGIS SEO Wave 3 M2 it reaches exactly ONE route, the
    narrow `GET /fin/v1/invoices/{id}/status` (status, ownership, refund / chargeback flags; no amounts or lines),
    enforced by a middleware before any route and by `caller()` with no names not admitting it; every other route
@@ -43,7 +44,9 @@ release, no float, only verified views paid, only Andre approves rules and rate 
 3. **Separation of duties is enforced at the API by caller identity (FIN-19).** V&I reaches only
    `payout-identity`; the scheduler proposes runs, releases approved batches and runs jobs, and can approve nothing;
    Andre approves and cannot release (the release route refuses any request carrying an approval token, 403);
-   `rail_gateway`/`bank_feed` push events only; each other department reaches only its protocol routes
+   `rail_gateway`/`payout_rail_gateway`/`bank_feed` push events only (since ADR 0023 `rail_gateway` reaches exactly
+   `POST /fin/v1/stripe/events` and `payout_rail_gateway` exactly the payout-rail webhook route, enforced like
+   seo_02's allowlist); each other department reaches only its protocol routes
    (`tests/test_auth_limits_idempotency.py` checks every caller on every caller route).
 4. **Record-first, everywhere, with remote calls outside the service lock.** Every port call is recorded as
    `crossing_<port>_requested` (ids and an argument hash only) and made in a `Gather` phase BEFORE the service lock

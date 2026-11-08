@@ -528,12 +528,12 @@ def test_a11_replay_same_body_stored_answer_different_body_409_webhook_twice_one
     it = rel["batch"]["items"][0]
     hr.stripe.paid(it["idempotency_key"])
     ev = {"event_id": "evt-dup", "type": "paid", "item_id": it["item_id"], "signature": "sig-ok-test-only"}
-    hr.ok(hr.post("/fin/v1/rails/stripe/events", {"request_id": rid(), "events": [ev]}, caller="rail_gateway"))
-    r2 = hr.ok(hr.post("/fin/v1/rails/stripe/events", {"request_id": rid(), "events": [ev]}, caller="rail_gateway"))
+    hr.ok(hr.post("/fin/v1/rails/stripe/events", {"request_id": rid(), "events": [ev]}, caller="payout_rail_gateway"))
+    r2 = hr.ok(hr.post("/fin/v1/rails/stripe/events", {"request_id": rid(), "events": [ev]}, caller="payout_rail_gateway"))
     assert r2["results"][0]["status"] == "duplicate" and len(_flows(hr, "F4e")) == 1
     bad = hr.post("/fin/v1/rails/stripe/events", {"request_id": rid(), "events": [{**ev, "event_id": "evt-forged",
                                                                                    "signature": "forged"}]},
-                  caller="rail_gateway")
+                  caller="payout_rail_gateway")
     assert bad.status_code == 409
 
 

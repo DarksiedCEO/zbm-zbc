@@ -5,7 +5,7 @@ never run = red; a control whose owner is not built never gets a result, so it s
 
 Separation of duties is enforced where it can only be enforced — at the API, by caller identity (api.py): V&I can only
 read payout identity; the scheduler proposes and releases and can approve nothing; Andre approves and cannot release;
-rail_gateway / bank_feed push events only; the other departments reach their protocol routes only.
+rail_gateway / payout_rail_gateway / bank_feed push events only; the other departments reach their protocol routes only.
 """
 
 from __future__ import annotations

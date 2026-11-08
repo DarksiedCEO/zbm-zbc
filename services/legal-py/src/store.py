@@ -47,6 +47,10 @@ class StoreWriteError(RuntimeError):
     pass
 
 
+class StoreReadError(RuntimeError):
+    """AEGIS r4 N4-L2: a blob exists but could not be read (EIO, EMFILE, ...): the API answers 503, never 404."""
+
+
 class _ShortWrite(OSError):
     """``pwrite`` / ``write`` wrote fewer bytes than asked (finance-py AEGIS 5a56a3a M1): a failed write."""
 
@@ -301,8 +305,10 @@ class BlobStore:
             try:
                 with open(path, "rb") as fh:
                     data = fh.read()
-            except OSError:
+            except FileNotFoundError:
                 return None
+            except OSError as exc:
+                raise StoreReadError(f"blob read failed: {type(exc).__name__}") from None
             return data if hashlib.sha256(data).hexdigest() == sha else None
 
     def exists(self, sha: str) -> bool:

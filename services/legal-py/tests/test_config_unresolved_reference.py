@@ -65,3 +65,33 @@ def test_a_short_caller_token_still_gets_the_length_message_unchanged():
     callers = dict(CALLERS, onboarding="short")
     with pytest.raises(RuntimeError, match=r"^LEGAL_CALLER_TOKENS: the onboarding token must be >= 32 printable ASCII"):
         config_mod.load(base_env(LEGAL_CALLER_TOKENS=json.dumps(callers)))
+
+
+# --- the optional compliance_38 caller (added to the deployed map on this branch; AEGIS r12 follow-up) -------------------
+
+@pytest.mark.parametrize("value", ["", "${{compliance.COMPLIANCE_LEGAL_CALLER_TOKEN}}"])
+def test_an_unset_compliance_38_entry_is_skipped_and_its_route_answers_503(value, caplog):
+    from helpers import Harness
+    callers = dict(CALLERS, compliance_38=value)
+    settings = config_mod.load(base_env(LEGAL_CALLER_TOKENS=json.dumps(callers)))
+    assert "compliance_38" not in settings.caller_tokens and settings.callers_not_configured == ("compliance_38",)
+    x = Harness(env={"LEGAL_CALLER_TOKENS": json.dumps(callers)})
+    r = x.post("/legal/v1/register/CQ-01/invalidate", {"request_id": "r-1", "source_ref": "src-1",
+                                                        "detected_change_sha256": "a" * 64}, caller=value or "nobody")
+    assert r.status_code == 503 and "compliance_38" in r.text, r.text
+    assert x.client.get("/health").status_code == 200                 # Legal is up; every other caller still works
+    assert x.get("/legal/v1/documents/client_msa", caller="finance_31").status_code in (200, 404)
+
+
+@pytest.mark.parametrize("caller", ["finance_31", "onboarding", "hub", "clipper_network"])
+def test_every_pre_existing_caller_stays_strict(caller):
+    for value in ("", "${{x.Y_PADDED_TO_THE_MINIMUM_LENGTH}}"):
+        callers = dict(CALLERS, **{caller: value})
+        with pytest.raises(RuntimeError):
+            config_mod.load(base_env(LEGAL_CALLER_TOKENS=json.dumps(callers)))
+
+
+def test_a_set_compliance_38_token_is_checked_like_any_other():
+    callers = dict(CALLERS, compliance_38="short")
+    with pytest.raises(RuntimeError, match="compliance_38 token must be"):
+        config_mod.load(base_env(LEGAL_CALLER_TOKENS=json.dumps(callers)))

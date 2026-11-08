@@ -66,7 +66,7 @@ def _calls(x, b, inv):
                                       "amount": "1.00"}, {"andre": ANDRE_TOKEN}),
         ("POST", "/fin/v1/payees/clip-a/offboarding-notices", {"request_id": rid(), "offboarding_id": "off-1"},
          {"caller": "clipper_network"}),
-        ("GET", "/fin/v1/audit/export", None, {"caller": "scheduler"}),
+        ("GET", "/fin/v1/audit/export", None, {"andre": ANDRE_TOKEN}),
     ]
 
 

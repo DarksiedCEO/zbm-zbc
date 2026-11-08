@@ -43,7 +43,7 @@ def _draft(hr):
     body = {"request_id": rid(), "entity": "zbm", "client_id": CLIENT, "kind": "service",
             "lines": [{"line_code": "strategy_services", "quantity": 1, "unit_price": "2000.00",
                        "description": "Search audit"}], "payment_methods": ["ach"],
-            "legal_ref": {"doc_id": "msa-seo", "version": 1, "doc_sha256": "d" * 64, "acceptance_id": "acc-seo"}}
+            "legal_ref": {"doc_id": "sow_seo_audit", "version": 1, "doc_sha256": "d" * 64, "acceptance_id": "acc-seo"}}
     return hr.ok(hr.post("/fin/v1/invoices", body, caller="onboarding"), 201)["invoice"]
 
 
@@ -71,7 +71,7 @@ def test_the_seo_client_reads_finance_s_real_invoice_through_its_whole_life(hr):
     assert SEO_FIN.assess(facts, "someone-else") == "INVOICE_TENANT_MISMATCH"
     assert "2000.00" not in repr(facts) and "Search audit" not in repr(facts)      # only what the verdict needs
     raw = hr.get(f"/fin/v1/invoices/{iid}/status", caller="seo_02")
-    assert raw.status_code == 200 and set(raw.json()) == SEO_FIN.STATUS_FIELDS
+    assert raw.status_code == 200 and set(raw.json()) == SEO_FIN.STATUS_FIELDS | SEO_FIN.OPTIONAL_STATUS_FIELDS
     assert "2000.00" not in raw.text and "Search audit" not in raw.text and "msa-seo" not in raw.text
 
 

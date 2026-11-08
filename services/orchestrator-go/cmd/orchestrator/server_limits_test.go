@@ -128,7 +128,7 @@ func TestSlowlorisHeaderIsCutOffAndOthersAreServed(t *testing.T) {
 func TestSlowBodyIsCutOffBeforeAnyScanAndOthersAreServed(t *testing.T) {
 	t.Parallel()
 	port, ledgerCalls := startLimitedOrchestrator(t)
-	head := "POST /revenue-recovery/scan HTTP/1.1\r\nHost: t\r\nAuthorization: Bearer test-orchestrator-token\r\n" +
+	head := "POST /revenue-recovery/scan HTTP/1.1\r\nHost: t\r\nAuthorization: Bearer " + bindTestOrchToken + "\r\n" +
 		"Content-Type: application/json\r\nContent-Length: 4096\r\n\r\n"
 	open, got := trickle(t, port, head, ' ', 300*time.Millisecond, 3*readTimeout, func() { healthOK(t, port) })
 	t.Logf("slow-body connection closed by the server after %v; it sent %q", open, firstLine(got))
@@ -146,7 +146,7 @@ func TestSlowBodyIsCutOffBeforeAnyScanAndOthersAreServed(t *testing.T) {
 	}
 	// And a real scan still runs afterwards.
 	req, _ := http.NewRequest(http.MethodPost, "http://127.0.0.1:"+port+"/revenue-recovery/scan", nil)
-	req.Header.Set("Authorization", "Bearer test-orchestrator-token")
+	req.Header.Set("Authorization", "Bearer "+bindTestOrchToken)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -178,14 +178,14 @@ func TestOversizedBodyIs413BeforeAnyScan(t *testing.T) {
 	port, ledgerCalls := startLimitedOrchestrator(t)
 	// Declared too large: refused from Content-Length, no body byte sent.
 	line := rawRequest(t, port, fmt.Sprintf("POST /revenue-recovery/scan HTTP/1.1\r\nHost: t\r\n"+
-		"Authorization: Bearer test-orchestrator-token\r\nContent-Length: %d\r\n\r\n", 10<<20))
+		"Authorization: Bearer "+bindTestOrchToken+"\r\nContent-Length: %d\r\n\r\n", 10<<20))
 	if !strings.HasPrefix(line, "HTTP/1.1 413") {
 		t.Fatalf("declared oversized body: got %q, want 413", line)
 	}
 	// Chunked, no Content-Length: refused once the running total passes the cap.
 	chunk := strings.Repeat(" ", 32<<10)
 	var b strings.Builder
-	b.WriteString("POST /revenue-recovery/scan HTTP/1.1\r\nHost: t\r\nAuthorization: Bearer test-orchestrator-token\r\nTransfer-Encoding: chunked\r\n\r\n")
+	b.WriteString("POST /revenue-recovery/scan HTTP/1.1\r\nHost: t\r\nAuthorization: Bearer " + bindTestOrchToken + "\r\nTransfer-Encoding: chunked\r\n\r\n")
 	for i := 0; i < (maxRequestBodyBytes/len(chunk))+4; i++ {
 		fmt.Fprintf(&b, "%x\r\n%s\r\n", len(chunk), chunk)
 	}

@@ -46,7 +46,7 @@ def test_n17_1_settled_payable_is_never_rebound_to_another_submission(hr):
     after = hr.ok(hr.get(f"/fin/v1/payables/{p1['payable_id']}"))
     assert (after["submission_id"], after["status"]) == ("sub-1", "settled")       # never rewritten, never accrued
     assert hr.ledger.of_type("payable_identity_conflict")
-    assert any(f["kind"] == "certification_rebound" for f in hr.ok(hr.get("/fin/v1/integrity"))["findings"])
+    assert any(f["kind"] == "certification_rebound" for f in hr.ok(hr.get("/fin/v1/integrity", caller=None, andre=ANDRE_TOKEN))["findings"])
     hr.clock.advance(days=7)
     rec = hr.recon()
     assert rec["fc01"], [l for l in rec["recon"]["legs"] if l["status"] not in ("matched", "not_in_use")]
@@ -98,7 +98,7 @@ def test_n17_1_reconciliation_and_integrity_compare_per_payable_not_totals(hr):
     bad = {l["subject"] for l in rec["legs"] if l["status"] not in ("matched", "not_in_use")}
     assert "zbc:2020" not in bad                                                    # the total still ties ...
     assert {"zbc:2020:payee:clip-a", "zbc:2020:payee:clip-b"} <= bad              # ... the sub-ledgers do not
-    integ = hr.ok(hr.get("/fin/v1/integrity"))
+    integ = hr.ok(hr.get("/fin/v1/integrity", caller=None, andre=ANDRE_TOKEN))
     assert integ["status"] == "red" and any("accrual entry does not post 2020" in x for x in integ["problems"])
 
 
@@ -114,7 +114,7 @@ def test_n17_1_replay_of_an_old_rebinding_line_is_total_and_turns_integrity_red(
                            "rec": {**x.svc.db["payables"][p["payable_id"]], "submission_id": "sub-2"}}))
     x.svc._commit(op)
     y = _restart(x, d)
-    integ = y.ok(y.get("/fin/v1/integrity"))
+    integ = y.ok(y.get("/fin/v1/integrity", caller=None, andre=ANDRE_TOKEN))
     assert integ["status"] == "red" and any("rebound" in pr for pr in integ["problems"])
 
 
@@ -268,7 +268,7 @@ def test_n17_3_every_malformed_certification_is_refused_recorded_and_replay_is_t
     assert r.status_code == 200 and r.json()["allowed"] is False, r.text
     assert not x.svc.db["payables"]
     y = _restart(x, d)                                   # the log replays: nothing malformed was anchored
-    assert y.ok(y.get("/fin/v1/integrity"))["status"] == "green"
+    assert y.ok(y.get("/fin/v1/integrity", caller=None, andre=ANDRE_TOKEN))["status"] == "green"
     assert not y.svc.db["payables"]
 
 

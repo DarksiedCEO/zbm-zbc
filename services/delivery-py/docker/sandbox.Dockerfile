@@ -9,13 +9,28 @@ ARG BASE_DIGEST
 FROM python:3.12-slim@sha256:${BASE_DIGEST}
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates curl build-essential pkg-config libssl-dev \
+# Supply-chain hardening (2026-11-08): apt is pinned to a dated snapshot.debian.org archive of the base's own Debian
+# release (see docker/Dockerfile), so every package resolves to exactly one version on every build; the installed
+# versions are written to /usr/share/zbm/apt-packages.txt. Moving the date is a reviewed change.
+ARG DEBIAN_SNAPSHOT=20261101T000000Z
+RUN echo "${DEBIAN_SNAPSHOT}" | grep -Eq '^[0-9]{8}T[0-9]{6}Z$' \
+    && sed -Ei -e "s#https?://deb\.debian\.org/debian-security#https://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}#" \
+        -e "s#https?://deb\.debian\.org/debian\$#https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}#" \
+        /etc/apt/sources.list.d/debian.sources \
+    && ! grep -q 'deb\.debian\.org' /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Check-Valid-Until=false update \
+    && apt-get install -y --no-install-recommends git ca-certificates curl build-essential pkg-config libssl-dev \
+    && mkdir -p /usr/share/zbm \
+    && dpkg-query -W -f='${Package}=${Version}\n' git ca-certificates curl build-essential pkg-config libssl-dev > /usr/share/zbm/apt-packages.txt \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd -g 65532 zbm && useradd -u 65532 -g 65532 -M zbm \
     && mkdir -p /mnt/user-data/workspace /mnt/skills && chown -R 65532:65532 /mnt/user-data
-# python: the monorepo's pinned FastAPI stack (BUILD_CONTRACTS §0) so every *-py service's suite runs offline
-COPY services/finance-py/requirements.txt /tmp/req-python.txt
-RUN pip install --no-cache-dir -r /tmp/req-python.txt && rm /tmp/req-python.txt
+# python: the monorepo's pinned FastAPI stack (BUILD_CONTRACTS §0) so every *-py service's suite runs offline.
+# 2026-11-08: installed from a hash lock of services/finance-py/requirements.txt (--require-hashes: every
+# transitive dependency pinned with its sha256, wheels only, no resolver); regenerate with the command at the top
+# of docker/sandbox-requirements.lock.txt whenever finance-py's pins change. devtools/licence_gate.py covers it.
+COPY services/delivery-py/docker/sandbox-requirements.lock.txt /tmp/req-python.txt
+RUN pip install --no-cache-dir --require-hashes --no-deps --only-binary=:all: -r /tmp/req-python.txt && rm /tmp/req-python.txt
 # rust stable + go + node, for the ledger-rust / orchestrator-go / node suites (cargo test --locked --offline,
 # go test -json -race, node --test). The engineer runs as uid 65532 with HOME=/mnt/user-data/workspace, so the
 # rustup proxy needs RUSTUP_HOME/CARGO_HOME outside HOME and world-readable (ADR 0011 toolchain amendment; the
@@ -35,6 +50,11 @@ RUN test -n "${RUSTUP_INIT_SHA256}" \
     && rm /tmp/rustup-init \
     && ln -s /opt/cargo/bin/* /usr/local/bin/ && chmod -R a+rX /opt/rustup /opt/cargo
 # Go: the tarball's sha256 (from https://go.dev/dl/?mode=json) is a REQUIRED build argument, like NODE_SHA256.
+# OPEN (2026-11-08, needs a ci.yml change — owner approval): 1.23.1 is end-of-life and older than orchestrator-go's
+# `go 1.27.3` directive. The move to 1.27.3 (sha256 65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
+# per docker-library/golang versions.json; re-verify against go.dev/dl) must change this default, ci.yml's
+# GO_VERSION/GO_SHA256 and ADR 0011's row together (devtools/test_ci_docker_args.py requires all three equal).
+# docs/runbooks/dependency-ownership.md, follow-up F-5.
 ARG GO_VERSION=1.23.1
 ARG GO_SHA256
 RUN test -n "${GO_SHA256}" \

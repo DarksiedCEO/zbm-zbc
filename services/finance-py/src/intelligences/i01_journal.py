@@ -26,7 +26,7 @@ import reasons as R
 
 NUMBER, NAME, ACTOR = 1, "Journal Keeper", "intel_01_journal"
 FLOWS = ("F1", "F1a", "F1r", "F2", "F3", "F4a", "F4b", "F4c", "F4d", "F4e", "F4f", "F4g", "F5", "F5a", "F5b", "F5c",
-         "F6", "F6p", "F7", "F7a", "F7l", "F8", "F9", "F10", "F11", "F11a", "F12", "F12c", "F12v", "F12r", "F12x",
+         "F6", "F6p", "F7", "F7a", "F7l", "F8", "F9", "F10", "F11", "F11a", "F11v", "F12", "F12c", "F12v", "F12r", "F12x",
          "F13", "F13f", "F13x", "F13p", "F13q", "F7r", "correction")
 # Media flows (ADR 0009 amendment, Oct 5 2026): F12 prepayment invoice issued, F12c issued invoice cancelled before
 # payment, F12v vendor paid from collected money, F12r media delivered (revenue and cost together), F12x the bank
@@ -150,6 +150,16 @@ def validate(entry: dict, locked: set, entries_by_id: dict) -> list[dict]:
             out.append(R.item("JOURNAL_INVALID", "reverses_entry_id names no entry of this entity"))
         else:
             exact_reversal = sorted(canonical(x) for x in reversal_lines(orig)) == sorted(canonical(x) for x in lines)
+    if memo == "F11v":
+        original = entries_by_id.get(rev) or {}
+        original_lines = original.get("lines", [])
+        service_original = (ent == "zbm" and original.get("memo_code") == "F11" and
+            original.get("source") == entry.get("source") and original.get("source", {}).get("kind") == "invoice" and
+            len(original_lines) == 2 and original_lines[0].get("account") == "1100" and
+            original_lines[0].get("debit") != "0.00" and original_lines[1].get("account") == "4110" and
+            original_lines[1].get("credit") != "0.00")
+        if not exact_reversal or not service_original:
+            out.append(R.item("JOURNAL_INVALID", "service invoice void must exactly reverse its original F11"))
     restricted_credit = any(ln["account"] in C.RESTRICTED_POOL and ln["credit"] != "0.00" for ln in lines)
     if ent == "zbc" and restricted_credit and memo not in RESTRICTED_CREDIT_FLOWS and not exact_reversal:
         out.append(R.item("RESTRICTED_CASH_MISUSE", "restricted cash (1020/1040/1041) never pays operating expenses, "

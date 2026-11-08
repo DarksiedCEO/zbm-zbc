@@ -1,0 +1,36 @@
+{
+  "schema": 1,
+  "platform": "linux/amd64",
+  "images": {
+    "ledger": {
+      "image": "ghcr.io/darksiedceo/zbm-gate5-ledger@sha256:61bd908be485600b06aa2b54bdeb12521eedda9571dea0c10d9fa1379ed00f89",
+      "source_commit": "f5fa44b6ab9ae9841188b44ec87a1f89fc63c1c3"
+    },
+    "legal": {
+      "image": "ghcr.io/darksiedceo/zbm-gate5-legal@sha256:78e4a776ba6cdd8115ed5dd5aafaf5fe2275de92168c6c0a317a9ea306ced9c4",
+      "source_commit": "f5fa44b6ab9ae9841188b44ec87a1f89fc63c1c3"
+    },
+    "compliance": {
+      "image": "ghcr.io/darksiedceo/zbm-gate5-compliance@sha256:fee2c2d2793658ac7124d36e80cde981a2e980512f7381c9c9c1bbac9da99a5e",
+      "source_commit": "f5fa44b6ab9ae9841188b44ec87a1f89fc63c1c3"
+    },
+    "finance": {
+      "image": "ghcr.io/darksiedceo/zbm-gate5-finance@sha256:b7423f8373626b1cadadea83bd9ca0b565e0a2e8b5f99688b87091573989c765",
+      "source_commit": "f5fa44b6ab9ae9841188b44ec87a1f89fc63c1c3"
+    },
+    "seo": {
+      "image": "ghcr.io/darksiedceo/zbm-gate5-seo@sha256:07c3937978a477d2d8f72e633a6f21053b85178528ef67e0f785d58a7f9300c9",
+      "source_commit": "f5fa44b6ab9ae9841188b44ec87a1f89fc63c1c3"
+    },
+    "admin": {
+      "image": "ghcr.io/darksiedceo/zbm-gate5-admin@sha256:f9cd97f88f168a90b848499d7f978448c1d7904202f68e163df0e62d2496f76a",
+      "source_commit": "f5fa44b6ab9ae9841188b44ec87a1f89fc63c1c3"
+    }
+  },
+  "admin_roles": [
+    "coordinator",
+    "observer",
+    "backup-trigger"
+  ],
+  "client_portal": "UNRESOLVED_PRIVATE_IMAGE_NOT_INCLUDED"
+}

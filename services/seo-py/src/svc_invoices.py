@@ -15,6 +15,11 @@ something malformed: refused 503 with ``override_allowed``). Only for an UNVERIF
 naming a reason from a closed set (``invoice_override``) on a request that already carries his verified approval;
 the override is recorded on the ledger as its own event. A reused invoice is refused whatever the override.
 
+ADR 0024 (Oct 30, 2026): before the invoice, every client run asks Compliance (38) for the client's CURRENT
+activation (compliance_client.py), in both modes, and there is no override: anything but a current ALLOW refuses
+(COMPLIANCE_NOT_ACTIVATED 409; no usable answer 503). A client tenant must be bound to its client id first
+(TENANT_FINANCE_CLIENT_UNBOUND), whatever the invoice mode.
+
 Network calls are made outside the service lock; every rule that depends on state is checked again after them.
 ``SEO_INVOICE_VERIFICATION=trust`` keeps the Wave 1/2 behaviour (the id is an unchecked input) and says so in
 /status.
@@ -26,6 +31,7 @@ from typing import Optional
 
 from envelope import sha
 from errors import Conflict, Invalid, Unavailable
+import compliance_client
 from finance_client import DEFINITIVE, PAID, FinanceLookupError, assess
 from reasons import R
 
@@ -50,25 +56,35 @@ class InvoicesMixin:
             if override:
                 raise Invalid(R("INVOICE_OVERRIDE_NOT_ALLOWED"))
             return None
+        client = t.get("finance_client_id")
+        if not client:                       # ADR 0024: Compliance is asked about THIS client, so it must be bound
+            raise Conflict(R("TENANT_FINANCE_CLIENT_UNBOUND"))
         if self.settings.invoice_verification == "trust":
             if override:
                 raise Invalid(R("INVOICE_OVERRIDE_NOT_ALLOWED"))
-            return {"mode": "trust"}
+            return {"mode": "trust", "client_id": client, "tenant_id": tid}
         used = self._invoice_owner(body["invoice_id"])
         if used is not None and used != owner:
             raise Conflict(R("INVOICE_ALREADY_USED"))
-        client = t.get("finance_client_id")
-        if getattr(self.ports.finance, "connected", False) and not client:
-            raise Conflict(R("TENANT_FINANCE_CLIENT_UNBOUND"))
         return {"mode": "finance", "invoice_id": body["invoice_id"], "client_id": client, "tenant_id": tid,
                 "override": override if andre else None, "owner": owner}
+
+    def _verify_compliance(self, client_id: Optional[str]) -> dict:
+        """Outside the lock (ADR 0024): Compliance's current ALLOW for the client, or the refusal (never overridden)."""
+        try:
+            return compliance_client.check(self.ports.compliance, client_id)
+        except compliance_client.ComplianceCheckError as exc:
+            if exc.code == compliance_client.NOT_ACTIVATED:
+                raise Conflict(R(exc.code), override_allowed=False) from None
+            raise Unavailable(R(exc.code), override_allowed=False) from None
 
     def _verify_invoice(self, plan: Optional[dict]) -> Optional[dict]:
         """Outside the lock: ask Finance. Returns the verification record, or raises the refusal."""
         if plan is None:
             return None
+        cmp_ = self._verify_compliance(plan["client_id"])     # ADR 0024: first, and never overridden
         if plan["mode"] == "trust":
-            return {"mode": "trust", "verdict": "UNCHECKED"}
+            return {"mode": "trust", "verdict": "UNCHECKED", "compliance": cmp_}
         facts = None
         try:
             facts = self.ports.finance.lookup(plan["invoice_id"])
@@ -77,12 +93,12 @@ class InvoicesMixin:
             code = exc.code
         if code == PAID:
             return {"mode": "finance", "verdict": PAID, "cause": None, "override": None, "invoice_status": "paid",
-                    "facts_sha256": sha(facts)}
+                    "facts_sha256": sha(facts), "compliance": cmp_}
         if code in DEFINITIVE:
             raise Conflict(R(code), override_allowed=False)
         if plan["override"]:
             return {"mode": "finance", "verdict": "OVERRIDDEN", "cause": code, "override": plan["override"],
-                    "invoice_status": None, "facts_sha256": None}
+                    "invoice_status": None, "facts_sha256": None, "compliance": cmp_}
         raise Unavailable(R(code), override_allowed=True)
 
     def _recheck_invoice(self, plan: Optional[dict]) -> None:
@@ -92,8 +108,9 @@ class InvoicesMixin:
             used = self._invoice_owner(plan["invoice_id"])
             if used is not None and used != plan["owner"]:
                 raise Conflict(R("INVOICE_ALREADY_USED"))
-            # AEGIS SEO Wave 3 L1: Finance's answer was judged against the binding read before the call; if Andre
-            # re-bound the tenant meanwhile, that verdict is about the wrong client
+        if plan is not None:
+            # AEGIS SEO Wave 3 L1 (and ADR 0024, both modes): Finance's and Compliance's answers were judged against the
+            # binding read before the call; if Andre re-bound the tenant meanwhile, they are about the wrong client
             t = self.tenants.get(plan["tenant_id"]) or {}
             if t.get("finance_client_id") != plan["client_id"]:
                 raise Conflict(R("TENANT_FINANCE_CLIENT_CHANGED"))
@@ -103,14 +120,20 @@ class InvoicesMixin:
                           actor: str, rk: str) -> list:
         """The typed evidence of an invoice check: ``invoice_verified`` (Finance confirmed it) or
         ``invoice_verification_overridden_by_andre`` (Finance could not answer and Andre overrode)."""
-        if verification is None or verification["mode"] != "finance":
+        if verification is None:
             return []
+        cmp_ = verification.get("compliance")
+        out = [("compliance_activation_confirmed", subject,
+                {**ids, "ruling_id": cmp_["ruling_id"], "jurisdiction": cmp_["jurisdiction"]}, (actor, rk))] \
+            if cmp_ else []
+        if verification["mode"] != "finance":
+            return out
         if verification["verdict"] == PAID:
-            return [("invoice_verified", subject, {**ids, "invoice_id": invoice_id, "verdict": PAID,
-                                                   "facts_sha256": verification["facts_sha256"]}, (actor, rk))]
-        return [("invoice_verification_overridden_by_andre", subject,
-                 {**ids, "invoice_id": invoice_id, "cause": verification["cause"],
-                  "override": verification["override"]}, ("andre", rk))]
+            return out + [("invoice_verified", subject, {**ids, "invoice_id": invoice_id, "verdict": PAID,
+                                                         "facts_sha256": verification["facts_sha256"]}, (actor, rk))]
+        return out + [("invoice_verification_overridden_by_andre", subject,
+                       {**ids, "invoice_id": invoice_id, "cause": verification["cause"],
+                        "override": verification["override"]}, ("andre", rk))]
 
     def invoice_verification_status(self) -> dict:
         mode = self.settings.invoice_verification

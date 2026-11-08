@@ -46,7 +46,10 @@ CMP_TOKEN = "live-compliance-stub-token-" + "c" * 12
 CMP_CALLER = "live-compliance-stub-caller-legal37-" + "k" * 8
 CALLERS = {n: f"live-legal-caller-{n}-" + "c" * 24 for n in ("compliance_38", "clipper_network", "verification_integrity",
                                                               "creative_production", "onboarding", "finance_31", "hub",
-                                                              "esign_gateway", "scheduler")}
+                                                              "esign_gateway", "scheduler", "client_portal")}
+# ADR 0028: the key Legal tags client acceptance links with (equal to client-portal's PORTAL_LINK_TAG_KEY)
+LINK_TAG_KEY = "live-legal-link-tag-key-shared-with-portal-" + "t" * 16
+CLIENT_LEGAL_NAME = "Acme Outdoor Co"
 COUNSEL = "eng-live-counsel-1"
 LOG: list[str] = []
 PROCS: list[subprocess.Popen] = []
@@ -203,7 +206,7 @@ def _main(work: Path) -> int:
     env = {"LEGAL_SERVICE_TOKEN": TOKEN, "LEGAL_ANDRE_APPROVAL_TOKEN": ANDRE, "LEGAL_CALLER_TOKENS": json.dumps(CALLERS),
            "LEDGER_SERVICE_URL": L, "LEDGER_SERVICE_TOKEN": LEDGER_TOKEN, "LEGAL_PORT": str(plg),
            "LEGAL_DATA_DIR": str(work / "legal"), "LEGAL_COMPLIANCE_URL": CMP, "LEGAL_COMPLIANCE_TOKEN": CMP_TOKEN,
-           "LEGAL_COMPLIANCE_CALLER_TOKEN": CMP_CALLER}
+           "LEGAL_COMPLIANCE_CALLER_TOKEN": CMP_CALLER, "LEGAL_LINK_TAG_KEY": LINK_TAG_KEY}
     try:
         (work / "ledger").mkdir()
         start([ledger_bin], {"LEDGER_SERVICE_TOKEN": LEDGER_TOKEN, "LEDGER_PORT": str(pl),
@@ -313,22 +316,66 @@ def _main(work: Path) -> int:
         cur = a.get("/legal/v1/documents/client_msa/current", caller="compliance_38").json()
         say(f"current_version(client_msa) -> {cur['current_version']} sha={str(cur['doc_sha256'])[:16]}... "
             f"review_by={cur['review_by']}")
-        check("the filled 1.1 is current with its own hash", cur["current_version"] == "1.1" and cur["doc_sha256"] == f["sha256"])
+        # ADR 0022 / AEGIS M5: "current" is what every party sees, so it never names a fill bound to one party; the
+        # fill is read by its own version id and accepted by number and hash (client:acme only)
+        fv = a.get("/legal/v1/documents/client_msa/versions/1.1", caller="compliance_38").json()
+        check("the filled 1.1 is approved and in force with its own hash, bound to its template",
+              fv["status"] == "approved" and fv["sha256"] == f["sha256"] and fv["basis_in_force"] is True
+              and (fv.get("template_ref") or {}).get("version") == "1.0" and fv["review_by"] is not None)
+        check("current_version never names client:acme's fill: it stays the 1.0 template (AEGIS M5)",
+              cur["current_version"] == "1.0" and cur["doc_sha256"] == db["sha256"])
         bad = a.post("/legal/v1/documents/client_msa/versions", {"request_id": a.rid(), "party_ref": "client:acme", "entity": "zbm",
                      "variables": {"client_name": "You must sign this today", "end_date": "2027-09-30"}}, caller="scheduler")
         check("a template variable that reads as advice -> 422 ADVICE_TEXT_BLOCKED",
               bad.status_code == 422 and bad.json()["detail"] == "ADVICE_TEXT_BLOCKED")
 
         # --- acceptance record -> obligations ---------------------------------------------------------------------
-        acc = a.post("/legal/v1/acceptances", {"request_id": a.rid(), "party_ref": "client:acme",
-                     "signer_identity_ref": "onb-login-acme-1", "doc_id": "client_msa", "version": "1.1",
-                     "doc_sha256": f["sha256"], "presented_sha256": f["sha256"], "method": "clickwrap_unticked_box",
-                     "presentation": "scroll_to_accept", "affirmative_act": True}, caller="onboarding")
-        ab = acc.json()
-        say(f"acceptance -> {acc.status_code} {ab.get('acceptance_id')} evidence_sufficient={ab.get('evidence_sufficient')} "
-            f"obligations={len(ab.get('obligation_ids', []))}")
+        # ADR 0028: a client's acceptance is recorded only through the client acceptance page. The old onboarding route
+        # refuses a client party; the page path is Andre's link (the MSA fill + its SOW) -> the client-portal caller
+        # resolves it -> the page text Legal renders -> the client-portal caller records the acceptance.
+        old = {"request_id": a.rid(), "party_ref": "client:acme", "signer_identity_ref": "onb-login-acme-1",
+               "doc_id": "client_msa", "version": "1.1", "doc_sha256": f["sha256"], "presented_sha256": f["sha256"],
+               "method": "clickwrap_unticked_box", "presentation": "scroll_to_accept", "affirmative_act": True}
+        r = a.post("/legal/v1/acceptances", old, caller="onboarding")
+        check("the onboarding route refuses a client's acceptance (ADR 0028: only the client acceptance page records it)",
+              r.status_code in (403, 409) and "ACCEPTANCE_NOT_INVITED" in r.text
+              and not a.get("/legal/v1/obligations", party_ref="client:acme").json()["items"])
+        sow_text = "STATEMENT OF WORK (standard form): revenue recovery services under the Master Services Agreement."
+        sv = a.post("/legal/v1/documents/sow/versions", {"request_id": a.rid(), "entity": "zbm", "text": sow_text},
+                    andre=True).json()
+        r = a.post(f"/legal/v1/documents/sow/versions/{sv['version']}/founder-approval",
+                   {"request_id": a.rid(), "version_sha256": sv["sha256"], "founder_confirms": True,
+                    "rationale": "Standard SOW form for the live run, approved by me as founder."}, andre=True)
+        check("Andre approves a standard SOW (the companion the acceptance page serves with the MSA)",
+              r.status_code == 200 and r.json().get("status") == "approved")
+        docs = [{"doc_id": "client_msa", "version": "1.1", "doc_sha256": f["sha256"]},
+                {"doc_id": "sow", "version": sv["version"], "doc_sha256": sv["sha256"]}]
+        inv = a.post("/legal/v1/client-acceptance-invitations", {
+            "request_id": a.rid(), "party_ref": "client:acme", "documents": docs,
+            "display": {"client_legal_name": CLIENT_LEGAL_NAME, "notice_email": "legal@acme.example",
+                        "sow_number": "SOW-1", "sow_title": "Revenue Recovery"}}, andre=True)
+        ib = inv.json()
+        check("Andre's client acceptance link (MSA fill + SOW) issued for client:acme",
+              inv.status_code == 201 and ib.get("page") == "first_engagement" and ib.get("token"))
+        res = a.post("/legal/v1/portal/invitations/resolve", {"token": ib["token"]}, caller="client_portal")
+        sys.path.insert(0, str(SVC / "src"))
+        import clickwrap_page as CP  # noqa: PLC0415 (Legal's own page renderer, the text the portal shows)
+        page = CP.page_text(res.json()["blocks"]).encode("utf-8") if res.status_code == 200 else b"none"
+        acc = a.post("/legal/v1/portal/acceptances", {
+            "request_id": a.rid(), "token": ib["token"],
+            "documents": [{**d, "presented_sha256": d["doc_sha256"], "affirmative_act": True} for d in docs],
+            "presentation": "inline", "page_sha256": hashlib.sha256(page).hexdigest(), "page_text_b64": b64(page),
+            "form_sha256": hashlib.sha256(b"live form " + ib["token"].encode()).hexdigest(),
+            "signatory": {"full_name": "Sam Signer", "title": "Owner", "company": CLIENT_LEGAL_NAME},
+            "ip_hmac_sha256": "e" * 64, "user_agent_hmac_sha256": "f" * 64, "hmac_key_id": "0" * 16},
+            caller="client_portal")
+        pb = acc.json()
+        ab = next((x for x in pb.get("acceptances", []) if x["doc_id"] == "client_msa"), {})
+        say(f"acceptance (client acceptance page) -> {acc.status_code} {ab.get('acceptance_id')} "
+            f"evidence_sufficient={ab.get('evidence_sufficient')} obligations={len(pb.get('obligation_ids', []))}")
         check("acceptance record: doc id + version + sha256 + timestamp + method, evidence sufficient (CQ-19 memo)",
-              acc.status_code == 201 and ab["evidence_sufficient"] is True and ab["doc_sha256"] == f["sha256"])
+              acc.status_code == 201 and ab.get("evidence_sufficient") is True and ab.get("doc_sha256") == f["sha256"]
+              and ab.get("version") == "1.1" and bool(ab.get("accepted_at")) and bool(ab.get("method")))
         # --- cross-service contract: Finance (31)'s Legal thin client against THIS live Legal (launch hardening) ---
         probe = r"""
 import json, sys
@@ -473,10 +520,13 @@ print(json.dumps(out))
         check("restart: anchors verified at start, integrity green", integ2["status"] == "green"
               and integ2["log_lines"] >= integ["log_lines"])
         cur2 = a.get("/legal/v1/documents/client_msa/current", caller="clipper_network").json()
+        fv2 = a.get("/legal/v1/documents/client_msa/versions/1.1", caller="compliance_38").json()
         hc2 = a.get("/legal/v1/holds/check", subject_ref="clipper:cn-clp-X").json()
         cnt2 = a.get("/legal/v1/takedowns/count", caller="verification_integrity", post_ref_sha256=post_sha).json()
         check("restart: current version, hold and takedown count replayed",
-              cur2["current_version"] == "1.1" and hc2["held"] is True and cnt2["notices"] == 1 and hl2["rules_version"] == 1)
+              cur2["current_version"] == "1.0" and cur2["doc_sha256"] == db["sha256"]
+              and fv2["status"] == "approved" and fv2["sha256"] == f["sha256"]
+              and hc2["held"] is True and cnt2["notices"] == 1 and hl2["rules_version"] == 1)
         r = a.post("/legal/v1/requests", {"request_id": a.rid(), "channel": "portal", "requester_ref": "clipper-7",
                                           "kind": "question"}, caller="hub")
         check("a write after restart is recorded", r.status_code == 201 and r.json()["route"] == "template_lane")

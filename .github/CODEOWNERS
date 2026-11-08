@@ -1,0 +1,8 @@
+# Code owners. GitHub requests a review from the owner listed for any changed path; a review is REQUIRED only when
+# branch protection on the target branch has "Require review from Code Owners" enabled (an owner setting).
+
+# Licence gate and its policy (owner licence ruling 2026-11-08): the allow-list, the closed owner_approvable set,
+# the reviewed exceptions and the gate code itself change only with the owner's review.
+/devtools/licences/ @DarksiedCEO
+/devtools/licence_gate.py @DarksiedCEO
+/devtools/licence_lib.py @DarksiedCEO

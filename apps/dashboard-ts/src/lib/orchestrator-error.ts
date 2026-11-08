@@ -42,6 +42,16 @@ export function describeOrchestratorFailure(status: number, bodyText: string): s
   return correlationId ? `${message} (correlation id ${correlationId})` : message;
 }
 
+// ADR 0023 (AEGIS edge review M-1 residual): the orchestrator answers 429 when this dashboard's server address is
+// over its per-client limit. Shown as what it is, not as a generic upstream error. retryAfter is the Retry-After
+// header (whole seconds); anything else is ignored.
+export function describeRateLimited(retryAfter: string | null): string {
+  const n = retryAfter !== null && /^[0-9]{1,5}$/.test(retryAfter) ? Number(retryAfter) : null;
+  return n !== null && n > 0
+    ? `rate limited by the orchestrator, try again shortly (in about ${n} s)`
+    : "rate limited by the orchestrator, try again shortly";
+}
+
 export function describeFetchFailure(_err: unknown): string {
   return "could not reach the orchestrator (details in the dashboard server log)";
 }
