@@ -601,3 +601,86 @@ def test_wrapped_errors_carry_no_request_and_no_key(boom):
     fake.script = [(200, b"not json")]
     je = err(lambda: rd(fake).record("origin", O, "PHONE"))
     assert je.__context__ is None and je.__cause__ is None
+
+
+# ====================================================================== round 2: sizing, twin rule, traceback locals
+
+@pytest.mark.parametrize("n", range(0, 9))
+def test_the_recommended_per_run_cap_covers_every_query_up_to_60(n):
+    paths = [f"/p{i}" for i in range(n)]
+    cap = 12 + 6 * n                                                   # the documented formula (ADR 0050), <= 60 here
+    assert cap == lena.calls_needed(n, twin=True) and cap <= 60
+    fake = FakeCrux()
+    sec = run(fake, paths=paths, twin=W, max_calls=cap)
+    assert sec["stopped"] is None and sec["counts"]["not_queried"] == 0 and sec["calls"] == cap
+    assert lena.calls_needed(n, twin=False) == cap - 6
+
+
+def test_past_eight_paths_the_60_cap_leaves_the_last_urls_listed_not_queried():
+    paths = [f"/p{i}" for i in range(9)]
+    sec = run(FakeCrux(), paths=paths, twin=W, max_calls=60)
+    assert sec["stopped"]["code"] == "CRUX_BUDGET_EXHAUSTED" and sec["calls"] == 60
+    last = sec["targets"][-1]["form_factors"]["TABLET"]["history"]
+    assert last == {"state": "NOT_QUERIED", "reason": "CRUX_BUDGET_EXHAUSTED"}
+
+
+@pytest.mark.parametrize("domain,twin", [
+    ("acme.test", "www.acme.test"), ("www.acme.test", "acme.test"),
+    ("example.co.uk", "www.example.co.uk"), ("www.example.co.uk", "example.co.uk"),
+    ("foo.github.io", "www.foo.github.io"),
+    ("shop.example.com", None), ("www.shop.example.com", None), ("a.b.example.co.uk", None),
+    ("www.co.uk", None), ("co.uk", None), ("www.com", None), ("com", None), ("github.io", None),
+    ("www.github.io", None), ("Example.com", None), ("", None),
+])
+def test_twins_only_for_a_registrable_domain_or_its_www_form(domain, twin):
+    assert lena.twin_of(domain) == twin
+
+
+def _holds_key(v, depth=0) -> bool:
+    if depth > 3:
+        return False
+    if isinstance(v, str):
+        return TEST_KEY in v
+    if isinstance(v, (bytes, bytearray)):
+        return TEST_KEY.encode() in v
+    if isinstance(v, (httpx.Request, httpx.Response)):
+        return TEST_KEY in str(v.headers) or (isinstance(v, httpx.Response) and _holds_key(v.request, depth + 1))
+    if isinstance(v, httpx.Headers):
+        return TEST_KEY in str(v)
+    if isinstance(v, dict):
+        return any(_holds_key(k, depth + 1) or _holds_key(x, depth + 1) for k, x in v.items())
+    if isinstance(v, (list, tuple, set)):
+        return any(_holds_key(x, depth + 1) for x in v)
+    return False
+
+
+@pytest.mark.parametrize("boom", ["timeout", "other", "status", "gzip", "kill"])
+def test_no_traceback_frame_local_holds_the_key_after_a_forced_error(boom):
+    fake = FakeCrux()
+
+    def handler(request):
+        if boom == "timeout":
+            raise httpx.ReadTimeout("slow", request=request)
+        if boom == "other":
+            raise RuntimeError(request)
+        if boom == "gzip":
+            return httpx.Response(200, content=b"\x1f\x8b", headers={"content-encoding": "gzip"})
+        return httpx.Response(503 if boom == "status" else 200, content=b"{}")
+    calls = {"n": 0}
+
+    def guard():
+        calls["n"] += 1
+        if boom == "kill" and calls["n"] > 1:
+            raise Killed("KILLED_PROVIDER")
+    c = cx.CruxClient(cx.ApiKey(TEST_KEY), transport=httpx.MockTransport(handler), monotonic=fake.clock.mono,
+                      sleep=fake.clock.sleep, max_calls=10)
+    with pytest.raises(cx.CruxError) as ei:
+        c.open_read(guard).record("origin", O, "PHONE")
+    e = ei.value
+    tb, frames = e.__traceback__, 0
+    while tb is not None:
+        frames += 1
+        for name, v in tb.tb_frame.f_locals.items():
+            assert not _holds_key(v), (boom, tb.tb_frame.f_code.co_name, name)
+        tb = tb.tb_next
+    assert frames >= 1 and e.__context__ is None and e.__cause__ is None

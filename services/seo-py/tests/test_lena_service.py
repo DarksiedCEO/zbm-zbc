@@ -378,3 +378,12 @@ def test_no_data_wording_names_the_exact_origin():
         "Google has no field data for this exact origin.")
     from agents import lena
     assert not any("too few visits" in x for x in lena.LIMITS)
+
+
+def test_a_non_registrable_subdomain_gets_no_twin(tmp_path):
+    fake = FakeCrux()
+    h = crux_harness(tmp_path, fake)
+    h.tenant("acme", "own", ("shop.acme.test",))
+    sec = audit(h, "acme", "shop.acme.test")["report"]["page_experience"]["section"]
+    assert sec["twin"] is None and not any("www." in k[2] for k in fake.keys())
+    assert len([k for k in fake.keys() if k[1] == "origin" and k[0] == "record"]) == 3

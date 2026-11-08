@@ -176,9 +176,28 @@ def shape_history(r: dict, today: str, retrieved_at: str) -> dict:
             "metrics": metrics, "provenance": prov}
 
 
-def twin_of(domain: str) -> str:
-    """The other form of a domain: ``www.example.com`` <-> ``example.com``."""
-    return domain[4:] if domain.startswith("www.") else "www." + domain
+def twin_of(domain: str) -> str | None:
+    """The other form of a REGISTRABLE domain (eTLD+1) or of its ``www.`` form: ``www.example.com`` <->
+    ``example.com``, ``example.co.uk`` <-> ``www.example.co.uk``. None for anything else: another subdomain
+    (``shop.example.com`` has no twin here), and never a public suffix (``www.co.uk`` is not turned into ``co.uk``).
+    The registrable domain is decided by the vendored Public Suffix List and local deny list already used for tenant
+    domains (agents/domain_match.py; both the ICANN and PRIVATE sections count, so ``foo.github.io`` is
+    registrable and ``github.io`` is not)."""
+    from agents import domain_match as dm
+    d = dm._ascii(domain)
+    if d is None or d != domain:
+        return None
+    bare = d[4:] if d.startswith("www.") else d
+    if "." not in bare or dm._suffix(bare) or not dm._suffix(bare.split(".", 1)[1]):
+        return None
+    return bare if d.startswith("www.") else "www." + bare
+
+
+def calls_needed(paths: int, twin: bool = True) -> int:
+    """The most queries one run makes when every query succeeds first time: per origin (the audited one, and its twin
+    when asked) 3 records + 3 histories, then per audited path 3 records + 3 histories. Retries are extra calls on
+    top (at most ``attempts - 1`` more per query). The recommended per-run cap, 12 + 6 x paths, is this with a twin."""
+    return 6 * (2 if twin else 1) + 6 * paths
 
 
 def plan(origin: str, urls: list, twin: str | None = None) -> list:

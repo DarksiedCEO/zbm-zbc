@@ -108,8 +108,8 @@ class CruxMixin:
             registered = set(self.tenants[tid]["domains"])
         # review M1: the other form (bare / www.) of the audited domain, when the tenant has not registered it (a
         # domain and its www. twin belong to one tenant, ADR 0017 decision 7, so the twin is the tenant's to ask about)
-        other = lena.twin_of(body["domain"])
-        twin = None if other in registered else f"https://{other}"
+        other = lena.twin_of(body["domain"])         # None unless a registrable domain or its www. form (PSL)
+        twin = None if other is None or other in registered else f"https://{other}"
         if not cx.ORIGIN.fullmatch(origin) or (twin is not None and not cx.ORIGIN.fullmatch(twin)):
             return env("FAILED", "CRUX_PROTOCOL_ERROR", {"state": "ORIGIN_INVALID"})
         try:

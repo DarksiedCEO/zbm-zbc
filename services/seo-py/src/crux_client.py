@@ -670,38 +670,46 @@ class _Read:
             pool._network_backend = _GuardedBackend(
                 _DeadlineBackend(self.c._mono, self.end, inner=self.c._inner_backend, resolver=self.c._resolver),
                 self._guard)
-        hdrs = {KEY_HEADER: self.c._key.reveal(), "Content-Type": "application/json", "Accept": "application/json",
-                "Accept-Encoding": "identity", "User-Agent": "zbm-seo-py-crux/1"}
+        out = self._exchange(url, body, transport, left)
+        if isinstance(out, Exception):
+            # raised here, OUTSIDE the exchange and its except blocks, detached (review L3, round 2 item 4): this
+            # frame holds no header, request or response, the exception carries no chained exception and no
+            # traceback from inside the exchange, so the key is reachable neither through __context__ / __cause__
+            # nor through e.__traceback__ frame locals
+            raise _detached(out)
+        return out
+
+    def _exchange(self, url: str, body: bytes, transport, left: float):
+        """One HTTP exchange. Never raises: answers (status, body, kept headers) or the exception to raise. The key
+        header lives only in this frame, which has returned (and is gone) before anything is raised."""
         try:
             with httpx.Client(timeout=httpx.Timeout(min(self.c.timeout_s, left)), transport=transport,
                               follow_redirects=False, trust_env=False) as client, \
-                    client.stream("POST", url, headers=hdrs, content=body) as resp:
+                    client.stream("POST", url, headers=_headers(self.c._key), content=body) as resp:
                 enc = resp.headers.get("content-encoding", "identity").strip().lower()
                 if enc not in ("identity", ""):
-                    raise CruxError("CRUX_PROTOCOL_ERROR", "content_encoding")
+                    return CruxError("CRUX_PROTOCOL_ERROR", "content_encoding")
                 declared = resp.headers.get("content-length")
                 if declared is not None and (not declared.isdigit() or int(declared) > MAX_BODY):
-                    raise CruxError("CRUX_PROTOCOL_ERROR", "body_too_large")
+                    return CruxError("CRUX_PROTOCOL_ERROR", "body_too_large")
                 chunks, size = [], 0
                 for chunk in resp.iter_bytes():
                     if self.c._mono() >= self.end:
-                        raise _Retry("CRUX_UNAVAILABLE", "deadline")
+                        return _Retry("CRUX_UNAVAILABLE", "deadline")
                     self._guard()
                     size += len(chunk)
                     if size > MAX_BODY:
-                        raise CruxError("CRUX_PROTOCOL_ERROR", "body_too_large")
+                        return CruxError("CRUX_PROTOCOL_ERROR", "body_too_large")
                     chunks.append(chunk)
                 keep = {k: resp.headers.get(k) for k in ("retry-after",) if resp.headers.get(k) is not None}
                 return resp.status_code, b"".join(chunks), keep
         except (CruxError, _Retry) as ours:
-            failure: Exception = ours
+            return CruxError(ours.code, ours.detail) if isinstance(ours, CruxError) else \
+                _Retry(ours.code, ours.detail, ours.retry_after)              # fresh: no traceback from in here
         except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError):
-            failure = _Retry("CRUX_UNAVAILABLE", "network")
+            return _Retry("CRUX_UNAVAILABLE", "network")
         except Exception:  # noqa: BLE001 - anything else is a malformed exchange, never a 500 and never a message
-            failure = CruxError("CRUX_PROTOCOL_ERROR", "exchange")
-        # raised OUTSIDE the except blocks, detached: an httpx exception carries the request (and so the key header);
-        # it must never ride along as __context__ / __cause__ into a log, a traceback print or a caller (review L3)
-        raise _detached(failure)
+            return CruxError("CRUX_PROTOCOL_ERROR", "exchange")
 
 
 def _retry_after(v: str | None) -> float | None:
@@ -710,12 +718,18 @@ def _retry_after(v: str | None) -> float | None:
     return float(min(int(v.strip()), 60))
 
 
+def _headers(key: ApiKey) -> dict:
+    return {KEY_HEADER: key.reveal(), "Content-Type": "application/json", "Accept": "application/json",
+            "Accept-Encoding": "identity", "User-Agent": "zbm-seo-py-crux/1"}
+
+
 def _detached(exc: Exception) -> Exception:
     """``exc`` with no chained exception: nothing from the failed exchange (an httpx request with its headers, a
     response, Google's text) stays reachable from what this module raises."""
     exc.__cause__ = None
     exc.__context__ = None
     exc.__suppress_context__ = True
+    exc.__traceback__ = None
     return exc
 
 

@@ -110,7 +110,7 @@ MUST failure or ERROR.
 | `SEO_PERPLEXITY_RESERVE_USD_PER_CALL` | `0.05` | what each request reserves against the spend budgets before it is sent (0.001..5), and what it costs when Perplexity reports no cost |
 | `SEO_CRUX_ENABLED` | `0` | Lena (real-user page experience, Chrome UX Report field data; ADR 0050). `0` = `NOT_CONNECTED`, no call ever (the key file is not read even if set). `1` requires `SEO_CRUX_API_KEY_FILE`: missing or unusable refuses start |
 | `SEO_CRUX_API_KEY_FILE` | unset | absolute path to a file holding one Google API key for the CrUX API (regular file owned by the service user, mode 0600/0400, no symlink, ≤ 1 KiB). Sent only in the `X-Goog-Api-Key` header, never in a URL, log, error or report |
-| `SEO_CRUX_CALLS_PER_RUN`, `SEO_CRUX_CALLS_PER_DAY`, `SEO_CRUX_TENANT_CALLS_PER_DAY` | `0`, `0`, `0` | HTTP calls per audit (0..120, retries included), in any 24 hours across all tenants (0..20000) and per tenant in any 24 hours (0..20000). **0 = OFF: no request is made** (BLOCKED `CRUX_BUDGET_EXHAUSTED`). The client also paces itself to at most 100 queries a minute (token bucket; Google's quota is 150 per project). Recommended go-live values (ADR 0050): per run 6 + 6 × paths, at most 60; per day about 2,000; per tenant per day about 200 — and only after the first hand-run call returned HTTP 200 |
+| `SEO_CRUX_CALLS_PER_RUN`, `SEO_CRUX_CALLS_PER_DAY`, `SEO_CRUX_TENANT_CALLS_PER_DAY` | `0`, `0`, `0` | HTTP calls per audit (0..120, retries included), in any 24 hours across all tenants (0..20000) and per tenant in any 24 hours (0..20000). **0 = OFF: no request is made** (BLOCKED `CRUX_BUDGET_EXHAUSTED`). The client also paces itself to at most 100 queries a minute (token bucket, per process: one replica today; Google's quota is 150 per project). Recommended go-live values (ADR 0050): per run 12 + 6 × paths, at most 60 (8 paths; retries are extra calls); per day about 2,000; per tenant per day about 200 — and only after the first hand-run call returned HTTP 200 |
 | `SEO_CRUX_TIMEOUT_SECONDS`, `SEO_CRUX_DEADLINE_SECONDS` | `10`, `60` | per-attempt timeout (1..60) and the hard deadline over Lena's whole read (5..300): DNS, connect, TLS, every read and write, every retry |
 | `SEO_CRUX_HISTORY_PERIODS` | `25` | CrUX History API collection periods asked for (1..40; weekly periods) |
 | `SEO_REPORT_BRAND_NAME`, `SEO_REPORT_BRAND_ACCENT` | `Z Best Media` / `#1f4e79` | white label of the client report: the preparer's name (1-60 letters, digits, spaces, `. , & ' ( ) -`) and accent colour (`#RRGGBB`); anything else refuses start |
@@ -126,7 +126,8 @@ the tenant's property), kill switch `provider:gsc`. Setup steps for Andre: ADR 0
 **Lena — real-user page experience** (`src/crux_client.py`, `src/svc_crux.py`, `src/agents/lena.py`; ADR 0050):
 one task, reporting Google's Chrome UX Report field data (LCP, INP, CLS, FCP, TTFB at p75, distribution, rating
 against web.dev's thresholds, collection period, freshness, 25-period history trend) for the audited origin and
-URLs per form factor. No lab test, no fix, no forecast, no findings; Google's "no data" is
+URLs per form factor; when only one of a registrable domain's bare / `www.` forms is registered, the other https
+form is asked too and shown separately (Public Suffix List-bounded; never merged). No lab test, no fix, no forecast, no findings; Google's "no data" is
 `INSUFFICIENT_FIELD_DATA`. A `page_experience` section in every audit report (`NOT_CONNECTED` by default), one
 allowlisted host (`chromeuxreport.googleapis.com`), kill switch `provider:crux`. Fixtures only in this build: never run
 against the live API.

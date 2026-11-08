@@ -125,17 +125,30 @@ through the Chrome UX Report (CrUX) API and the CrUX History API. Lena reads it 
   the other form of the address. (a) Wording: "Google has no field data for this exact origin." (reason text, the
   limits, the report rows "no field data for this exact address" and the note under the table). (b) When only one of
   the bare and `www.` forms of the audited domain is registered, Lena also asks the other form's **https** origin (its
-  twin; a domain and its `www.` twin belong to one tenant, ADR 0017 decision 7): +3 record calls; history only where
-  that origin has current data; the twin is its own target (`role: "twin"`), shown on its own labelled rows and
+  twin; a domain and its `www.` twin belong to one tenant, ADR 0017 decision 7): up to +6 calls (3 records, and 3
+  histories where the twin has current data); the twin is its own target (`role: "twin"`), shown on its own labelled rows and
   **never merged** with the audited origin. The URL queries use the audited origin's host, or the twin's when only
   the twin has field data (`section.url_origin`). Both forms registered: no twin (each is audited on its own).
+  **Twin rule (round 2):** only a registrable domain (eTLD+1) or its `www.` form has a twin, decided by the vendored,
+  pinned Public Suffix List plus local deny list already used for tenant domains (`agents/domain_match.py`,
+  `public_suffix_list.dat`, MPL-2.0, ICANN and PRIVATE sections; no new file vendored). `example.co.uk` <->
+  `www.example.co.uk`; `shop.example.com`, `www.shop.example.com` and deeper subdomains get none; a public suffix is
+  never produced (`www.co.uk` is not turned into `co.uk`; `github.io` gets none, `foo.github.io` does). Lowercase
+  A-label domains only (registered domains are).
 - **M2 — budgets and pacing.** `SEO_CRUX_TENANT_CALLS_PER_DAY` (0..20,000, default 0 = OFF, fail-closed bounds): a
   run reserves min(per run, global day left, tenant day left). Client-side pacing in `crux_client._Pacer`: a token
   bucket of 10 refilled at 90 a minute, process-wide, so any 60-second window holds at most 100 requests (retries
-  included), under Google's 150; a wait that would pass the deadline stops the read `CRUX_RATE_LIMITED`
+  included), under Google's 150. **The bucket is per process:** Gate 5 runs one replica per service, so this is the
+  project-wide bound today; with N replicas each would get its own 100 a minute (scale follow-up: a shared limiter,
+  or 100 / N per replica, before seo-py runs more than one replica); a wait that would pass the deadline stops the read `CRUX_RATE_LIMITED`
   `client_pacing` without sending. Tested structurally on the injected clock (sliding-window counts), no wall clock.
-  **Recommended go-live values:** per run 6 + 6 × paths, at most 60 (the twin adds up to 3 record calls); per day
-  about 2,000; per tenant per day about 200.
+  **Recommended go-live values (corrected in round 2):** per run **12 + 6 × paths**, at most 60 — the origins cost
+  6 alone and up to 12 with the twin (3 records + 3 histories each), each path 6 (`lena.calls_needed`; a test runs
+  0..8 paths at exactly that cap and finds every query sent). At the 60 ceiling that covers 8 paths; a 9th or later
+  path's queries are the ones left `NOT_QUERIED CRUX_BUDGET_EXHAUSTED` (listed, never silent; tested). Retries are
+  calls too (up to 2 more per query on 429 / 5xx / timeouts): the formula covers a run where every query succeeds
+  first time; on a bad day the last queries are the ones not sent, in the priority order above. Per day about 2,000;
+  per tenant per day about 200.
 - **L2 — extra fields.** Every documented required field is still validated strictly; unknown extra fields are
   accepted and ignored (never read, never passed on), at most 16 per object (more: that object is malformed), and
   counted in `extra_fields_ignored` per answer and in the section's counts. **Go-live canary:** the first hand-run
@@ -144,6 +157,10 @@ through the Chrome UX Report (CrUX) API and the CrUX History API. Lena reads it 
 - **L3 — chained exceptions.** Every error this adapter raises is detached (`__cause__` and `__context__` cleared,
   context suppressed, raised outside the `except` block), so no httpx request — and so no key header — rides along
   on an exception (tested with a transport that raises an exception holding the request).
+- **Round 2, traceback frames:** the key header is built inside `_exchange`, which never raises: it returns the
+  answer or the error to raise, and its frame is gone before `_once` raises the detached error (traceback cleared
+  too), so no frame reachable from `e.__traceback__` holds the key, a header dict, a request or a response (tested
+  for a timeout, an exception holding the request, a 5xx, a gzip body and a kill mid-read).
 - **L1 kept:** header auth (`X-Goog-Api-Key`) is unverified against the live endpoint. **The first hand-run call
   must return HTTP 200 before any budget is set above 0.**
 - Name stays "Lena" pending the owner; poor scores stay data only (no findings).
@@ -179,6 +196,7 @@ of the key is accepted by this endpoint.
 - No `effectiveConnectionType` or other CrUX dimensions; no LCP sub-parts, navigation types, RTT or ad metrics.
 - No CrUX BigQuery dataset; no other field-data provider.
 - No `http://` twin: the twin is asked on https only.
+- No shared (cross-replica) pacer: the 100-a-minute bucket is per process (see the round-2 note).
 - No retention rule beyond the report's: the data is public aggregates, kept with the audit like the rest of it.
 - No scheduled CrUX refresh of its own: Lena runs inside audits (scheduled re-audits included, under the same caps).
 
@@ -201,4 +219,5 @@ of the key is accepted by this endpoint.
    after go-live needs a mapping note, before go-live it is free).
 2. Should a POOR / NEEDS_IMPROVEMENT p75 become a finding (decision WATCH or ACT, data class `measured` with a
    third-party source label), or stay data only as built?
-3. Budgets for go-live: the review recommends per run 6 + 6 × paths (≤ 60), per day ~2,000, per tenant per day ~200.
+3. Budgets for go-live: the review recommends per run 12 + 6 × paths (≤ 60, plus retry headroom), per day ~2,000,
+   per tenant per day ~200.
