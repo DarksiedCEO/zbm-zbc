@@ -932,6 +932,39 @@ def test_osei_round5_keep_drop_table(q, want):
     assert (sp.classify_query(q, ["acme"]) == "pii_suspect") == (want == "DROP"), q
 
 
+# Round 7 (fail safe): secrets smuggled into URL paths and query strings drop; only plain slugs and short version
+# tokens are exempt, so the round-6 URLs stay KEEP. Every secret shape is built from parts (no literal for scanners).
+_AKIA = "".join(("AKIA", "IOSFODNN7", "EXAMPLE"))
+ROUND7_DROP = (
+    "evil.com/" + _AKIA, "e.com/v1/" + _AKIA + "/docs", "host.com/" + "".join(("dGhpcyBp", "cyBhIHNl", "Y3JldA")),
+    "s.com/" + "".join(("AIza", "SyD-9tSrke72", "PouQMnMX-a7eZSW0jkFMBWY")),
+    "a.io/" + "".join(("x9k2m4", "p7q1w3", "e5r8t6y0")),
+    "evil.com/" + "".join(("a1b2c3d4", "e5f6g7h8")), "c.co/" + "/".join(("abc123def456", "ghi789jkl012")),
+    "e.com/" + "-".join(("p4ss", "w0rd", "1x9z", "k2m7", "q8r3")), "e.com/" + "".join(("s3cr3t", "p4ssw0rd", "1234")),
+    "evil.com/" + "".join(("k7mdeng2", "bpxrficy")), "evil.com/" + "".join(("abcdefghijklm", "nopqrstuvwxyz")),
+    "example.com/?token=" + "".join(("abcdefghij", "0123456789")), "example.com/x?key=" + "".join(("q8w7", "e6r5")),
+    "site.com/a?b=1&api_key=" + "".join(("zzzz", "zz9")), "example.com/?t=" + "".join(("a1b2c3d4e5", "f6g7h8i9")),
+    "reset ?password=" + "".join(("hunt", "er22")), _AKIA,
+)
+ROUND7_KEEP = ("docs.example.com/v2/api/reference", "api.stripe.com/v1/charges docs", "acme.com/blog/5-ways-to-save",
+               "example.org/docs/v3/getting-started", "mysite.com/page2/contact", "moz.com/learn/seo/http2",
+               "example.com/?page=2", "shop.com/search?q=rugs", "example.com/blog/2024-11-08-rug-care")
+# Known over-drops, by design (privacy beats recall): a path part mixing letters and digits that is not a short
+# version token (sku12345), a slug word over 15 letters, a host label with digits.
+ROUND7_OVERDROP = ("shop.com/products/sku12345678", "example.com/blog/internationalization-guide",
+                   "web2print-shop.com/catalogue/flyers")
+
+
+@pytest.mark.parametrize("q,want", [(q, "KEEP") for q in ROUND7_KEEP] + [(q, "DROP") for q in ROUND7_DROP])
+def test_osei_round7_url_secrets_drop_and_plain_urls_keep(q, want):
+    assert (sp.classify_query(q, ["acme"]) == "pii_suspect") == (want == "DROP"), q
+
+
+@pytest.mark.parametrize("q", ROUND7_OVERDROP)
+def test_osei_round7_disclosed_overdrops(q):
+    assert sp.classify_query(q, ["acme"]) == "pii_suspect", f"{q!r} is now kept: update the disclosed over-drops"
+
+
 def test_osei_round4_disclosed_gap():
     assert sp.classify_query("123 n main", ["acme"]) != "pii_suspect"     # bare named street: disclosed, not caught
 

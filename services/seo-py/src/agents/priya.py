@@ -148,9 +148,12 @@ LIMITS = [
     "building-name addresses, streets with more than three name words or an unlisted suffix ('trail', 'pike'), a "
     "state code that is also an English word with its ZIP ('portland or 97201'), and other countries' postal "
     "formats. Secrets it does NOT catch: base64 under 12 characters, and a random password written as a plain "
-    "word (for example after 'reset'). The rule also drops some non-addresses shaped like '<number> <word> st' or "
-    "'<number> <word> court'. Derived variants are never built from a query with a "
-    "capitalised word, nor from a frame adding a word outside a closed vocabulary.",
+    "word (for example after 'reset'). Secrets inside URL paths and query strings are judged part by part; only "
+    "plain slugs and short version tokens (v2, page2) are exempt, so some ordinary URLs are dropped too: a path "
+    "part mixing letters and digits ('sku12345678'), a slug word over 15 letters, a host name with digits. The "
+    "rule also drops some non-addresses shaped like '<number> <word> st' or '<number> <word> court'. Derived "
+    "variants are never built from a query with a capitalised word, nor from a frame adding a word outside a "
+    "closed vocabulary.",
     "The ledger is computed on request and handed out once; it is not stored (only its SHA-256 and counts).",
 ]
 

@@ -629,14 +629,15 @@ GSC-12. **Limitations (honest).**
      the read visibly (`GSC_PROTOCOL_ERROR`) instead of being half-read.
    - Names in queries are not detected as such; they are safe only because no query text is kept. Address-shaped
      queries, PO boxes, PMB numbers, rural routes, ZIP+4, a state with a ZIP, UK and Canadian postcodes, French
-     leading forms (`350 rue …`) and any query over 512 characters are `pii_suspect` since rules `2026-11-08.6`
+     leading forms (`350 rue …`) and any query over 512 characters are `pii_suspect` since rules `2026-11-08.7`
      (ADR 0047, "Personal data"); the id / token word rule no longer drops model numbers, tire sizes, decimals or
      years (`24acc636a003`, `225/65r17`, `3.5`, `2012`). Not caught: bare named streets with no suffix (`1200
      broadway`, `123 n main`), landmark or building-name addresses, streets with more than three name words or an
      unlisted suffix, an English-word state code with its ZIP (`portland or 97201`), a UK postcode without its space,
      other countries' postal formats (the rule is US-centric). Base64- and AWS-secret-like words holding `/` drop as
-     secrets; plain-word URL paths, host names with short slug segments and tire sizes do not. Not caught: base64
-     under 12 characters, a random password written as a plain word. Over-dropped: a non-address shaped
+     secrets; so do secrets inside URL paths and query strings (only plain slugs and short version tokens such as
+     `v2` are exempt, so URLs with letter-digit path parts, slug words over 15 letters or host labels with digits are
+     over-dropped by design). Not caught: base64 under 12 characters, a random password written as a plain word. Over-dropped: a non-address shaped
      like `<number> <word> st|ave|dr…` or `<number> <word> court|place|way` at the end of a query. Osei keeps no query
      text, so a miss changes only which class a query is counted in; the client report's label lists what is set
      aside. Page templates

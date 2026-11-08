@@ -45,10 +45,13 @@ import lookalikes
 from agents import logs as logs_mod
 
 AGENT, TASK = "osei", "search_performance"
-VERSION = "2026-11-08.6"                     # query classes, templating and the aggregation rules below
+VERSION = "2026-11-08.7"                     # query classes, templating and the aggregation rules below
 # 2026-11-08.1 (Priya review round 1, M3): street addresses, unit / apartment numbers, PO boxes, ZIP+4 and a ZIP next
 #    to a US state are pii_suspect (looks_like_address)
 # 2026-11-08.2 (review round 2): the address rule needs address structure (it over-dropped service queries)
+# 2026-11-08.7 (review round 7): the round-6 host exemption was too wide (secrets in paths passed): now only plain
+#    slugs and short version tokens are exempt; path pieces, query-string values and known secret prefixes are judged
+#    by the token rules
 # 2026-11-08.6 (review round 6): a host name with short slug segments is not a "/" secret (URL-path queries kept)
 # 2026-11-08.5 (review round 5): UK postcodes need a real area and a non-ordinal, non-unit inward part; French place /
 #    route need an article; old / new / good alone as a street name only at the end; base64 / AWS-like words with "/"
@@ -241,22 +244,58 @@ def looks_like_address(folded: str) -> bool:
 
 _JWT = re.compile(r"[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}")
 _SLASH_TOKEN = re.compile(r"[a-z0-9_\-=+.~/]{12,}")
-_PLAIN_SEGMENT = re.compile(r"[a-z]+(?:[-.][a-z]+)*")
-# a URL path of ordinary slugs under a host name: docs.example.com/v2/api/reference, acme.com/blog/5-ways-to-save
-_HOST_PATH = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?\.)+[a-z]{2,24}(?:/[a-z0-9-]{1,24})*/?")
+# review round 7 (fail safe): a URL-ish word is exempt from the secret rules only when EVERY part (each "/" segment,
+# each "." label in it) is (a) a slug of hyphen-separated words, each all letters (at most 15) or all digits (at most
+# 4) - "5-ways-to-save", "getting-started", "2024", "example", "com" - or (b) a short version / page token
+# ([a-z]{1,5} then 1-2 digits: v2, page2, http2). Anything else is judged by the token rules.
+_SLUG_WORD = re.compile(r"[a-z]{1,15}|\d{1,4}")
+_VERSION_TOKEN = re.compile(r"[a-z]{1,5}\d{1,2}")
+# known secret prefixes (case-folded): AWS access key ids, Google API keys, GitHub / Slack / Stripe-style tokens
+_SECRET_PREFIX = re.compile(r"(?:akia|asia)[a-z0-9]{12,}|aiza[a-z0-9_-]{20,}|(?:ghp|gho|ghu|ghs|github_pat|xox[abprs]|"
+                            r"sk_live|sk_test|rk_live|pk_live)[_-][a-z0-9_-]{8,}")
+# a query-string parameter whose value is a credential: token=, key=, password= ... with 6+ characters
+_SECRET_PARAM = re.compile(r"(?:^|[?&;#/])(?:[a-z_]*token|[a-z_]*key|secret|password|passwd|pwd|pass|auth|sig|"
+                           r"signature|session|sessionid|sid|code|otp)=[^&#\s]{6,}")
+_URL_SPLIT = re.compile(r"[/?&=#;:]")
+
+
+def _plain_part(part: str) -> bool:
+    if _VERSION_TOKEN.fullmatch(part):
+        return True
+    words = part.split("-")
+    return all(_SLUG_WORD.fullmatch(x) for x in words)
+
+
+def _plain_url(w: str) -> bool:
+    """Every "/" segment and every "." label in it is a plain slug or a short version token (round 7)."""
+    parts = [x for seg in w.split("/") for x in seg.split(".")]
+    return bool(parts) and all(x == "" or _plain_part(x) for x in parts)
+
+
+def _secret_piece(piece: str) -> bool:
+    """One piece of a URL-ish word (split at / ? & = # ; :) judged by the token rules."""
+    if not piece:
+        return False
+    if _SECRET_PREFIX.match(piece) or logs_mod._HEX.fullmatch(piece) or logs_mod._TOKENISH.fullmatch(piece):
+        return True
+    letters, digits = sum(c.isalpha() for c in piece), sum(c.isdigit() for c in piece)
+    if letters and digits >= 2:
+        if len(piece) >= 16:
+            return True
+        if len(piece) >= 8 and _transitions(piece) >= 0.6 * (len(piece) - 1):
+            return True
+    return False
 
 
 def _slash_secret(w: str) -> bool:
     """A base64 / AWS-secret-like word holding "/", "+" or "=" (review round 5): 20+ such characters with a digit, a
     "+" or an "=" (``wjalr.../k7mdeng/...``, ``dghpcy9pcy9h/c2vjcmv0ignszxk=``), or 12+ with two of "/", "+", "="
-    (``ywjj/zgvm+z2hp``). A path of plain words (``example.com/blog/how-to-clean``), a host name followed by short slug
-    segments (``docs.example.com/v2/api/reference``, ``mysite.com/page2/contact``; review round 6) and a short tire
-    size (``225/65r17``) are not. Not caught: base64 under 12 characters."""
+    (``ywjj/zgvm+z2hp``). Exempt only when every part is a plain slug or a short version token (``_plain_url``:
+    ``docs.example.com/v2/api/reference``, ``acme.com/blog/5-ways-to-save``); a short tire size (``225/65r17``) is
+    under the length thresholds. Not caught: base64 under 12 characters."""
     if not _SLASH_TOKEN.fullmatch(w) or not any(c in w for c in "/+="):
         return False
-    if all(_PLAIN_SEGMENT.fullmatch(seg) for seg in w.split("/") if seg):
-        return False
-    if _HOST_PATH.fullmatch(w):            # a host name, then short slug segments of letters, digits and hyphens
+    if _plain_url(w):
         return False
     marks = sum(1 for c in "/+=" if c in w)
     return (len(w) >= 20 and (any(c.isdigit() for c in w) or "+" in w or "=" in w)) or marks >= 2
@@ -281,8 +320,10 @@ def _word_identifies(w: str) -> bool:
     if kind == "{email}" or kind == "{uuid}":
         return True
     if logs_mod._HEX.fullmatch(w) or _JWT.search(w) or len(w) > 40 or logs_mod._TOKENISH.fullmatch(w) \
-            or _slash_secret(w):
+            or _slash_secret(w) or _SECRET_PREFIX.match(w) or _SECRET_PARAM.search(w):
         return True
+    if _URL_SPLIT.search(w) and not _plain_url(w) and any(_secret_piece(x) for x in _URL_SPLIT.split(w)):
+        return True                      # a secret inside a path or a query string (evil.com/akia..., ?token=...)
     m = logs_mod._FILE.fullmatch(w)
     if m and m.group(2).isalpha() and len(m.group(2)) >= 2 and any(c.isalpha() for c in m.group(1)) \
             and m.group(2).lower() not in logs_mod.STATIC_EXT:
