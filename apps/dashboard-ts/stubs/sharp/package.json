@@ -1,0 +1,8 @@
+{
+  "name": "sharp",
+  "version": "0.0.0-zbm-stub",
+  "description": "ZBM-owned empty stand-in for sharp. The dashboard never optimises images (next.config.mjs images.unoptimized: true, no next/image import), so Next.js's optional sharp dependency and its LGPL-3.0 libvips binaries are replaced by this package via package.json overrides (owner licence ruling 2026-11-08).",
+  "license": "MIT",
+  "private": true,
+  "main": "index.js"
+}
