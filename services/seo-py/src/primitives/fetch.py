@@ -391,15 +391,26 @@ class Fetcher:
         """The resolver call INSIDE the current fetch's one deadline (round-3 review of PR 47, item 1; the same shape
         as finance_client._Resolver): it runs on its own daemon thread under a slot of the process-wide DNS gate and is
         waited for only for the time left, so a slow or hung resolver never carries a fetch (or its nested robots.txt
-        fetch, or a redirect hop) past twice the timeout. Late: TIMEOUT; every slot busy, failed or empty: DNS_FAILED
-        (fail closed). A hung lookup keeps its thread and slot until the system resolver gives up, never the fetch."""
+        fetch, or a redirect hop) past twice the timeout. Late: TIMEOUT; failed or empty: DNS_FAILED. Every slot busy
+        is OUR capacity, not the site's DNS (round-4 review of PR 47): the fetch waits for a slot within its own deadline
+        and, if none frees, ends RESOURCE_LIMIT. An IP literal needs no lookup and takes no slot (the SSRF policy still
+        applies to it). A hung lookup keeps its thread and slot until the system resolver gives up, never the fetch."""
+        if _is_ip_literal(host):
+            # an address literal: no network lookup, so no slot and no thread (the resolver still sees it, as the
+            # certified address checks expect; a numeric getaddrinfo answers at once)
+            try:
+                return list(self.resolver(host, port))
+            except (OSError, UnicodeError, ValueError):
+                raise _Refused("DNS_FAILED", "the address does not resolve") from None
         deadline = _BUDGET.deadline
         left = self.timeout_s if deadline is None else deadline - time.monotonic()
         if left <= 0:
             raise _Refused("TIMEOUT", "the fetch deadline passed before the name was resolved")
         gate = _DNS_GATE                      # the slot goes back to the gate it came from, whatever replaces it
-        if not gate.acquire(blocking=False):
-            raise _Refused("DNS_FAILED", "every DNS worker is busy")
+        if not gate.acquire(timeout=left):
+            raise _Refused("RESOURCE_LIMIT", "every DNS worker of this service stayed busy (our capacity, not the "
+                                             "site's DNS)")
+        left = self.timeout_s if deadline is None else deadline - time.monotonic()
         box: dict = {}
         done = threading.Event()
         resolve = self.resolver
@@ -418,7 +429,7 @@ class Fetcher:
         except BaseException:
             gate.release()
             raise _Refused("DNS_FAILED", "could not start a DNS lookup") from None
-        if not done.wait(left):
+        if not done.wait(max(0.0, left)):
             raise _Refused("TIMEOUT", "the host did not resolve within the fetch deadline")
         if "error" in box:
             raise _Refused("DNS_FAILED", "the host does not resolve")
@@ -575,7 +586,12 @@ class Fetcher:
         p = urlsplit(url)
         origin = f"{p.scheme.lower()}://{(p.netloc or '').lower()}"
         if origin not in cache:
-            cache[origin] = self.robots(origin, guard=guard)
+            rb = self.robots(origin, guard=guard)
+            if rb["status_class"] == "not_checked":
+                # our capacity, not the site: never cached (a later fetch asks again), and this fetch is refused
+                # closed without claiming anything about robots.txt
+                raise _Refused("RESOURCE_LIMIT", "robots.txt could not be checked: this service was busy")
+            cache[origin] = rb
         rb = cache[origin]
         path = urlunsplit(("", "", p.path or "/", p.query, ""))
         return rb["parsed"].allowed(PRODUCT_TOKEN, path) if rb["parsed"] is not None else rb["default_allow"]
@@ -587,6 +603,9 @@ class Fetcher:
         out = {"origin": origin, "fetch": r.summary(), "parsed": None, "default_allow": False, "status_class": None}
         if r.state == "TOO_LARGE":
             out["status_class"] = "too_large"          # cannot read the whole file: treat as unreachable (fail closed)
+            return out
+        if r.state == "RESOURCE_LIMIT":
+            out["status_class"] = "not_checked"          # our capacity or safety limit: nothing known about the site
             return out
         if r.state != "OK":
             out["status_class"] = "unreachable"

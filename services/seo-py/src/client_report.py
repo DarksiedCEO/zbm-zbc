@@ -153,6 +153,8 @@ STATUS = {
 }
 NOT_CLEAN = ("Nothing is reported here because this area was not checked. This is not a clean result.")
 REASON_TEXT = {
+    "SERVICE_BUSY": "Our audit service was busy and could not complete this check. This says nothing about your "
+                    "site; running the audit again completes it.",
     "AUDIT_DEADLINE": "The audit's time limit was reached before this check finished; only what was observed is "
                       "reported.",
     "SITEMAP_UNREAD": "A sitemap could not be read (no usable answer), so the sitemap check is incomplete.",
@@ -218,7 +220,8 @@ FETCH_STATE_TEXT = {
     "REFUSED_ADDRESS": "resolves to a private network address (refused)", "DNS_FAILED": "domain name did not resolve",
     "CONNECT_FAILED": "connection failed", "TLS_FAILED": "secure (TLS) connection failed", "TIMEOUT": "timed out",
     "TOO_LARGE": "response too large", "UNSUPPORTED_ENCODING": "unsupported compression",
-    "RESOURCE_LIMIT": "stopped at a safety limit", "TOO_MANY_REDIRECTS": "too many redirects",
+    "RESOURCE_LIMIT": "not completed: our audit service was busy or hit a safety limit (not a problem with your "
+                      "site)", "TOO_MANY_REDIRECTS": "too many redirects",
     "BLOCKED_BY_ROBOTS": "robots.txt disallows our crawler", "PROTOCOL_ERROR": "unreadable response",
     "KILLED": "stopped by a safety switch",
 }
@@ -620,6 +623,8 @@ def _visible(f: dict) -> bool:
         return False
     if f.get("code") == "CANONICAL_TARGET_NOT_200" and d.get("fetch_state") not in (None, "OK"):
         return False
+    if d.get("fetch_state") == "RESOURCE_LIMIT":
+        return False                     # our capacity or safety limit stopped the request: not about the site
     return True
 
 

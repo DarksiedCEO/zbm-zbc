@@ -49,6 +49,7 @@ LIMITS = ["Observed from one network location at one time; a CDN or firewall may
 HTML_TYPES = ("text/html", "application/xhtml+xml")
 CANONICAL_CHECK_MAX = 5
 REFUSED_STATUSES = (401, 403, 405, 429)
+SERVICE_BUSY = "SERVICE_BUSY"          # our own capacity or safety limit stopped a request (never about the site)
 
 
 def _noindex(fetch, extract: Optional[dict]) -> bool:
@@ -73,6 +74,12 @@ def run(ctx) -> tuple[dict, dict]:
         t0 = ctx.monotonic()
         rb = ctx.fetcher.robots(ctx.origin, guard=ctx.guard)
         ctx.observe(t0)
+        if rb.get("status_class") == "not_checked":
+            # round-4 review: our own capacity limit, not the site. robots.txt is neither cached nor treated as
+            # unreachable; nothing else is read, and the area is FAILED with an honest "our service was busy"
+            facts["robots"] = {"status_class": "not_checked", "fetch": rb["fetch"]}
+            return envelope(AGENT, TASK, "FAILED", [], methodology=METHODOLOGY.format(v=bots.VERSION),
+                            limitations=LIMITS, reason=SERVICE_BUSY, facts=facts), pages
         ctx.robots = rb
         ctx.robots_cache[_origin_key(ctx.origin)] = rb
         ctx.osei.observed("robots", ctx.origin + "/robots.txt", rb["status_class"])
@@ -159,8 +166,9 @@ def run(ctx) -> tuple[dict, dict]:
     else:
         outcome = "OK" if fetched == len(pages) else "PARTIAL"
     facts["render_states"] = {p: v["render"]["state"] for p, v in pages.items()}
+    reason = SERVICE_BUSY if outcome != "OK" and facts.get("service_busy_pages") else None
     return envelope(AGENT, TASK, outcome, findings, methodology=METHODOLOGY.format(v=bots.VERSION),
-                    limitations=LIMITS, not_connected=not_connected, facts=facts), pages
+                    limitations=LIMITS, not_connected=not_connected, facts=facts, reason=reason), pages
 
 
 # Discovery: what a linked path must look like to be read. Only page-like paths (no file extension, or an HTML one);
@@ -401,6 +409,11 @@ def _page_findings(ctx, path: str, f, extract: Optional[dict], canon_checked: in
     if f.state == "BLOCKED_BY_ROBOTS":
         out.append(finding("PAGE_BLOCKED_FOR_OUR_CRAWLER", "info", "measured", "INSUFFICIENT_EVIDENCE", url=url,
                            detail={"note": "robots.txt disallows ZBM-SEO-Audit here; the page was not read"}))
+        return out, canon_checked
+    if f.state == "RESOURCE_LIMIT":
+        # our capacity or safety limit, not the site: recorded, never a finding about the client's page
+        if facts is not None:
+            facts.setdefault("service_busy_pages", []).append(path)
         return out, canon_checked
     if not f.ok:
         out.append(finding("PAGE_UNREACHABLE", "high", "measured", "INSUFFICIENT_EVIDENCE", url=url,

@@ -1389,6 +1389,13 @@ CR-12. **Sellable report (Gate 4 run against zbestmedia.com, 2026-11-08; branch 
      (every slot busy: `DNS_FAILED` at once; a slot always returns to the gate it was taken from). Delia's reserve is
      `delia.MAX_REQUESTS` = 2 x `MAX_CHILDREN` + 1 = 21; Selene's `REQUESTS_PER_PAGE` is 4 (the canonical check
      included).
+   - **Round-4 review of 3ddca3e, closed.** A full DNS gate is our capacity, not the site's DNS: the fetch waits for a
+     slot within its own deadline and otherwise ends `RESOURCE_LIMIT`. robots.txt fetched under `RESOURCE_LIMIT` is
+     `not_checked`: never cached and never treated as unreachable / disallow-all (a fetch needing it is refused
+     `RESOURCE_LIMIT`). Selene, Delia and the pages they read record it (`service_busy_pages`, `service_busy`) with no
+     finding; an area it left incomplete carries reason `SERVICE_BUSY` ("Our audit service was busy ... This says
+     nothing about your site"); a recorded finding with fetch state `RESOURCE_LIMIT` is never shown. An IP-literal host
+     takes no DNS slot and no lookup (the SSRF policy still applies).
 
 ## Unlock list
 

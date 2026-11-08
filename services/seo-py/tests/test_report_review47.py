@@ -705,16 +705,118 @@ def test_a_resolver_that_fails_is_dns_failed_and_frees_its_slot():
         fetch_mod._DNS_GATE.release()
 
 
-def test_every_dns_slot_busy_fails_closed_without_asking(monkeypatch):
-    import threading
-    monkeypatch.setattr(fetch_mod, "_DNS_GATE", threading.BoundedSemaphore(1))
-    assert fetch_mod._DNS_GATE.acquire(blocking=False)
+class _FakeGate:
+    """A DNS gate under test control: the first ``allow`` acquisitions get a slot, later ones find every slot busy.
+    Records the time each caller offered to wait (no clock is read, no wall-clock bound is asserted)."""
+
+    def __init__(self, allow=0):
+        import threading
+        self.allow, self.offered, self.released = allow, [], threading.Event()
+
+    def acquire(self, blocking=True, timeout=None):
+        self.offered.append(timeout)
+        if self.allow > 0:
+            self.allow -= 1
+            return True
+        return False
+
+    def release(self):
+        self.released.set()
+
+
+def test_a_full_dns_gate_waits_within_the_deadline_then_is_our_resource_limit(monkeypatch):
+    gate = _FakeGate(allow=0)
+    monkeypatch.setattr(fetch_mod, "_DNS_GATE", gate)
     r = _BlockedResolver()
-    f = fetch_mod.Fetcher(timeout_s=5, resolver=r, policy=lambda h, ip, p: True)
+    f = fetch_mod.Fetcher(timeout_s=1, resolver=r, policy=lambda h, ip, p: True)
     try:
-        assert f.fetch("http://busy.test/", honor_robots=False).state == "DNS_FAILED" and r.asked == []
+        out = f.fetch("http://busy.test/", honor_robots=False)
+        assert out.state == "RESOURCE_LIMIT" and "our capacity" in out.detail and r.asked == []
+        assert len(gate.offered) == 1 and 0 < gate.offered[0] <= 2 * f.timeout_s     # waited inside the deadline
     finally:
         r.release.set()
+
+
+def test_a_slot_that_frees_while_waiting_lets_the_fetch_proceed(monkeypatch):
+    gate = _FakeGate(allow=1)
+    monkeypatch.setattr(fetch_mod, "_DNS_GATE", gate)
+    f = fetch_mod.Fetcher(timeout_s=1, resolver=lambda h, p: ["93.184.216.34"], policy=lambda h, ip, p: False)
+    out = f.fetch("http://free.test/", honor_robots=False)
+    assert out.state == "REFUSED_ADDRESS" and gate.released.wait(5)        # resolved, then the SSRF policy decided
+
+
+def test_an_ip_literal_takes_no_dns_slot_and_still_meets_the_ssrf_policy(monkeypatch):
+    gate = _FakeGate(allow=0)
+    monkeypatch.setattr(fetch_mod, "_DNS_GATE", gate)
+    for url in ("http://127.0.0.1/", "http://[::1]/", "http://93.184.215.14/"):
+        out = fetch_mod.Fetcher(timeout_s=1, policy=lambda h, ip, p: ip not in ("127.0.0.1", "::1", "93.184.215.14")) \
+            .fetch(url, honor_robots=False)
+        assert out.state == "REFUSED_ADDRESS" and gate.offered == []     # never waited on our DNS gate
+
+
+@pytest.mark.local_http
+def test_an_ip_literal_is_fetched_without_a_dns_slot(srv, monkeypatch):
+    gate = _FakeGate(allow=0)
+    monkeypatch.setattr(fetch_mod, "_DNS_GATE", gate)
+    f = srv.site_fetcher(policy=lambda h, ip, p: True)      # this test's SSRF policy admits the loopback fixture
+    asked = []
+    real = f.resolver
+    f.resolver = lambda h, p: asked.append(h) or real(h, p)
+    out = f.fetch("http://127.0.0.1/", honor_robots=False)
+    assert out.state == "OK" and asked == ["127.0.0.1"] and gate.offered == []
+
+
+@pytest.mark.local_http
+def test_gate_full_on_the_robots_fetch_is_service_busy_and_never_cached(srv, monkeypatch):
+    install_site(srv)
+    monkeypatch.setattr(fetch_mod, "_DNS_GATE", _FakeGate(allow=0))
+    ctx = _ctx(srv, max_pages=0)
+    env, pages = selene.run(ctx)
+    assert env["outcome"] == "FAILED" and env["reason"] == "SERVICE_BUSY" and env["findings"] == []
+    assert pages == {} and ctx.robots is None and ctx.robots_cache == {}
+    assert env["facts"]["robots"]["status_class"] == "not_checked"
+    cache = {}
+    out = ctx.fetcher.fetch("http://site.test/", robots_cache=cache, guard=None)
+    assert out.state == "RESOURCE_LIMIT" and cache == {}                  # never "unreachable / disallow all"
+    from svc_audits import _skipped
+    d = _skipped("delia", "sitemaps_and_llms_txt", env)
+    assert d["reason"] == "SERVICE_BUSY"
+
+
+@pytest.mark.local_http
+def test_gate_full_on_a_page_fetch_is_service_busy_and_never_a_finding(srv, monkeypatch):
+    install_site(srv)
+    monkeypatch.setattr(fetch_mod, "_DNS_GATE", _FakeGate(allow=1))      # robots.txt gets the one slot
+    ctx = _ctx(srv, paths=("/",), max_pages=0)
+    env, pages = selene.run(ctx)
+    assert env["outcome"] == "FAILED" and env["reason"] == "SERVICE_BUSY"
+    assert env["facts"]["service_busy_pages"] == ["/"]
+    assert not {"PAGE_UNREACHABLE", "PAGE_HTTP_ERROR"} & {f["code"] for f in env["findings"]}
+    assert pages["/"]["fetch"].state == "RESOURCE_LIMIT"
+
+
+@pytest.mark.local_http
+def test_gate_full_on_delias_requests_is_service_busy_and_never_a_finding(srv, monkeypatch):
+    install_site(srv)
+    ctx = _ctx(srv, max_pages=0)
+    selene.run(ctx)
+    monkeypatch.setattr(fetch_mod, "_DNS_GATE", _FakeGate(allow=0))
+    env = delia.run(ctx)
+    assert env["outcome"] == "FAILED" and env["reason"] == "SERVICE_BUSY" and env["findings"] == []
+
+
+@pytest.mark.parametrize("fmt", ["markdown", "html"])
+def test_the_report_says_our_service_was_busy_and_blames_nothing_on_the_site(fmt):
+    v = _with_selene_findings(
+        finding("PAGE_UNREACHABLE", "high", "measured", "INSUFFICIENT_EVIDENCE", url=U + "/a",
+                detail={"fetch_state": "RESOURCE_LIMIT"}), outcome="PARTIAL")
+    sel = next(e for e in v["report"]["agents"] if e["agent"] == "selene")
+    sel["reason"] = "SERVICE_BUSY"
+    t, m = cr.render(v, "acme", fmt)
+    t = t.decode()
+    assert "Our audit service was busy and could not complete this check" in t
+    assert "Page could not be reached" not in t and "did not resolve" not in t
+    assert not m["coverage"]["complete"]
 
 
 @pytest.mark.local_http
@@ -799,14 +901,20 @@ def test_readme_states_the_startup_refusal_for_short_deadlines():
 
 
 def test_a_slot_goes_back_to_the_gate_it_came_from(monkeypatch):
-    import threading
-    import time as _t
-    old = threading.BoundedSemaphore(2)
+    """Event-driven (no sleeps): a lookup outlives its fetch, the gate is replaced (as after a fork), and the slot
+    is released to the gate it was taken from, never to the new one."""
+    old, new = _FakeGate(allow=1), _FakeGate(allow=1)
     monkeypatch.setattr(fetch_mod, "_DNS_GATE", old)
-    f = fetch_mod.Fetcher(timeout_s=1, resolver=_slow_resolver(3.0), policy=lambda h, ip, p: True)
-    assert f.fetch("http://slow.test/", honor_robots=False).state == "TIMEOUT"   # its lookup is still running
-    new = threading.BoundedSemaphore(2)
-    monkeypatch.setattr(fetch_mod, "_DNS_GATE", new)                            # e.g. reset after a fork
-    _t.sleep(2.0)                                                               # the lookup finishes and releases
-    assert [new.acquire(blocking=False) for _ in range(3)] == [True, True, False]
-    assert [old.acquire(blocking=False) for _ in range(3)] == [True, True, False]
+    r = _BlockedResolver()
+    f = fetch_mod.Fetcher(timeout_s=1, resolver=r, policy=lambda h, ip, p: True)
+    import time as _t
+    fetch_mod._BUDGET.deadline = _t.monotonic() + 0.05                   # the fetch's own deadline, already short
+    try:
+        with pytest.raises(fetch_mod._Refused) as exc:
+            f._resolve("slow.test", 80)
+        assert exc.value.state == "TIMEOUT" and r.asked == ["slow.test"]
+    finally:
+        fetch_mod._BUDGET.deadline = None
+    monkeypatch.setattr(fetch_mod, "_DNS_GATE", new)                      # replaced while the lookup still runs
+    r.release.set()                                                       # the lookup now returns
+    assert old.released.wait(5) and not new.released.is_set()

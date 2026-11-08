@@ -115,6 +115,8 @@ def run(ctx) -> dict:
         outcome, reason = "PARTIAL", ("LLMS_TXT_UNREAD" if sitemaps_known else "SITEMAP_UNREAD")
     else:
         outcome, reason = "FAILED", "SITEMAP_UNREAD"
+    if facts.get("service_busy") and outcome != "OK":
+        reason = "SERVICE_BUSY"
     if deadline and outcome != "OK":
         reason = DEADLINE_REASON
         facts["deadline_reached"] = True
@@ -148,6 +150,11 @@ def _sitemaps(ctx, facts: dict) -> list:
         seen.add(sm)
         f = _fetch(ctx, sm, "application/xml,text/xml;q=0.9,*/*;q=0.5")
         ctx.osei.observed("sitemap", sm, f.state)
+        if f.state == "RESOURCE_LIMIT":
+            # our capacity, not the site: no finding about the client's sitemap; the area is incomplete
+            failures += 1
+            facts["service_busy"] = True
+            continue
         if not f.ok or f.status != 200:
             # Gate 4: a sitemap URL that answers 404 / 410 was OBSERVED to be missing (a finding, SITEMAP_MISSING);
             # only a fetch that failed or an answer that is neither the sitemap nor "not found" (401/403/5xx...)
@@ -307,6 +314,10 @@ def _llms(ctx, facts: dict) -> list:
     f = _fetch(ctx, url, "text/plain,text/markdown;q=0.9,*/*;q=0.5")
     ctx.osei.observed("llms_txt", url, f.state)
     note = "llms.txt is an emerging, non-standard convention (llmstxt.org proposal)"
+    if f.state == "RESOURCE_LIMIT":
+        facts["llms_txt"] = {"state": "unreadable", "fetch_state": f.state}
+        facts["service_busy"] = True                # our capacity, not the site: no finding
+        return []
     if not f.ok:
         facts["llms_txt"] = {"state": "unreadable", "fetch_state": f.state}
         return [finding("LLMS_TXT_UNREADABLE", "info", "measured", "INSUFFICIENT_EVIDENCE", url=url, capability="P3",
