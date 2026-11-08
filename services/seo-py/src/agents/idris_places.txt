@@ -1,0 +1,29 @@
+# Idris (ADR 0048): major places that are never an emerging-competitor candidate. Self-authored for this repository
+# (place names are facts; no third-party list or licence). Lower case, comma-separated entries.
+# countries
+afghanistan, albania, algeria, argentina, armenia, australia, austria, azerbaijan, bahamas, bahrain, bangladesh, belarus, belgium
+bolivia, bosnia, brazil, bulgaria, cambodia, cameroon, canada, chile, china, colombia, croatia, cuba, cyprus, czechia, denmark
+ecuador, egypt, estonia, ethiopia, finland, france, georgia, germany, ghana, greece, guatemala, haiti, honduras, hungary, iceland
+india, indonesia, iran, iraq, ireland, israel, italy, jamaica, japan, jordan, kazakhstan, kenya, kuwait, laos, latvia, lebanon, libya
+lithuania, luxembourg, madagascar, malaysia, malta, mexico, moldova, monaco, mongolia, morocco, mozambique, myanmar, nepal
+netherlands, nicaragua, nigeria, norway, oman, pakistan, panama, paraguay, peru, philippines, poland, portugal, qatar, romania, russia
+rwanda, senegal, serbia, singapore, slovakia, slovenia, somalia, spain, sudan, sweden, switzerland, syria, taiwan, tanzania, thailand
+tunisia, turkey, uganda, ukraine, uruguay, uzbekistan, venezuela, vietnam, yemen, zambia, zimbabwe
+new zealand, south africa, south korea, north korea, saudi arabia, united states, united kingdom, united arab emirates
+sri lanka, costa rica, puerto rico, dominican republic, hong kong, america, europe, asia, africa, oceania, antarctica
+north america, south america, latin america, middle east
+# US states
+alabama, alaska, arizona, arkansas, california, colorado, connecticut, delaware, florida, hawaii, idaho, illinois, indiana, iowa
+kansas, kentucky, louisiana, maine, maryland, massachusetts, michigan, minnesota, mississippi, missouri, montana, nebraska, nevada
+ohio, oklahoma, oregon, pennsylvania, tennessee, texas, utah, vermont, virginia, washington, wisconsin, wyoming
+new hampshire, new jersey, new mexico, new york, north carolina, north dakota, rhode island, south carolina, south dakota
+west virginia
+# major cities
+london, paris, berlin, madrid, rome, tokyo, osaka, beijing, shanghai, shenzhen, mumbai, delhi, bangalore, dubai, toronto, vancouver
+montreal, sydney, melbourne, brisbane, chicago, boston, seattle, houston, dallas, austin, denver, phoenix, atlanta, miami, orlando
+philadelphia, detroit, portland, nashville, baltimore, pittsburgh, cleveland, sacramento, oakland, pasadena, anaheim, irvine
+amsterdam, brussels, vienna, zurich, geneva, munich, hamburg, frankfurt, milan, barcelona, lisbon, dublin, edinburgh, manchester
+stockholm, oslo, copenhagen, helsinki, warsaw, prague, budapest, istanbul, cairo, lagos, nairobi, johannesburg, seoul, bangkok
+jakarta, manila, hanoi, taipei
+los angeles, san francisco, san diego, san jose, las vegas, long beach, new orleans, salt lake city, kansas city, st louis
+mexico city, sao paulo, rio de janeiro, buenos aires, tel aviv, kuala lumpur, cape town, abu dhabi, silicon valley, bay area

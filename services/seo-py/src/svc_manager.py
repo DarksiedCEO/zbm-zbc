@@ -56,7 +56,9 @@ REGISTRY = {
               "outputs": ["competitor_visibility envelope (idris.share_of_voice/1: presence, mention share and "
                           "citation share per brand x engine x prompt with Wilson intervals, UNKNOWN when it cannot "
                           "be told; opportunities and strengths; EMERGING_COMPETITOR / WATCH candidates)",
-                          "competitor observations recorded per citation run (counts and pointers, no answer text)"]},
+                          "competitor observations recorded per citation run (counts, pointers and, per emerging "
+                          "candidate, at most 3 excerpts of at most 160 characters, PII-screened and marked "
+                          "untrusted; never a whole answer)"]},
     "naomi": {"assignment": "prompt volume with confidence bands",
               "inputs": ["a prompt-volume source (NOT_CONNECTED)"], "outputs": ["prompt_volume envelope (audit)"]},
     "osei": {"assignment": "data hygiene, first-party truth and search-truth drift",

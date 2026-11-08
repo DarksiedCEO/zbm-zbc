@@ -22,7 +22,7 @@ provenance and confidence, never 0% for unknown); no paid data.
 ### D1. One job, and what is not Idris's
 
 Idris measures the client's AI share of voice against competitors and detects emerging competitors (`agents/idris.py`,
-rules `idris-rules/2026-11-08.1`, contract `idris.share_of_voice/1`). Registry entry in `svc_manager.REGISTRY`
+rules `idris-rules/2026-11-08.2`, contract `idris.share_of_voice/1`). Registry entry in `svc_manager.REGISTRY`
 (assignment, inputs, outputs; `GET /seo/v1/department`); Idris leaves `NOT_BUILT_AGENTS`; it has its own lifecycle
 state (a restricted Idris is refused 403 `AGENT_RESTRICTED`, and citation runs then record no observations — Callum
 is unaffected). NOT Idris's: asking engines (the adapter and Callum's collection), classifying the client's citations
@@ -36,13 +36,16 @@ unchanged). When the tenant has a competitor set and Idris is not restricted, `s
 passes `idris.Observer`, which is called once after Callum's classification with the same collected samples (text in
 memory only), the resolver (its cache: resolved redirects are reused, no new fetch) and the run's times. It never
 raises: a failure is recorded as `failed` (with the safe location) and Callum's run is recorded regardless. The
-service commits `competitor_observations_recorded` right after `citation_run_recorded` (ledger: ids, counts, hashes).
+service commits `competitor_observations_recorded` right after `citation_run_recorded` (ledger: ids, counts, hashes). Review round 1:
+building the observer, calling it (`callum.run` catches anything it raises) and recording its observations are each
+guarded, so a failing Idris can never change Callum's response, outcome or HTTP status (tested byte-for-byte against a
+run without Idris); a run whose observations were not recorded is simply not reusable.
 
 **Reuse rules** (`svc_competitors._reusable`). `POST .../competitor-visibility-runs` reuses — with **zero** engine
 calls — the most recent citation run of the same tenant that: completed (never an interrupted one); has Idris's
 observations; used the same domain, the same prompt set id, version and sha256, and the competitor-set version now in
 force (same sha256: competitor names are matched while the text exists, so a changed set needs new answers); covered
-every requested engine (narrowing is allowed and the observations are narrowed; widening is not reuse); and completed
+every requested engine (narrowing is allowed and the observations are narrowed; widening is not reuse); and whose answers were OBSERVED (the observations' `observed_at`, not the run's completion; review round 1)
 within `max_age_minutes` (default and maximum 60 = Callum's near-real-time refresh interval; 0 = always fresh).
 Otherwise it requests a fresh citation run with the request's own `request_id` and **every one of Callum's rules**
 (domain, prompt set, Andre + Finance + Compliance for a client tenant, one running run per tenant, per-run caps and
@@ -76,7 +79,7 @@ on that table lists it); else `other`.
 
 Per brand × engine × prompt (and pooled per engine and in total, marked directional): **presence** = answers naming
 the brand / usable answers; **mention share** = answers naming it / brand-answer pairs over every benchmark brand
-(client, tracked, folded emerging); **citation share** = citations on its domains / citations on any tracked brand's
+(the client and the tracked competitors; emerging ones are reported apart, review round 1); **citation share** = citations on its domains / citations on any tracked brand's
 domain (unresolved ones excluded and counted; `incomplete: true` when any were). Each is `{value, k, n, ci95
 (Wilson 95%), interval, unknown}` with provenance (data class measured, source `callum_citation_run_answers`, citation
 run, engine, prompt id, prompt-set and competitor-set hashes, rules, model versions, observed_at). A share's interval is
@@ -90,7 +93,9 @@ rate; a failed call is an `INCONCLUSIVE` row with the engine's code; a stopped e
 **Rows**: every answer × brand named or cited, and every failed call, with engine, model, model version, provider,
 prompt id, sample, `observed_at`, `provider_asked_at`, `refresh_tier`, `refresh_due` and an **evidence pointer**
 (`citation_run_id`, engine, prompt id, sample, `answer_sha256`) into Callum's citation run, whose row holds the bounded
-excerpt. At most 2,000 rows (`rows_truncated`). No answer text is kept.
+excerpt. At most 2,000 rows (`rows_truncated`). No whole answer is kept: the observations hold counts and pointers,
+and per emerging candidate its extracted name and at most 3 excerpts of at most 160 characters (PII-screened, withheld
+when they look like personal data, marked untrusted).
 
 ### D6. Emerging competitors: a deterministic extractor, never a model
 
@@ -111,8 +116,8 @@ of a markdown list item), `BOLD`, `MIXED_CASE`, `CORPORATE_SUFFIX` (Inc, LLC, Gr
 the last 30 days, a candidate is `EMERGING_COMPETITOR` when it appeared in ≥ 3 usable answers AND on ≥ 2 engines or in
 ≥ 2 runs AND carries ≥ 1 brand signal; confidence HIGH with ≥ 6 answers, 2+ engines, 2+ runs and `DOMAIN_HINT`, else
 MEDIUM; anything less is `WATCH` (listed with what it is `missing`, never folded in). The top 10 emerging competitors
-(by answers) are **folded into the benchmark** (origin `emerging`, `brand_id: emg:<key>`; presence and mention share
-from this run's answers; citation share UNKNOWN) — beyond, not inside, the 20 tracked. Finding
+(by answers) are **listed in the benchmark** (origin `emerging`, `brand_id: emg:<key>`; PRESENCE only from this run's
+answers, kept out of every share denominator: review round 1) — beyond, not inside, the 20 tracked. Finding
 `IDRIS_EMERGING_COMPETITOR` is data class `inferred` (the identification is lexical), decision WATCH. **Dismissal**:
 `POST .../competitor-set/dismissals` by the owner (dashboard, seo_agent) or the tenant itself (hub with its tenant
 token, own tenant only — the hub's one write here, like log ingests), for a key seen in the tenant's observations
@@ -144,13 +149,46 @@ a fresh run adds Callum's), `GET` list / one (+ hub own tenant, compliance_38). 
 404 as missing ones. Idempotent by request id; replay rebuilds every view; the manager's scorecard shows Idris's runs
 (reused / fresh / outcomes).
 
+## Review round 1 (independent review of 44098614: CONDITIONAL) — changes
+
+- **HIGH, overlapping terms.** "Jungle Scout" and "Scout" let one span count for two brands (a denominator of 15
+  for 10 answers). The competitor set now refuses terms that contain one another, as whole words after the fold, across
+  competitors and against the tenant's client brand terms (422 `COMPETITOR_TERMS_OVERLAP`). At run time one span names
+  one brand: a brand's matching runs on the answer with every LONGER term of another brand that contains its term
+  masked (longest match wins), and a tracked competitor overlapping a client term is excluded
+  (`CLIENT_TERM_OVERLAP`). A competitor set is refused while the tenant has no prompt-set brand terms (409
+  `CLIENT_BRAND_TERMS_REQUIRED`).
+- **MED, dismissal bypass.** A dismissal now covers its key, legal-suffix variants either way (`refundrangersinc` /
+  `refundrangers`: inc, llc, ltd, corp, co, group, holdings, labs, gmbh, plc) and, for keys of 4+ characters, any name
+  containing it; `dismissed_seen` names the covering key. `POST .../competitor-set/undismissals` (dashboard only:
+  the owner) withdraws a dismissal (`emerging_competitor_undismissed`, replayed).
+- **MED, non-brands promoted.** New exclusions: `INSTRUCTION_LIKE` (a name holding an instruction word — ignore,
+  instructions, prompt, system, override, ... — or an underscore artefact), `PLACE` (the bundled gazetteer
+  `agents/idris_places.txt`: ~150 countries and regions, the 50 US states, ~100 major cities; self-authored, place names
+  are facts, no licence), `PERSON_NAME` (a 1-3 word name starting with a first name from `agents/idris_first_names.txt`,
+  ~250 common first names, self-authored, no licence; a disclosed heuristic that can drop a brand named like a
+  person). Publisher and engine names now match as a word or prefix of a name ("Forbes Advisor", "Gemini Advanced",
+  "ChatGPT Plus"). `GENERIC` covers names made only of generic business nouns (`GENERIC_NOUNS`: "Revenue Recovery
+  Software"), and `CORPORATE_SUFFIX` is a legal form only (Software, Solutions, Media, ... are no longer a signal).
+  **Emerging competitors are kept out of every share denominator** (reviewer's recommendation, adopted): they are
+  listed in the benchmark with their presence only (`benchmark.*.emerging`, `excluded_from_shares: true`, provenance
+  data class `inferred`; `facts.emerging_brands`), never a leader in an opportunity, and never named in a headline;
+  `folded_into_benchmark` is renamed `listed_in_benchmark`. This supersedes D5/D6 where they say "folded into the
+  benchmark".
+- **MED, client lookalikes.** `idris.client_like`: a name whose core (legal suffixes and generic nouns stripped) is a
+  client term or domain label, or a lookalike of one (`ZBestMedia Labs`, `Zbestmedia LLC`), is `CLIENT_LOOKALIKE`; one
+  containing a client term as whole words, or as a compact substring for terms of 5+ characters (labels of 6+), is
+  `CLIENT_VARIANT`. The same rule refuses such a tracked competitor (`COMPETITOR_IS_CLIENT`) and excludes it at run time.
+- **LOW.** Reuse age from `observed_at` (above); a visibility record names the real caller (`requested_by`), never
+  "andre" because the header was present, and notes `andre_presented`; the README, the registry and this ADR state the
+  kept excerpts exactly.
+
 ## What is NOT built (deliberately)
 
 - No LLM-based candidate extraction (owner rule: only through the adapter and default OFF; not needed for v1).
 - No sentiment measure; the negative cue is lexical and reported only.
 - No verification of an emerging competitor's domain (domain hints are unverified; citation share stays UNKNOWN);
   no "promote to tracked" action (the tenant adds it to the set, within the 20).
-- No un-dismiss route (a dismissed key stays dismissed; listed in `dismissed_seen`).
 - No scheduler (the near-real-time tier is on demand, `refresh_due` says when), no dashboard pages, no client-report
   section, no war-room scenarios for Idris.
 - No paid SEO data, no consumer-app scraping, no prompt volume; no live call, key or spend (Idris adds none).

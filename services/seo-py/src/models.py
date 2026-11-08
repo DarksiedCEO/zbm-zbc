@@ -205,3 +205,9 @@ class VisibilityRunCreate(Strict):
     engines: Optional[Annotated[list[Literal["openai", "anthropic", "google", "perplexity"]],
                                 Field(min_length=1, max_length=4)]] = None
     max_age_minutes: Annotated[StrictInt, Field(ge=0, le=60)] = 60
+
+
+class EmergingUndismiss(Strict):
+    """ADR 0048 review round 1: the owner withdraws a dismissal."""
+    request_id: RequestId
+    key: Annotated[StrictStr, Field(min_length=2, max_length=60)]

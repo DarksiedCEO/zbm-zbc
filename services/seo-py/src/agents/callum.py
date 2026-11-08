@@ -647,7 +647,10 @@ def run(engines: dict, prompt_set: Optional[dict], domain: str, n: int, guard: C
         usable = {e: r for e, r in collected.items() if r["outcome"] != NOT_CONNECTED}
         result = classify(usable, prompt_set, domain, resolver, run_id, observed_at, refresh_due)
         if observer is not None:
-            observer(usable, resolver, observed_at, refresh_due)
+            try:
+                observer(usable, resolver, observed_at, refresh_due)
+            except Exception:  # noqa: BLE001 - an observer never changes Callum's result (ADR 0048 review round 1)
+                pass
     except Killed as k:
         return envelope(AGENT, TASK, "KILLED", [], methodology=methodology, limitations=LIMITS, reason=k.code,
                         facts={"engines": {e: {"outcome": r["outcome"]} for e, r in collected.items()}})

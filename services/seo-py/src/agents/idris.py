@@ -22,26 +22,35 @@ proper-noun runs of 1-4 words (``candidates``) in answers to the client's prompt
 brand signals (a list head, bold, mixed case, a corporate suffix, or the name's own domain cited in the same answer).
 A candidate is ``EMERGING_COMPETITOR`` when it was seen in at least ``EMERGING_MIN_ANSWERS`` usable answers over the
 look-back AND on at least ``EMERGING_MIN_SPREAD`` engines OR in at least ``EMERGING_MIN_SPREAD`` runs AND it carries
-at least one brand signal; otherwise it is ``WATCH`` (listed with its counts, never folded in). Up to
-``MAX_EMERGING_FOLDED`` emerging competitors are folded into the benchmark automatically (origin ``emerging``; their
-citation share is UNKNOWN: no domain is verified for them). The owner (dashboard) or the tenant (hub, its own tenant)
-can dismiss one; a dismissed candidate that reappears is listed under ``dismissed_seen`` with its counts, never
+at least one brand signal; otherwise it is ``WATCH`` (listed with its counts, never in the benchmark). Up to
+``MAX_EMERGING_FOLDED`` emerging competitors are listed in the benchmark automatically with their PRESENCE only (origin
+``emerging``, ``excluded_from_shares``: review round 1 keeps every extracted name out of the share denominators and out
+of every headline until a human tracks it). The owner (dashboard) or the tenant (hub, its own tenant) can dismiss one,
+and the owner can undo that; a dismissal also covers names containing the dismissed key and legal-suffix variants
+(``refundrangersinc``); a dismissed candidate that reappears is listed under ``dismissed_seen`` with its counts, never
 flagged again and never silently dropped.
 
-Excluded from candidates (each counted by reason, ``excluded``): the client's own brand terms and LOOKALIKES of them
-(the shared lookalike fold, punctuation and spacing ignored, or one edit away for names of 6+ characters:
-``CLIENT_LOOKALIKE``, listed apart as a brand-impersonation signal) and longer names that contain one
-(``CLIENT_VARIANT``); tracked competitors (``TRACKED``); generic words (the bundled common-word list, ``STOPWORDS``,
-``GENERIC_TERMS``: ``GENERIC``); single words that only ever start a sentence with no brand signal
+Excluded from candidates (each counted once per name per answer by reason, ``excluded``): instruction-shaped names
+(``INSTRUCTION_WORDS``, e.g. "Ignore All Instructions") and markdown artefacts (``INSTRUCTION_LIKE``); the client's own
+brand terms, the client domain's label and LOOKALIKES of them (the shared lookalike fold, punctuation and spacing
+ignored, legal suffixes and generic nouns stripped — ``ZBestMedia Labs`` — or one edit away for names of 6+
+characters: ``CLIENT_LOOKALIKE``, listed apart as a brand-impersonation signal) and names that contain one (whole
+words, or a compact substring for terms of 5+ characters: ``Zbestmedia LLC`` — ``CLIENT_VARIANT``); places (the
+bundled self-authored gazetteer ``idris_places.txt``: ``PLACE``); person-name shapes (a 1-3 word name starting with a
+first name from the bundled self-authored ``idris_first_names.txt``: ``PERSON_NAME``, a disclosed heuristic); tracked competitors (``TRACKED``); generic words (the bundled common-word list, ``STOPWORDS``,
+``GENERIC_TERMS``, ``GENERIC_NOUNS`` — a name made only of these, e.g. "Revenue Recovery Software": ``GENERIC``); single words that only ever start a sentence with no brand signal
 (``SENTENCE_INITIAL``); runs of more than 4 capitalised words and heading / title-case lines (``TITLE_RUN``); the answer
-engines' own names (``ENGINE_SELF``); names of known publishers (``KNOWN_PUBLISHERS``, self-authored: a citation host
-on that table is a PUBLISHER, never a brand, and its name is never a candidate: ``PUBLISHER``); names whose every word
+engines' own names, also as part of a name ("Gemini Advanced", "ChatGPT Plus": ``ENGINE_SELF``); names of known
+publishers, also as a prefix or a word of a name ("Forbes Advisor") (``KNOWN_PUBLISHERS``, self-authored: a citation
+host on that table is a PUBLISHER, never a brand, and its name is never a candidate: ``PUBLISHER``); names whose every word
 is in the prompt (the prompt's topic, e.g. "Amazon" in "best amazon reimbursement agency": ``TOPIC_TERM``); and the
 tenant's own exclusions (``EXCLUDED_BY_TENANT``). A tracked competitor whose term or domain is the client's (or a
-lookalike of it) is excluded from the benchmark at run time (``excluded: CLIENT_LOOKALIKE``) and reported.
+lookalike of it), or whose term overlaps a client term, is excluded from the benchmark at run time and reported. One
+span of text names ONE brand: when a brand's term contains another's (``Jungle Scout`` / ``Scout``), the longest
+match wins (the competitor set refuses such overlaps; the run masks them for sets that predate the rule).
 
-Share of voice is two measures, never one score: MENTION share (answers naming brand B / brand-answer pairs over every
-benchmark brand) and CITATION share (citations on B's domains / citations on any tracked brand's domain), each with a
+Share of voice is two measures, never one score: MENTION share (answers naming brand B / brand-answer pairs over the
+client and the tracked competitors) and CITATION share (citations on B's domains / citations on any tracked brand's domain), each with a
 95% Wilson interval, plus per-brand PRESENCE (answers naming B / usable answers). UNKNOWN (``value: null``, never 0%)
 when there are fewer than ``MIN_USABLE`` usable answers, when no benchmark brand was named, when a brand's only
 mentions are unconfirmed, when every citation is unresolved, or (citation share) for a brand with no verified domain.
@@ -57,6 +66,7 @@ from __future__ import annotations
 import bisect
 import functools
 import re
+from pathlib import Path
 from typing import Optional
 
 import lookalikes
@@ -66,11 +76,11 @@ from agents.prompt_guard import personal_data
 from envelope import envelope, finding, observed, sha
 
 AGENT, TASK = "idris", "competitor_visibility"
-VERSION = "idris-rules/2026-11-08.1"
+VERSION = "idris-rules/2026-11-08.2"
 CONTRACT = "idris.share_of_voice/1"
 REFRESH_TIER = "near_real_time"
 MAX_TRACKED = 20                       # configured competitors per tenant (the 21st is refused: COMPETITOR_LIMIT)
-MAX_EMERGING_FOLDED = 10               # emerging competitors folded into one benchmark (beyond the 20 tracked)
+MAX_EMERGING_FOLDED = 10               # emerging competitors listed in one benchmark (presence only, never in a share)
 MAX_WATCH_LISTED = 20
 EMERGING_MIN_ANSWERS = 3
 EMERGING_MIN_SPREAD = 2                # distinct engines, or distinct runs
@@ -83,9 +93,9 @@ MAX_ROWS = 2000
 MAX_WORDS = 4
 CUE_WINDOW = 40
 EXCERPT_MAX = 160
-SIGNALS = ("LIST_HEAD", "BOLD", "MIXED_CASE", "CORPORATE_SUFFIX", "DOMAIN_HINT")
-EXCLUSIONS = ("GENERIC", "SENTENCE_INITIAL", "TITLE_RUN", "ENGINE_SELF", "CLIENT_LOOKALIKE", "CLIENT_VARIANT",
-              "TRACKED", "PUBLISHER", "TOPIC_TERM", "EXCLUDED_BY_TENANT")
+SIGNALS = ("LIST_HEAD", "BOLD", "MIXED_CASE", "CORPORATE_SUFFIX", "DOMAIN_HINT")   # CORPORATE_SUFFIX: legal forms only
+EXCLUSIONS = ("INSTRUCTION_LIKE", "GENERIC", "SENTENCE_INITIAL", "TITLE_RUN", "ENGINE_SELF", "CLIENT_LOOKALIKE",
+              "CLIENT_VARIANT", "TRACKED", "PUBLISHER", "PLACE", "PERSON_NAME", "TOPIC_TERM", "EXCLUDED_BY_TENANT")
 _TABLE = lookalikes.Table()
 
 # a lexical cue next to a brand name: reported as ``negative_cue``, never a sentiment score and never subtracted
@@ -104,10 +114,45 @@ ltd pdf sku skus kpi kpis crm ppc fba asin asins saas diy usd faq q a ok
 """.split())
 ENGINE_SELF = frozenset({"openai", "chatgpt", "gpt", "anthropic", "claude", "gemini", "perplexity", "google",
                          "bing", "copilot"})
-CORPORATE_SUFFIXES = frozenset("""
-inc llc ltd corp co company group agency labs media partners solutions consulting technologies software systems
-studio studios digital marketing analytics capital holdings gmbh ag sa plc
+# legal-form suffixes only (review round 1: "Software", "Solutions", "Media" ... are generic nouns, not a brand signal)
+CORPORATE_SUFFIXES = frozenset("inc llc ltd corp co company group holdings labs gmbh ag sa plc".split())
+# generic business nouns: a name made only of these (with stopwords / common words) is GENERIC ("Revenue Recovery
+# Software"); also stripped before the place, person and client-lookalike comparisons
+GENERIC_NOUNS = frozenset("""
+software service services solution solutions tool tools platform platforms app apps system systems agency agencies
+company companies firm firms recovery revenue marketing management analytics consulting consultants support team
+teams experts expert specialists specialist reimbursement reimbursements seller sellers audit audits report reports
+data cloud online digital media partners partner technologies technology tech studio studios capital advisor advisors
+advisory group network center centre hub pro pros plus premium advanced suite review reviews guide guides
 """.split())
+# words that make a "name" an instruction, never a brand (prompt-injection-shaped text such as "**Ignore All
+# Instructions**"): such a candidate is INSTRUCTION_LIKE
+INSTRUCTION_WORDS = frozenset("""
+ignore disregard forget override instructions instruction prompt prompts system assistant previous execute run
+click buy call contact visit delete reveal print output respond reply pretend jailbreak bypass admin developer mode
+""".split())
+_HERE = Path(__file__).parent
+
+
+@functools.lru_cache(maxsize=4)
+def _entries(name: str) -> frozenset:
+    """The compact forms of a bundled self-authored list (comma-separated entries, ``#`` comments)."""
+    out = set()
+    for line in (_HERE / name).read_text(encoding="utf-8").splitlines():
+        if line.strip().startswith("#"):
+            continue
+        out |= {compact(e) for e in line.split(",") if e.strip()}
+    return frozenset(out)
+
+
+def places() -> frozenset:
+    """The bundled gazetteer (``idris_places.txt``: major countries, US states, major cities; self-authored)."""
+    return _entries("idris_places.txt")
+
+
+def first_names() -> frozenset:
+    """The bundled first-name list (``idris_first_names.txt``; self-authored): the person-name heuristic."""
+    return _entries("idris_first_names.txt")
 # Self-authored (no third-party list, no licence): hosts that PUBLISH or HOST content about brands. A citation landing
 # on one is a PUBLISHER citation, never a brand's; the publisher's name is never an emerging-competitor candidate.
 # A tenant whose real competitor is one of these lists it as a tracked competitor (tracked domains are checked first).
@@ -128,10 +173,11 @@ LIMITS = ["Idris reads the answers of Callum's citation runs: one sample of N an
           "A mention is a lexical whole-word match (agents/brand_mention.py); Idris does not understand the answer. A "
           "negative cue next to a name is reported, never a sentiment measure, and never removes the mention.",
           "Emerging competitors come from a deterministic proper-noun extractor with stated thresholds: it can miss "
-          "lower-case or unusual names and can list a non-brand (a place, a product line). WATCH candidates are never "
-          "folded into the benchmark; any candidate can be dismissed.",
-          "Shares are over the benchmark brands only (the client, the tracked competitors and the folded emerging "
-          "ones); an untracked brand does not count until it is detected. Brand mentions within one answer are not "
+          "lower-case or unusual names and can list a non-brand the bundled place / first-name / generic lists miss. "
+          "Emerging names are reported with their presence only, never in a share or a headline; WATCH candidates "
+          "are not listed in the benchmark; any candidate can be dismissed.",
+          "Shares are over the client and the tracked competitors only; an untracked or emerging brand does not count "
+          "in a share until it is tracked. Brand mentions within one answer are not "
           "independent, so a share's Wilson interval is approximate (directional).",
           "Citation share counts structured citations on the brands' configured domains; unresolved redirector "
           "citations are excluded and counted; an emerging competitor has no verified domain (citation share UNKNOWN).",
@@ -189,6 +235,56 @@ def _contains_words(name: str, part: str) -> bool:
     return bool(p) and len(n) > len(p) and any(n[i:i + len(p)] == p for i in range(len(n) - len(p) + 1))
 
 
+_LEGAL_KEY_SUFFIXES = ("holdings", "group", "gmbh", "corp", "labs", "inc", "llc", "ltd", "plc", "co")
+
+
+def core_key(key: str) -> str:
+    """A compact key without trailing legal-form suffixes (``refundrangersinc`` -> ``refundrangers``)."""
+    changed = True
+    while changed:
+        changed = False
+        for suf in _LEGAL_KEY_SUFFIXES:
+            if key.endswith(suf) and len(key) - len(suf) >= 3:
+                key, changed = key[:-len(suf)], True
+                break
+    return key
+
+
+def core_name(name: str) -> str:
+    """The compact name without trailing legal-form suffixes and generic nouns (``ZBestMedia Labs`` ->
+    ``zbestmedia``, ``Long Beach Recovery`` -> ``longbeach``); never empty."""
+    ws = _words(name)
+    while len(ws) > 1 and (ws[-1] in CORPORATE_SUFFIXES or ws[-1] in GENERIC_NOUNS):
+        ws = ws[:-1]
+    return core_key(compact(" ".join(ws)))
+
+
+def client_like(name: str, client_terms, client_label: Optional[str] = None) -> Optional[str]:
+    """``CLIENT_LOOKALIKE`` when ``name`` (or its core, suffixes and generic nouns removed) is a client brand term or
+    the client domain's label, or a lookalike of one; ``CLIENT_VARIANT`` when it contains one (whole words, or — for
+    terms of 5+ characters / labels of 6+ — as a compact substring: ``Zbestmedia LLC``); else None."""
+    key, core = compact(name), core_name(name)
+    for c in client_terms:
+        cc = compact(c)
+        if lookalike_name(name, c) or (core and lookalike_name(core, cc)):
+            return "CLIENT_LOOKALIKE"
+    if client_label and (core == client_label or key == client_label):
+        return "CLIENT_LOOKALIKE"
+    for c in client_terms:
+        cc = compact(c)
+        if _contains_words(name, c) or (len(cc) >= 5 and cc in key):
+            return "CLIENT_VARIANT"
+    if client_label and len(client_label) >= 6 and client_label in key:
+        return "CLIENT_VARIANT"
+    return None
+
+
+def overlapping(a: str, b: str) -> bool:
+    """Two terms that would match the same words: equal after the fold, or one contains the other as whole words
+    (``Jungle Scout`` / ``Scout``)."""
+    return compact(a) == compact(b) or _contains_words(a, b) or _contains_words(b, a)
+
+
 def registrable(host: str) -> Optional[str]:
     """The registrable domain of ``host`` by the vendored Public Suffix List (``acme.co.uk`` for ``www.acme.co.uk``)."""
     h = domain_match._ascii(host or "")
@@ -223,9 +319,14 @@ def brands(competitor_set: dict, prompt_set: dict, domain: str) -> tuple:
     out, excluded = [client], []
     for c in competitor_set.get("competitors") or []:
         why = None
-        if any(lookalike_name(t, ct) for t in c["terms"] for ct in client["terms"]):
+        reg = registrable(domain)
+        label = compact(reg.split(".")[0]) if reg else None
+        if any(client_like(t, client["terms"], label) for t in c["terms"] + [c["name"]]):
             why = "CLIENT_LOOKALIKE"
-        elif any(domain_match.match(d, domain) is not None for d in c.get("domains") or []):
+        elif any(overlapping(t, ct) for t in c["terms"] for ct in client["terms"]):
+            why = "CLIENT_TERM_OVERLAP"
+        elif any(domain_match.match(d, domain) is not None or domain_match.on_site(domain, d)
+                 for d in c.get("domains") or []):
             why = "CLIENT_DOMAIN"
         if why:
             excluded.append({"brand_id": c["competitor_id"], "name": c["name"], "excluded": why})
@@ -344,30 +445,42 @@ def candidates(text: str, ctx: dict, excluded: Optional[dict] = None) -> list:
         display = t[start:end]
         key = compact(display)
         lows = [w.lower() for w, _s, _e in ws]
+        wkeys = [compact(w) for w, _s, _e in ws]
+        if "_" in display or any(x in INSTRUCTION_WORDS for x in lows):
+            bump("INSTRUCTION_LIKE", key)               # instruction-shaped text or a markdown artefact: never a brand
+            continue
+        common = brand_mention.common_words()
         if len(key) < 2 or len(key) > 60 or key.isdigit() \
-                or all(x in STOPWORDS or x in GENERIC_TERMS for x in lows) \
-                or (len(ws) == 1 and lows[0] in brand_mention.common_words()):
+                or all(x in STOPWORDS or x in GENERIC_TERMS or x in GENERIC_NOUNS or x in common for x in lows):
             bump("GENERIC", key)
             continue
-        if key in ENGINE_SELF:
-            bump("ENGINE_SELF", key)
+        if any(w in ENGINE_SELF for w in wkeys) or any(key.startswith(e) for e in ENGINE_SELF if len(e) >= 5):
+            bump("ENGINE_SELF", key)                   # "Gemini Advanced", "ChatGPT Plus", "Claude's"
             continue
-        if any(lookalike_name(display, c) for c in ctx["client_terms"]) or \
-                (ctx.get("client_label") and key == ctx["client_label"]):
+        like = client_like(display, ctx["client_terms"], ctx.get("client_label"))
+        if like == "CLIENT_LOOKALIKE":
             bump("CLIENT_LOOKALIKE", key)
             seen = ctx.get("lookalikes_seen")
             if seen is not None and (key in seen or len(seen) < 10):
                 seen.setdefault(key, {"display": display, "answers": 0})
                 ctx.setdefault("lookalikes_this_answer", set()).add(key)
             continue
-        if any(_contains_words(display, c) for c in ctx["client_terms"]):
+        if like == "CLIENT_VARIANT":
             bump("CLIENT_VARIANT", key)
             continue
         if any(key == compact(tt) or _contains_words(display, tt) for tt in ctx["tracked_terms"]):
             bump("TRACKED", key)
             continue
-        if key in _PUBLISHER_KEYS:
-            bump("PUBLISHER", key)
+        if key in _PUBLISHER_KEYS or any(w in _PUBLISHER_KEYS for w in wkeys) \
+                or any(key.startswith(pk) for pk in _PUBLISHER_KEYS if len(pk) >= 4):
+            bump("PUBLISHER", key)                     # "Forbes Advisor", "Reddit Answers"
+            continue
+        core = core_name(display)
+        if key in places() or core in places():
+            bump("PLACE", key)                         # "London", "Long Beach Recovery"
+            continue
+        if len(ws) <= 3 and wkeys[0] in first_names() and lows[-1] not in CORPORATE_SUFFIXES:
+            bump("PERSON_NAME", key)                   # "Sarah Johnson" (a first-name heuristic)
             continue
         if key in ctx["exclude_keys"]:
             bump("EXCLUDED_BY_TENANT", key)
@@ -403,6 +516,24 @@ def candidates(text: str, ctx: dict, excluded: Optional[dict] = None) -> list:
         if len(out) >= MAX_CANDIDATES_PER_ANSWER:
             break
     return out
+
+
+def _mask(text: str, terms: list) -> str:
+    """``text`` with every match of ``terms`` [(term, case_sensitive)] overwritten (same length, no word boundary
+    created), so a shorter term inside them cannot match there."""
+    spans = sorted(m.span() for t, cs in terms for m in brand_mention._pattern(t, cs).finditer(text))
+    if not spans:
+        return text
+    out, pos = [], 0
+    for a, b in spans:
+        a = max(a, pos)
+        if b <= a:
+            continue
+        out.append(text[pos:a])
+        out.append("x" * (b - a))
+        pos = b
+    out.append(text[pos:])
+    return "".join(out)
 
 
 def _negative_cue(text: str, b: dict) -> bool:
@@ -485,6 +616,10 @@ def observe(engines: dict, resolver, competitor_set: dict, prompt_set: dict, dom
            "exclude_keys": {compact(x) for x in competitor_set.get("exclude_terms") or []},
            "lookalikes_seen": {}}
     detect = competitor_set.get("emerging_detection", True)
+    longer = {b["brand_id"]: [(o_t, bool((o["rules"] and {r["term"]: r for r in o["rules"]}.get(o_t, {})
+                                          .get("case_sensitive"))))
+                              for o in bl if o["brand_id"] != b["brand_id"] for o_t in o["terms"]
+                              if any(_contains_words(o_t, t) for t in b["terms"])] for b in bl}
     tallies: dict = {}
     cands: dict = {}
     excluded: dict = {}
@@ -551,15 +686,18 @@ def observe(engines: dict, resolver, competitor_set: dict, prompt_set: dict, dom
             for b in bl:
                 bt = k["brands"][b["brand_id"]]
                 cited = owners.get(b["brand_id"], 0)
-                m = brand_mention.mention(text, b["terms"], b["rules"], domain=(b["domains"] or [None])[0],
+                # review round 1 (HIGH): one span names ONE brand — the longest term wins; another brand's longer
+                # term that contains this brand's term ("Jungle Scout" over "Scout") is masked before matching
+                btext = _mask(norm, longer[b["brand_id"]]) if longer[b["brand_id"]] else norm
+                m = brand_mention.mention(btext, b["terms"], b["rules"], domain=(b["domains"] or [None])[0],
                                           client_cited=bool(cited))
                 if m["mentioned"] and m["confidence"] == brand_mention.LOW and len(b["domains"]) > 1:
                     for d in b["domains"][1:]:
-                        if brand_mention.mention(text, b["terms"], b["rules"], domain=d)["confidence"] == \
+                        if brand_mention.mention(btext, b["terms"], b["rules"], domain=d)["confidence"] == \
                                 brand_mention.HIGH:
                             m = {**m, "confidence": brand_mention.HIGH}
                             break
-                neg = bool(m["mentioned"]) and _negative_cue(norm, b)
+                neg = bool(m["mentioned"]) and _negative_cue(btext, b)
                 if m["mentioned"] and m["confidence"] == brand_mention.HIGH:
                     bt["mentions"] += 1
                     client_named = client_named or b["brand_id"] == "client"
@@ -745,9 +883,11 @@ def emerging(current: dict, history: list, dismissals: dict, tracked_terms: list
                 "co_mentioned_with_client": a["co_mentioned_with_client"],
                 "domain_hints_unverified": sorted(a["domain_hints"], key=lambda h: (-a["domain_hints"][h], h))[:3],
                 "first_seen_at": a["first_seen_at"], "evidence": a["evidence"]}
-        if key in dismissals:
+        by = dismissed_by(key, dismissals)
+        if by is not None:
             if a["answers_this_run"]:
-                dismissed_seen.append({**view, "state": "DISMISSED", "dismissed": dismissals[key]})
+                dismissed_seen.append({**view, "state": "DISMISSED", "dismissed_key": by,
+                                       "dismissed": dismissals[by]})
             continue
         spread = len(a["engines"]) >= EMERGING_MIN_SPREAD or len(a["runs"]) >= EMERGING_MIN_SPREAD
         if a["answers"] >= EMERGING_MIN_ANSWERS and spread and a["signals"]:
@@ -763,10 +903,22 @@ def emerging(current: dict, history: list, dismissals: dict, tracked_terms: list
     items.sort(key=order)
     watch.sort(key=order)
     for i, it in enumerate(items):
-        it["folded_into_benchmark"] = i < MAX_EMERGING_FOLDED
+        it["listed_in_benchmark"] = i < MAX_EMERGING_FOLDED
     return {"rule": EMERGING_RULE, "items": items, "watch": watch[:MAX_WATCH_LISTED],
             "watch_total": len(watch), "dismissed_seen": sorted(dismissed_seen, key=order),
             "runs_considered": 1 + len(history)}
+
+
+def dismissed_by(key: str, dismissals: dict) -> Optional[str]:
+    """The dismissal covering ``key``: the key itself, a legal-suffix variant of it (``refundrangersinc`` for
+    ``refundrangers``, and back), or — for dismissed keys of 4+ characters — any name containing it."""
+    if key in dismissals:
+        return key
+    ck = core_key(key)
+    for d in sorted(dismissals):
+        if core_key(d) == ck or (len(d) >= 4 and d in key):
+            return d
+    return None
 
 
 def _best(display: dict) -> str:
@@ -798,16 +950,18 @@ def compute(obs: dict, history: list, dismissals: dict, previous: Optional[dict]
     em = emerging(obs, history, dismissals, tracked_terms, client_terms) if obs.get("emerging_detection") else \
         {"rule": EMERGING_RULE, "items": [], "watch": [], "watch_total": 0, "dismissed_seen": [], "runs_considered": 0,
          "off": "emerging detection is off for this competitor set"}
-    folded = [{"brand_id": f"emg:{it['key']}", "name": it["name"], "origin": "emerging", "terms": [it["name"]],
-               "domains": [], "key": it["key"]} for it in em["items"] if it["folded_into_benchmark"]]
-    bl = list(obs["brands"]) + folded
+    # review round 1: emerging competitors are listed in the benchmark with their PRESENCE only and kept OUT of
+    # every share denominator (reported apart, ``excluded_from_shares``) until a human tracks them
+    folded = [{"brand_id": f"emg:{it['key']}", "name": it["name"], "origin": "emerging", "key": it["key"]}
+              for it in em["items"] if it["listed_in_benchmark"]]
+    bl = list(obs["brands"])
     by_key = {c["key"]: c for c in obs.get("candidates") or []}
-    scopes, by_engine, tot = [], {}, {"usable": 0, "unresolved": 0, "stats": {b["brand_id"]: _zero() for b in bl}}
+    scopes, by_engine, tot = [], {}, {"usable": 0, "unresolved": 0, "stats": {b["brand_id"]: _zero() for b in bl},
+                                      "emerging": {f["brand_id"]: 0 for f in folded}}
     for t in obs["tallies"]:
         stats = {bid: dict(v) for bid, v in t["brands"].items()}
-        for f in folded:
-            stats[f["brand_id"]] = {**_zero(), "mentions": by_key.get(f["key"], {}).get("by_scope", {}).get(
-                f"{t['engine']}|{t['prompt_index']}", 0)}
+        emg = {f["brand_id"]: by_key.get(f["key"], {}).get("by_scope", {}).get(f"{t['engine']}|{t['prompt_index']}",
+                                                                                0) for f in folded}
         prov = {"data_class": "measured", "source": "callum_citation_run_answers",
                 "citation_run_id": obs["citation_run_id"], "engine": t["engine"], "prompt_id": t["prompt_id"],
                 "prompt_set_sha256": obs["prompt_set"]["sha256"], "competitor_set_sha256": obs["competitor_set"]["sha256"],
@@ -817,15 +971,21 @@ def compute(obs: dict, history: list, dismissals: dict, previous: Optional[dict]
                        "citations": t["citations"], "unresolved_citations": t["unresolved_citations"],
                        "publisher_citations": t["publisher_citations"],
                        "client_lookalike_citations": t["client_lookalike_citations"],
-                       "brands": _scope_metrics(t["usable"], t["unresolved_citations"], stats, bl, prov)})
+                       "brands": _scope_metrics(t["usable"], t["unresolved_citations"], stats, bl, prov),
+                       "emerging": _emerging_presence(t["usable"], emg, folded, prov)})
         e = by_engine.setdefault(t["engine"], {"usable": 0, "unresolved": 0, "failed": 0,
-                                               "stats": {b["brand_id"]: _zero() for b in bl}})
+                                               "stats": {b["brand_id"]: _zero() for b in bl},
+                                               "emerging": {f["brand_id"]: 0 for f in folded}})
         for agg in (e, tot):
             agg["usable"] += t["usable"]
             agg["unresolved"] += t["unresolved_citations"]
             for bid, v in stats.items():
+                if bid not in agg["stats"]:
+                    continue
                 for x in v:
                     agg["stats"][bid][x] += v[x]
+            for bid, n in emg.items():
+                agg["emerging"][bid] += n
         e["failed"] += t["failed"]
     pooled_note = "pooled over prompts (and engines for the totals): prompts are not a random sample; directional"
     engines_view = {}
@@ -835,15 +995,16 @@ def compute(obs: dict, history: list, dismissals: dict, previous: Optional[dict]
         engines_view[eng] = {"usable_answers": e["usable"], "inconclusive_calls": e["failed"],
                              "unresolved_citations": e["unresolved"],
                              "outcome": (obs["engines"].get(eng) or {}).get("outcome"),
-                             "brands": _scope_metrics(e["usable"], e["unresolved"], e["stats"], bl, prov)}
+                             "brands": _scope_metrics(e["usable"], e["unresolved"], e["stats"], bl, prov),
+                             "emerging": _emerging_presence(e["usable"], e["emerging"], folded, prov)}
     for eng, info in sorted(obs["engines"].items()):
         engines_view.setdefault(eng, {"usable_answers": 0, "inconclusive_calls": 0, "unresolved_citations": 0,
-                                      "outcome": info["outcome"], "brands": {}})
+                                      "outcome": info["outcome"], "brands": {}, "emerging": {}})
+    tprov = {"data_class": "measured", "source": "callum_citation_run_answers",
+             "citation_run_id": obs["citation_run_id"], "rules": VERSION, "note": pooled_note}
     totals = {"usable_answers": tot["usable"], "unresolved_citations": tot["unresolved"],
-              "brands": _scope_metrics(tot["usable"], tot["unresolved"], tot["stats"], bl,
-                                       {"data_class": "measured", "source": "callum_citation_run_answers",
-                                        "citation_run_id": obs["citation_run_id"], "rules": VERSION,
-                                        "note": pooled_note})}
+              "brands": _scope_metrics(tot["usable"], tot["unresolved"], tot["stats"], bl, tprov),
+              "emerging": _emerging_presence(tot["usable"], tot["emerging"], folded, tprov)}
     opps, strengths = _opportunities(scopes, bl, previous)
     facts = {"contract": CONTRACT, "rules": VERSION, "visibility_run_id": visibility_run_id, "source": source,
              "citation_run_id": obs["citation_run_id"], "citation_run_outcome": run.get("outcome"),
@@ -851,6 +1012,7 @@ def compute(obs: dict, history: list, dismissals: dict, previous: Optional[dict]
              "generated_at": generated_at, "domain": obs["domain"], "prompt_set": obs["prompt_set"],
              "competitor_set": obs["competitor_set"],
              "brands": [{k: v for k, v in b.items() if k != "terms"} for b in bl],
+             "emerging_brands": [dict(f, excluded_from_shares=True) for f in folded],
              "excluded_tracked": obs.get("excluded_tracked") or [],
              "benchmark": {"by_engine_prompt": scopes, "by_engine": engines_view, "totals": totals},
              "opportunities": {"order_rule": ORDER_RULE, "items": opps}, "strengths": strengths,
@@ -863,6 +1025,16 @@ def compute(obs: dict, history: list, dismissals: dict, previous: Optional[dict]
         return envelope(AGENT, TASK, outcome, [], methodology=method, limitations=LIMITS, facts=facts,
                         reason="the citation run observed nothing; no share of voice can be told")
     return envelope(AGENT, TASK, outcome, _findings(facts, obs), methodology=method, limitations=LIMITS, facts=facts)
+
+
+def _emerging_presence(usable: int, counts: dict, folded: list, prov: dict) -> dict:
+    """Emerging competitors' presence (answers naming them / usable answers): reported apart, never in a share."""
+    few = usable < MIN_USABLE
+    return {f["brand_id"]: {"brand_id": f["brand_id"], "origin": "emerging", "excluded_from_shares": True,
+                            "presence": _rate(counts.get(f["brand_id"], 0), usable,
+                                              "INSUFFICIENT_ANSWERS" if few else None),
+                            "provenance": {**prov, "data_class": "inferred", "basis": "deterministic extractor"}}
+            for f in folded}
 
 
 def _zero() -> dict:
@@ -964,7 +1136,7 @@ def _findings(facts: dict, obs: dict) -> list:
         out.append(finding("IDRIS_EMERGING_COMPETITOR", "medium", "inferred", "WATCH", capability="P9",
                            detail={"key": it["key"], "name": observed(it["name"], 80), "confidence": it["confidence"],
                                    "answers": it["answers"], "engines": it["engines"], "runs": it["runs"],
-                                   "signals": it["signals"], "folded_into_benchmark": it["folded_into_benchmark"]}))
+                                   "signals": it["signals"], "listed_in_benchmark": it["listed_in_benchmark"]}))
     for x in facts["client_lookalikes_seen"]:
         out.append(finding("IDRIS_CLIENT_LOOKALIKE_NAMED", "medium", "measured", "WATCH", capability="P9",
                            detail={"key": x["key"], "name": observed(x["display"], 80)}))

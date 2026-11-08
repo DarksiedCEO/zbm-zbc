@@ -86,6 +86,10 @@ class CompetitorsMixin:
                 raise Invalid(R("COMPETITOR_SET_INVALID"))
             names.add(idris.compact(name))
             terms_seen |= {idris.compact(x) for x in terms}
+            # review round 1 (HIGH): a term containing another competitor's term ("Jungle Scout" / "Scout") would let
+            # one span count for two brands: refused
+            if any(idris.overlapping(x, y) for o in out for y in o["terms"] for x in terms):
+                raise Invalid(R("COMPETITOR_TERMS_OVERLAP"))
             rules = []
             for r in c.get("term_rules") or []:
                 term = " ".join(r["term"].split())
@@ -107,15 +111,21 @@ class CompetitorsMixin:
     def _not_the_client(self, t: dict, tid: str, content: dict) -> None:
         """Under the lock: no tracked competitor may be the client — its domain (or a lookalike of it, or a parent of
         it) or its brand terms (or a lookalike of them) as configured in the tenant's prompt sets."""
-        client_terms = {x for p in self.prompt_sets.values() if p["tenant_id"] == tid
-                        for x in p["versions"][str(p["current"])]["brand_terms"]}
+        client_terms = sorted({x for p in self.prompt_sets.values() if p["tenant_id"] == tid
+                               for x in p["versions"][str(p["current"])]["brand_terms"]})
+        if not client_terms:                      # review round 1: nothing to tell the client from a competitor by
+            raise Conflict(R("CLIENT_BRAND_TERMS_REQUIRED"))
+        labels = {idris.compact(r.split(".")[0]) for r in (idris.registrable(td) for td in t["domains"]) if r}
         for c in content["competitors"]:
             for d in c["domains"]:
                 for td in t["domains"]:
                     if domain_match.match(d, td) is not None or domain_match.on_site(td, d):
                         raise Invalid(R("COMPETITOR_IS_CLIENT"))
-            if any(idris.lookalike_name(x, ct) for x in c["terms"] + [c["name"]] for ct in client_terms):
-                raise Invalid(R("COMPETITOR_IS_CLIENT"))
+            for x in c["terms"] + [c["name"]]:
+                if any(idris.client_like(x, client_terms, lb) for lb in labels or {None}):
+                    raise Invalid(R("COMPETITOR_IS_CLIENT"))
+                if any(idris.overlapping(x, ct) for ct in client_terms):
+                    raise Invalid(R("COMPETITOR_TERMS_OVERLAP"))
 
     def _a_competitor_set_version(self, d, at):
         cs = self.competitor_sets.setdefault(d["tenant_id"], {"tenant_id": d["tenant_id"], "versions": {}})
@@ -146,13 +156,25 @@ class CompetitorsMixin:
 
     def idris_observer(self, tid: str, domain: str, ps: dict, cid: str) -> Optional[idris.Observer]:
         """Under the lock: Idris's observer for a citation run, or None (no competitor set, or Idris restricted)."""
-        cs = self.current_competitor_set(tid)
-        if cs is None or self.agent_blocked("idris"):
+        try:
+            cs = self.current_competitor_set(tid)
+            if cs is None or self.agent_blocked("idris"):
+                return None
+            return idris.Observer(cs, ps, domain, cid)
+        except Exception as exc:  # noqa: BLE001 - review round 1: Idris can never change Callum's run
+            log.error("idris observer not built: %s", type(exc).__name__)
             return None
-        return idris.Observer(cs, ps, domain, cid)
 
     def record_observations(self, tid: str, cid: str, observer: Optional[idris.Observer]) -> None:
-        """Under the lock, right after ``citation_run_recorded``: Idris's observations (or its failure)."""
+        """Under the lock, right after ``citation_run_recorded``: Idris's observations (or its failure). Never raises:
+        Callum's response and outcome are the same whatever happens here (review round 1); a run whose observations
+        were not recorded is simply not reusable."""
+        try:
+            self._record_observations(tid, cid, observer)
+        except Exception as exc:  # noqa: BLE001
+            log.error("idris observations not recorded: %s", type(exc).__name__)
+
+    def _record_observations(self, tid: str, cid: str, observer: Optional[idris.Observer]) -> None:
         if observer is None or (observer.result is None and observer.error is None):
             return
         data = {"citation_run_id": cid, "tenant_id": tid}
@@ -201,6 +223,26 @@ class CompetitorsMixin:
                                    (actor, rk)))
             return self._dismissal_view(tid, key)
 
+    def undismiss_candidate(self, actor: str, tid: str, body: dict) -> dict:
+        """The owner (dashboard only) withdraws a dismissal."""
+        with self.lock:
+            self._gate()
+            self._get(self.tenants, tid, "TENANT_NOT_FOUND")
+            self.check_kill(tenant=tid, write=True)
+            rk = self.rk("undismiss", tid, body)
+            if self._idem(actor, rk, body):
+                return self._dismissal_view(tid, body["key"])
+            if body["key"] not in self.emerging_dismissals.get(tid, {}):
+                raise NotFound(R("CANDIDATE_NOT_FOUND"))
+            data = {"tenant_id": tid, "key": body["key"], "by": actor}
+            self._commit("emerging_competitor_undismissed", self._req(data, actor, rk, body, body["key"]), actor,
+                         evidence=("emerging_competitor_undismissed", f"competitor_set:{tid}",
+                                   {"tenant_id": tid, "key_sha256": sha(body["key"]), "by": actor}, (actor, rk)))
+            return self._dismissal_view(tid, body["key"])
+
+    def _a_emerging_competitor_undismissed(self, d, at):
+        self.emerging_dismissals.get(d["tenant_id"], {}).pop(d["key"], None)
+
     def _seen(self, tid: str, key: str) -> bool:
         for o in self.competitor_observations.values():
             if o["tenant_id"] == tid and any(c["key"] == key for c in (o["observations"] or {}).get("candidates")
@@ -218,7 +260,9 @@ class CompetitorsMixin:
     # ------------------------------------------------------------------ competitor-visibility runs
 
     def request_visibility_run(self, actor: str, tid: str, body: dict, andre: bool) -> dict:
-        eff = "andre" if andre else actor
+        # review round 1: the visibility record names the real caller; Andre's approval (when presented) is passed on
+        # to a fresh citation run, which records it as Callum's rules say, and noted as ``andre_presented``
+        eff = actor
         with self.lock:
             self._gate()
             t = self._get(self.tenants, tid, "TENANT_NOT_FOUND")
@@ -229,7 +273,7 @@ class CompetitorsMixin:
             self._visibility_rules(t, tid, body)
             reuse = self._reusable(tid, body)
             if reuse is not None:
-                return self._record_visibility(eff, rk, body, tid, reuse, "reused")
+                return self._record_visibility(eff, rk, body, tid, reuse, "reused", andre)
         cbody = {"request_id": body["request_id"], "domain": body["domain"], "prompt_set_id": body["prompt_set_id"]}
         if body.get("engines"):
             cbody["engines"] = body["engines"]
@@ -241,7 +285,7 @@ class CompetitorsMixin:
             if prev:
                 return self.visibility_run_view(tid, prev[1])
             self._visibility_rules(t, tid, body)
-            return self._record_visibility(eff, rk, body, tid, cv["citation_run_id"], "fresh")
+            return self._record_visibility(eff, rk, body, tid, cv["citation_run_id"], "fresh", andre)
 
     def _visibility_rules(self, t: dict, tid: str, body: dict) -> None:
         self.check_kill(tenant=tid, capability="ai_probe", write=True)
@@ -282,14 +326,15 @@ class CompetitorsMixin:
                 continue
             if o["observations"]["competitor_set"].get("sha256") != cs["sha256"] or not wanted <= set(r["engines"]):
                 continue
-            done = parse_iso(r["completed_at"])
+            done = parse_iso(o["observations"]["observed_at"])     # when the answers were observed (round 1)
             if done < floor:
                 continue
             if best is None or (done, cid) > best[0]:
                 best = ((done, cid), cid)
         return None if best is None else best[1]
 
-    def _record_visibility(self, actor: str, rk: str, body: dict, tid: str, cid: str, source: str) -> dict:
+    def _record_visibility(self, actor: str, rk: str, body: dict, tid: str, cid: str, source: str,
+                           andre: bool = False) -> dict:
         """Under the lock: compute Idris's envelope from the citation run's observations and record it."""
         vid = derived_id("vis", tid, actor, rk)
         r = self.citation_runs[cid]
@@ -318,6 +363,7 @@ class CompetitorsMixin:
         facts = env.get("facts") or {}
         data = {"visibility_run_id": vid, "tenant_id": tid, "domain": body["domain"],
                 "prompt_set_id": body["prompt_set_id"], "citation_run_id": cid, "source": source,
+                "andre_presented": bool(andre),
                 "result": env, "result_sha256": rsha}
         self._commit("competitor_visibility_recorded", self._req(data, actor, rk, body, vid), actor,
                      evidence=("competitor_visibility_recorded", f"visibility_run:{vid}",
