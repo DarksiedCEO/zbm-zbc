@@ -1322,3 +1322,11 @@ hashing or effects. Existing aggregates remain readable and can be finished
 without rehashing under a replacement key. The stored fingerprint is a continuity
 check, not authenticated journal signing or a substitute for key escrow. Tests
 cover wrong-key restart, original-key recovery and changes during processing.
+
+## Priya, the keyword agent (2026-11-08)
+
+Priya's keyword ledger (`POST /seo/v1/tenants/{tid}/keyword-ledger`), the Bing Webmaster Tools adapter (fixtures
+only; `SEO_BING_WEBMASTER_KEY_FILE` still refuses start), the Google Ads Keyword Planner interface, the new switches
+`capability:keywords` and `provider:bing`, and the EMERGING hand-off contract to Theo and Naomi are recorded in
+[ADR 0047](0047-seo-priya-keyword-ledger.md). A Priya run that reads Search Console spends one read of
+`SEO_GSC_READS_PER_DAY`; the ledger (it holds query text) is handed out once and never stored, so GSC-6 holds.

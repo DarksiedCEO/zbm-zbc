@@ -99,6 +99,14 @@ class GscPropertySet(Strict):
     property: Annotated[StrictStr, Field(pattern=GSC_PROPERTY)] | None
 
 
+class KeywordLedgerCreate(Strict):
+    """Priya's keyword ledger (ADR 0047). ``bing_site_domain``: one of the tenant's registered domains, required
+    when ``bing`` is a source."""
+    request_id: RequestId
+    sources: Annotated[list[Literal["gsc", "bing"]], Field(min_length=1, max_length=2)] = ["gsc"]
+    bing_site_domain: Optional[Annotated[StrictStr, Field(pattern=DOMAIN)]] = None
+
+
 class LogIngestCreate(Strict):
     request_id: RequestId
     domain: Annotated[StrictStr, Field(pattern=DOMAIN)]

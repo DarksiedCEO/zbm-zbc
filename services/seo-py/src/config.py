@@ -30,8 +30,8 @@ KNOWN_CALLERS = ("dashboard", "seo_agent", "scheduler", "hub", "finance_31", "co
 _PRINTABLE = re.compile(r"[\x21-\x7e]{32,512}")
 TENANT_ID = re.compile(r"[a-z][a-z0-9-]{1,39}")
 CAPABILITY_SWITCHES = ("fetch", "render", "ai_probe", "audit", "entity_write", "prompt_sets", "logs", "schedules",
-                       "reports")
-PROVIDER_SWITCHES = ("web", "openai", "anthropic", "google", "perplexity", "gsc")
+                       "reports", "keywords")                     # keywords: Priya's ledger (ADR 0047)
+PROVIDER_SWITCHES = ("web", "openai", "anthropic", "google", "perplexity", "gsc", "bing")   # bing: ADR 0047
 
 # Pricing, locked by Andre (spec Oct 6). Config only: nothing in this service charges, quotes or invoices; payments
 # are Finance (31)'s, through Stripe. Above the top tier: "Contact us". Self-serve is not offered until the client
