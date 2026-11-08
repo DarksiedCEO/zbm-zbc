@@ -50,8 +50,17 @@ FILLER_WORDS = ("revenue", "recovery", "agency", "marketplace", "audit", "reimbu
 
 # ============================================================================================ small helpers
 
+_ENC = str.maketrans("0123456789abcdef", "ghijklmnopqrstuv")
+_DEC = str.maketrans("ghijklmnopqrstuv", "0123456789abcdef")
+
+
 def hexenc(url: str) -> str:
-    return url.encode("utf-8", "surrogatepass").hex()
+    """Hex with the digits spelled g..v: never secret-shaped (no hex run, no digits), so a resolver fetches it."""
+    return url.encode("utf-8", "surrogatepass").hex().translate(_ENC)
+
+
+def hexdec(s: str) -> bytes:
+    return bytes.fromhex(s.translate(_DEC))
 
 
 def via(host: str, target: str, scheme: str = "https") -> str:

@@ -453,12 +453,12 @@ def url_ip_literal(url: str, rng: random.Random) -> str:
 def url_shortener(url: str, rng: random.Random) -> str:
     """The URL behind a link shortener (the driver's fake web redirects ``/wr-<hex>`` on these hosts to it)."""
     host = rng.choice(("t.co", "bit.ly", "lnkd.in", "tinyurl.com", "ow.ly"))
-    return f"https://{host}/wr-{url.encode('utf-8', 'surrogatepass').hex()}"
+    return f"https://{host}/wr-{__import__('grammar').hexenc(url)}"
 
 
 def url_redirector(url: str, rng: random.Random) -> str:
     """The URL behind Gemini's grounding redirector host (ADR 0046 M3)."""
-    return f"https://vertexaisearch.cloud.google.com/grounding-api-redirect/wr-{url.encode('utf-8', 'surrogatepass').hex()}"
+    return f"https://vertexaisearch.cloud.google.com/grounding-api-redirect/wr-{__import__('grammar').hexenc(url)}"
 
 
 def url_long(url: str, rng: random.Random) -> str:

@@ -157,11 +157,11 @@ def chain_of(url: str, limit: int = 12) -> list:
     """Every URL the fake web would walk from ``url`` (a ``/wr-<hex>`` path redirects to the hex-encoded URL)."""
     out = [url]
     while len(out) < limit:
-        m = re.search(r"/wr-([0-9a-f]+)$", out[-1].split("?")[0].split("#")[0])
+        m = re.search(r"/wr-([g-v]+)$", out[-1].split("?")[0].split("#")[0])
         if m is None:
             break
         try:
-            out.append(bytes.fromhex(m.group(1)).decode("utf-8", "surrogatepass"))
+            out.append(__import__("grammar").hexdec(m.group(1)).decode("utf-8", "surrogatepass"))
         except ValueError:
             break
     return out
@@ -533,17 +533,17 @@ class RedirectWeb(object):
             return SEO.respond(200, SEO.SECRET, {"content-type": "text/html"})
         if path == "/robots.txt":
             return SEO.respond(200, "User-agent: *\nAllow: /\n", {"content-type": "text/plain"})
-        m = re.search(r"/wr-([0-9a-f]+)$", path)
+        m = re.search(r"/wr-([g-v]+)$", path)
         if m is not None:
             try:
-                target = bytes.fromhex(m.group(1)).decode("utf-8", "surrogatepass")
+                target = __import__("grammar").hexdec(m.group(1)).decode("utf-8", "surrogatepass")
             except ValueError:
                 return SEO.respond(400, "bad", {"content-type": "text/plain"})
-            return SEO.respond(self.status, b"", {"location": target})
+            return SEO.respond(self.status, b"", [(b"location", target.encode("utf-8", "surrogatepass"))])
         canon = ""
-        c = re.search(r"/canon-([0-9a-f]+)", path)
+        c = re.search(r"/canon-([g-v]+)", path)
         if c is not None:
-            canon = f'<link rel="canonical" href="{bytes.fromhex(c.group(1)).decode("utf-8", "replace")}">'
+            canon = f'<link rel="canonical" href="{__import__("grammar").hexdec(c.group(1)).decode("utf-8", "replace")}">'
         return SEO.respond(200, f"<html><head><title>x</title>{canon}</head><body>page</body></html>",
                            {"content-type": "text/html; charset=utf-8"})
 
@@ -772,7 +772,7 @@ def generated_chain(ctx, spec):
     final = f"{'http' if g['final'] == 'private' else 'https'}://{final_host}/landing"
     if g.get("canonical"):
         ch = {"client": CLIENT, "lookalike": "sіte.test", "competitor": "competitor.test"}[g["canonical"]]
-        final += "/canon-" + f"https://{ch}/page".encode().hex()
+        final += "/canon-" + __import__("grammar").hexenc(f"https://{ch}/page")
     url = final
     for i, kind in enumerate(reversed(g["hops"])):
         url = _hop_url(kind, url, CLIENT, str(i))

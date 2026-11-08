@@ -172,7 +172,7 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
 - Minimal repro: a citation run, brand `Zoom`, Anthropic answering the fixture shape with final text block `Zoom in on the map to see it.` and a competitor citation: rows are `MENTIONED_NOT_CITED confidence HIGH`. `python3 devtools/warroom/run.py --replay seo-py-callum/R0009`.
 - Why it is a MUST failure: ADR 0046 B5a rounds 3-6 (a sentence-initial common word is unconfirmed: never in the headline rate or the MNC list).
 - Replay: `seo-py-callum/R0009`, `seo-py-callum/R0010`, `seo-py-callum/R0013`, `seo-py-callum/R0014`, `seo-py-callum/R0015`, `seo-py-callum/R0016`, `seo-py-callum/R0017`, `seo-py-callum/R0018`, `seo-py-callum/R0019`, `seo-py-callum/R0024`, `seo-py-callum/R0025`, `seo-py-callum/R0026`, `seo-py-callum/R0027`, `seo-py-callum/R0034`, `seo-py-callum/R0035`, `seo-py-callum/R0036`, `seo-py-callum/R0037`, `seo-py-callum/R0038`, `seo-py-callum/R0042`, `seo-py-callum/R0043`, `seo-py-callum/R0044`, `seo-py-callum/R0045`, `seo-py-callum/R0046`.
-- Status: OPEN (for the Callum builder; not fixed in the war-room PR).
+- Status: FIXED (seo-py war room fixes WR-F011..WR-F014, ADR 0046 B9; commit `6cdf9311` on branch `claude/seo-callum-engines-20261108`). The replay cases pass and stay as regression cases.
 
 ## WR-F012 — seo-py: Callum's evidence excerpt keeps a secret the answer text carries (the engine's own API key)
 
@@ -181,7 +181,7 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
 - Minimal repro: `python3 devtools/warroom/run.py --replay seo-py-callum/R0011` (secret-echo `answer_text`).
 - Why it is a MUST failure: ADR 0046 A4 / ADR 0017 W4-5 (no output ever carries a key) and B5 (bounded, screened evidence).
 - Replay: `seo-py-callum/R0011`.
-- Status: OPEN.
+- Status: FIXED (seo-py war room fixes WR-F011..WR-F014, ADR 0046 B9; commit `6cdf9311` on branch `claude/seo-callum-engines-20261108`). The replay cases pass and stay as regression cases..
 
 ## WR-F013 — seo-py: a cited URL's path is stored verbatim, so a key in the path reaches rows, evidence and the log
 
@@ -190,7 +190,7 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
 - Minimal repro: `python3 devtools/warroom/run.py --replay seo-py-callum/R0012` (secret-echo `cited_path`).
 - Why it is a MUST failure: as WR-F012.
 - Replay: `seo-py-callum/R0012`.
-- Status: OPEN.
+- Status: FIXED (seo-py war room fixes WR-F011..WR-F014, ADR 0046 B9; commit `6cdf9311` on branch `claude/seo-callum-engines-20261108`). The replay cases pass and stay as regression cases..
 
 ## WR-F014 — seo-py: a client URL that redirects to a raw-Unicode lookalike host is credited as STRENGTH_URL
 
@@ -199,7 +199,7 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
 - Minimal repro: resolution ON, cited `https://acme.com/wr-<hex of https://аcme.com/go>` on the war room's fake web (`python3 devtools/warroom/run.py --replay seo-py-callum/R0001`).
 - Why it is a MUST failure: ADR 0046 B4 M1 (a lookalike at ANY hop is never the client, wherever the chain goes).
 - Replay: `seo-py-callum/R0001`, `seo-py-callum/R0002`, `seo-py-callum/R0003`, `seo-py-callum/R0004`, `seo-py-callum/R0005`, `seo-py-callum/R0006`, `seo-py-callum/R0007`, `seo-py-callum/R0008`, `seo-py-callum/R0020`, `seo-py-callum/R0021`, `seo-py-callum/R0022`, `seo-py-callum/R0023`, `seo-py-callum/R0028`, `seo-py-callum/R0029`, `seo-py-callum/R0030`, `seo-py-callum/R0031`, `seo-py-callum/R0032`, `seo-py-callum/R0033`, `seo-py-callum/R0039`, `seo-py-callum/R0040`, `seo-py-callum/R0041`, `seo-py-callum/R0047`, `seo-py-callum/R0048`, `seo-py-callum/R0049`, `seo-py-callum/R0050`.
-- Status: OPEN.
+- Status: FIXED (seo-py war room fixes WR-F011..WR-F014, ADR 0046 B9; commit `6cdf9311` on branch `claude/seo-callum-engines-20261108`). The replay cases pass and stay as regression cases..
 
 ## AEGIS round 2 (review of the WR-F006 / WR-F007 fixes)
 

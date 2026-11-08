@@ -380,13 +380,40 @@ class Generative(unittest.TestCase):
                 "//site.test/": "NOT_WEB", "file://site.test/": "NOT_WEB"}
         for url, label in want.items():
             self.assertEqual(drv.oracle_url(url), label, url)
-        hop = "https://t.co/wr-" + ("https://sіte.test/wr-" + "https://site.test/p".encode().hex()).encode().hex()
+        import grammar
+        hop = "https://t.co/wr-" + grammar.hexenc("https://sіte.test/wr-" + grammar.hexenc("https://site.test/p"))
         self.assertEqual(drv.chain_of(hop)[-1], "https://site.test/p")
         self.assertTrue(drv.tainted(hop, "site.test"))
         self.assertFalse(drv.creditable(hop, "site.test", True) and not drv.tainted(hop, "site.test"))
-        clean = "https://t.co/wr-" + "https://site.test/p".encode().hex()
+        clean = "https://t.co/wr-" + grammar.hexenc("https://site.test/p")
         self.assertTrue(drv.creditable(clean, "site.test", True))
         self.assertFalse(drv.creditable(clean, "site.test", False))     # resolution off: the cited host decides
+
+
+def _service_deps() -> bool:
+    import importlib.util as u
+    return all(u.find_spec(m) is not None for m in ("fastapi", "httpx", "pydantic"))
+
+
+class CallumReplayRegressions(unittest.TestCase):
+    """A replay case must really exercise what its finding names: WR-F014 (a client URL redirecting to a raw-Unicode
+    lookalike) once passed only because the fake web's paths looked secret-shaped and its Location header could not be
+    built, so the redirect was never followed. The replay must show the redirect hop."""
+
+    @unittest.skipUnless(_service_deps(), "needs seo-py's pinned requirements (the warroom CI job installs them)")
+    def test_wr_f014_replay_records_the_redirect_hop(self):
+        lib = engine.load_library("seo-py-callum")
+        case = next(c for c in engine.replay_cases(lib) if c["case_id"] == "seo-py-callum/R0001")
+        self.assertEqual(case["known_failure"] or json.loads((engine.REPLAY / "seo-py-callum.json").read_text(
+            encoding="utf-8"))["cases"][0].get("fixed"), "WR-F014")
+        obs = engine.run_worker(lib, [case], sys.executable)["seo-py-callum/R0001"]
+        self.assertIsNone(obs.get("error"), obs.get("error"))
+        rows = obs["steps"][0]["body"]["result"]["facts"]["rows"]
+        cited = [r for r in rows if r.get("chain") and (r["chain"].get("cited") or {}).get("host") == "acme.com"]
+        self.assertTrue(cited, rows[:3])
+        for r in cited:
+            self.assertTrue(r["chain"]["hop_hosts"], r["chain"])               # the redirect was really followed
+            self.assertNotEqual(r["class"], "STRENGTH_URL", r)
 
 
 class Personas(unittest.TestCase):
