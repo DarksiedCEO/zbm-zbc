@@ -83,9 +83,10 @@ def test_attack_corpus_every_case_drops(base, obf, text):
     assert sp.classify_query(text, ["acme"]) == "pii_suspect", (base, obf, repr(text))
 
 
-@pytest.mark.parametrize("base,obf,text", list(ac.gaps()))
-def test_attack_corpus_known_gaps_are_the_disclosed_ones(base, obf, text):
-    assert sp.classify_query(text, ["acme"]) != "pii_suspect", f"{base}/{obf} is now caught: update KNOWN_GAPS"
+def test_attack_corpus_known_gaps_are_the_disclosed_ones():
+    for base, obf, text in ac.gaps():
+        assert sp.classify_query(text, ["acme"]) != "pii_suspect", f"{base}/{obf} is now caught: update KNOWN_GAPS"
+    assert ac.KNOWN_GAPS == set()                       # round 11 closed the phone / SSN filler-letter gaps
 
 
 def _all_drop_cases():

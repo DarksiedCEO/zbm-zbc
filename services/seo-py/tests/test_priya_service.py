@@ -347,3 +347,47 @@ def test_an_unexpected_transport_failure_in_bing_is_a_source_failure(tmp_path):
     out = run(h, body={"sources": ["gsc", "bing"], "bing_site_domain": "acme.test"})
     assert out["ledger"]["sources"]["bing_webmaster"]["state"] == "BING_PROTOCOL_ERROR"
     assert out["ledger"]["status"] == "PARTIAL"
+
+
+# ---------------------------------------------------------------- review round 11: the Naomi / Theo hand-off record
+
+def _consumer_canonical_sha(doc) -> str:
+    """The consumer's canonical form (PR #53 priya_handoff.canonical_sha), restated so the two cannot drift."""
+    import hashlib
+    return hashlib.sha256(json.dumps(doc, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+                          .encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def test_the_run_records_the_handoff_sha_per_priya_handoff_record_1(tmp_path):
+    h, fake = setup(tmp_path)
+    out = run(h)
+    doc = out["ledger"]["handoff"]
+    assert out["handoff_record"] == "priya.handoff_record/1"
+    assert out["handoff_sha256"] == _consumer_canonical_sha(doc) == priya.handoff_sha(doc)
+    assert out["handoff_items"] == len(doc["items"]) and out["status"] == "completed"
+    assert out["tenant_id"] == "acme" and doc["run_id"] == out["run_id"] and doc["tenant_id"] == "acme"
+    runs = h.ok(h.get("/tenants/acme/keyword-ledger-runs"))
+    assert runs[0]["handoff_sha256"] == out["handoff_sha256"] and runs[0]["handoff_items"] == out["handoff_items"]
+    tampered = json.loads(json.dumps(doc))
+    tampered["items"] = tampered["items"][:-1]
+    assert _consumer_canonical_sha(tampered) != out["handoff_sha256"]          # a changed hand-off never verifies
+
+
+def test_the_handoff_record_survives_a_restart_and_a_replay_and_keeps_no_query_text(tmp_path):
+    h, fake = setup(tmp_path, data_dir=str(tmp_path / "data"))
+    body = {"request_id": rid()}
+    out = h.ok(h.post("/tenants/acme/keyword-ledger", body), 201)
+    again = h.ok(h.post("/tenants/acme/keyword-ledger", body), 201)
+    assert again["replay"] is True and again["handoff_sha256"] == out["handoff_sha256"]
+    h2 = h.restart()
+    runs = h2.ok(h2.get("/tenants/acme/keyword-ledger-runs"))
+    assert runs[0]["handoff_sha256"] == out["handoff_sha256"] and runs[0]["handoff_record"] == "priya.handoff_record/1"
+    blob = every_stored_byte(h2, tmp_path)
+    assert out["handoff_sha256"] in blob and not any(t in blob for t in SECRET_TEXTS)
+
+
+def test_a_run_without_search_console_still_records_an_empty_handoff_hash(tmp_path):
+    h, fake = setup(tmp_path)
+    h.ports.first_party["search_console"].connected = False
+    out = run(h)
+    assert out["handoff_items"] == 0 and out["handoff_sha256"] == priya.handoff_sha(out["ledger"]["handoff"])

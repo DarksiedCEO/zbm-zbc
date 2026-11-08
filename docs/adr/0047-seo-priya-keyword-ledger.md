@@ -145,7 +145,7 @@ account and developer token: a founder decision, not built.
 
 A query that ADR 0017's classifier calls `pii_suspect` (e-mails in any spelling, one phone-like run of 7+ digits not
 an ISO date, id- or secret-like words, and — added in review round 1, reworked in rounds 2 to 4,
-`search_performance` rules `2026-11-08.10`, so Osei's query classes use it too — address forms and over-long text):
+`search_performance` rules `2026-11-08.11`, so Osei's query classes use it too — address forms and over-long text):
 - an id- or secret-like word (round 4 narrowed this from the log templater's rule, which dropped model numbers, tire
   sizes, decimals and years — `24acc636a003`, `225/65r17`, `3.5`, `2012` — as ids): an e-mail in any spelling, a
   UUID, 16+ hex characters, a JWT-like dotted token, 20+ token characters, anything over 40 characters, a
@@ -199,14 +199,31 @@ an ISO date, id- or secret-like words, and — added in review round 1, reworked
   `example [.] com`) for common TLDs, the label not a stop word (`the dot com bubble` is kept).
   **Still not caught (round 9, disclosed):** dotted octal or hex IPv4 (`0300.0250.1.1`, `0xc0.0xa8.1.1`); a
   "dot" host with an uncommon TLD; base64 of binary data split into short words; a time-like `hh:mm:ss` is kept
-  and an IPv6 literal of three short groups could be missed. Round 10: a phone or SSN-shaped number with a filler
-  letter between its groups (too few digits for Luhn, and the letter breaks the 7-digit run), and an address
-  (IP, IPv6, URL) spaced out character by character, are not caught — both pinned as known gaps in
-  `tests/attack_corpus.py`, the table-driven corpus (public test card numbers, AWS's documentation example key,
-  RFC 5737 / RFC 3849 addresses, example.com) that applies every obfuscation — combining marks, zero-width, bidi,
-  fullwidth, mathematical, circled, superscript and other-script digits, Cyrillic homoglyphs, eleven separators
-  (each character / each group), spelled-out digits, reversal and filler letters / tokens — and that reviewers
-  can run directly; all of its 388 generated cases drop;
+  and an IPv6 literal of three short groups could be missed. An address (IP, IPv6, URL) spaced out character by
+  character is not caught.
+- **Round 11.** The separator-stripped text of a secret-chunked query gets the alternation, hex, prefix and entropy
+  (4.1+ bits) rules and an equal-length-chunks rule, but **no length rule**: round 10's length rule dropped spec
+  queries (`12v 100ah lifepo4 battery`, `r410a r22 refrigerant`); 39 spec / model-number queries are KEEP tests.
+  9+ digits across filler tokens set apart by separators (`123 x 45 x 6789`, `1234 -ab- 5678 -ab- 9`) are dropped
+  (ordinary words and units — `in`, `to`, `vs`, `km`, `mhz` glued to a number — never join two numbers, so `cars
+  under 30000 in 50000 miles` and `ddr5 6000mhz cl30 32gb` are kept); letters used as digits inside digit-like
+  words (`4lll`, `SSS-OlO-Ol99`: l/i/| → 1, o → 0, s → 5, b → 8, z → 2) for the 9+ digit and Luhn rules;
+  dingbat, negative circled and other enclosed digits (`❶`, `➀`, `⓵`); Spanish and mixed spelled digits, number
+  words run together once separators are removed (forwards and reversed); 12+ one-character words judged as one
+  token (forwards and reversed); base64 padding after case-folding; spaced or "dot" IPv4 (`192 . 0 . 2 . 1`,
+  `192 dot 0 dot 2 dot 1`).
+- **The attack corpus** (`tests/attack_corpus.py`, rounds 10-11): public test card numbers, AWS's documentation
+  example key, a SHA-256 hex digest, an example JWT, base64 and percent-encoded e-mail / key, RFC 5737 / RFC 3849
+  addresses and example.com, under every obfuscation — combining marks (acute, keycap, underline), zero-width,
+  bidi, fullwidth, mathematical, Cyrillic homoglyphs, circled / superscript / dingbat / negative circled / double
+  circled / parenthesized / full-stop / Arabic-Indic / Devanagari digits, letter-for-digit homoglyphs, eleven
+  separators (each character / each group), English, Spanish and mixed spelled digits, reversal, filler letters /
+  tokens, interleaving and case changes. **Single obfuscation: 478 generated cases, all dropped** (round 10's text
+  said 388 cases — the count was 390 with its two pinned gaps; both gaps are closed now). **Composed mode** (two
+  obfuscations, a deterministic SHA-256-selected one-in-11 subset of every ordered pair): **1,748 cases, 5 kept
+  (0.29%)**, all in ONE pinned class — filler letters or tokens placed INSIDE spelled-out number words
+  (`thre-ab-e se-ab-ven …`). Risk: low; it needs a deliberate two-step obfuscation and its output is no longer a
+  readable number. The tests pin it (`tests/test_query_privacy_r11.py`: residual ≤ 1% and only that class);
   7+ digits in one run stay the digit-run rule's;
 - a street address: a house number (at the start, or after a space not preceded by `top` / `best`), an optional
   direction, 1-3 street-name tokens (none a stop or quantity word such as `near`, `in`, `best`, `hour`, `bedroom`,
@@ -265,6 +282,13 @@ conversation mining, NOT_BUILT; naomi: prompt volume, NOT_CONNECTED), `items` (e
 `origin`, `emerging_kinds`, `volume_status` (BELOW_THRESHOLD or UNKNOWN_NOT_MEASURED only), `observed_counts` (null
 for derived items), `evidence`, `requested_measurements`), and the rule "an item is a candidate to measure, not a
 measured demand". `priya.validate_handoff` is the check the consumers are to run. Nothing consumes it yet.
+
+**Hand-off record (round 11, contract `priya.handoff_record/1`, consumer side ADR 0049 / PR #53).** Every completed
+run's `keyword_ledger_recorded` record — and the run views — carry `handoff_record` (`priya.handoff_record/1`),
+`handoff_sha256` (SHA-256 of the hand-off document exactly as the run returned it, canonical form: JSON, keys
+sorted, separators `,` `:`, `ensure_ascii` false, UTF-8; `priya.handoff_sha`) and `handoff_items`
+(`len(items)`), next to the run id, tenant and status, so Theo and Naomi can verify a hand-off they are given.
+Only the hash and the count are kept; the document (it carries query text) is still never stored.
 
 ## Not built (honest)
 

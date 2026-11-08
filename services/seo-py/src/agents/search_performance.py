@@ -48,10 +48,12 @@ import lookalikes
 from agents import logs as logs_mod
 
 AGENT, TASK = "osei", "search_performance"
-VERSION = "2026-11-08.10"                     # query classes, templating and the aggregation rules below
+VERSION = "2026-11-08.11"                     # query classes, templating and the aggregation rules below
 # 2026-11-08.1 (Priya review round 1, M3): street addresses, unit / apartment numbers, PO boxes, ZIP+4 and a ZIP next
 #    to a US state are pii_suspect (looks_like_address)
 # 2026-11-08.2 (review round 2): the address rule needs address structure (it over-dropped service queries)
+# 2026-11-08.11 (review round 11): no length rule on joined letter-digit text (spec queries kept); 9+ digits across
+#    filler tokens; homoglyph and enclosed digits; Spanish and mixed spelled digits; spaced / "dot" IPv4
 # 2026-11-08.10 (review round 10): one shared character normalisation (clean_text) for the classifier and Priya's
 #    key; the full word rules on secret-chunked queries with separators removed; URL-safe base64 decoded, base64
 #    needs a tell or a sensitive decode; cards across up to three filler characters; spelled-out digit runs
@@ -130,6 +132,7 @@ def brand_tokens(domains: Iterable[str], entity_name: str | None) -> list:
 
 
 PII_DIGIT_RUN = 7
+FILLER_DIGIT_RUN = 9           # round 11: SSN (9) and phone (10) digits across short filler tokens
 # phone separators: space, dot, parentheses, slash, underscore, comma, plus, the ASCII hyphen, the Unicode hyphens and
 # dashes (U+2010..U+2015: hyphen, non-breaking hyphen, figure dash, en dash, em dash, horizontal bar), the minus sign
 # and the middle dot; up to five in a row (" -- ", ") - ") between two digits (AEGIS gl-gsc certification L4)
@@ -350,6 +353,9 @@ _URL_MARKS = re.compile(r"[a-z][a-z0-9+.-]{0,15}://|://|(?<![a-z0-9])www\.|%[0-9
                         r"(?<![0-9a-z:])::(?:ffff:)?[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){0,6}(?![0-9a-z:])")
 # round 9: a host written with spaces or "dot" ("example . com", "example dot com"), common TLDs only; the label
 # may not be a stop word ("the dot com bubble" is kept)
+# round 11: an IPv4 address written with spaces or "dot" ("192 . 0 . 2 . 1", "192 dot 0 dot 2 dot 1")
+_SPACED_IP = re.compile(r"(?<![\d.])\d{1,3}(?:\s*(?:\.|\(\.\)|\[\.\]|\(dot\)|\[dot\]|\bdot\b|\bpunto\b)\s*\d{1,3}){3}"
+                        r"(?![\d.])")
 _SPACED_HOST = re.compile(r"(?<![a-z0-9-])(?!(?:the|a|an|of|in|on|at|to|and|or|is)\s)[a-z0-9][a-z0-9-]{0,62}"
                           r"\s*(?:\.|\(\.\)|\[\.\]|\s\(?dot\)?|\[dot\])\s*"
                           r"(?:com|net|org|io|co|uk|us|ca|de|fr|au|info|biz|edu|gov|app|dev|ai)(?![a-z0-9])")
@@ -396,6 +402,10 @@ def clean_text(t: str, keep_script_marks: bool) -> str:
         base_ascii = ord(c) < 128
         if not keep_script_marks and cat == "Nd" and not c.isascii():
             c = str(unicodedata.digit(c))          # detection form: other-script digits (٤, ४) judged as ASCII
+        elif not keep_script_marks and cat == "No":
+            v = unicodedata.numeric(c, None)       # round 11: dingbat / negative circled / enclosed numbers (❶, ➀)
+            if v is not None and float(v).is_integer() and 0 <= v <= 20:
+                c = str(int(v))
         out.append(c)
     return unicodedata.normalize("NFKC", "".join(out)).translate(_DOTS)
 
@@ -419,7 +429,8 @@ def decode_query(q: str) -> str:
 
 def url_like(folded: str) -> bool:
     """Whether decoded, folded query text looks like a URL (dropped whole; review round 8)."""
-    if _URL_MARKS.search(folded) or _HOSTNAME.search(folded) or _SPACED_HOST.search(folded):
+    if _URL_MARKS.search(folded) or _HOSTNAME.search(folded) or _SPACED_HOST.search(folded) \
+            or _SPACED_IP.search(folded):
         return True
     return any("/" in w and not _SLASH_OK.fullmatch(w) for w in folded.split())
 
@@ -436,16 +447,100 @@ def _luhn(digits: str) -> bool:
 
 # digit groups joined by separators and at most one short filler token of up to three characters between them
 # ("4539 x 1488", "4111-ab-1111", "4111 xy 1111"; round 10)
-_DIGIT_GROUPS = re.compile(r"\d+(?:[\s\-/._,:;]{0,3}[^\d\s]{0,3}[\s\-/._,:;]{0,3}\d+)*")
+_GSEP = r"[\s\-/._,:;()\[\]]"
+_GFILL = r"[^\d\s\-/._,:;()\[\]]{1,3}"
+# between two digit groups: separators, and up to three filler tokens of 1-3 characters, each set apart by a separator
+# (so a word of four letters such as "ford" never counts as filler)
+_DIGIT_GROUPS = re.compile(r"\d+(?:" + _GSEP + r"{0,3}(?:" + _GFILL + r"(?:" + _GSEP + r"{1,3}" + _GFILL + r"){0,2})?"
+                           + _GSEP + r"{0,3}\d+)*")
+# the stricter form for the 9+ digit rule (no Luhn check behind it): filler tokens must be set apart from the digits
+# by separators, so a unit glued to a number ("6000mhz cl30") never joins two numbers
+_DIGIT_GROUPS_STRICT = re.compile(r"\d+(?:(?:" + _GSEP + r"{1,3}" + _GFILL + r"(?:" + _GSEP + r"{1,3}" + _GFILL
+                                  + r"){0,2}" + _GSEP + r"{1,3}|" + _GSEP + r"{0,3})\d+)*")
 _NUMBER_WORDS = {"zero": "0", "oh": "0", "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6",
-                 "seven": "7", "eight": "8", "nine": "9"}
-_SPELLED = re.compile(r"(?:\b(?:" + "|".join(_NUMBER_WORDS) + r")\b[\s\-,.]*){7,}")
+                 "seven": "7", "eight": "8", "nine": "9",
+                 # round 11: Spanish
+                 "cero": "0", "uno": "1", "una": "1", "dos": "2", "tres": "3", "cuatro": "4", "cinco": "5",
+                 "seis": "6", "siete": "7", "ocho": "8", "nueve": "9"}
+_SPELLED = re.compile(r"(?:(?:\b(?:" + "|".join(_NUMBER_WORDS) + r")\b|\d+|\b[lioszb|]\b)[\s\-,.]*"
+                      r"(?:(?!(?:" + "|".join(_NUMBER_WORDS) + r")\b)[a-z]{1,3}\b[\s\-,.]*)?){7,}")
+_HOMO1 = {"l": "1", "i": "1", "|": "1", "o": "0", "s": "5", "b": "8", "z": "2"}
+# number words run together once every separator is gone ("f i v e f i v e ...", reversed too; round 11)
+_NUMWORD_CONCAT = re.compile(r"(?:" + "|".join(sorted(_NUMBER_WORDS, key=len, reverse=True)) + r"|\d){7,}")
 
 
 def spelled_digits(folded: str) -> str:
-    """Runs of 7+ spelled-out digits as digits ("four one one one ..." -> "4111..."; round 10), else ""."""
-    return " ".join("".join(_NUMBER_WORDS[w] for w in re.findall(r"[a-z]+", m.group()))
-                    for m in _SPELLED.finditer(folded))
+    """Runs of 7+ tokens that are spelled-out digits (English or Spanish) or digits, with at least two spelled
+    ones, as digits ("four one one one ..." -> "4111...", "4 one 1 one ..."; rounds 10-11), else ""."""
+    out = []
+    for m in _SPELLED.finditer(folded):
+        toks = [t for t in re.findall(r"[a-z]+|\d+|\|", m.group())
+                if t in _NUMBER_WORDS or t.isdigit() or t in _HOMO1]           # filler tokens dropped
+        if sum(1 for t in toks if t in _NUMBER_WORDS) >= 2:
+            out.append("".join(_NUMBER_WORDS.get(t) or _HOMO1.get(t, t) for t in toks))
+    squashed = re.sub(r"[^a-z0-9]", "", folded)
+    for text in (squashed, squashed[::-1]):
+        for m in _NUMWORD_CONCAT.finditer(text):
+            toks = re.findall("|".join(sorted(_NUMBER_WORDS, key=len, reverse=True)) + r"|\d", m.group())
+            if sum(1 for t in toks if t in _NUMBER_WORDS) >= 2:
+                out.append("".join(_NUMBER_WORDS.get(t, t) for t in toks))
+    return " ".join(out)
+
+
+# round 11: letters used as digits ("4lll llll", "SSS-OlO-Ol99"): l i | -> 1, o -> 0, s -> 5, b -> 8, z -> 2
+_HOMOGLYPH_DIGITS = str.maketrans({"l": "1", "i": "1", "|": "1", "o": "0", "s": "5", "b": "8", "z": "2"})
+_HOMOGLYPH_SET = frozenset("lio|sbz")
+
+
+def homoglyph_digits(folded: str) -> str:
+    """A view of the query with homoglyph letters read as digits, only inside digit-like words: a word with a real
+    digit whose letters are all homoglyphs, and all-homoglyph words of 2+ characters next to such a word. Used only
+    by the 9+ digit-run and Luhn rules, so ``lol 2024`` (7 digits) is not hit."""
+    words = folded.split()
+
+    def letters_ok(w):
+        return all(not c.isalpha() or c in _HOMOGLYPH_SET for c in w if c not in "-._/")
+
+    mapped = [any(c.isdigit() for c in w) and letters_ok(w) and any(c in _HOMOGLYPH_SET for c in w) for w in words]
+    seed = [any(c.isdigit() for c in w) and letters_ok(w) for w in words]
+
+    def near_seed(i):                    # a seed next door, or one word further across a short filler word
+        for j in (i - 1, i + 1):
+            if 0 <= j < len(words) and seed[j]:
+                return True
+        for j, k in ((i - 2, i - 1), (i + 2, i + 1)):
+            if 0 <= j < len(words) and seed[j] and len(words[k]) <= 3 and not seed[k]:
+                return True
+        return False
+    changed = True
+    while changed:
+        changed = False
+        for i, w in enumerate(words):
+            if seed[i] or not all(c in _HOMOGLYPH_SET or c in "-._/" for c in w):
+                continue
+            if near_seed(i):
+                seed[i] = mapped[i] = changed = True
+    if not any(mapped):
+        return ""
+    return " ".join(w.translate(_HOMOGLYPH_DIGITS) if seed[i] else w for i, w in enumerate(words))
+
+
+_FILLER_STOP = re.compile(r"\b(?:in|on|at|to|of|or|and|vs|by|for|the|is|are|per|than|from|an|a|with|into|via|"
+                          r"y|o|en|de|con|por|para|km|mi|ft|lb|kg|mph|usd)\b")
+
+
+def filler_digit_run(folded: str) -> int:
+    """The most digits in consecutive digit groups once separators and short filler tokens (up to three characters)
+    between them are removed ("123 x 45 x 6789", "1234 -ab- 5678 -ab- 9"; round 11); ordinary short words and units
+    (``in``, ``to``, ``vs``, ``km`` ...) never join two numbers ("cars under 30000 in 50000 miles" is kept), and
+    year-like groups do not count when there are two or more of them, as in ``longest_digit_run``."""
+    best = 0
+    text = _FILLER_STOP.sub(" #### ", _ISO_DATE.sub(" # ", folded))     # ordinary words never join numbers
+    for m in _DIGIT_GROUPS_STRICT.finditer(text):
+        groups = re.findall(r"\d+", m.group())
+        years = [g for g in groups if _YEAR.fullmatch(g)]
+        best = max(best, sum(len(g) for g in groups if len(years) < 2 or not _YEAR.fullmatch(g)))
+    return best
 
 
 def card_like(folded: str) -> bool:
@@ -476,17 +571,27 @@ def _entropy(w: str) -> float:
 def split_secret(folded: str) -> bool:
     """A secret split by separators (rounds 8-10): each space-separated word with '/', '-', '_' and '.' removed is
     judged by the word rules (``abcd-1234-efgh-5678-ijkl-9012``); the whole query with spaces and separators removed
-    by the prefix, alternation and hex rules always, and by the FULL word rule set (20+ token characters, 16+
-    mixed, entropy) when it is chunked like a secret: at least two words mixing letters and digits, and more than
-    half of all words (``9f86d081 884c7d65``, ``ab12 cd34 ef56``; ``ps5 2tb ssd upgrade`` is two of four, kept).
-    Ordinary queries hold at most one model number per few words, so ``trane xr14 4 ton`` and ``3 bed 2 bath 1500
-    sq ft`` are not judged as one token."""
+    by the prefix, alternation and hex rules always; and, when it is chunked like a secret (at least two words
+    mixing letters and digits, more than half of all words), by an entropy check (16+ characters at 4.1+ bits) and
+    an equal-length-chunks check (``ab12 cd34 ef56 gh78``). Round 11: the length rules (20+ token characters, 16+
+    mixed) are NOT applied to the joined text: spec queries such as ``12v 100ah lifepo4 battery`` or ``r410a r22
+    refrigerant`` join into long letter-digit strings and were dropped."""
     for w in folded.split():
         j = re.sub(r"[/\-_.]", "", w)
         if j != w and j and _word_identifies(j):
             return True
     whole = re.sub(r"[\s/\-_.]", "", folded)
-    if _SECRET_PREFIX.search(whole):
+    if _SECRET_PREFIX.search(whole) or _SECRET_PREFIX.search(whole[::-1]):
+        return True
+    # round 11: a run of 12+ one-character words is a value spelled out character by character ("A K I A ...");
+    # no ordinary query has one, so the joined run gets the FULL word rules, forwards and reversed
+    for m in re.finditer(r"(?:(?<!\S)\S(?!\S)\s*){12,}", folded):
+        run = re.sub(r"\s", "", m.group())
+        if _word_identifies(run) or _word_identifies(run[::-1]):
+            return True
+    # round 11: base64 padding, case-folded or not ("amfuzs5kb2 vazxhhbxbs zs5jb20="): 12+ base64 characters with a
+    # digit, ending in '=' or '=='
+    if re.fullmatch(r"[a-z0-9+/]{12,}={1,2}", re.sub(r"\s", "", folded)) and any(c.isdigit() for c in whole):
         return True
     alnum = re.sub(r"[^a-z0-9]", "", whole)
     letters, digits = sum(c.isalpha() for c in alnum), sum(c.isdigit() for c in alnum)
@@ -500,10 +605,12 @@ def split_secret(folded: str) -> bool:
     words = folded.split()
     mixed = [w for w in words if any(c.isalpha() for c in w) and any(c.isdigit() for c in w)]
     if len(words) >= 2 and len(mixed) >= 2 and 2 * len(mixed) > len(words):
-        if _word_identifies(whole):
+        # round 11: no length rule on the joined text (it dropped "12v 100ah lifepo4 battery"); only entropy, at a
+        # bar ordinary spec queries stay under (they peak near 4.0 bits), and uniform secret-like chunks
+        if len(alnum) >= 16 and _entropy(alnum) >= 4.1:
             return True
-        if len(alnum) >= 16 and _entropy(alnum) >= 3.5:
-            return True
+        if len(mixed) >= 3 and len(mixed) == len(words) and len({len(w) for w in words}) == 1 and len(words[0]) >= 4:
+            return True                                  # "ab12 cd34 ef56 gh78": equal-length letter-digit chunks
     return False
 
 
@@ -551,11 +658,14 @@ def classify_query(q: str, brands: list, _depth: int = 0) -> str:
     folded = _LOOKALIKE.fold_cased(t)
     words = folded.split()
     spelled = spelled_digits(folded)
+    glyphs = homoglyph_digits(folded)
     if url_like(folded) or base64_text(t, _depth) or "@" in folded or logs_mod._EMAIL.search(folded) \
             or logs_mod._AT_WORD.search(folded) \
             or longest_digit_run(folded) >= PII_DIGIT_RUN or any(_word_identifies(w) for w in words) \
             or card_like(folded) or split_secret(folded) or looks_like_address(folded) \
-            or (spelled and (longest_digit_run(spelled) >= PII_DIGIT_RUN or card_like(spelled))):
+            or (spelled and (longest_digit_run(spelled) >= PII_DIGIT_RUN or card_like(spelled))) \
+            or filler_digit_run(folded) >= FILLER_DIGIT_RUN \
+            or (glyphs and (longest_digit_run(glyphs) >= 9 or card_like(glyphs))):
         return "pii_suspect"
     squashed = re.sub(r"[^a-z0-9]", "", folded)
     if any(b in squashed for b in brands):

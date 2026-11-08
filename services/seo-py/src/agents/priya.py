@@ -38,6 +38,7 @@ The input is plain data; this module touches no service state, ledger, log or ne
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import re
 import unicodedata
@@ -159,8 +160,11 @@ LIMITS = [
     "caught. One character normalisation is shared by the classifier and the stored key (controls, private-use "
     "and space variants become spaces), so a split value cannot reappear joined in the ledger; spelled-out digit "
     "runs, URL-safe base64 and cards across short filler tokens are caught. Still not caught: dotted octal or hex "
-    "IPv4 ('0300.0250.1.1'), a 'dot' host with an uncommon TLD, base64 of binary data split into short words, a "
-    "phone or SSN with a filler letter between its groups, and an address spaced out character by character. The "
+    "IPv4 ('0300.0250.1.1'), a 'dot' host with an uncommon TLD, base64 of binary data split into short words, an "
+    "address spaced out character by character, and filler letters placed inside spelled-out number words "
+    "('thre-ab-e se-ab-ven ...'). Phones and SSNs across filler tokens, homoglyph, enclosed and Spanish spelled "
+    "digits, and spaced or 'dot' IPv4 addresses are caught; spec and model-number queries ('12v 100ah lifepo4 "
+    "battery') are kept. The "
     "rule also drops some non-addresses shaped like '<number> <word> st' or '<number> <word> court'. Derived "
     "variants are never built from a query with a capitalised word, nor from a frame adding a word outside a "
     "closed vocabulary.",
@@ -710,6 +714,16 @@ HANDOFF_CONSUMERS = {"theo": {"task": "conversation mining", "state": "NOT_BUILT
                      "naomi": {"task": "prompt volume", "state": "NOT_CONNECTED"}}
 HANDOFF_ITEM_KEYS = ("key", "query", "origin", "emerging_kinds", "volume_status", "observed_counts", "evidence",
                      "requested_measurements")
+
+
+HANDOFF_RECORD_CONTRACT = "priya.handoff_record/1"
+
+
+def handoff_sha(doc: dict) -> str:
+    """The SHA-256 of the canonical hand-off document (contract ``priya.handoff_record/1``, the consumer's
+    ``priya_handoff.canonical_sha``): JSON, keys sorted, separators (',', ':'), ensure_ascii false, UTF-8, hex."""
+    return hashlib.sha256(json.dumps(doc, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+                          .encode("utf-8", "surrogatepass")).hexdigest()
 
 
 def handoff(tenant_id: str, run_id: str, generated_at: str, rows: list) -> dict:

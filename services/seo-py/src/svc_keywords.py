@@ -182,7 +182,11 @@ class KeywordsMixin:
             lsha = sha(ledger)
             rec = {"run_id": run_id, "status": ledger["status"], "outcome": env["outcome"], "ledger_sha256": lsha,
                    "counts": _count_view(ledger["counts"]),
-                   "sources": {k: v["state"] for k, v in ledger["sources"].items()}}
+                   "sources": {k: v["state"] for k, v in ledger["sources"].items()},
+                   # contract priya.handoff_record/1 (ADR 0047 / ADR 0049): what Theo and Naomi verify against
+                   "handoff_record": priya.HANDOFF_RECORD_CONTRACT,
+                   "handoff_sha256": priya.handoff_sha(ledger["handoff"]),
+                   "handoff_items": len(ledger["handoff"]["items"])}
             self._commit("keyword_ledger_recorded", rec, "seo",
                          evidence=("keyword_ledger_recorded", f"keywords:{run_id}", dict(rec), ("recorded", run_id)))
             view = self.keyword_run_view(tid, run_id)
@@ -295,7 +299,8 @@ class KeywordsMixin:
             "gsc_read": bool(d["gsc_read"]), "window": None if not d.get("window_start") else
             {"start": d["window_start"], "end": d["window_end"]}, "andre_approved": bool(d.get("andre_approved")),
             "requested_by": d["actor"], "requested_at": at, "status": "running", "completed_at": None,
-            "ledger_status": None, "outcome": None, "ledger_sha256": None, "counts": None, "source_states": None}
+            "ledger_status": None, "outcome": None, "ledger_sha256": None, "counts": None, "source_states": None,
+            "handoff_record": None, "handoff_sha256": None, "handoff_items": None}
         if d["gsc_read"]:                                  # one read against the tenant's keyword-ledger budget
             reads = self.gsc_ledger_reads.setdefault(d["tenant_id"], [])
             reads.append(at)
@@ -304,7 +309,10 @@ class KeywordsMixin:
     def _a_keyword_ledger_recorded(self, d, at):
         self.keyword_runs[d["run_id"]].update(status="completed", completed_at=at, ledger_status=d["status"],
                                               outcome=d["outcome"], ledger_sha256=d["ledger_sha256"],
-                                              counts=dict(d["counts"]), source_states=dict(d["sources"]))
+                                              counts=dict(d["counts"]), source_states=dict(d["sources"]),
+                                              handoff_record=d.get("handoff_record"),
+                                              handoff_sha256=d.get("handoff_sha256"),
+                                              handoff_items=d.get("handoff_items"))
 
     def _a_keyword_ledger_interrupted(self, d, at):
         self.keyword_runs[d["run_id"]].update(status="interrupted", completed_at=at, interrupted_reason=d["reason"],
