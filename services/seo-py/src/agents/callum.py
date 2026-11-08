@@ -289,8 +289,7 @@ def url_has_secret(url: Optional[str]) -> bool:
     p = split_url(url) if url else None
     if p is None:
         return False
-    parts = (p.path or "").split("/") + [p.query or "", p.fragment or "", p.username or "", p.password or ""]
-    return any(secret_guard.has_secret(x) for x in parts if x)
+    return secret_guard.url_has_secret(url)
 
 
 def stored_url(url: Optional[str]) -> Optional[dict]:
@@ -304,9 +303,11 @@ def stored_url(url: Optional[str]) -> Optional[dict]:
     path = p.path or "/"
     withheld = None
     segs = path.split("/")
-    if any(secret_guard.has_secret(x) for x in segs):
-        # WR-F013: a secret-shaped path segment is replaced, never kept; host and the other segments stay
-        path, withheld = "/".join("{secret}" if secret_guard.has_secret(x) else x for x in segs), "SECRET_REDACTED"
+    bad, _ = secret_guard.url_secret_segments(url)
+    if bad:
+        # WR-F013: a secret-shaped path segment is replaced, never kept; host and the other segments stay (the
+        # allowed shapes — commit SHAs on code hosts, hashed asset names, document ids, shorteners — are kept)
+        path, withheld = "/".join("{secret}" if i in bad else x for i, x in enumerate(segs)), "SECRET_REDACTED"
     if personal_data(path) is not None:
         path, withheld = "/{withheld}", "PERSONAL_DATA"
     host = p.hostname.lower()[:253]
@@ -515,7 +516,7 @@ def classify(engines: dict, prompt_set: dict, domain: str, resolver: Resolver, r
                 # WR-F013: a URL carrying a secret is never fetched, whatever the resolution setting
                 secret_url = url_has_secret(c["url"])
                 res = {"state": "NOT_FETCHED_SECRET"} if secret_url and resolver.enabled else (
-                    {"state": "OFF"} if secret_url else resolver.resolve(c["url"]))
+                    {"state": "OFF"} if secret_url else resolver.resolve(secret_guard.fetch_url(c["url"])))
                 cl = classify_citation(c["url"], domain, competitors, res)
                 if secret_url or any((cl["chain"].get(x) or {}).get("withheld") == "SECRET_REDACTED"
                                      for x in ("cited", "final", "canonical")):

@@ -1230,3 +1230,80 @@ def test_wr_f014_a_client_chain_refused_after_hops_or_ending_on_an_error_page_is
     res2 = callum.Resolver(ScriptedFetcher({u: err}), lambda **k: None, True, 5).resolve(u)
     cl = callum.classify_citation(u, "acme.com", [], res2)
     assert cl["class"] == "INCONCLUSIVE" and cl["reason"] == "LANDING_PAGE_ERROR"
+
+
+# ---------------------------------------------------------------------------------------------- redaction precision
+
+KEEP_URLS = [
+    "https://x.com/acme/status/1852960912345678901", "https://twitter.com/acme/status/1795000000000000000",
+    "https://www.aliexpress.com/item/1005006123456789.html", "https://www.aliexpress.us/item/3256805123456789.html",
+    "https://github.com/acme/site/commit/8f14e45fceea167a5a36dedd4bea2543c1b2d3e4",
+    "https://github.com/acme/site/tree/3f2a9c1b7e4d5a6f8e9d0c1b2a3f4e5d6c7b8a9f/docs",
+    "https://gitlab.com/acme/site/-/commit/9d4e1e23bd5b727046a9e3b4b7db57bd8d6ee684",
+    "https://bitbucket.org/acme/site/commits/aa4f3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a",
+    "https://cdn.site.test/static/main.8f14e45fceea167a.css", "https://cdn.site.test/js/app-3f2a9c1b7e4d5a6f.js",
+    "https://site.test/assets/vendor.9d4e1e23bd5b7270.chunk.js", "https://site.test/password-reset-guide",
+    "https://site.test/blog/how-to-choose-a-password-manager", "https://site.test/token-economy-explained",
+    "https://site.test/secret-menu-items-2026", "https://site.test/api-key-best-practices",
+    "https://site.test/authorization-letter-template", "https://site.test/?gclid=Cj0KCQiA6Ou5BhCrARIsAPoTxrB8x1",
+    "https://site.test/landing?fbclid=IwAR3x9Kq2Zp7Lm4Nv8Bc1Df6Gh0Jk5Rs9Tu2Wx4Yz",
+    "https://site.test/p?utm_source=newsletter&utm_campaign=fall2026&msclkid=4f8a2b9c1d7e3f6a",
+    "https://docs.google.com/document/d/1A2b3C4d5E6f7G8h9I0jK1lM2nO3pQ4rS5tU6vW7xY8z/edit",
+    "https://drive.google.com/file/d/1Zx9Yw8Vu7Ts6Rq5Po4Nm3Lk2Ji1Hg0Fe/view",
+    "https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit",
+    "https://t.co/Ab3dE5gH7j", "https://bit.ly/3xYz9AbC", "https://youtu.be/dQw4w9WgXcQ",
+    "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "https://www.amazon.com/dp/B0C1234567",
+    "https://site.test/blog/2026/11/08/revenue-recovery", "https://site.test/products/12345678901234567890",
+    "https://site.test/items/550e8400-e29b-41d4-a716-446655440000",
+    "https://en.wikipedia.org/wiki/Revenue_recovery", "https://www.reddit.com/r/FulfillmentByAmazon/comments/1abc2de/x/",
+    "https://medium.com/@acme/how-we-recovered-revenue-3f2a9c1b7e4d", "https://news.site.test/article/2026-11-08",
+    "https://site.test/search?q=password+protection", "https://site.test/en-us/pricing", "https://site.test/",
+    "https://www.linkedin.com/company/acme-corp/", "https://site.test/case-studies/acme-2026-q3-results",
+    "https://stackoverflow.com/questions/12345678/how-to-store-an-api-key",
+    "https://site.test/guides/bearer-token-vs-api-key",
+]
+
+
+def _drop_values():
+    """Documented FAKE example values only, assembled at run time (no literal key in the source)."""
+    aws_id = "AKIA" + "IOSFODNN7" + "EXAMPLE"                                    # AWS docs' example access key id
+    aws_secret = "wJalrXUtnFEMI" + "/K7MDENG/" + "bPxRfiCY" + "EXAMPLEKEY"       # AWS docs' example secret key
+    return [te.KEYS["openai"], aws_id, aws_secret, "sk-proj-" + "Ab3dE5gH7jK9mN1pQ3sT5vX7", _synthetic_jwt()]
+
+
+def test_ordinary_cited_urls_are_kept_and_fetchable():
+    assert len(KEEP_URLS) >= 40
+    for u in KEEP_URLS:
+        assert not callum.url_has_secret(u), u
+        s = callum.stored_url(u)
+        # never a secret (a long digit run may still be withheld as possible personal data: a pre-existing rule
+        # that only shortens the stored path; the URL is fetched)
+        assert s["withheld"] in (None, "PERSONAL_DATA") and "{secret}" not in (s["url"] or ""), (u, s)
+    assert callum.secret_guard.fetch_url(KEEP_URLS[18]) == "https://site.test/landing"     # tracking dropped
+    assert callum.secret_guard.fetch_url("https://site.test/?q=a&b=1") == "https://site.test/?q=a&b=1"
+
+
+def test_secret_values_in_paths_queries_and_text_are_dropped():
+    for v in _drop_values():
+        for u in (f"https://site.test/{v}/page", f"https://site.test/p?key={v}", f"https://site.test/p?x=1#{v}",
+                  "https://site.test/p?auth=Bearer%20" + v):
+            assert callum.url_has_secret(u), u
+            assert v not in json.dumps(callum.stored_url(u)), u
+        for text in (f"Authorization: Bearer {v}", f"key {v} here", f"curl -H 'x-api-key: {v}'",
+                     f"See https://site.test/p?h=Bearer%20{v} now", f"aws_secret_access_key={v}"):
+            red, n = callum.secret_guard.redact(text)
+            assert n and v not in red and v[:12] not in red, (text, red)
+
+
+@pytest.mark.parametrize("text", [
+    "Use password protection on every account.", "A secret menu and token rewards.", "Reset your password-reset link.",
+    "The bearer of this card.", "Order 1005006123456789 shipped; tweet 1852960912345678901.",
+    "Commit 8f14e45fceea167a5a36dedd4bea2543c1b2d3e4 on github.com/acme/site is public.",
+    "Z Best Media recovers revenue for 2026 sellers.",
+])
+def test_ordinary_prose_is_not_redacted(text):
+    red, n = callum.secret_guard.redact(text)
+    if "Commit" in text:
+        assert n <= 1                                       # a bare 40-hex SHA in prose may be redacted: no leak cost
+    else:
+        assert n == 0 and red == text, red

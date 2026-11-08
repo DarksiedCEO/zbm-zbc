@@ -235,10 +235,22 @@ B9. **War room fixes (PR #55 findings WR-F011..WR-F014; replays `seo-py-callum/R
       `REDIRECTED_OFF_CLIENT`); stopped off the client or refused by URL rules → INCONCLUSIVE
       (`REDIRECT_NOT_RESOLVED`); a client landing page answering 4xx/5xx → INCONCLUSIVE (`LANDING_PAGE_ERROR`). A
       failure with no redirect seen (timeout, DNS) still falls back to the cited host.
-    - Note for the war room: its fake web encodes chains as `/wr-<hex>` paths, which the WR-F013 rule now treats as
-      secret-shaped, so with the rule on those cases pass as INCONCLUSIVE without being fetched. All 25 WR-F014
-      replays were also run with the secret-URL rule disabled locally (not committed) and pass on the resolution
-      logic itself; the war room should encode chains without a long hex run.
+    - **Redaction precision (re-certification review).** The hex rule needs letters AND digits (a tweet's status id
+      or a 16-digit item id is not a secret); a credential label (`password`, `token`, `secret`, `api-key`,
+      `authorization`, `bearer`) counts only when followed by `:`, `=` or whitespace and a token-shaped value (letters
+      and digits), so `/password-reset-guide` and "password protection" stay; allowed URL shapes: commit / tree / blob
+      SHAs on github.com, gitlab.com, bitbucket.org, codeberg.org, hashed asset names (`main.8f14e45fceea167a.css`),
+      any path on Google Docs / Drive / Sheets / Slides and on known link shorteners; known tracking parameters
+      (`gclid`, `fbclid`, `msclkid`, `utm_*`, ...) are never secrets and are dropped before a fetch (the stored URL
+      drops the whole query anyway). Under-redaction fixed: text and URL parts are also checked percent-decoded
+      (`Bearer%20<token>`), and the 40-character AWS secret-key format is a rule of its own (both cases, a digit / `/`
+      / `+`, entropy ≥ 4 bits, no run of 6+ lower-case letters; checked across path segments, since such a key holds
+      `/`). Tests: a table of 43 ordinary URLs that are kept and fetchable, and the documented fake example values
+      (AWS's `AKIAIOSFODNN7EXAMPLE` and its example secret key, built at run time) dropped from paths, queries,
+      fragments and text. A long digit run in a path may still be withheld as possible personal data (the prompt
+      guard's pre-existing rule): the stored path is shortened, the URL is still fetched.
+    - The war room's fake web now encodes chains without hex digits (the reviewer's path fix for PR #55), so its
+      redirect cases are fetched and exercise the resolution logic.
 
 ## Founder-pending defaults (added by this ADR)
 
