@@ -635,12 +635,14 @@ def render(cache: Path) -> None:
              "| Component | Shipped in | Packages | Licences | Notices |", "|---|---|---|---|---|"]
     reviewed = {(e["component"], e["name"], e["version"]): e
                 for e in L.load_json(LICENCES_DIR / "exceptions.json")["exceptions"]}
+    effective_by_key: dict = {}
     for cid, title, lock, kind, where in COMPONENTS:
         rows = json.loads((cache / f"{cid}.json").read_text())
         for r in rows:
             e = reviewed.get((cid, r["name"], r["version"]))
             r["effective"] = (e or {}).get("licence") or r["licence"]
             r["status"] = (e or {}).get("status", "")
+            effective_by_key[(cid, r["name"], r["version"])] = r["effective"]
         inventory["components"][cid] = {
             "lockfile": lock, "kind": kind,
             "packages": [{k: r[k] for k in ("name", "version", "licence", "licence_raw", "licence_source",
@@ -658,7 +660,7 @@ def render(cache: Path) -> None:
         for r in rows:
             extra = " (dev only)" if r.get("dev") else (" (not installed on linux/amd64)" if r.get("shipped") is False else "")
             tag = {"approved-flagged": " FLAGGED", "pending-owner-decision": " PENDING OWNER DECISION",
-                   "reviewed-metadata": " (reviewed)"}.get(r["status"], "")
+                   "reviewed-metadata": " (reviewed)", "owner-approved": " (owner-approved)"}.get(r["status"], "")
             body.append(f"| [{r['name']}](#{_anchor(r['name'] + '-' + r['version'])}) | {r['version']} | "
                         f"{r['effective']}{tag}{extra} | `{r.get('artefact', '')}` |")
         body.append("")
@@ -676,6 +678,10 @@ def render(cache: Path) -> None:
                      + (f" ({r['status']}; see devtools/licences/exceptions.json)" if r["status"] else "")
                      + f" (declared:`{(r.get('licence_raw') or '')[:200]}`, from "
                      f"{r.get('licence_source', '')})" + (f". Upstream: {r['homepage']}" if r.get("homepage") else ""), ""]
+            e = reviewed.get((cid, r["name"], r["version"])) or {}
+            if e.get("attribution"):
+                body += [f"**Attribution** (owner-approved by {e['approved_by']} on {e['approved_on']}): "
+                         f"{e['attribution']}", ""]
             if not r["files"]:
                 body += ["_The artefact ships no licence file; the declared licence above applies._", ""]
             for fname, text in sorted(r["files"].items()):
@@ -692,6 +698,14 @@ def render(cache: Path) -> None:
                 fence = "````" if "```" in text else "```"
                 body += [f"### Text {h}", "", f"<a id=\"text-{h}\"></a>", "", fence + "text", text.rstrip("\n"), fence, ""]
         (NOTICES_DIR / f"{cid}.md").write_text("\n".join(body) + "\n", encoding="utf-8")
+    approved = [e for e in reviewed.values() if e.get("status") == "owner-approved"]
+    if approved:
+        index += ["", "## Owner-approved licences and attribution", "",
+                  "Licences outside the original 2026-11-08 list, approved by the owner for the exact package version "
+                  "below. Each attribution obligation is part of the approval and must be kept.", ""]
+        for e in sorted(approved, key=lambda e: (e["component"], e["name"])):
+            index.append(f"* **{e['name']} {e['version']}** ({e['component']}; {effective_by_key.get((e['component'], e['name'], e['version']), '?')}"
+                         f"; approved by {e['approved_by']} on {e['approved_on']}): {e['attribution']}")
     index += ["", "## Notes", "",
               "* MPL-2.0 components are listed with the source location of the covered files (MPL-2.0 §3.2); "
               "they are used unmodified.",

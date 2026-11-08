@@ -14,6 +14,16 @@ Licence policy (owner ruling 2026-11-08): permissive licences only (MIT, Apache-
 | Railway deploy tooling (.railway/package-lock.json) | CI/deploy tooling only (not shipped in an image) | 3 | MIT (3) | [third_party_notices/npm-railway.md](third_party_notices/npm-railway.md) |
 | restic 0.19.1 (deploy/docker/maintenance/vendor/restic) | Gate 5 images ledger, legal, finance, compliance, seo, admin (/opt/zbm-maintenance/bin/restic) | 81 | Apache-2.0 (28), BSD-3-Clause (26), MIT (18), BSD-2-Clause (8), MPL-2.0 (1) | [third_party_notices/go-restic.md](third_party_notices/go-restic.md) |
 
+## Owner-approved licences and attribution
+
+Licences outside the original 2026-11-08 list, approved by the owner for the exact package version below. Each attribution obligation is part of the approval and must be kept.
+
+* **caniuse-lite 1.0.30001810** (npm-dashboard; CC-BY-4.0; approved by Andre (owner) on 2026-11-08): CC-BY-4.0 credit line, kept in THIRD_PARTY_NOTICES.md and with any distribution of the dashboard: "Browser support data from caniuse.com by Alexis Deveria, packaged as caniuse-lite by Ben Briggs and the browserslist contributors (https://github.com/browserslist/caniuse-lite), licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Used unmodified." The package's LICENSE is reproduced in third_party_notices/npm-dashboard.md.
+* **pillow 13.0.0** (python-delivery; MIT-CMU; approved by Andre (owner) on 2026-11-08): MIT-CMU: keep pillow's copyright and permission notice (third_party_notices/python-delivery.md) with any distribution of the delivery-py image.
+* **pypdfium2 5.13.0** (python-delivery; (Apache-2.0 OR BSD-3-Clause) AND CC-BY-4.0 AND BSD-3-Clause AND FTL AND Unicode-3.0 AND IJG AND Zlib AND libpng-2.0 AND libtiff AND BSD-2-Clause AND MIT AND Apache-2.0 WITH LLVM-exception AND LicenseRef-AGG-2.3; approved by Andre (owner) on 2026-11-08): Keep the wheel's licence set and every BUILD_LICENSES text (third_party_notices/python-delivery.md) with any distribution of the delivery-py image; FreeType (FTL) and libjpeg-turbo (IJG) require crediting the FreeType Project and the Independent JPEG Group in product documentation; ICU (Unicode-3.0), libpng, libtiff, AGG and pypdfium2's CC-BY-4.0 docs require their notices to be kept.
+* **regex 2026.9.10** (python-delivery; Apache-2.0 AND CNRI-Python; approved by Andre (owner) on 2026-11-08): Apache-2.0 + CNRI-Python: keep regex's licence texts (third_party_notices/python-delivery.md) with any distribution of the delivery-py image.
+* **unicode-ident 1.0.26** (rust-ledger; (MIT OR Apache-2.0) AND Unicode-3.0; approved by Andre (owner) on 2026-11-08): Unicode-3.0: keep the Unicode copyright and permission notice with any copy of the data files (reproduced in third_party_notices/rust-ledger.md). Build-time only; nothing extra ships in the ledger image.
+
 ## Notes
 
 * MPL-2.0 components are listed with the source location of the covered files (MPL-2.0 §3.2); they are used unmodified.

@@ -222,6 +222,35 @@ class GateCase(_TmpCase):
         self.assertEqual(res.exit_code(allow_pending=False), 2)
         self.assertEqual(res.exit_code(allow_pending=True), 0)
 
+    OWNER_OK = {"component": "web", "name": "next", "version": "16.0.0", "status": "owner-approved",
+                "approved_by": "Owner", "approved_on": "2026-11-08", "attribution": "credit line", "reason": "data"}
+
+    def test_owner_approved_entry_passes_and_is_listed(self):
+        inv = inventory(web={"packages": [{"name": "next", "version": "16.0.0", "licence": "CC-BY-4.0"}]})
+        res = Tree(self.tmp, inv=inv, exceptions=[CERTIFI_OK, self.OWNER_OK]).run()
+        self.assertEqual(res.violations, [])
+        self.assertEqual(res.pending, [])
+        self.assertEqual(len(res.approved), 1)
+        self.assertIn("attribution: credit line", res.approved[0])
+        self.assertEqual(res.exit_code(allow_pending=False), 0)
+
+    def test_owner_approved_entry_needs_approver_date_and_attribution(self):
+        inv = inventory(web={"packages": [{"name": "next", "version": "16.0.0", "licence": "CC-BY-4.0"}]})
+        for missing in ("approved_by", "approved_on", "attribution"):
+            entry = {k: v for k, v in self.OWNER_OK.items() if k != missing}
+            res = Tree(self.tmp, inv=inv, exceptions=[CERTIFI_OK, entry]).run()
+            self.assertViolation(res, f"owner-approved needs '{missing}'")
+
+    def test_owner_approval_cannot_admit_copyleft(self):
+        policy = dict(POLICY, forbidden_ids=["GPL-3.0-only", "LGPL-3.0-or-later"])
+        inv = inventory(web={"packages": [{"name": "next", "version": "16.0.0", "licence": "MIT AND GPL-3.0-only"}]})
+        res = Tree(self.tmp, inv=inv, exceptions=[CERTIFI_OK, self.OWNER_OK], policy=policy).run()
+        self.assertViolation(res, "owner-approved entry cannot admit a forbidden licence id")
+
+    def test_owner_approval_for_a_licence_that_passes_anyway_is_stale(self):
+        res = Tree(self.tmp, exceptions=[CERTIFI_OK, self.OWNER_OK]).run()
+        self.assertViolation(res, "passes without its owner-approved entry")
+
     def test_reviewed_metadata_entry_supplies_the_licence(self):
         inv = inventory(web={"packages": [{"name": "next", "version": "16.0.0", "licence": "UNKNOWN"}]})
         exc = [CERTIFI_OK, {"component": "web", "name": "next", "version": "16.0.0", "status": "reviewed-metadata",
@@ -490,10 +519,18 @@ class RealRepositoryCase(unittest.TestCase):
     def test_repository_gate(self):
         res = G.run()
         self.assertEqual(res.violations, [])
-        pending = sorted(p.split(" [", 1)[0].replace("PENDING OWNER DECISION ", "") for p in res.pending)
-        self.assertEqual(pending, ["npm-dashboard: caniuse-lite==1.0.30001810", "python-delivery: pillow==13.0.0",
-                                   "python-delivery: pypdfium2==5.13.0", "python-delivery: regex==2026.9.10",
-                                   "rust-ledger: unicode-ident==1.0.26"])
+        self.assertEqual(res.pending, [], "owner ruled on every pending licence on 2026-11-08")
+        self.assertEqual(res.exit_code(allow_pending=False), 0)
+        approved = sorted(p.split(" [", 1)[0].replace("APPROVED ", "") for p in res.approved)
+        self.assertEqual(approved, ["npm-dashboard: caniuse-lite==1.0.30001810", "python-delivery: pillow==13.0.0",
+                                    "python-delivery: pypdfium2==5.13.0", "python-delivery: regex==2026.9.10",
+                                    "rust-ledger: unicode-ident==1.0.26"])
+        self.assertTrue(all("Andre (owner) 2026-11-08; attribution: " in a for a in res.approved), res.approved)
+
+    def test_caniuse_cc_by_credit_line_is_in_the_notices(self):
+        text = (L.REPO / "THIRD_PARTY_NOTICES.md").read_text()
+        self.assertIn("Browser support data from caniuse.com by Alexis Deveria", text)
+        self.assertIn("licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/)", text)
 
     def test_dashboard_lock_has_no_sharp_or_lgpl(self):
         lock = L.parse_package_lock((L.REPO / "apps/dashboard-ts/package-lock.json").read_text())

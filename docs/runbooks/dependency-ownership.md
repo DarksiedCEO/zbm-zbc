@@ -14,7 +14,7 @@ sitting and are not rebuilt by this work).
 
 | Piece | Where | What it does |
 |---|---|---|
-| Licence gate | `devtools/licence_gate.py`, `devtools/licence_lib.py` | Offline, stdlib only. Reads every lockfile (shared Python lock, every `uv.lock`, `Cargo.lock`, every `package-lock.json`, `go.mod`, the vendored restic binary), checks each package's licence against `devtools/licences/policy.json`, requires a reviewed entry in `devtools/licences/exceptions.json` for MPL-2.0 (approved-flagged) and for anything the ruling does not name (pending-owner-decision), and fails if `langgraph-api`, `langgraph-runtime-inmem`, `langgraph-cli` or `forbiddenfruit` is installable from any Python lock on a real platform (it walks the `uv.lock` graph with marker evaluation; `sys_platform == 'never'` overrides are correctly not installable). Exit 0 clean, 1 violation, 2 only pending owner decisions. Self-test: `python3 -B -m unittest devtools/test_licence_gate.py -v`. |
+| Licence gate | `devtools/licence_gate.py`, `devtools/licence_lib.py` | Offline, stdlib only. Reads every lockfile (shared Python lock, every `uv.lock`, `Cargo.lock`, every `package-lock.json`, `go.mod`, the vendored restic binary), checks each package's licence against `devtools/licences/policy.json`, requires a reviewed entry in `devtools/licences/exceptions.json` for MPL-2.0 (approved-flagged) and for anything the ruling does not name (owner-approved with approver, date and attribution, or pending-owner-decision until ruled on), and fails if `langgraph-api`, `langgraph-runtime-inmem`, `langgraph-cli` or `forbiddenfruit` is installable from any Python lock on a real platform (it walks the `uv.lock` graph with marker evaluation; `sys_platform == 'never'` overrides are correctly not installable). Exit 0 clean, 1 violation, 2 only pending owner decisions (none pending since 2026-11-08). Self-test: `python3 -B -m unittest devtools/test_licence_gate.py -v`. |
 | Inventory | `devtools/licences/inventory.json` (generated) | Declared licence of every locked package, read from the hash-verified artefact. |
 | Notices | `THIRD_PARTY_NOTICES.md`, `third_party_notices/*.md` (generated) | Full licence/notice texts shipped inside each artefact, per component: shared Python runtime, delivery-py, delivery sandbox, ledger-rust, dashboard, Railway tooling, restic (+ its 79 Go modules and the Go runtime). Includes pypdfium2's `BUILD_LICENSES` and onnxruntime's `ThirdPartyNotices.txt`; MPL-2.0 components name their source location. |
 | Generator | `devtools/third_party_notices.py` | `collect --cache <dir>` downloads every locked artefact and verifies it against the lock hash (wheel/sdist sha256; npm sha512 integrity; each `.crate` against its Cargo.lock checksum, the licence then read from the crate's own Cargo.toml — the value `cargo metadata` reports; the deer-flow LICENSE against its recorded sha256; restic against `binary-manifest.json`, and each of its Go licence texts at an immutable commit against the sha256 in `devtools/licences/go-licence-pins.json`; `--pin-new` records pins for new modules, to be reviewed); `render --cache <dir>` rewrites the inventory and notices from the cache. |
@@ -37,45 +37,39 @@ python3 devtools/licence_gate.py                               # offline
 `ls-remote`); crates come from `~/.cargo/registry/cache` or static.crates.io, checksum-verified either way. A new package with no machine-readable licence comes out `UNKNOWN`;
 read its licence file in `third_party_notices/<component>.md` and add a `reviewed-metadata` entry.
 
-### Open owner decisions (the gate exits 2 until each is ruled on)
+### Owner decisions (ruled 2026-11-08 by Andre; none pending in the application layer)
 
-| Package | Component (shipped in) | Licence | Recommendation |
+All five licences the original ruling did not name were **approved by Andre on 2026-11-08**, each for the exact
+package version below. They are `owner-approved` entries in `devtools/licences/exceptions.json` (with `approved_by`,
+`approved_on` and the attribution obligation, all required by the gate); the gate lists them as `APPROVED` on every
+run and can never use such an entry to admit a forbidden (copyleft / source-available) id. A version bump drops the
+entry and the gate fails until it is re-approved.
+
+| Package | Component (shipped in) | Licence | Attribution obligation (kept in THIRD_PARTY_NOTICES.md) |
 |---|---|---|---|
-| caniuse-lite 1.0.30001810 | dashboard (Next.js direct dependency) | CC-BY-4.0 (data) | Approve CC-BY-4.0 for data-only packages; attribution is kept in the notices. The alternative is replacing Next.js. |
-| unicode-ident 1.0.26 | ledger-rust **build only** (proc-macro chain; not linked into ledger-server) | (MIT OR Apache-2.0) AND Unicode-3.0 | Approve Unicode-3.0 (attribution-only data licence). |
-| pillow 13.0.0 | delivery-py | MIT-CMU | Approve as MIT family. |
-| regex 2026.9.10 | delivery-py | Apache-2.0 AND CNRI-Python | Approve CNRI-Python as part of the PSF/Python licence stack. |
-| pypdfium2 5.13.0 | delivery-py | BSD-3/Apache-2.0 + bundled PDFium: FTL, Unicode-3.0, IJG, libpng-2.0, libtiff, AGG 2.3, CC-BY-4.0 docs | All permissive, none copyleft; approve, or replace pypdfium2 if the owner wants no FTL/IJG credit clauses. |
+| caniuse-lite 1.0.30001810 | dashboard (Next.js direct dependency) | CC-BY-4.0 (data) | CC BY credit line: "Browser support data from caniuse.com by Alexis Deveria, packaged as caniuse-lite by Ben Briggs and the browserslist contributors (https://github.com/browserslist/caniuse-lite), licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Used unmodified." |
+| unicode-ident 1.0.26 | ledger-rust **build only** (proc-macro chain; not linked into ledger-server) | (MIT OR Apache-2.0) AND Unicode-3.0 | Keep the Unicode copyright and permission notice. |
+| pillow 13.0.0 | delivery-py | MIT-CMU | Keep pillow's copyright and permission notice. |
+| regex 2026.9.10 | delivery-py | Apache-2.0 AND CNRI-Python | Keep regex's licence texts. |
+| pypdfium2 5.13.0 | delivery-py | BSD-3/Apache-2.0 + bundled PDFium: FTL, Unicode-3.0, IJG, libpng-2.0, libtiff, AGG 2.3, CC-BY-4.0 docs | Keep every BUILD_LICENSES text; credit the FreeType Project and the Independent JPEG Group in product documentation. |
 
-When the owner rules: an approved id either goes into `policy.json` `allowed` (with a `family_variants` line) or the
-entry's status becomes `approved-flagged`; a rejection means removing the package. The real-repository test in
-`devtools/test_licence_gate.py` lists the pending set and must be updated with it.
+Still **pending**: the operating-system-layer carve-out below (not decided).
 
-## CI wiring (for owner review — not done here, `.github/workflows/**` is out of scope tonight)
+## CI wiring (done 2026-11-08, owner approval)
 
-Add to the `hygiene-static` job (it already has Python 3.13, `go` is not required — without it the restic module
-list check is skipped and the binary sha256 check still runs):
+`.github/workflows/ci.yml` job `licence-gate`, listed in the `required` job's `needs`. It runs on every event (no
+path filter) on ubuntu-24.04 with Python 3.13 and Go 1.27.3 (setup actions pinned by commit SHA like the rest of the
+file), restores `actions/cache` (pinned by SHA) at `$RUNNER_TEMP/licence-cache` keyed on every lockfile,
+`devtools/licences/go-licence-pins.json` and restic's `binary-manifest.json`, then:
 
-```yaml
-      - name: Licence gate (owner ruling 2026-11-08)
-        shell: bash
-        run: |
-          set +e
-          python3 -B -m unittest devtools/test_licence_gate.py -v 2>&1 | tee "$RUNNER_TEMP/licence-gate-test.log"
-          code=${PIPESTATUS[0]}
-          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/licence-gate-test.log" --code "$code" --suite "devtools:licence-gate"
-          [ "$code" = 0 ] || exit "$code"
-          python3 devtools/licence_gate.py --allow-pending --verify-sources --cache "$RUNNER_TEMP/licence-cache" \
-            --json "$RUNNER_TEMP/licence-gate.json"
-```
+1. `python3 -B -m unittest devtools/test_licence_gate.py -v` — wrapped like every test step (tee + ci_annotate.py);
+2. `python3 -B devtools/licence_gate.py --verify-sources --cache "$RUNNER_TEMP/licence-cache" --json …` —
+   **fail-closed**: no `--allow-pending`, so a violation, a pending owner decision, or an artefact that cannot be
+   fetched and hash-verified fails the job (and therefore `required`). Each VIOLATION / PENDING line becomes a
+   check-run error annotation; a green run posts the summary as a notice.
 
-`--verify-sources` needs network (PyPI, npm, static.crates.io, raw.githubusercontent.com) and `go` on PATH for the
-restic module list; cache `$RUNNER_TEMP/licence-cache` with actions/cache keyed on the lockfiles to keep it fast.
-
-`--allow-pending` is the interim mode while the five decisions above are open (they still print as `PENDING OWNER
-DECISION` lines in the log); drop the flag once they are ruled on so a new pending entry fails the build. The
-`changes` job's shared-path list should treat `devtools/licences/**`, every lockfile and `THIRD_PARTY_NOTICES.md` as
-inputs of this step.
+No secrets are used. `--verify-sources` needs network for uncached artefacts (PyPI, registry.npmjs.org,
+static.crates.io, raw.githubusercontent.com).
 
 ## Scope limit: operating-system layer — PENDING OWNER DECISION
 
@@ -192,7 +186,7 @@ These touch `.github/workflows/**`, a file copied into a Gate 5 image, or behavi
 | F-1 | Floating Rust toolchain in CI | `.github/workflows/ci.yml` lines 195, 275, 324, 467, 749 (`rustup toolchain install stable`) | Install `1.99.1` explicitly (with `clippy` at 324) so the step installs what is used. **Already in effect, for the ledger crate only, without a workflow change:** every CI cargo invocation on the ledger runs with `services/ledger-rust` as its working directory — the ledger-rust job (`working-directory`), the live runs' "Build the real ledger-rust server" (:472-474), audit-rust (`defaults.run.working-directory`, so `cargo install cargo-audit` too), and onboarding-py's suite (`tests/conftest.py:216` runs `cargo build` with `cwd=crate_dir`) — so rustup's directory-scoped `rust-toolchain.toml` makes all of them build with 1.99.1. **Not covered:** the delivery-py job's toy-rs fixture build (`ci.yml:273-277`, cargo runs in `fixtures/dlv/toy-rs`) still uses floating `stable` — F-15. Side effects to expect on the first run: each Rust job downloads 1.99.1 (+clippy) on top of the `stable` it installed (a minute or so; `stable` becomes unused), the rust-cache key changes so caches start cold once, clippy lints are those of 1.99.1 (not the newest stable), and `cargo audit` keeps reporting RUSTSEC-2026-0386 for tokio 1.53.1 (informational/unsound; see F-8). |
 | F-2 | `registry:2` pulled by tag | `.github/workflows/ci.yml:575` | Pin `registry:2@sha256:<digest>` (mirror per "Base images"). |
 | F-3 | Unhashed `pip install -r services/*/requirements.txt` in CI | `.github/workflows/ci.yml:203, 480, 837` (and 208, 482, 485) | Generate a per-service hash lock (or reuse `deploy/python/requirements.lock.txt` + a test lock for pytest, as `sandbox-requirements.lock.txt` does) and install with `--require-hashes --no-deps --only-binary=:all:`. |
-| F-4 | Licence gate in CI | `.github/workflows/ci.yml` `hygiene-static` | The step in "CI wiring" above. |
+| F-4 | Licence gate in CI | `.github/workflows/ci.yml` job `licence-gate` (in `required`) | **DONE 2026-11-08** (owner approval): see "CI wiring" above — `--verify-sources`, cached, fail-closed. |
 | F-5 | Sandbox Go 1.23.1 is end-of-life (and older than orchestrator-go's `go 1.27.3`) | `services/delivery-py/docker/sandbox.Dockerfile` `GO_VERSION`, `ci.yml` `GO_VERSION`/`GO_SHA256`, ADR 0011 pin row | Move all three together to `1.27.3`, sha256 `65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40` (from docker-library/golang `versions.json`; re-verify against `https://go.dev/dl/?mode=json` when recording). Not done tonight: `devtools/test_ci_docker_args.py` requires the Dockerfile default, ci.yml and ADR 0011 to agree, and ci.yml is out of scope. |
 | F-6 | Base images from upstream registries | every Dockerfile `FROM` (Gate 5 images included) | Mirror by digest into GHCR. |
 | F-7 | Crates fetched from crates.io | `services/ledger-rust` (Gate 5 ledger image) | `cargo vendor` + source replacement; the Dockerfile copies `vendor/` and `.cargo/`. |

@@ -445,6 +445,21 @@ def spdx_ids(expr: str) -> list[str]:
     return out
 
 
+def spdx_with_exceptions(expr: str) -> list[str]:
+    """The `WITH <exception>` ids in an expression."""
+    out: list[str] = []
+
+    def walk(n):
+        if n[0] == "ID":
+            if n[2]:
+                out.append(n[2])
+        else:
+            walk(n[1])
+            walk(n[2])
+    walk(spdx_parse(expr))
+    return out
+
+
 def spdx_satisfied(expr: str, allowed: set, allowed_exceptions: set = frozenset()) -> bool:
     """True when the expression can be complied with using only ``allowed`` ids (OR: either branch; AND: both).
     A ``WITH`` exception only grants extra permissions; it is accepted when listed in ``allowed_exceptions``."""

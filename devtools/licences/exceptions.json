@@ -1,5 +1,5 @@
 {
-  "_doc": "Reviewed licence exceptions for devtools/licence_gate.py. One entry per (component, package, exact version): a version bump drops the entry and the gate fails until it is re-reviewed. 'status': approved-flagged = an MPL-2.0 (policy 'flagged') component the owner ruling allows; it passes and is listed as FLAGGED on every run. reviewed-metadata = the package's metadata carries no usable licence, a reviewer read the licence file shipped in the hash-verified artefact and recorded the SPDX expression in 'licence' (it is then checked like any other). pending-owner-decision = a licence the ruling does not cover; the gate reports PENDING and exits 2 (0 only with --allow-pending), it never passes silently. An entry that no longer matches a locked package, or whose package passes without it, fails the gate as stale. 'licence' (optional) replaces the inventory's declared licence for evaluation; 'reason' is mandatory.",
+  "_doc": "Reviewed licence exceptions for devtools/licence_gate.py. One entry per (component, package, exact version): a version bump drops the entry and the gate fails until it is re-reviewed. 'status': approved-flagged = an MPL-2.0 (policy 'flagged') component the owner ruling allows; it passes and is listed as FLAGGED on every run. reviewed-metadata = the package's metadata carries no usable licence, a reviewer read the licence file shipped in the hash-verified artefact and recorded the SPDX expression in 'licence' (it is then checked like any other). pending-owner-decision = a licence the ruling does not cover; the gate reports PENDING and exits 2 (0 only with --allow-pending), it never passes silently. owner-approved = the owner ruled on that exact package version ('approved_by', 'approved_on' and the 'attribution' obligation are required); it passes, is listed as APPROVED on every run, and can never admit a policy forbidden_ids licence. An entry that no longer matches a locked package, or whose package passes without it, fails the gate as stale. 'licence' (optional) replaces the inventory's declared licence for evaluation; 'reason' is mandatory.",
   "exceptions": [
     {
       "component": "python-shared", "name": "certifi", "version": "2026.10.19", "status": "approved-flagged",
@@ -46,25 +46,35 @@
       "reason": "Pastes the whole MIT text into its License field (no expression, no classifier); the bundled licenses/LICENSE is the MIT text."
     },
     {
-      "component": "npm-dashboard", "name": "caniuse-lite", "version": "1.0.30001810", "status": "pending-owner-decision",
-      "reason": "CC-BY-4.0 (browser-support DATA, a direct dependency of next 16.4.3; attribution-only, not copyleft). Not in the 2026-11-08 ruling's list. Options: approve CC-BY-4.0 for data packages (attribution kept in third_party_notices/npm-dashboard.md), or remove it (not possible without replacing Next.js). PENDING OWNER DECISION."
+      "component": "npm-dashboard", "name": "caniuse-lite", "version": "1.0.30001810", "status": "owner-approved",
+      "approved_by": "Andre (owner)", "approved_on": "2026-11-08",
+      "attribution": "CC-BY-4.0 credit line, kept in THIRD_PARTY_NOTICES.md and with any distribution of the dashboard: \"Browser support data from caniuse.com by Alexis Deveria, packaged as caniuse-lite by Ben Briggs and the browserslist contributors (https://github.com/browserslist/caniuse-lite), licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Used unmodified.\" The package's LICENSE is reproduced in third_party_notices/npm-dashboard.md.",
+      "reason": "CC-BY-4.0 (browser-support DATA, a direct dependency of next 16.4.3; attribution-only, not copyleft). Not in the original 2026-11-08 list; approved by Andre 2026-11-08."
     },
     {
-      "component": "rust-ledger", "name": "unicode-ident", "version": "1.0.26", "status": "pending-owner-decision",
-      "reason": "Declared '(MIT OR Apache-2.0) AND Unicode-3.0': the Unicode-3.0 part covers the Unicode character DATA tables (permissive, attribution-only). Build-time only: `cargo tree -i unicode-ident -e normal,build` shows it reached solely through proc-macro2/quote/syn -> serde_derive (a proc-macro), so it runs inside the compiler and is not linked into the Gate 5 ledger-server binary. Unicode-3.0 is not named in the ruling. PENDING OWNER DECISION."
+      "component": "rust-ledger", "name": "unicode-ident", "version": "1.0.26", "status": "owner-approved",
+      "approved_by": "Andre (owner)", "approved_on": "2026-11-08",
+      "attribution": "Unicode-3.0: keep the Unicode copyright and permission notice with any copy of the data files (reproduced in third_party_notices/rust-ledger.md). Build-time only; nothing extra ships in the ledger image.",
+      "reason": "Declared '(MIT OR Apache-2.0) AND Unicode-3.0': the Unicode-3.0 part covers the Unicode character DATA tables (permissive, attribution-only). Build-time only: `cargo tree -i unicode-ident -e normal,build` shows it reached solely through proc-macro2/quote/syn -> serde_derive (a proc-macro), so it runs inside the compiler and is not linked into the Gate 5 ledger-server binary. Approved by Andre 2026-11-08."
     },
     {
-      "component": "python-delivery", "name": "pillow", "version": "13.0.0", "status": "pending-owner-decision",
-      "reason": "Declared MIT-CMU (the historical PIL licence: a permissive MIT-style notice, OSI/FSF-listed as HPND/MIT-CMU). Not named in the ruling. delivery-py only (not a Gate 5 image). PENDING OWNER DECISION (recommend: approve as MIT family)."
+      "component": "python-delivery", "name": "pillow", "version": "13.0.0", "status": "owner-approved",
+      "approved_by": "Andre (owner)", "approved_on": "2026-11-08",
+      "attribution": "MIT-CMU: keep pillow's copyright and permission notice (third_party_notices/python-delivery.md) with any distribution of the delivery-py image.",
+      "reason": "Declared MIT-CMU (the historical PIL licence: a permissive MIT-style notice, OSI/FSF-listed as HPND/MIT-CMU). delivery-py only (not a Gate 5 image). Approved by Andre 2026-11-08 (as MIT family)."
     },
     {
-      "component": "python-delivery", "name": "regex", "version": "2026.9.10", "status": "pending-owner-decision",
-      "reason": "Declared 'Apache-2.0 AND CNRI-Python' (CNRI-Python: the CNRI part of the historical Python licence stack, permissive, OSI-approved). Not named in the ruling. delivery-py only. PENDING OWNER DECISION (recommend: approve as PSF family)."
+      "component": "python-delivery", "name": "regex", "version": "2026.9.10", "status": "owner-approved",
+      "approved_by": "Andre (owner)", "approved_on": "2026-11-08",
+      "attribution": "Apache-2.0 + CNRI-Python: keep regex's licence texts (third_party_notices/python-delivery.md) with any distribution of the delivery-py image.",
+      "reason": "Declared 'Apache-2.0 AND CNRI-Python' (CNRI-Python: the CNRI part of the historical Python licence stack, permissive, OSI-approved). delivery-py only. Approved by Andre 2026-11-08 (as PSF family)."
     },
     {
-      "component": "python-delivery", "name": "pypdfium2", "version": "5.13.0", "status": "pending-owner-decision",
+      "component": "python-delivery", "name": "pypdfium2", "version": "5.13.0", "status": "owner-approved",
+      "approved_by": "Andre (owner)", "approved_on": "2026-11-08",
+      "attribution": "Keep the wheel's licence set and every BUILD_LICENSES text (third_party_notices/python-delivery.md) with any distribution of the delivery-py image; FreeType (FTL) and libjpeg-turbo (IJG) require crediting the FreeType Project and the Independent JPEG Group in product documentation; ICU (Unicode-3.0), libpng, libtiff, AGG and pypdfium2's CC-BY-4.0 docs require their notices to be kept.",
       "licence": "(Apache-2.0 OR BSD-3-Clause) AND CC-BY-4.0 AND BSD-3-Clause AND FTL AND Unicode-3.0 AND IJG AND Zlib AND libpng-2.0 AND libtiff AND BSD-2-Clause AND MIT AND Apache-2.0 WITH LLVM-exception AND LicenseRef-AGG-2.3",
-      "reason": "Declared 'BSD-3-Clause, Apache-2.0, dependency licenses'. The linux_x64 wheel bundles a PDFium build whose BUILD_LICENSES (reproduced in third_party_notices/python-delivery.md) add FreeType (FTL, credit clause), ICU (Unicode-3.0), libjpeg-turbo (IJG AND BSD-3-Clause AND Zlib), libpng-2.0, libtiff, Anti-Grain Geometry 2.3, lcms (MIT), openjpeg (BSD-2-Clause), llvm-libc (Apache-2.0 WITH LLVM-exception); pypdfium2's own docs are CC-BY-4.0. All permissive, none copyleft, several not named in the ruling. delivery-py only. PENDING OWNER DECISION."
+      "reason": "Declared 'BSD-3-Clause, Apache-2.0, dependency licenses'. The linux_x64 wheel bundles a PDFium build whose BUILD_LICENSES (reproduced in third_party_notices/python-delivery.md) add FreeType (FTL, credit clause), ICU (Unicode-3.0), libjpeg-turbo (IJG AND BSD-3-Clause AND Zlib), libpng-2.0, libtiff, Anti-Grain Geometry 2.3, lcms (MIT), openjpeg (BSD-2-Clause), llvm-libc (Apache-2.0 WITH LLVM-exception); pypdfium2's own docs are CC-BY-4.0. All permissive, none copyleft. delivery-py only. Approved by Andre 2026-11-08."
     }
   ]
 }

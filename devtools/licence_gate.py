@@ -14,6 +14,8 @@ What it checks, for every lockfile in the repository (devtools/licence_lib.py di
 3. each package's licence (inventory, or a reviewed exceptions.json entry) is satisfiable from policy 'allowed';
    a 'flagged' id (MPL-2.0) passes only with an approved-flagged entry; anything else needs an entry, and a
    pending-owner-decision entry is reported as PENDING (exit 2 unless --allow-pending), never passed silently;
+   an owner-approved entry (approved_by, approved_on, attribution required) passes for that exact package version
+   and is listed as APPROVED on every run — it can never admit a policy 'forbidden_ids' licence;
 4. none of policy 'forbidden_packages' is installable from any Python lock on any real platform;
 5. go.mod files have no more requires than reviewed; the vendored restic binary matches its manifest sha256 and,
    when a ``go`` toolchain is on PATH, its module list matches the inventory;
@@ -26,7 +28,7 @@ What it checks, for every lockfile in the repository (devtools/licence_lib.py di
    also equal package-lock's `license`. CI should run this mode (it needs network for uncached artefacts).
 A package with no licence value at all is an explicit UNKNOWN-licence violation.
 
-How CI should call it: docs/runbooks/dependency-ownership.md, "CI wiring (for owner review)".
+CI runs it in the `licence-gate` job of .github/workflows/ci.yml (docs/runbooks/dependency-ownership.md, "CI wiring").
 """
 
 from __future__ import annotations
@@ -53,6 +55,7 @@ class Result:
     violations: list = field(default_factory=list)
     pending: list = field(default_factory=list)
     flagged: list = field(default_factory=list)
+    approved: list = field(default_factory=list)
     checked: dict = field(default_factory=dict)
 
     def exit_code(self, allow_pending: bool) -> int:
@@ -186,6 +189,7 @@ def run(root: Path = L.REPO, policy_path: Path = DEFAULT_POLICY, exceptions_path
     allowed = set(policy["allowed"])
     allowed_exc = set(policy.get("allowed_with_exceptions", []))
     flagged = set(policy["flagged"])
+    forbidden_ids = set(policy.get("forbidden_ids", []))
     comps = {k: v for k, v in policy["components"].items() if not k.startswith("_")}
     res = Result()
 
@@ -200,8 +204,12 @@ def run(root: Path = L.REPO, policy_path: Path = DEFAULT_POLICY, exceptions_path
         for key in ("component", "name", "version", "status", "reason"):
             if not e.get(key):
                 res.violations.append(f"exceptions.json entry {e} lacks '{key}'")
-        if e.get("status") not in ("approved-flagged", "reviewed-metadata", "pending-owner-decision"):
+        if e.get("status") not in ("approved-flagged", "reviewed-metadata", "pending-owner-decision", "owner-approved"):
             res.violations.append(f"exceptions.json entry {e.get('name')}: unknown status {e.get('status')!r}")
+        if e.get("status") == "owner-approved":
+            for key in ("approved_by", "approved_on", "attribution"):
+                if not e.get(key):
+                    res.violations.append(f"exceptions.json entry {e.get('name')}: owner-approved needs '{key}'")
         if e.get("status") == "reviewed-metadata" and not e.get("licence"):
             res.violations.append(f"exceptions.json entry {e.get('name')}: reviewed-metadata needs 'licence'")
         exc_index[(e.get("component"), e.get("name"), e.get("version"))] = e
@@ -251,11 +259,26 @@ def run(root: Path = L.REPO, policy_path: Path = DEFAULT_POLICY, exceptions_path
             if entry is not None:
                 used.add((entry["component"], entry["name"], entry["version"]))
             if ok_plain:
-                if status in ("approved-flagged", "pending-owner-decision"):
+                if status in ("approved-flagged", "pending-owner-decision", "owner-approved"):
                     res.violations.append(f"stale exception: {label} passes without its {status} entry — remove it")
                 continue
             if ok_flag and status == "approved-flagged":
                 res.flagged.append(f"FLAGGED {label} — {entry['reason']}")
+            elif status == "owner-approved":
+                # an owner approval covers a permissive licence the ruling did not name; it can never admit a
+                # forbidden (copyleft / source-available) id
+                try:
+                    ids = set(L.spdx_ids(expr))
+                    clean = L.spdx_satisfied(expr, ids - forbidden_ids, allowed_exc | set(L.spdx_with_exceptions(expr)))
+                except ValueError:
+                    clean = False
+                if clean and all(entry.get(k) for k in ("approved_by", "approved_on", "attribution")):
+                    res.approved.append(f"APPROVED {label} — {entry['approved_by']} {entry['approved_on']}; "
+                                        f"attribution: {entry['attribution']}")
+                elif clean:
+                    pass                                  # the missing field is already a violation (entry check)
+                else:
+                    res.violations.append(f"{label}: owner-approved entry cannot admit a forbidden licence id")
             elif status == "pending-owner-decision":
                 res.pending.append(f"PENDING OWNER DECISION {label} — {entry['reason']}")
             elif ok_flag:
@@ -282,18 +305,16 @@ def main(argv: list[str]) -> int:
     if args.verify_sources and not args.cache:
         ap.error("--verify-sources needs --cache <dir>")
     res = run(args.root, verify_cache=args.cache if args.verify_sources else None)
-    for line in res.flagged:
-        print(line)
-    for line in res.pending:
+    for line in res.flagged + res.approved + res.pending:
         print(line)
     for line in res.violations:
         print(f"VIOLATION {line}")
     total = sum(res.checked.values())
     print(f"licence gate: {total} packages in {len(res.checked)} components; {len(res.violations)} violation(s), "
-          f"{len(res.pending)} pending owner decision(s), {len(res.flagged)} flagged")
+          f"{len(res.pending)} pending owner decision(s), {len(res.flagged)} flagged, {len(res.approved)} owner-approved")
     if args.json:
         args.json.write_text(json.dumps({"violations": res.violations, "pending": res.pending, "flagged": res.flagged,
-                                         "checked": res.checked}, indent=2) + "\n")
+                                         "approved": res.approved, "checked": res.checked}, indent=2) + "\n")
     return res.exit_code(args.allow_pending)
 
 

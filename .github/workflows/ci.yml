@@ -982,6 +982,53 @@ jobs:
   # The one check branch protection requires. A skipped upstream job (path filter said its inputs did not change)
   # is fine; a failed or cancelled one is not.
   # ---------------------------------------------------------------------------------------------------------------
+  # Licence gate (owner ruling 2026-11-08; wired in by owner approval 2026-11-08): every lockfile and the vendored
+  # restic binary against devtools/licences/policy.json + exceptions.json, with --verify-sources re-deriving every
+  # licence from the hash-verified artefact (PyPI wheels/sdists, .crate files, npm tarballs, restic's pinned Go
+  # licence texts). Runs on every event (no path filter) and fails closed: a violation, a pending owner decision, or
+  # an artefact that cannot be fetched and verified fails the job. No secrets; network for uncached artefacts only.
+  # docs/runbooks/dependency-ownership.md "CI wiring".
+  licence-gate:
+    name: licence-gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version: "1.27.3"   # only for `go version -m` on the vendored restic binary (its module list)
+          cache: false
+      - name: Artefact cache (keyed on everything the gate verifies)
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ${{ runner.temp }}/licence-cache
+          key: licence-cache-v1-${{ hashFiles('deploy/python/requirements.lock.txt', 'services/delivery-py/uv.lock', 'services/delivery-py/docker/sandbox-requirements.lock.txt', 'services/ledger-rust/Cargo.lock', 'apps/dashboard-ts/package-lock.json', '.railway/package-lock.json', 'devtools/licences/go-licence-pins.json', 'deploy/docker/maintenance/binary-manifest.json') }}
+          restore-keys: licence-cache-v1-
+      - name: Licence gate self-test (devtools/test_licence_gate.py)
+        shell: bash
+        run: |
+          set +e
+          python3 -B -m unittest devtools/test_licence_gate.py -v 2>&1 | tee "$RUNNER_TEMP/licence-gate-test.log"
+          code=${PIPESTATUS[0]}
+          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/licence-gate-test.log" --code "$code" \
+            --suite "devtools:test_licence_gate"
+          exit "$code"
+      - name: Licence gate --verify-sources (fail-closed)
+        shell: bash
+        run: |
+          set +e
+          python3 -B devtools/licence_gate.py --verify-sources --cache "$RUNNER_TEMP/licence-cache" \
+            --json "$RUNNER_TEMP/licence-gate.json" 2>&1 | tee "$RUNNER_TEMP/licence-gate.log"
+          code=${PIPESTATUS[0]}
+          grep -E '^(VIOLATION|PENDING OWNER DECISION) ' "$RUNNER_TEMP/licence-gate.log" | head -50 \
+            | while IFS= read -r line; do echo "::error title=licence gate::${line//::/: :}"; done
+          summary=$(grep -E '^licence gate: ' "$RUNNER_TEMP/licence-gate.log" | tail -1)
+          if [ "$code" = 0 ]; then echo "::notice title=licence gate::${summary}"; else echo "::error title=licence gate (exit $code)::${summary:-no summary - the gate crashed, see the log}"; fi
+          exit "$code"
+
   required:
     name: required
     if: always()
@@ -1001,6 +1048,7 @@ jobs:
       - secret-scan
       - hygiene-static
       - warroom
+      - licence-gate
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
