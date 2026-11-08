@@ -1,0 +1,55 @@
+{
+  "_doc": "Licence policy for devtools/licence_gate.py, from the owner ruling of 2026-11-08: only permissive licences (MIT, Apache-2.0, BSD, ISC, Zlib, PSF, Unlicense, CC0); MPL-2.0 allowed but flagged; no AGPL/GPL/LGPL in shipped services; no source-available licences (ELv2, BSL/BUSL, SSPL, ...); everything pinned with hashes and owned; licence notices kept. 'allowed' are the SPDX ids that pass with no review. 'family_variants' records why each id beyond the owner's words is in 'allowed' (each is a strictly more permissive member of a named family). 'flagged' ids pass ONLY through a reviewed devtools/licences/exceptions.json entry with status approved-flagged. Every other id (including permissive ones the ruling does not name, e.g. Unicode-3.0, MIT-CMU, CC-BY-4.0) needs an exceptions entry, and an entry with status pending-owner-decision is reported, never silently passed. 'forbidden_ids' are listed for the reader; the gate refuses anything not satisfiable from 'allowed' (+ an approved 'flagged' entry) whether listed here or not.",
+  "allowed": [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "0BSD",
+    "ISC",
+    "Zlib",
+    "PSF-2.0",
+    "Python-2.0",
+    "Unlicense",
+    "CC0-1.0"
+  ],
+  "allowed_with_exceptions": [
+    "LLVM-exception"
+  ],
+  "family_variants": {
+    "MIT-0": "MIT family: the MIT text without the attribution condition (cffi)",
+    "0BSD": "BSD family: zero-clause BSD, no conditions at all (tslib, numpy bundled code)",
+    "Python-2.0": "PSF family: SPDX id of the Python licence stack, of which PSF-2.0 is the current part",
+    "LLVM-exception": "a WITH exception that only adds permissions to Apache-2.0"
+  },
+  "flagged": [
+    "MPL-2.0"
+  ],
+  "forbidden_ids": [
+    "AGPL-1.0", "AGPL-3.0", "AGPL-3.0-only", "AGPL-3.0-or-later",
+    "GPL-1.0", "GPL-2.0", "GPL-2.0-only", "GPL-2.0-or-later", "GPL-3.0", "GPL-3.0-only", "GPL-3.0-or-later",
+    "LGPL-2.0", "LGPL-2.1", "LGPL-2.1-only", "LGPL-2.1-or-later", "LGPL-3.0", "LGPL-3.0-only", "LGPL-3.0-or-later",
+    "Elastic-2.0", "BUSL-1.1", "SSPL-1.0", "Commons-Clause", "PolyForm-Noncommercial-1.0.0", "PolyForm-Shield-1.0.0"
+  ],
+  "forbidden_packages": {
+    "_doc": "Python distributions that must not be installable on any real platform (linux/macOS/Windows, CPython 3.12-3.14) from any Python lock. In a uv.lock an override marker such as `sys_platform == 'never'` keeps them in the file; the gate follows the dependency graph from the project root and fails if any path with satisfiable markers reaches one.",
+    "python": [
+      "langgraph-api",
+      "langgraph-runtime-inmem",
+      "langgraph-cli",
+      "forbiddenfruit"
+    ]
+  },
+  "components": {
+    "_doc": "Every lockfile the gate finds must be listed here (an unlisted lockfile fails the gate, so a new ecosystem is reviewed before it ships). 'kind' selects the reader. The toy fixtures under fixtures/dlv/ are excluded by devtools/licence_lib.py (test inputs for the delivery engine; nothing in them ships).",
+    "python-shared": {"lockfile": "deploy/python/requirements.lock.txt", "kind": "requirements"},
+    "python-delivery": {"lockfile": "services/delivery-py/uv.lock", "kind": "uv"},
+    "python-sandbox": {"lockfile": "services/delivery-py/docker/sandbox-requirements.lock.txt", "kind": "requirements"},
+    "rust-ledger": {"lockfile": "services/ledger-rust/Cargo.lock", "kind": "cargo"},
+    "npm-dashboard": {"lockfile": "apps/dashboard-ts/package-lock.json", "kind": "npm"},
+    "npm-railway": {"lockfile": ".railway/package-lock.json", "kind": "npm"},
+    "go-orchestrator": {"lockfile": "services/orchestrator-go/go.mod", "kind": "gomod", "max_requires": 0},
+    "go-restic": {"lockfile": null, "kind": "restic", "binary": "deploy/docker/maintenance/vendor/restic", "manifest": "deploy/docker/maintenance/binary-manifest.json"}
+  }
+}

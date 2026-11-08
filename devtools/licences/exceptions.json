@@ -1,0 +1,70 @@
+{
+  "_doc": "Reviewed licence exceptions for devtools/licence_gate.py. One entry per (component, package, exact version): a version bump drops the entry and the gate fails until it is re-reviewed. 'status': approved-flagged = an MPL-2.0 (policy 'flagged') component the owner ruling allows; it passes and is listed as FLAGGED on every run. reviewed-metadata = the package's metadata carries no usable licence, a reviewer read the licence file shipped in the hash-verified artefact and recorded the SPDX expression in 'licence' (it is then checked like any other). pending-owner-decision = a licence the ruling does not cover; the gate reports PENDING and exits 2 (0 only with --allow-pending), it never passes silently. An entry that no longer matches a locked package, or whose package passes without it, fails the gate as stale. 'licence' (optional) replaces the inventory's declared licence for evaluation; 'reason' is mandatory.",
+  "exceptions": [
+    {
+      "component": "python-shared", "name": "certifi", "version": "2026.10.19", "status": "approved-flagged",
+      "reason": "MPL-2.0 CA bundle, used unmodified; source at https://github.com/certifi/python-certifi (notice in third_party_notices/python-shared.md). Ships in the Gate 5 Python images."
+    },
+    {
+      "component": "python-delivery", "name": "certifi", "version": "2026.10.19", "status": "approved-flagged",
+      "reason": "MPL-2.0 CA bundle, used unmodified (delivery-py)."
+    },
+    {
+      "component": "python-sandbox", "name": "certifi", "version": "2026.10.19", "status": "approved-flagged",
+      "reason": "MPL-2.0 CA bundle, used unmodified (delivery fix-engine sandbox image)."
+    },
+    {
+      "component": "python-delivery", "name": "orjson", "version": "3.12.0", "status": "approved-flagged",
+      "reason": "Declared 'MPL-2.0 AND (Apache-2.0 OR MIT)': the MPL-2.0 part is bundled code inside the wheel, used unmodified; source https://github.com/ijl/orjson."
+    },
+    {
+      "component": "python-delivery", "name": "tqdm", "version": "4.70.1", "status": "approved-flagged",
+      "reason": "Declared 'MPL-2.0 AND MIT', used unmodified; source https://github.com/tqdm/tqdm."
+    },
+    {
+      "component": "go-restic", "name": "github.com/hashicorp/golang-lru/v2", "version": "v2.0.7", "status": "approved-flagged",
+      "reason": "MPL-2.0 Go module statically linked into the upstream restic 0.19.1 binary, unmodified; source https://github.com/hashicorp/golang-lru at v2.0.7. restic ships in six Gate 5 images (/opt/zbm-maintenance/bin/restic)."
+    },
+    {
+      "component": "python-delivery", "name": "agent-client-protocol", "version": "0.12.1", "status": "reviewed-metadata", "licence": "Apache-2.0",
+      "reason": "METADATA has no License-Expression/License/classifier; the wheel's dist-info/licenses/LICENSE is the Apache-2.0 text (same finding as services/delivery-py/seed/licence_exceptions.json)."
+    },
+    {
+      "component": "python-delivery", "name": "dotenv", "version": "0.9.9", "status": "reviewed-metadata", "licence": "MIT",
+      "reason": "Declares License: UNKNOWN; the bundled dist-info/LICENSE is the MIT text ('MIT License', Copyright (c) 2018 Pedro Buron)."
+    },
+    {
+      "component": "python-delivery", "name": "protobuf-py-ext", "version": "0.1.1", "status": "reviewed-metadata", "licence": "Apache-2.0",
+      "reason": "Native extension built from the same repository (github.com/bufbuild/protobuf-py) as protobuf-py 0.1.1, whose METADATA carries License-Expression: Apache-2.0; the ext wheel ships no licence metadata or file (services/delivery-py/seed/licence_exceptions.json, verified 2026-09-27)."
+    },
+    {
+      "component": "python-delivery", "name": "sqlite-vec", "version": "0.1.9", "status": "reviewed-metadata", "licence": "MIT OR Apache-2.0",
+      "reason": "License field reads 'MIT License, Apache License, Version 2.0' (upstream dual-licenses MIT or Apache-2.0)."
+    },
+    {
+      "component": "python-delivery", "name": "tiktoken", "version": "0.14.0", "status": "reviewed-metadata", "licence": "MIT",
+      "reason": "Pastes the whole MIT text into its License field (no expression, no classifier); the bundled licenses/LICENSE is the MIT text."
+    },
+    {
+      "component": "npm-dashboard", "name": "caniuse-lite", "version": "1.0.30001810", "status": "pending-owner-decision",
+      "reason": "CC-BY-4.0 (browser-support DATA, a direct dependency of next 16.4.3; attribution-only, not copyleft). Not in the 2026-11-08 ruling's list. Options: approve CC-BY-4.0 for data packages (attribution kept in third_party_notices/npm-dashboard.md), or remove it (not possible without replacing Next.js). PENDING OWNER DECISION."
+    },
+    {
+      "component": "rust-ledger", "name": "unicode-ident", "version": "1.0.26", "status": "pending-owner-decision",
+      "reason": "Declared '(MIT OR Apache-2.0) AND Unicode-3.0': the Unicode-3.0 part covers the Unicode character DATA tables (permissive, attribution-only). Build-time only: `cargo tree -i unicode-ident -e normal,build` shows it reached solely through proc-macro2/quote/syn -> serde_derive (a proc-macro), so it runs inside the compiler and is not linked into the Gate 5 ledger-server binary. Unicode-3.0 is not named in the ruling. PENDING OWNER DECISION."
+    },
+    {
+      "component": "python-delivery", "name": "pillow", "version": "13.0.0", "status": "pending-owner-decision",
+      "reason": "Declared MIT-CMU (the historical PIL licence: a permissive MIT-style notice, OSI/FSF-listed as HPND/MIT-CMU). Not named in the ruling. delivery-py only (not a Gate 5 image). PENDING OWNER DECISION (recommend: approve as MIT family)."
+    },
+    {
+      "component": "python-delivery", "name": "regex", "version": "2026.9.10", "status": "pending-owner-decision",
+      "reason": "Declared 'Apache-2.0 AND CNRI-Python' (CNRI-Python: the CNRI part of the historical Python licence stack, permissive, OSI-approved). Not named in the ruling. delivery-py only. PENDING OWNER DECISION (recommend: approve as PSF family)."
+    },
+    {
+      "component": "python-delivery", "name": "pypdfium2", "version": "5.13.0", "status": "pending-owner-decision",
+      "licence": "(Apache-2.0 OR BSD-3-Clause) AND CC-BY-4.0 AND BSD-3-Clause AND FTL AND Unicode-3.0 AND IJG AND Zlib AND libpng-2.0 AND libtiff AND BSD-2-Clause AND MIT AND Apache-2.0 WITH LLVM-exception AND LicenseRef-AGG-2.3",
+      "reason": "Declared 'BSD-3-Clause, Apache-2.0, dependency licenses'. The linux_x64 wheel bundles a PDFium build whose BUILD_LICENSES (reproduced in third_party_notices/python-delivery.md) add FreeType (FTL, credit clause), ICU (Unicode-3.0), libjpeg-turbo (IJG AND BSD-3-Clause AND Zlib), libpng-2.0, libtiff, Anti-Grain Geometry 2.3, lcms (MIT), openjpeg (BSD-2-Clause), llvm-libc (Apache-2.0 WITH LLVM-exception); pypdfium2's own docs are CC-BY-4.0. All permissive, none copyleft, several not named in the ruling. delivery-py only. PENDING OWNER DECISION."
+    }
+  ]
+}
