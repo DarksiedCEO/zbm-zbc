@@ -21,7 +21,7 @@ from envelope import sha
 from errors import Conflict, Forbidden, Invalid, Unavailable
 from reasons import R
 
-AGENTS = ("selene", "delia", "roman", "entity_check", "callum", "naomi", "osei")
+AGENTS = ("selene", "delia", "roman", "entity_check", "callum", "naomi", "osei", "theo", "zara")
 # The agent registry (ADR 0046, owner rule: every agent has a human name, ONE job, and an entry with its assignment,
 # inputs and outputs). Shared plumbing (primitives/, answer_adapter.py and the engine adapters, the ports) is not an
 # agent and is not listed. Shown on GET /seo/v1/department.
@@ -48,15 +48,37 @@ REGISTRY = {
                            "confidence)",
                            "callum.mnc_priority/2 (the Mentioned-Not-Cited list for Roman and Adaeze)"]},
     "naomi": {"assignment": "prompt volume with confidence bands",
-              "inputs": ["a prompt-volume source (NOT_CONNECTED)"], "outputs": ["prompt_volume envelope (audit)"]},
+              "inputs": ["a prompt-volume source (NOT_CONNECTED)",
+                         "conversation runs (ADR 0049): the fireteam's topic list, Priya's priya-emerging-handoff/1 "
+                         "items (observed impressions on this property), the latest audit's Search Console "
+                         "question-class totals (context only)"],
+              "outputs": ["prompt_volume envelope (audit)",
+                          "naomi.prompt_volume/1 to Zara: per topic a DIRECTIONAL_PROXY band (Garwood 95%) with "
+                          "reliability and confidence (never HIGH), or UNKNOWN (never 0)"]},
     "osei": {"assignment": "data hygiene, first-party truth and search-truth drift",
              "inputs": ["every run's quarantines and observations", "Search Console (when bound)",
                         "two completed audits"],
              "outputs": ["data_hygiene and search_performance envelopes", "drift reports"]},
+    # ADR 0049: the conversation-mining + prompt-volume fireteam (Theo, Naomi, lead Zara)
+    "theo": {"assignment": "conversation mining: multi-turn chains (opening -> follow-ups -> final recommendation) "
+                           "and where the client and competitors appear at each turn",
+             "inputs": ["the fireteam's topic list (prompt set prompts, Priya's emerging question items)",
+                        "Priya's priya-emerging-handoff/1 items (follow-up templates only)",
+                        "the prompt set's brand terms and competitor domains, the run's competitor terms",
+                        "answers from the multi-engine adapter (ADR 0046), within SEO_THEO_RUN_MAX_CALLS"],
+             "outputs": ["theo.conversation_chains/1 to Zara: per topic x engine the chain pattern, strength, "
+                         "per-turn client / competitor rates and the final-recommendation distribution",
+                         "conversation_chains envelope (per-turn rows with bounded evidence)"]},
+    "zara": {"assignment": "fireteam lead: cross-check Theo's chains against Naomi's volume as they arrive; flag, "
+                           "downgrade or hold before anything moves downstream (never mines or estimates)",
+             "inputs": ["theo.conversation_chains/1 (per topic, as emitted)", "naomi.prompt_volume/1 (per topic)"],
+             "outputs": ["zara.conversation_volume/1 (the only fireteam output downstream: verdict, conflicts, "
+                         "decision, priority basis per topic)", "zara.priya_feedback/1 for Priya's emerging-query "
+                         "loop (contract only, not consumed)"]},
 }
 # Named in the spec, NOT built (no code, no registry entry until they are): Adaeze (content gap) is a consumer of
-# callum.mnc_priority/2; Marcus, Priya, Theo, Zara, Idris, Vesper, Julian, Sable, Farrah (ADR 0017).
-NOT_BUILT_AGENTS = ("adaeze", "marcus", "priya", "theo", "zara", "idris", "vesper", "julian", "sable", "farrah")
+# callum.mnc_priority/2; Marcus, Priya, Idris, Vesper, Julian, Sable, Farrah (ADR 0017). Theo and Zara: ADR 0049.
+NOT_BUILT_AGENTS = ("adaeze", "marcus", "priya", "idris", "vesper", "julian", "sable", "farrah")
 STATES = ("active", "watch", "retrain", "restricted", "retired")
 MOVES = {"active": ("watch", "restricted"), "watch": ("active", "retrain", "restricted"),
          "retrain": ("active", "watch", "restricted"), "restricted": ("active", "retrain", "retired"),
@@ -163,6 +185,8 @@ class ManagerMixin:
                 if agent == "osei" else None,
                 "engine_runs": self.engine_scorecard() if agent == "callum" else None,
                 "citation_runs": self.citation_scorecard() if agent == "callum" else None,
+                **({"conversation_runs": self.conversation_scorecard(agent)}
+                   if agent in ("theo", "naomi", "zara") else {}),
                 "basis": "completed audit reports, finished log ingests, recorded drift reports and (Callum) "
                          "recorded answer-engine reservations and settlements"}
 

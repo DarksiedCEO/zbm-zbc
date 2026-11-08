@@ -519,6 +519,26 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
         """Callum's Mentioned-Not-Cited priority list: the callum.mnc_priority/2 contract Roman and Adaeze read."""
         return svc.mnc_priority_view(scope[1], _id(cid))
 
+    # ------------------------------------------------------------------ the Theo / Naomi / Zara fireteam (ADR 0049)
+
+    @app.post(P + "/tenants/{tid}/conversation-runs", dependencies=auth, status_code=201)
+    def request_conversation_run(request: Request, req: dict = Depends(body(m.ConversationRunCreate)),
+                                 scope: tuple = Depends(scoped("dashboard", "seo_agent"))) -> dict:
+        return svc.request_conversation_run(scope[0], scope[1], req, andre=andre_if_presented(request))
+
+    @app.get(P + "/tenants/{tid}/conversation-runs", dependencies=auth)
+    def conversation_runs(scope: tuple = Depends(scoped(*CITATION_READERS))) -> list:
+        return svc.conversation_runs_view(scope[1])
+
+    @app.get(P + "/tenants/{tid}/conversation-runs/{vid}", dependencies=auth)
+    def conversation_run(vid: str, scope: tuple = Depends(scoped(*CITATION_READERS))) -> dict:
+        return svc.conversation_run_view(scope[1], _id(vid))
+
+    @app.get(P + "/tenants/{tid}/conversation-runs/{vid}/crosscheck", dependencies=auth)
+    def conversation_crosscheck(vid: str, scope: tuple = Depends(scoped(*CITATION_READERS))) -> dict:
+        """Zara's zara.conversation_volume/1: the only fireteam output that moves downstream."""
+        return svc.crosscheck_view(scope[1], _id(vid))
+
     # ------------------------------------------------------------------ first-party log ingests (Wave 2)
 
     LOG_CALLERS = ("dashboard", "seo_agent", "hub")
