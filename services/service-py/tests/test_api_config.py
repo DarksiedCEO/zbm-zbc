@@ -47,15 +47,22 @@ def test_andre_gate(h):
     h.ok(h.client.post(path, json=body, headers={**hdr, "X-Andre-Approval-Token": ANDRE_TOKEN}))
 
 
-@pytest.mark.parametrize("token", [None, SERVICE_TOKEN, CALLERS["hub"]])
-def test_andre_token_equal_to_another_token_counts_as_not_configured(tmp_path, token):
-    h = Harness(tmp_path, SVC_ANDRE_APPROVAL_TOKEN=token or "")
+def test_andre_token_unset_counts_as_not_configured(tmp_path):
+    h = Harness(tmp_path, SVC_ANDRE_APPROVAL_TOKEN="")
     saved = h.article(approve=False)
     r = h.client.post("/svc/v1/kb/articles/hours/approve",
                       json={"request_id": rid(), "version": saved["version"], "content_sha256": saved["content_sha256"]},
-                      headers={**h.headers("dashboard"), "X-Andre-Approval-Token": token or "x"})
+                      headers={**h.headers("dashboard"), "X-Andre-Approval-Token": "x"})
     assert r.status_code == 403 and r.json()["detail"] == "ANDRE_NOT_CONFIGURED"
     assert h.ok(h.get("/svc/v1/status"))["andre_approvals_configured"] is False
+
+
+@pytest.mark.parametrize("token", [SERVICE_TOKEN, CALLERS["hub"], CALLERS["dashboard"]])
+def test_andre_token_equal_to_another_token_refuses_start(token):
+    # hardening 2026-11-08: was silently "not configured" (seen only when an approval failed); now a start refusal
+    with pytest.raises(RuntimeError, match="SVC_ANDRE_APPROVAL_TOKEN must differ"):
+        config_mod.load(base_env(SVC_ANDRE_APPROVAL_TOKEN=token))
+    # the gate itself still refuses such a token (defence in depth, for any caller that builds it directly)
     assert FounderGate.build(token, SERVICE_TOKEN, CALLERS.values()).configured is False
 
 

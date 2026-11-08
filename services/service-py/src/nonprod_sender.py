@@ -22,9 +22,17 @@ class NonProdFileSender:
     def send(self, msg: Outbound) -> str:
         line = json.dumps({"message_id": msg.message_id, "brand": msg.brand, "channel": msg.channel, "to": msg.to,
                            "sender": msg.sender, "text": msg.text}, sort_keys=True) + "\n"
+        data = line.encode("utf-8")
         fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
         try:
-            os.write(fd, line.encode("utf-8"))
+            # hardening 2026-11-08: os.write may write only part of the buffer; a short write left a torn JSON line
+            # and still answered "sent". Every byte is written, or this raises (the tick records a failed attempt).
+            view = memoryview(data)
+            while view:
+                n = os.write(fd, view)
+                if n <= 0:
+                    raise OSError("short write to the non-production outbox")
+                view = view[n:]
             os.fsync(fd)
         finally:
             os.close(fd)

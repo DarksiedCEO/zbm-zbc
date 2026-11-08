@@ -36,11 +36,11 @@ else; Andre's actions go through the `dashboard` caller AND carry `X-Andre-Appro
 |---|---|---|
 | `SVC_SERVICE_TOKEN` | — | required, 32..512 printable characters |
 | `SVC_CALLER_TOKENS` | `{}` | JSON `{caller: token}`; known callers only; all distinct and different from the service token |
-| `SVC_ANDRE_APPROVAL_TOKEN` | unset | Andre's approvals (FounderGate); equal to the service token or any caller token = not configured |
+| `SVC_ANDRE_APPROVAL_TOKEN` | unset | Andre's approvals (FounderGate); unset = not configured (every approval refused). When set: 32..512 printable characters, never an unresolved `${{...}}` reference, different from the service token and every caller token — otherwise the service refuses to start |
 | `SVC_NON_PRODUCTION` | 0 | 1 allows the in-memory store (tests only). Never in production |
 | `SVC_DATA_DIR` | — | required in production; a directory owned by the service user, mode 0700 |
 | `SVC_HMAC_KEY_FILE` | unset | normally unset: the service GENERATES its key on the first start (32 bytes from `os.urandom`) and keeps it in `SVC_DATA_DIR/hmac.key` (0600). A supplied file must hold 32+ random-looking bytes, base64 (refused: all zeros, fewer than 16 distinct bytes, a repeated 8-byte block, or only printable characters). The key's fingerprint is written to the log at the first start; another key refuses start. `SVC_NON_PRODUCTION=1` without a data directory uses a fixed test key |
-| `LEDGER_SERVICE_URL`, `LEDGER_SERVICE_TOKEN` | unset | unset = every write refused (fail closed) |
+| `LEDGER_SERVICE_URL`, `LEDGER_SERVICE_TOKEN` | unset | both or neither (one alone refuses start); neither = every write refused (fail closed). The URL is a base URL `http(s)://host[:port]`; the token is never an unresolved `${{...}}` reference and differs from every token this service accepts |
 | `SVC_SUPPORT_EMAIL_ZBM`, `SVC_SUPPORT_EMAIL_ZBC` | unset | the support identity per brand (inbound must be addressed to it; outbound is sent from it); must differ; unset = that brand's email refused |
 | `SVC_SMS_NUMBER_ZBM`, `SVC_SMS_NUMBER_ZBC` | unset | the brand's SMS number, E.164; must differ; unset = that brand's SMS refused |
 | `SVC_LEGAL_URL` / `SVC_LEGAL_TOKEN` / `SVC_LEGAL_CALLER_TOKEN` | unset | all three or none; Legal (37) `POST /legal/v1/requests`; none = handoff `not_wired` |
@@ -50,8 +50,8 @@ else; Andre's actions go through the `dashboard` caller AND carry `X-Andre-Appro
 | `SVC_RENEWAL_WINDOW_DAYS` | 60 | 7..180 |
 | `SVC_VOICE_PROVIDER`, `SVC_EMAIL_PROVIDER`, `SVC_SMS_PROVIDER`, `SVC_CHAT_PROVIDER`, `SVC_ALERT_PROVIDER` | unset | not built: setting one refuses start. Exception: `SVC_SMS_PROVIDER=nonprod_file` with `SVC_NON_PRODUCTION=1` and `SVC_NONPROD_OUTBOX_FILE` (absolute path) "sends" SMS by appending JSON lines to that file (the live run's sender; never in production) |
 | `SVC_FINANCE_URL`, `SVC_CYBER_URL`, `SVC_COMPLIANCE_URL`, `SVC_RESULTS_URL`, `SVC_ONBOARDING_URL` | unset | clients not built: setting one refuses start |
-| `SVC_BIND_ADDR`, `SVC_PORT` | 127.0.0.1, 8460 | |
-| `SVC_REQUEST_HEAD_TIMEOUT_SECONDS`, `SVC_KEEP_ALIVE_TIMEOUT_SECONDS`, `SVC_LIMIT_CONCURRENCY`, `SVC_SWITCH_INTERVAL_SECONDS`, `SVC_DRAINS_MAX` | 10, 5, 128, 0.001, 512 | launcher tuning (`src/serve.py`, shared with the other Python services; the switch interval only 0.0001 .. 0.05, `src/launch_guard.py`) |
+| `SVC_BIND_ADDR`, `SVC_PORT` | 127.0.0.1, 8460 | the address is an IP literal or `localhost` (anything else refuses start); `::` / `[::]` is bound dual-stack, IPv4 and IPv6 (`src/dual_stack.py`, finance-py's module byte for byte) |
+| `SVC_REQUEST_HEAD_TIMEOUT_SECONDS`, `SVC_KEEP_ALIVE_TIMEOUT_SECONDS`, `SVC_LIMIT_CONCURRENCY`, `SVC_SWITCH_INTERVAL_SECONDS`, `SVC_DRAINS_MAX` | 10, 5, 128, 0.001, 512 | launcher tuning (`src/serve.py`, shared with the other Python services; the switch interval only 0.0001 .. 0.05, `src/launch_guard.py`). Each must be finite and in range — head timeout 0.5..300 s, keep-alive 1..300 s, concurrency 1..10000 — or the service refuses to start |
 
 Addresses are taken lower-case (email) and E.164 (phone); the gateways normalise before posting. No body may carry
 a date of birth, government id, card or bank account number, IP address or device field (422, anywhere in the body).
@@ -65,6 +65,7 @@ a date of birth, government id, card or bank account number, IP address or devic
 | `POST /svc/v1/contacts`; `GET /contacts/{id}` | hub, onboarding; dashboard | the minimum about a person: ref, email, phone, time zone, display name |
 | `POST /svc/v1/consents`; `POST /consents/revoke`; `GET /contacts/{id}/consents` | hub, onboarding; hub, dashboard; dashboard, hub, compliance_38 | consent registry (express only; names the address it is for; text stored once by keyed hash) |
 | `POST /svc/v1/contacts/{id}/sms-pause/clear` | Andre | lift the pause an unanswered inbound message put on proactive SMS to the contact's current number (pauses belong to the number; never restores a revoked consent) |
+| `POST /svc/v1/contacts/{id}/email-pause/clear` | Andre | the same for proactive EMAIL (pauses belong to the address). Any inbound the bot does not answer, on any channel, and any NPS comment pauses proactive email (409 `EMAIL_PAUSED`) as it pauses proactive SMS: fail closed, since no opt-out word list is complete |
 | `POST /svc/v1/chat/messages`; `GET /chat/threads/{ticket_id}?contact_ref=&brand=` | hub | inbound chat (answered inline when an approved answer matches); the thread as the contact sees it |
 | `POST /svc/v1/inbound/email` | email_gateway | inbound email to a brand's support identity |
 | `POST /svc/v1/inbound/sms` | sms_gateway | inbound SMS; a bare STOP / UNSUBSCRIBE / CANCEL / END / QUIT revokes SMS consent at once |
@@ -101,6 +102,17 @@ generates or reads the key and before it opens the log; a second process on the 
 Saving or approving a KB article returns `warnings`: words in its example questions that are on a watch list or one
 typo from a refused term. Read them before approving; the refused-term list cannot be complete and Andre's approval
 is the main control.
+
+Opt-outs across channels (hardening 2026-11-08): an opt-out received by chat or SMS that names email ("stop emailing
+me", "remove me from your mailing list", "no more texts or emails") also revokes EMAIL consent (`revoked_via:
+email_opt_out_by_chat` / `_by_sms`); one whose email scope is unclear keeps email and raises `EMAIL_OPT_OUT_UNCLEAR`;
+a bare STOP by text revokes SMS only (and, like every opt-out, pauses proactive email); a short opt-out that reaches
+further but names no channel ("STOP ALL", "stop contacting me") keeps email consent and raises `OPT_OUT_POSSIBLE`.
+Rollback limit: a log holding `email_paused` lines refuses start on builds before this one (ADR 0014, Nov 8 2026
+amendment). A survey (NPS) comment is never answered, so it pauses proactive SMS and email
+like any unanswered inbound and, with opt-out wording in it, raises `OPT_OUT_POSSIBLE`; the survey form never changes
+consent itself. Legal's intake kind reads every contract term of the body and subject, typos and inflections included
+("my lawyr", "litigating" reach Legal as `litigation_threat`).
 
 ## Live run
 

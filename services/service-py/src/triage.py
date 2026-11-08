@@ -412,7 +412,8 @@ def classify(text: str, recent_inbound_24h: int = 0, reopened: int = 0, subject:
     fired = [c for c in PRECEDENCE if c in fired]
     questions = text.count("?")
     if fired:
-        return Triage(fired[0], tuple(fired), tuple(signals), False, questions)
+        extra = {"contract_terms": contract_terms(text, subject)} if "contract" in fired else {}
+        return Triage(fired[0], tuple(fired), tuple(signals), False, questions, extra)
     reasons = []
     if non_ascii_letters(text) or (subject and non_ascii_letters(subject)):
         reasons.append("other:non_ascii")
@@ -482,17 +483,60 @@ PRIORITY = {"security": "p1", "privacy": "p2", "contract": "p2", "money": "p2", 
             "routine": "p3", "no_answer": "p3"}
 
 
+# Hardening 2026-11-08: legal_kind read only the first five recorded signals of the contract category, and only their
+# exact-lexicon form. "My lawyr will be in touch" (a typo: contract:near_lawyer), "we are litigating" (a stem:
+# contract:stem_litigat) or a message whose first five contract hits were "cancel, contract, terms ..." with "lawsuit"
+# sixth went to Legal as a plain contract_dispute. Now every contract term of the body and the subject is read
+# (``contract_terms``, kept on the Triage), typo and stem forms included, by the base word.
+LITIGATION_TERMS = frozenset({"sue", "sues", "suing", "sued", "sueing", "lawsuit", "lawyer", "lawyers", "attorney",
+                              "attorneys", "litigation", "litigat", "court", "small_claims", "claims_court",
+                              "cease_and_desist", "solicitor", "solicitors", "legal_action"})
+IP_PREFIXES = ("dmca", "copyright", "infring", "takedown", "taken_down", "take_down", "trademark")
+
+
+# Review of PR #46 (L2): a one-typo match on a short word reads names as legal words ("Tom Sawyer" is one letter
+# from "lawyer"). For Legal's intake kind a typo of six letters or fewer counts only right after a possessive or an
+# article ("my lawyr", "our atorney"); longer typos ("attorny", "lawsiut") count anywhere.
+_TYPO_CONTEXT = frozenset({"my", "our", "his", "her", "their", "your", "a", "the"})
+
+
+def _legal_typo_hits(norm: str) -> set:
+    toks = norm.split()
+    out = set()
+    for i, tok in enumerate(toks):
+        if len(tok) < 5 or (len(tok) <= 6 and not (i > 0 and toks[i - 1] in _TYPO_CONTEXT)):
+            continue
+        out |= {stem for stem in FUZZY["contract"] if _one_edit(tok, stem)}
+    return out
+
+
+def contract_terms(text: str, subject: Optional[str] = None) -> tuple:
+    """Every contract term in the body and subject, by its base word (spaces as underscores): lexicon phrases, the
+    one-typo stems (FUZZY) and the inflection stems (STEMS) and exact words. Sorted, so it is deterministic."""
+    out: set[str] = set()
+    for t in (text, subject):
+        if not t:
+            continue
+        norm = normalise(t)
+        out |= {normalise(w).strip().replace(" ", "_") for w in LEXICON["contract"] if _has(norm, w)}
+        out |= _legal_typo_hits(norm)
+        # the stem "court" also starts "courtesy" / "courteous": the exact word "court" (LEXICON) stands for it here
+        out |= {st.replace(" ", "_") for c, st in stem_hits(norm) if c == "contract" and st != "court"}
+    return tuple(sorted(out))
+
+
 def legal_kind(t: Triage) -> str:
     """legal-py's intake kind for this message (only used when Legal is a route)."""
-    s = set(t.signals)
     if "privacy" in t.categories:
         return "privacy_request"
-    if any(x in s for x in ("contract:sue", "contract:suing", "contract:sued", "contract:lawsuit", "contract:lawyer",
-                            "contract:lawyers", "contract:attorney", "contract:attorneys", "contract:litigation",
-                            "contract:court", "contract:small_claims", "contract:cease_and_desist")):
+    terms = set(t.extra.get("contract_terms") or ())
+    for sig in (t.signals if "contract_terms" not in t.extra else ()):   # a Triage built without them: its signals
+        if sig.startswith("contract:") and sig != "contract:stem_court":
+            base = sig[len("contract:"):]
+            terms.add(base[5:] if base.startswith(("near_", "stem_")) else base)
+    if terms & LITIGATION_TERMS:
         return "litigation_threat"
-    if any(x.startswith(("contract:dmca", "contract:copyright", "contract:infring", "contract:takedown",
-                         "contract:trademark")) for x in s):
+    if any(x.startswith(IP_PREFIXES) for x in terms):
         return "ip_claim"
     return "contract_dispute"
 
