@@ -1,0 +1,3018 @@
+{
+ "library": "seo-py-lena",
+ "version": 1,
+ "department": "Search & Answer Intelligence (department 2): Lena, real-user page experience (Chrome UX Report field data)",
+ "service": "seo-py",
+ "driver": "seo_py_lena.py",
+ "basis": "ADR 0050 (field data only; OFF by default; record-first reservations; per-run and daily call caps; provider:crux kill switch; the key only in the X-Goog-Api-Key header, never in a URL, log, error, status or report; no field data is INSUFFICIENT_FIELD_DATA, never fast or slow; the Core Web Vitals assessment passes only with LCP, INP and CLS all present and good; strict parsing; a null history point is no data; the trend is descriptive, never a forecast; tenant-scoped views). The war room's own oracle compares every reported value and rating with what the fake served for that exact key and web.dev's thresholds.",
+ "variants_per_seed": 1,
+ "scenarios": [
+  {
+   "id": "no-field-data-404",
+   "persona": "an origin or URLs Google has no field data for (its documented 404), for every form factor or only some, current data or history only",
+   "basis": "ADR 0050 ('no field data' is INSUFFICIENT_FIELD_DATA, never fast, never slow; the history of a key with no current data is not asked)",
+   "seeds": [
+    {
+     "literal": [
+      "origin",
+      "urls",
+      "all",
+      "phone_only",
+      "history_only",
+      "tablet_everywhere"
+     ],
+     "basis": "the driver's no-data shapes"
+    }
+   ],
+   "input_field": "missing",
+   "params": {
+    "paths": [
+     "/",
+     "/,/pricing",
+     "/,/pricing,/about"
+    ]
+   },
+   "fixed_input": {
+    "paths": "/,/pricing"
+   },
+   "variants_per_seed": 2,
+   "steps": [
+    {
+     "action": "crux_audit",
+     "args": {
+      "missing": "$missing",
+      "paths": "$paths"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "the_audit_completes_whatever_google_sends",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "audits_not_completed"
+     }
+    },
+    {
+     "id": "key_never_in_a_url_response_report_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_leaked"
+     }
+    },
+    {
+     "id": "key_only_in_its_header",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_header_missing"
+     }
+    },
+    {
+     "id": "no_other_secret_anywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "never_fast_or_slow_without_data",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "fast_slow_without_data"
+     }
+    },
+    {
+     "id": "verdict_never_pass_with_a_missing_core_metric",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pass_with_missing_core"
+     }
+    },
+    {
+     "id": "values_and_ratings_are_what_google_served",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_value_or_rating"
+     }
+    },
+    {
+     "id": "a_null_history_point_is_never_a_number",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "null_became_number"
+     }
+    },
+    {
+     "id": "no_forecast",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "forecast"
+     }
+    },
+    {
+     "id": "data_only_from_its_own_key",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "data_not_from_its_key"
+     }
+    },
+    {
+     "id": "retired_metric_never_reported",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "retired_metric_reported"
+     }
+    },
+    {
+     "id": "no_cross_tenant_or_off_target_query",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cross_tenant"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "the_client_report_builds",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "report_failed"
+     }
+    },
+    {
+     "id": "valid_field_data_kept",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "valid_data_lost"
+     }
+    },
+    {
+     "id": "collection_period_honest",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "period_honesty"
+     }
+    },
+    {
+     "id": "paced_within_googles_quota",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "over_quota_per_minute"
+     }
+    }
+   ]
+  },
+  {
+   "id": "partial-metrics",
+   "persona": "records missing one metric (a Core Web Vital or not) for every key or only some form factors and kinds",
+   "basis": "ADR 0050 (the Core Web Vitals assessment passes only when LCP, INP and CLS are all present and good; otherwise not enough field data)",
+   "seeds": [
+    {
+     "extract": {
+      "file": "src/agents/lena.py",
+      "module": "THRESHOLDS"
+     }
+    }
+   ],
+   "input_field": "metric",
+   "params": {
+    "ff": [
+     "*",
+     "PHONE",
+     "DESKTOP",
+     "TABLET"
+    ],
+    "kind": [
+     "*",
+     "origin",
+     "url"
+    ]
+   },
+   "fixed_input": {
+    "ff": "*",
+    "kind": "*",
+    "mutation": "drop"
+   },
+   "variants_per_seed": 2,
+   "steps": [
+    {
+     "action": "crux_audit",
+     "args": {
+      "metric": "$metric",
+      "mutation": "$mutation",
+      "ff": "$ff",
+      "kind": "$kind",
+      "paths": "/,/pricing"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "the_audit_completes_whatever_google_sends",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "audits_not_completed"
+     }
+    },
+    {
+     "id": "key_never_in_a_url_response_report_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_leaked"
+     }
+    },
+    {
+     "id": "key_only_in_its_header",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_header_missing"
+     }
+    },
+    {
+     "id": "no_other_secret_anywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "never_fast_or_slow_without_data",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "fast_slow_without_data"
+     }
+    },
+    {
+     "id": "verdict_never_pass_with_a_missing_core_metric",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pass_with_missing_core"
+     }
+    },
+    {
+     "id": "values_and_ratings_are_what_google_served",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_value_or_rating"
+     }
+    },
+    {
+     "id": "a_null_history_point_is_never_a_number",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "null_became_number"
+     }
+    },
+    {
+     "id": "no_forecast",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "forecast"
+     }
+    },
+    {
+     "id": "data_only_from_its_own_key",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "data_not_from_its_key"
+     }
+    },
+    {
+     "id": "retired_metric_never_reported",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "retired_metric_reported"
+     }
+    },
+    {
+     "id": "no_cross_tenant_or_off_target_query",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cross_tenant"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "the_client_report_builds",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "report_failed"
+     }
+    },
+    {
+     "id": "valid_field_data_kept",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "valid_data_lost"
+     }
+    },
+    {
+     "id": "collection_period_honest",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "period_honesty"
+     }
+    },
+    {
+     "id": "paced_within_googles_quota",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "over_quota_per_minute"
+     }
+    },
+    {
+     "id": "the_case_was_measured",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "measured",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "malformed-metrics-and-histograms",
+   "persona": "percentiles that are NaN, null, negative, mistyped, infinite or huge; histograms whose densities do not sum, are negative, have gaps, too many bins, an open middle bin; unknown fields inside a metric",
+   "basis": "ADR 0050 / crux_client (strict parsing: a malformed metric is MALFORMED and dropped, never rated; the others are kept)",
+   "seeds": [
+    {
+     "literal": [
+      "p75_nan",
+      "p75_null",
+      "p75_negative",
+      "p75_string",
+      "p75_bool",
+      "p75_huge",
+      "p75_inf_text",
+      "density_sum",
+      "density_negative",
+      "bins_gap",
+      "bins_many",
+      "open_middle",
+      "hist_not_list",
+      "no_percentiles",
+      "metric_not_dict",
+      "percentile_extra",
+      "metric_extra_field"
+     ],
+     "basis": "the driver's metric mutations (BREAKING / UNCERTAIN), around the shapes pinned in tests/test_lena.py BAD_METRICS"
+    }
+   ],
+   "input_field": "mutation",
+   "params": {
+    "metric": [
+     "largest_contentful_paint",
+     "interaction_to_next_paint",
+     "cumulative_layout_shift",
+     "experimental_time_to_first_byte",
+     "*core",
+     "*all"
+    ],
+    "ff": [
+     "*",
+     "PHONE",
+     "TABLET"
+    ]
+   },
+   "fixed_input": {
+    "metric": "*core",
+    "ff": "*"
+   },
+   "variants_per_seed": 2,
+   "steps": [
+    {
+     "action": "crux_audit",
+     "args": {
+      "metric": "$metric",
+      "mutation": "$mutation",
+      "ff": "$ff",
+      "paths": "/,/pricing"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "the_audit_completes_whatever_google_sends",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "audits_not_completed"
+     }
+    },
+    {
+     "id": "key_never_in_a_url_response_report_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_leaked"
+     }
+    },
+    {
+     "id": "key_only_in_its_header",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_header_missing"
+     }
+    },
+    {
+     "id": "no_other_secret_anywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "never_fast_or_slow_without_data",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "fast_slow_without_data"
+     }
+    },
+    {
+     "id": "verdict_never_pass_with_a_missing_core_metric",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pass_with_missing_core"
+     }
+    },
+    {
+     "id": "values_and_ratings_are_what_google_served",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_value_or_rating"
+     }
+    },
+    {
+     "id": "a_null_history_point_is_never_a_number",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "null_became_number"
+     }
+    },
+    {
+     "id": "no_forecast",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "forecast"
+     }
+    },
+    {
+     "id": "data_only_from_its_own_key",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "data_not_from_its_key"
+     }
+    },
+    {
+     "id": "retired_metric_never_reported",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "retired_metric_reported"
+     }
+    },
+    {
+     "id": "no_cross_tenant_or_off_target_query",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cross_tenant"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "the_client_report_builds",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "report_failed"
+     }
+    },
+    {
+     "id": "valid_field_data_kept",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "valid_data_lost"
+     }
+    },
+    {
+     "id": "collection_period_honest",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "period_honesty"
+     }
+    },
+    {
+     "id": "paced_within_googles_quota",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "over_quota_per_minute"
+     }
+    }
+   ]
+  },
+  {
+   "id": "history-nulls-and-malformed-series",
+   "persona": "History API series with null points (Google's 'no data that week'), \"NaN\" text, a short series, partial NaN densities, periods out of order or more than asked, all null",
+   "basis": "ADR 0050 (a period without data is null in p75s and \"NaN\" in densities; a null is never a value; the trend is descriptive, from periods with data only, never a forecast)",
+   "seeds": [
+    {
+     "literal": [
+      "null_points",
+      "nan_text_points",
+      "short_series",
+      "densities_partial_nan",
+      "periods_unordered",
+      "periods_too_many",
+      "all_null"
+     ],
+     "basis": "the driver's history mutations"
+    }
+   ],
+   "input_field": "history_mut",
+   "params": {
+    "kind": [
+     "origin",
+     "url"
+    ],
+    "ff": [
+     "PHONE",
+     "DESKTOP"
+    ]
+   },
+   "fixed_input": {
+    "kind": "*",
+    "ff": "*"
+   },
+   "variants_per_seed": 1,
+   "steps": [
+    {
+     "action": "crux_audit",
+     "args": {
+      "history_mut": "$history_mut",
+      "kind": "$kind",
+      "ff": "$ff",
+      "paths": "/,/pricing"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "the_audit_completes_whatever_google_sends",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "audits_not_completed"
+     }
+    },
+    {
+     "id": "key_never_in_a_url_response_report_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_leaked"
+     }
+    },
+    {
+     "id": "key_only_in_its_header",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_header_missing"
+     }
+    },
+    {
+     "id": "no_other_secret_anywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "never_fast_or_slow_without_data",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "fast_slow_without_data"
+     }
+    },
+    {
+     "id": "verdict_never_pass_with_a_missing_core_metric",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pass_with_missing_core"
+     }
+    },
+    {
+     "id": "values_and_ratings_are_what_google_served",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_value_or_rating"
+     }
+    },
+    {
+     "id": "a_null_history_point_is_never_a_number",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "null_became_number"
+     }
+    },
+    {
+     "id": "no_forecast",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "forecast"
+     }
+    },
+    {
+     "id": "data_only_from_its_own_key",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "data_not_from_its_key"
+     }
+    },
+    {
+     "id": "retired_metric_never_reported",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "retired_metric_reported"
+     }
+    },
+    {
+     "id": "no_cross_tenant_or_off_target_query",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cross_tenant"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "the_client_report_builds",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "report_failed"
+     }
+    },
+    {
+     "id": "valid_field_data_kept",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "valid_data_lost"
+     }
+    },
+    {
+     "id": "collection_period_honest",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "period_honesty"
+     }
+    },
+    {
+     "id": "paced_within_googles_quota",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "over_quota_per_minute"
+     }
+    },
+    {
+     "id": "the_case_was_measured",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "measured",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "record-keys-and-unknown-fields",
+   "persona": "records keyed for the www twin, another tenant's origin, another form factor or a URL normalised onto another origin; inverted or missing periods; new top-level and record fields; unknown metrics; the retired FID served anyway; a period in the future or long past",
+   "basis": "ADR 0050 / crux_client (the record's key must be the one asked; a normalised URL only on the same origin; unknown metrics ignored; FID never asked for and never reported)",
+   "seeds": [
+    {
+     "literal": [
+      "key_twin",
+      "key_other_tenant",
+      "key_form_factor",
+      "norm_other_origin",
+      "periods_inverted",
+      "no_period",
+      "answer_extra_field",
+      "metrics_flood",
+      "key_is_key",
+      "record_extra_field",
+      "period_future",
+      "unknown_metric",
+      "fid_served",
+      "norm_same_origin",
+      "period_old",
+      "metric_named_like_key"
+     ],
+     "basis": "the driver's record-level mutations (RECORD_BREAKING / RECORD_UNCERTAIN / RECORD_PRESERVING), around tests/test_lena.py BAD_RECORDS"
+    }
+   ],
+   "input_field": "record_mut",
+   "params": {
+    "kind": [
+     "origin",
+     "url"
+    ],
+    "ff": [
+     "PHONE",
+     "TABLET"
+    ]
+   },
+   "fixed_input": {
+    "kind": "*",
+    "ff": "*"
+   },
+   "variants_per_seed": 1,
+   "steps": [
+    {
+     "action": "crux_audit",
+     "args": {
+      "record_mut": "$record_mut",
+      "kind": "$kind",
+      "ff": "$ff",
+      "paths": "/,/pricing"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "the_audit_completes_whatever_google_sends",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "audits_not_completed"
+     }
+    },
+    {
+     "id": "key_never_in_a_url_response_report_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_leaked"
+     }
+    },
+    {
+     "id": "key_only_in_its_header",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_header_missing"
+     }
+    },
+    {
+     "id": "no_other_secret_anywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "never_fast_or_slow_without_data",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "fast_slow_without_data"
+     }
+    },
+    {
+     "id": "verdict_never_pass_with_a_missing_core_metric",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pass_with_missing_core"
+     }
+    },
+    {
+     "id": "values_and_ratings_are_what_google_served",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_value_or_rating"
+     }
+    },
+    {
+     "id": "a_null_history_point_is_never_a_number",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "null_became_number"
+     }
+    },
+    {
+     "id": "no_forecast",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "forecast"
+     }
+    },
+    {
+     "id": "data_only_from_its_own_key",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "data_not_from_its_key"
+     }
+    },
+    {
+     "id": "retired_metric_never_reported",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "retired_metric_reported"
+     }
+    },
+    {
+     "id": "no_cross_tenant_or_off_target_query",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cross_tenant"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "the_client_report_builds",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "report_failed"
+     }
+    },
+    {
+     "id": "valid_field_data_kept",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "valid_data_lost"
+     }
+    },
+    {
+     "id": "collection_period_honest",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "period_honesty"
+     }
+    },
+    {
+     "id": "paced_within_googles_quota",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "over_quota_per_minute"
+     }
+    }
+   ]
+  },
+  {
+   "id": "crux-storms",
+   "persona": "Google answering 400 / 401 / 403 / 418 / 429 (with and without Retry-After) / 5xx, timing out, refusing connections, redirecting, sending HTML, a huge or gzip or trickled body, echoing the key",
+   "basis": "ADR 0050 / crux_client (closed reason codes; retries only on connect errors, timeouts, 429 and 5xx within the attempts and the deadline; a stopping code ends the read; the audit completes)",
+   "seeds": [
+    {
+     "literal": [
+      "500",
+      "502,ok",
+      "503,503,503",
+      "504",
+      "418",
+      "429",
+      "429ra5",
+      "429ra60",
+      "400",
+      "400key",
+      "401",
+      "403",
+      "403quota",
+      "timeout",
+      "timeout,timeout,ok",
+      "connect",
+      "redirect",
+      "html",
+      "not_json",
+      "huge",
+      "gzip",
+      "drip",
+      "ok,ok,ok,429",
+      "ok,ok,ok,ok,503,503,503",
+      "ok,timeout,ok,timeout,ok"
+     ],
+     "basis": "storm scripts over the driver's steps (STORM_STEPS): one step per request, the last repeats"
+    }
+   ],
+   "input_field": "script",
+   "params": {
+    "paths": [
+     "/",
+     "/,/pricing,/about"
+    ]
+   },
+   "fixed_input": {
+    "paths": "/,/pricing"
+   },
+   "variants_per_seed": 1,
+   "steps": [
+    {
+     "action": "crux_audit",
+     "args": {
+      "script": "$script",
+      "paths": "$paths"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "the_audit_completes_whatever_google_sends",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "audits_not_completed"
+     }
+    },
+    {
+     "id": "key_never_in_a_url_response_report_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_leaked"
+     }
+    },
+    {
+     "id": "key_only_in_its_header",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_header_missing"
+     }
+    },
+    {
+     "id": "no_other_secret_anywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "never_fast_or_slow_without_data",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "fast_slow_without_data"
+     }
+    },
+    {
+     "id": "verdict_never_pass_with_a_missing_core_metric",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pass_with_missing_core"
+     }
+    },
+    {
+     "id": "values_and_ratings_are_what_google_served",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_value_or_rating"
+     }
+    },
+    {
+     "id": "a_null_history_point_is_never_a_number",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "null_became_number"
+     }
+    },
+    {
+     "id": "no_forecast",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "forecast"
+     }
+    },
+    {
+     "id": "data_only_from_its_own_key",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "data_not_from_its_key"
+     }
+    },
+    {
+     "id": "retired_metric_never_reported",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "retired_metric_reported"
+     }
+    },
+    {
+     "id": "no_cross_tenant_or_off_target_query",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cross_tenant"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "the_client_report_builds",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "report_failed"
+     }
+    },
+    {
+     "id": "valid_field_data_kept",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "valid_data_lost"
+     }
+    },
+    {
+     "id": "collection_period_honest",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "period_honesty"
+     }
+    },
+    {
+     "id": "paced_within_googles_quota",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "over_quota_per_minute"
+     }
+    }
+   ]
+  },
+  {
+   "id": "caps-and-budgets",
+   "persona": "per-run and daily call caps (0 = OFF by default), the daily cap shared across tenants, the per-tenant daily cap, the www twin, a day passing, a restart",
+   "basis": "ADR 0050 (SEO_CRUX_CALLS_PER_RUN, SEO_CRUX_CALLS_PER_DAY across all tenants; record-first reservations; CRUX_BUDGET_EXHAUSTED when nothing is left). and SEO_CRUX_TENANT_CALLS_PER_DAY per tenant in any 24 hours",
+   "seeds": [
+    {
+     "literal": [
+      "per_run=0",
+      "per_run=1",
+      "per_run=2,paths=3",
+      "per_run=6",
+      "per_run=7,paths=3",
+      "per_day=0",
+      "per_run=12,per_day=20,plan=acme+globex+acme",
+      "per_run=12,per_day=12,plan=acme+restart+acme",
+      "per_run=12,per_day=12,plan=acme+day+acme",
+      "per_run=40,per_day=50,plan=acme+www+globex,paths=3",
+      "per_run=120,per_day=130,plan=acme+globex,paths=3",
+      "per_run=5,per_day=11,plan=globex+globex+globex",
+      "per_run=40,per_day=2000,per_tenant=30,plan=acme+acme+globex",
+      "per_run=12,per_day=2000,per_tenant=12,plan=acme+www+globex",
+      "per_run=40,per_day=2000,per_tenant=0,plan=acme",
+      "per_run=20,per_day=2000,per_tenant=25,plan=globex+day+globex"
+     ],
+     "basis": "cap settings named in ADR 0050 and config.py"
+    }
+   ],
+   "input_field": "kind",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "budget",
+     "args": {
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "the_audit_completes_whatever_google_sends",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "audits_not_completed"
+     }
+    },
+    {
+     "id": "key_never_in_a_url_response_report_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_leaked"
+     }
+    },
+    {
+     "id": "key_only_in_its_header",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_header_missing"
+     }
+    },
+    {
+     "id": "no_other_secret_anywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "never_fast_or_slow_without_data",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "fast_slow_without_data"
+     }
+    },
+    {
+     "id": "verdict_never_pass_with_a_missing_core_metric",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pass_with_missing_core"
+     }
+    },
+    {
+     "id": "values_and_ratings_are_what_google_served",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_value_or_rating"
+     }
+    },
+    {
+     "id": "a_null_history_point_is_never_a_number",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "null_became_number"
+     }
+    },
+    {
+     "id": "no_forecast",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "forecast"
+     }
+    },
+    {
+     "id": "data_only_from_its_own_key",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "data_not_from_its_key"
+     }
+    },
+    {
+     "id": "retired_metric_never_reported",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "retired_metric_reported"
+     }
+    },
+    {
+     "id": "no_cross_tenant_or_off_target_query",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cross_tenant"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "the_client_report_builds",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "report_failed"
+     }
+    },
+    {
+     "id": "valid_field_data_kept",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "valid_data_lost"
+     }
+    },
+    {
+     "id": "collection_period_honest",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "period_honesty"
+     }
+    },
+    {
+     "id": "paced_within_googles_quota",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "over_quota_per_minute"
+     }
+    }
+   ]
+  },
+  {
+   "id": "quota-pacing",
+   "persona": "Google's 150 queries per minute per project, enforced on the fake clock, against back-to-back audits at the per-run cap (the client paces itself, per process)",
+   "basis": "crux_client docstring (quota 150 queries per minute per project, shared by both APIs) and ADR 0050 (a 429 is CRUX_RATE_LIMITED and stops the read)",
+   "seeds": [
+    {
+     "literal": [
+      "1",
+      "2",
+      "3"
+     ],
+     "basis": "audits back to back"
+    }
+   ],
+   "input_field": "audits",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "quota",
+     "args": {
+      "audits": "$audits"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "the_audit_completes_whatever_google_sends",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "audits_not_completed"
+     }
+    },
+    {
+     "id": "key_never_in_a_url_response_report_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_leaked"
+     }
+    },
+    {
+     "id": "key_only_in_its_header",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_header_missing"
+     }
+    },
+    {
+     "id": "no_other_secret_anywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "never_fast_or_slow_without_data",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "fast_slow_without_data"
+     }
+    },
+    {
+     "id": "verdict_never_pass_with_a_missing_core_metric",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pass_with_missing_core"
+     }
+    },
+    {
+     "id": "values_and_ratings_are_what_google_served",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_value_or_rating"
+     }
+    },
+    {
+     "id": "a_null_history_point_is_never_a_number",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "null_became_number"
+     }
+    },
+    {
+     "id": "no_forecast",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "forecast"
+     }
+    },
+    {
+     "id": "data_only_from_its_own_key",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "data_not_from_its_key"
+     }
+    },
+    {
+     "id": "retired_metric_never_reported",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "retired_metric_reported"
+     }
+    },
+    {
+     "id": "no_cross_tenant_or_off_target_query",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cross_tenant"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "the_client_report_builds",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "report_failed"
+     }
+    },
+    {
+     "id": "valid_field_data_kept",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "valid_data_lost"
+     }
+    },
+    {
+     "id": "collection_period_honest",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "period_honesty"
+     }
+    },
+    {
+     "id": "paced_within_googles_quota",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "over_quota_per_minute"
+     }
+    }
+   ]
+  },
+  {
+   "id": "kill-switches-and-lifecycle",
+   "persona": "provider:crux, global, write, the tenant's and capability:audit engaged before or during a read; SEO_KILLED_PROVIDERS=crux; Lena restricted",
+   "basis": "ADR 0050 (provider:crux checked before the read, before every request and on every socket operation; the global, write, tenant and capability:audit switches as for every run step)",
+   "seeds": [
+    {
+     "literal": [
+      "provider:crux",
+      "global",
+      "write",
+      "tenant:acme",
+      "capability:audit",
+      "env:SEO_KILLED_PROVIDERS",
+      "lifecycle:restricted"
+     ],
+     "basis": "the switches svc_crux.py and svc_audits.py check"
+    }
+   ],
+   "input_field": "switch",
+   "params": {
+    "when": [
+     "mid_read"
+    ]
+   },
+   "fixed_input": {
+    "when": "before"
+   },
+   "variants_per_seed": 1,
+   "steps": [
+    {
+     "action": "kill",
+     "args": {
+      "switch": "$switch",
+      "when": "$when"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "the_audit_completes_whatever_google_sends",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "audits_not_completed"
+     }
+    },
+    {
+     "id": "key_never_in_a_url_response_report_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_leaked"
+     }
+    },
+    {
+     "id": "key_only_in_its_header",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_header_missing"
+     }
+    },
+    {
+     "id": "no_other_secret_anywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "never_fast_or_slow_without_data",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "fast_slow_without_data"
+     }
+    },
+    {
+     "id": "verdict_never_pass_with_a_missing_core_metric",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pass_with_missing_core"
+     }
+    },
+    {
+     "id": "values_and_ratings_are_what_google_served",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_value_or_rating"
+     }
+    },
+    {
+     "id": "a_null_history_point_is_never_a_number",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "null_became_number"
+     }
+    },
+    {
+     "id": "no_forecast",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "forecast"
+     }
+    },
+    {
+     "id": "data_only_from_its_own_key",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "data_not_from_its_key"
+     }
+    },
+    {
+     "id": "retired_metric_never_reported",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "retired_metric_reported"
+     }
+    },
+    {
+     "id": "no_cross_tenant_or_off_target_query",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cross_tenant"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "the_client_report_builds",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "report_failed"
+     }
+    },
+    {
+     "id": "valid_field_data_kept",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "valid_data_lost"
+     }
+    },
+    {
+     "id": "collection_period_honest",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "period_honesty"
+     }
+    },
+    {
+     "id": "paced_within_googles_quota",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "over_quota_per_minute"
+     }
+    },
+    {
+     "id": "switch_honoured",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "kill_violations"
+     }
+    }
+   ]
+  },
+  {
+   "id": "bare-and-www-twins",
+   "persona": "the bare origin and its www twin, both registered (acme) or only the bare one (globex: the twin is asked too), with data for one, both or neither, and Google answering one with the other's record",
+   "basis": "ADR 0050 limitations (CrUX keys are exact: https://example.com and https://www.example.com are different origins; an unregistered twin is asked and shown beside the audited origin, labelled, never merged)",
+   "seeds": [
+    {
+     "literal": [
+      "bare_only",
+      "www_only",
+      "neither",
+      "both",
+      "bare_answers_for_www",
+      "unregistered_twin_both_have_data",
+      "unregistered_twin_only_has_data",
+      "unregistered_twin_has_none",
+      "unregistered_twin_answers_as_bare"
+     ],
+     "basis": "the driver's twin shapes"
+    }
+   ],
+   "input_field": "shape",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "twins",
+     "args": {
+      "shape": "$shape"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "the_audit_completes_whatever_google_sends",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "audits_not_completed"
+     }
+    },
+    {
+     "id": "key_never_in_a_url_response_report_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_leaked"
+     }
+    },
+    {
+     "id": "key_only_in_its_header",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_header_missing"
+     }
+    },
+    {
+     "id": "no_other_secret_anywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "never_fast_or_slow_without_data",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "fast_slow_without_data"
+     }
+    },
+    {
+     "id": "verdict_never_pass_with_a_missing_core_metric",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pass_with_missing_core"
+     }
+    },
+    {
+     "id": "values_and_ratings_are_what_google_served",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_value_or_rating"
+     }
+    },
+    {
+     "id": "a_null_history_point_is_never_a_number",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "null_became_number"
+     }
+    },
+    {
+     "id": "no_forecast",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "forecast"
+     }
+    },
+    {
+     "id": "data_only_from_its_own_key",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "data_not_from_its_key"
+     }
+    },
+    {
+     "id": "retired_metric_never_reported",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "retired_metric_reported"
+     }
+    },
+    {
+     "id": "no_cross_tenant_or_off_target_query",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cross_tenant"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "the_client_report_builds",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "report_failed"
+     }
+    },
+    {
+     "id": "valid_field_data_kept",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "valid_data_lost"
+     }
+    },
+    {
+     "id": "collection_period_honest",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "period_honesty"
+     }
+    },
+    {
+     "id": "paced_within_googles_quota",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "over_quota_per_minute"
+     }
+    }
+   ]
+  },
+  {
+   "id": "cross-tenant-page-experience",
+   "persona": "another tenant, the hub with another tenant's token and Finance reaching for acme's page-experience section, or auditing acme's origin",
+   "basis": "ADR 0050 (the page-experience route is tenant-scoped: another tenant's audit is the same 404; Lena reads only a domain registered to the audit's tenant)",
+   "seeds": [
+    {
+     "literal": [
+      "globex_reads_acme_section",
+      "hub_with_zbm_token",
+      "hub_with_globex_token",
+      "finance_reads_section",
+      "globex_audits_acme_domain",
+      "globex_audits_acme_www",
+      "id_uppercased",
+      "path_traversal",
+      "globex_audit_then_reads_own"
+     ],
+     "basis": "the driver's probes"
+    }
+   ],
+   "input_field": "probe",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "cross_tenant",
+     "args": {
+      "probe": "$probe"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "the_audit_completes_whatever_google_sends",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "audits_not_completed"
+     }
+    },
+    {
+     "id": "key_never_in_a_url_response_report_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_leaked"
+     }
+    },
+    {
+     "id": "key_only_in_its_header",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_header_missing"
+     }
+    },
+    {
+     "id": "no_other_secret_anywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "never_fast_or_slow_without_data",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "fast_slow_without_data"
+     }
+    },
+    {
+     "id": "verdict_never_pass_with_a_missing_core_metric",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pass_with_missing_core"
+     }
+    },
+    {
+     "id": "values_and_ratings_are_what_google_served",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_value_or_rating"
+     }
+    },
+    {
+     "id": "a_null_history_point_is_never_a_number",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "null_became_number"
+     }
+    },
+    {
+     "id": "no_forecast",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "forecast"
+     }
+    },
+    {
+     "id": "data_only_from_its_own_key",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "data_not_from_its_key"
+     }
+    },
+    {
+     "id": "retired_metric_never_reported",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "retired_metric_reported"
+     }
+    },
+    {
+     "id": "no_cross_tenant_or_off_target_query",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cross_tenant"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "the_client_report_builds",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "report_failed"
+     }
+    },
+    {
+     "id": "valid_field_data_kept",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "valid_data_lost"
+     }
+    },
+    {
+     "id": "collection_period_honest",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "period_honesty"
+     }
+    },
+    {
+     "id": "paced_within_googles_quota",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "over_quota_per_minute"
+     }
+    },
+    {
+     "id": "probe_refused",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "probe_refused",
+      "value": true
+     }
+    },
+    {
+     "id": "nothing_of_acme_echoed",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "foreign_echoed"
+     }
+    }
+   ]
+  },
+  {
+   "id": "enterprise-scale",
+   "persona": "25 URLs x 3 form factors x 2 APIs per audit at the per-run cap, and many audits across tenants against the daily cap",
+   "basis": "ADR 0050 (queries in priority order until the run's call cap; NOT_QUERIED with the stopping code past it)",
+   "seeds": [
+    {
+     "literal": [
+      "25_paths_cap_120",
+      "25_paths_cap_40",
+      "10_audits_daily_600",
+      "6_audits_20_paths"
+     ],
+     "basis": "the driver's scale shapes"
+    }
+   ],
+   "input_field": "shape",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "scale",
+     "args": {
+      "shape": "$shape"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "the_audit_completes_whatever_google_sends",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "audits_not_completed"
+     }
+    },
+    {
+     "id": "key_never_in_a_url_response_report_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_leaked"
+     }
+    },
+    {
+     "id": "key_only_in_its_header",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_header_missing"
+     }
+    },
+    {
+     "id": "no_other_secret_anywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "never_fast_or_slow_without_data",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "fast_slow_without_data"
+     }
+    },
+    {
+     "id": "verdict_never_pass_with_a_missing_core_metric",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pass_with_missing_core"
+     }
+    },
+    {
+     "id": "values_and_ratings_are_what_google_served",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_value_or_rating"
+     }
+    },
+    {
+     "id": "a_null_history_point_is_never_a_number",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "null_became_number"
+     }
+    },
+    {
+     "id": "no_forecast",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "forecast"
+     }
+    },
+    {
+     "id": "data_only_from_its_own_key",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "data_not_from_its_key"
+     }
+    },
+    {
+     "id": "retired_metric_never_reported",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "retired_metric_reported"
+     }
+    },
+    {
+     "id": "no_cross_tenant_or_off_target_query",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cross_tenant"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "the_client_report_builds",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "report_failed"
+     }
+    },
+    {
+     "id": "valid_field_data_kept",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "valid_data_lost"
+     }
+    },
+    {
+     "id": "collection_period_honest",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "period_honesty"
+     }
+    },
+    {
+     "id": "paced_within_googles_quota",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "over_quota_per_minute"
+     }
+    },
+    {
+     "id": "the_case_was_measured",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "measured",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "key-leakage-attempts",
+   "persona": "the API key pushed at every exit: Google's error bodies and messages, a redirect carrying it, exception messages, a record keyed with it, a metric named after it, the agent or the parser raising with it in the message",
+   "basis": "ADR 0050 / svc_crux (the API key is never in a URL, a log line, an error, the status or the report)",
+   "seeds": [
+    {
+     "literal": [
+      "400echo",
+      "403echo",
+      "500echo",
+      "404_other",
+      "connect_echo",
+      "redirect",
+      "metric_named_like_key",
+      "record_keyed_with_the_key",
+      "agent_raises_with_key",
+      "parser_raises_with_key"
+     ],
+     "basis": "the driver's key-leak shapes"
+    }
+   ],
+   "input_field": "kind",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "key_leak",
+     "args": {
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "the_audit_completes_whatever_google_sends",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "audits_not_completed"
+     }
+    },
+    {
+     "id": "key_never_in_a_url_response_report_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_leaked"
+     }
+    },
+    {
+     "id": "key_only_in_its_header",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_header_missing"
+     }
+    },
+    {
+     "id": "no_other_secret_anywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "never_fast_or_slow_without_data",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "fast_slow_without_data"
+     }
+    },
+    {
+     "id": "verdict_never_pass_with_a_missing_core_metric",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pass_with_missing_core"
+     }
+    },
+    {
+     "id": "values_and_ratings_are_what_google_served",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_value_or_rating"
+     }
+    },
+    {
+     "id": "a_null_history_point_is_never_a_number",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "null_became_number"
+     }
+    },
+    {
+     "id": "no_forecast",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "forecast"
+     }
+    },
+    {
+     "id": "data_only_from_its_own_key",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "data_not_from_its_key"
+     }
+    },
+    {
+     "id": "retired_metric_never_reported",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "retired_metric_reported"
+     }
+    },
+    {
+     "id": "no_cross_tenant_or_off_target_query",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cross_tenant"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "the_client_report_builds",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "report_failed"
+     }
+    },
+    {
+     "id": "valid_field_data_kept",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "valid_data_lost"
+     }
+    },
+    {
+     "id": "collection_period_honest",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "period_honesty"
+     }
+    },
+    {
+     "id": "paced_within_googles_quota",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "over_quota_per_minute"
+     }
+    }
+   ]
+  },
+  {
+   "id": "key-file-with-the-feature-on",
+   "persona": "SEO_CRUX_ENABLED=1 with the key file missing, empty, world-readable, a symlink, a directory, oversize, not a key, relative or unset; and the feature off with a bad file",
+   "basis": "ADR 0050 / config.py (enabled without a usable key file refuses start, under the *_FILE rules; no error quotes the file; disabled never reads it)",
+   "seeds": [
+    {
+     "literal": [
+      "missing",
+      "empty",
+      "mode_644",
+      "symlink",
+      "directory",
+      "oversize",
+      "not_a_key",
+      "key_plus_spaces",
+      "relative_path",
+      "unset",
+      "off_with_bad_file"
+     ],
+     "basis": "the driver's key-file shapes"
+    }
+   ],
+   "input_field": "kind",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "key_file",
+     "args": {
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "key_never_in_an_error_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_leaked"
+     }
+    },
+    {
+     "id": "start_refused_as_documented",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_file_honoured"
+     }
+    }
+   ]
+  },
+  {
+   "id": "generated-hostile-crux",
+   "persona": "INVENTED by the war room: whole hostile CrUX answer plans from a grammar (grammar.crux_answer_plan): no-data keys, metric / record / history mutations by selector, paths, twins, caps",
+   "basis": "every MUST above, on inputs nobody listed; terminals from agents/lena.py THRESHOLDS and tests/crux_fakes.py BOUNDS",
+   "generator": {
+    "name": "crux_answer_plan",
+    "count": 40,
+    "atoms": {
+     "metrics": [
+      {
+       "extract": {
+        "file": "src/agents/lena.py",
+        "module": "THRESHOLDS"
+       }
+      },
+      {
+       "extract": {
+        "file": "tests/crux_fakes.py",
+        "module": "BOUNDS"
+       }
+      }
+     ]
+    }
+   },
+   "input_field": "spec",
+   "steps": [
+    {
+     "action": "generated_answers",
+     "args": {
+      "spec": "$spec"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "the_audit_completes_whatever_google_sends",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "audits_not_completed"
+     }
+    },
+    {
+     "id": "key_never_in_a_url_response_report_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_leaked"
+     }
+    },
+    {
+     "id": "key_only_in_its_header",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_header_missing"
+     }
+    },
+    {
+     "id": "no_other_secret_anywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "never_fast_or_slow_without_data",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "fast_slow_without_data"
+     }
+    },
+    {
+     "id": "verdict_never_pass_with_a_missing_core_metric",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pass_with_missing_core"
+     }
+    },
+    {
+     "id": "values_and_ratings_are_what_google_served",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_value_or_rating"
+     }
+    },
+    {
+     "id": "a_null_history_point_is_never_a_number",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "null_became_number"
+     }
+    },
+    {
+     "id": "no_forecast",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "forecast"
+     }
+    },
+    {
+     "id": "data_only_from_its_own_key",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "data_not_from_its_key"
+     }
+    },
+    {
+     "id": "retired_metric_never_reported",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "retired_metric_reported"
+     }
+    },
+    {
+     "id": "no_cross_tenant_or_off_target_query",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cross_tenant"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "the_client_report_builds",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "report_failed"
+     }
+    },
+    {
+     "id": "valid_field_data_kept",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "valid_data_lost"
+     }
+    },
+    {
+     "id": "collection_period_honest",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "period_honesty"
+     }
+    },
+    {
+     "id": "paced_within_googles_quota",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "over_quota_per_minute"
+     }
+    }
+   ]
+  },
+  {
+   "id": "generated-crux-storms",
+   "persona": "INVENTED by the war room: storms, caps, quotas, kills mid-read and tight deadlines from a grammar (grammar.crux_storm)",
+   "basis": "every MUST above, on storms nobody listed",
+   "generator": {
+    "name": "crux_storm",
+    "count": 40,
+    "atoms": {
+     "metrics": [
+      {
+       "extract": {
+        "file": "src/agents/lena.py",
+        "module": "THRESHOLDS"
+       }
+      }
+     ]
+    }
+   },
+   "input_field": "spec",
+   "steps": [
+    {
+     "action": "generated_storm",
+     "args": {
+      "spec": "$spec"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "the_audit_completes_whatever_google_sends",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "audits_not_completed"
+     }
+    },
+    {
+     "id": "key_never_in_a_url_response_report_record_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_leaked"
+     }
+    },
+    {
+     "id": "key_only_in_its_header",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "key_header_missing"
+     }
+    },
+    {
+     "id": "no_other_secret_anywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "never_fast_or_slow_without_data",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "fast_slow_without_data"
+     }
+    },
+    {
+     "id": "verdict_never_pass_with_a_missing_core_metric",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pass_with_missing_core"
+     }
+    },
+    {
+     "id": "values_and_ratings_are_what_google_served",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_value_or_rating"
+     }
+    },
+    {
+     "id": "a_null_history_point_is_never_a_number",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "null_became_number"
+     }
+    },
+    {
+     "id": "no_forecast",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "forecast"
+     }
+    },
+    {
+     "id": "data_only_from_its_own_key",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "data_not_from_its_key"
+     }
+    },
+    {
+     "id": "retired_metric_never_reported",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "retired_metric_reported"
+     }
+    },
+    {
+     "id": "no_cross_tenant_or_off_target_query",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cross_tenant"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "work_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "work_over_bound"
+     }
+    },
+    {
+     "id": "the_client_report_builds",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "report_failed"
+     }
+    },
+    {
+     "id": "valid_field_data_kept",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "valid_data_lost"
+     }
+    },
+    {
+     "id": "collection_period_honest",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "period_honesty"
+     }
+    },
+    {
+     "id": "paced_within_googles_quota",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "over_quota_per_minute"
+     }
+    },
+    {
+     "id": "switch_honoured",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "kill_violations"
+     }
+    }
+   ]
+  }
+ ]
+}
