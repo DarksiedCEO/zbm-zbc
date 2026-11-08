@@ -6,9 +6,12 @@ The ledger has two tiers:
 
   ESTABLISHED  queries with real measured demand ON THIS PROPERTY: at least ``ESTABLISHED_MIN_IMPRESSIONS``
                impressions in one source's window (Search Console, or Bing Webmaster Tools when wired). Each source's
-               numbers are kept apart, with the source, the date range and a Poisson band on the count.
+               numbers are kept apart, with the source, the date range and an exact (Garwood) Poisson band on the
+               count. The tier is decided on Search Console's count when Search Console measured the query.
   EMERGING     queries with no reliable volume yet: (a) OBSERVED long-tail rows below the threshold, their thin
-               counts kept as measured but flagged ``BELOW_THRESHOLD``; (b) DERIVED variants — conversational,
+               counts kept as measured but flagged ``BELOW_THRESHOLD``; queries only Bing measured (Bing's rows cover
+               their own multi-week dates, not Search Console's window, so they are never tiered against the
+               threshold: ``MEASURED_NOT_TIERED``, flag ``BING_ONLY_UNTIERED``); (b) DERIVED variants — conversational,
                question and constraint frames seen on the site's own long tail, transferred deterministically to the
                site's established head terms — with NO volume at all (``UNKNOWN_NOT_MEASURED``), never an estimate.
 
@@ -16,13 +19,17 @@ What a number in the ledger is, and is not:
   - impressions / clicks / CTR / position are what the engine reported for THIS property in the stated window. They
     are not market search volume; ``market_volume`` is always null (no paid vendor; Keyword Planner not built);
   - ``opportunity`` is a CTR gap against the property's OWN position curve (impression-weighted CTR per position
-    bucket over its own established, non-brand Search Console queries in the same window); a bucket with too little
-    support is INCONCLUSIVE, never filled from a published industry curve. It is ``modeled`` data, not traffic;
+    bucket over its own established, non-brand Search Console queries in the same window, the row itself left out);
+    a bucket with too little support is INCONCLUSIVE, never filled from a published industry curve. The gap carries
+    a 95% interval from the row's Wilson score CTR interval; a row under the threshold, or a gap interval that
+    includes 0, is INCONCLUSIVE. It is ``modeled`` data, not traffic;
   - ``difficulty`` is null: no owned data supports an Ahrefs-style keyword difficulty, and none is invented.
 
 Personal data: a query that looks like personal data (``search_performance.classify_query`` -> ``pii_suspect``:
-e-mails, phone-like digit runs, id- or token-like words) never enters the ledger; only how many there were and their
-summed counts. Derived variants are checked the same way.
+e-mails, phone-like digit runs, id- or token-like words, street addresses, US ZIP+4 and ZIP-with-state) never enters
+the ledger; only how many distinct queries there were and their summed counts. Derived variants are checked the same
+way, and a frame is built only from a query with no capitalised word whose added words are all in a closed vocabulary
+(``FRAME_VOCAB``): personal names cannot be reliably detected, so a word that could be one is never transferred.
 
 The input is plain data; this module touches no service state, ledger, log or network.
 """
@@ -40,13 +47,15 @@ from agents import search_performance as sp
 from envelope import observed
 
 AGENT, TASK = "priya", "keyword_ledger"
-VERSION = "2026-11-08.1"                       # tiers, thresholds, curve, near-duplicate and frame rules below
+VERSION = "2026-11-08.2"                       # tiers, thresholds, curve, near-duplicate and frame rules below
+# .2 (review round 1): Wilson CTR interval and gap interval, thin rows INCONCLUSIVE; leave-one-out curve; exact
+#    Garwood band; tier from Search Console, Bing-only rows untiered; frame vocabulary; distinct PII query count
 LEDGER_SCHEMA = "priya-keyword-ledger/1"
 HANDOFF_SCHEMA = "priya-emerging-handoff/1"
 TIERS = ("ESTABLISHED", "EMERGING")
 ORIGINS = ("observed", "derived")
 CONFIDENCE = ("HIGH", "MEDIUM", "LOW", "NONE")
-VOLUME_STATUS = ("MEASURED_ON_THIS_PROPERTY", "BELOW_THRESHOLD", "UNKNOWN_NOT_MEASURED")
+VOLUME_STATUS = ("MEASURED_ON_THIS_PROPERTY", "BELOW_THRESHOLD", "MEASURED_NOT_TIERED", "UNKNOWN_NOT_MEASURED")
 EMERGING_KINDS = ("question", "conversational", "constraint", "long_tail")
 FLAGS = (
     "BELOW_THRESHOLD",            # measured, but fewer impressions than the established threshold
@@ -57,12 +66,14 @@ FLAGS = (
     "NOT_MEASURED",               # a derived variant: no engine has measured it
     "NEAR_DUPLICATE",             # another ledger row is the same query up to word order, plurals and stop words
     "BING_WINDOW_DIFFERS",        # Bing's rows cover their own dates, not Search Console's window
+    "BING_ONLY_UNTIERED",         # only Bing measured it: its summed weekly rows are not compared with the threshold
 )
 STATUSES = ("OK", "PARTIAL", "EMPTY_MEASURED", "INCONCLUSIVE")
 
 ESTABLISHED_MIN_IMPRESSIONS = 20               # founder-pending default (ADR 0047): unmeasured against a real client
 MEDIUM_MIN, HIGH_MIN = 100, 1000               # impressions for MEDIUM / HIGH confidence
-POISSON_Z = 1.96
+Z95 = 1.959963984540054                        # the two-sided 95% normal quantile (Wilson; Wilson-Hilferty)
+GARWOOD_EXACT_MAX = 1000                       # exact incomplete-gamma bounds up to this count; Wilson-Hilferty above
 CURVE_MIN_QUERIES, CURVE_MIN_IMPRESSIONS = 5, 200   # support a position bucket needs before it is used
 BUCKETS = (("1", 1.5), ("2", 2.5), ("3", 3.5), ("4-5", 5.5), ("6-10", 10.5), ("11-20", 20.5), ("21+", math.inf))
 HEADS_CAP, FRAMES_CAP, VARIANTS_CAP = 25, 20, 200
@@ -74,6 +85,18 @@ _CONSTRAINT = re.compile(r"\b(near me|nearby|open now|under|below|without|with|f
                          r"top|affordable|free|same day|24/7|emergency|price|cost)\b")
 _LOOKALIKE = lookalikes.Table()
 PII_CLASS = "pii_suspect"
+# The only words a frame may add around a head (conservative, closed): stop words, question words, the constraint and
+# commercial words above, and a short list of generic verbs and modifiers. A frame with any other word is not used,
+# because that word could be a name, a place or an identifier that no rule here can classify.
+FRAME_VOCAB = STOP_WORDS | frozenset({
+    "who", "what", "when", "where", "why", "how", "which", "can", "could", "does", "do", "is", "are", "should",
+    "will", "would", "much", "many", "long", "often", "near", "me", "nearby", "open", "now", "under", "below",
+    "without", "vs", "versus", "cheap", "cheapest", "best", "top", "affordable", "free", "same", "day", "emergency",
+    "price", "prices", "pricing", "cost", "costs", "buy", "review", "reviews", "deal", "deals", "quote", "quotes",
+    "hire", "service", "services", "company", "companies", "local", "professional", "choose", "find", "get", "clean",
+    "cleaning", "fix", "repair", "install", "installation", "replace", "replacement", "use", "make", "need", "rent",
+    "rental", "diy", "tips", "guide", "ideas", "types", "kit", "is", "it", "worth", "good", "bad", "new", "used",
+    "small", "large", "commercial", "residential", "home", "house", "online", "i", "you"})
 
 CARD = {
     "agent": AGENT, "job": "produce the client's keyword ledger (one task)",
@@ -99,12 +122,25 @@ LIMITS = [
     "search volume, which is not measured (no paid vendor; Google Ads Keyword Planner not built).",
     "Search Console returns top rows only and omits anonymised queries; the anonymised share is reported, never "
     "spread over the rows.",
+    "Impressions are the engine's full count for this property in the window, not a sample. The 95% band on them "
+    "(exact Garwood Poisson interval) says how far such a count could move from one window to the next if the rate "
+    "behind it stayed the same; it is a model of period-to-period variability, not sampling error, and not a "
+    "forecast.",
     "Position is an average over the window as the engine reports it.",
-    "The CTR curve is this property's own, from the same window; a bucket without enough support is INCONCLUSIVE.",
+    "The CTR curve is this property's own, from the same window; a row's expected CTR leaves the row out, and a "
+    "bucket without enough support is INCONCLUSIVE.",
+    "A CTR gap carries a 95% interval from the row's Wilson score CTR interval against the expected CTR (the curve's "
+    "own uncertainty is not added, so the true uncertainty is larger). A row under the established threshold, or a "
+    "gap whose interval includes 0, is INCONCLUSIVE.",
+    "The tier is decided on Search Console's count in its window. Bing's rows cover their own multi-week dates, so a "
+    "query only Bing measured is kept as measured but not tiered (MEASURED_NOT_TIERED, BING_ONLY_UNTIERED).",
     "Derived EMERGING variants are pattern transfers from the site's own long tail; they have no volume and are not "
     "evidence of demand.",
-    "Names in queries are not detected as personal data; only e-mails, phone-like digit runs and id- or token-like "
-    "words are dropped.",
+    "Personal names cannot be reliably detected in queries: a query naming a person can appear in the ledger as the "
+    "engine reported it. Dropped as personal data: e-mails, phone-like digit runs, id- or token-like words, street "
+    "addresses (number plus street suffix, unit or apartment numbers, PO boxes), ZIP+4 codes and a ZIP next to a "
+    "state; the dropped count is of distinct queries. Derived variants are never built from a query with a "
+    "capitalised word, nor from a frame adding a word outside a closed vocabulary.",
     "The ledger is computed on request and handed out once; it is not stored (only its SHA-256 and counts).",
 ]
 
@@ -151,10 +187,85 @@ def emerging_kinds(norm: str) -> list:
 
 # ====================================================================== numbers
 
+def _gamma_p(a: float, x: float) -> float:
+    """The regularised lower incomplete gamma P(a, x) (series below a + 1, Lentz continued fraction above)."""
+    if x <= 0:
+        return 0.0
+    lg = a * math.log(x) - x - math.lgamma(a)
+    if x < a + 1:
+        s = t = 1.0 / a
+        ap = a
+        for _ in range(100_000):
+            ap += 1
+            t *= x / ap
+            s += t
+            if t < s * 1e-15:
+                break
+        return min(1.0, s * math.exp(lg))
+    b, c = x + 1 - a, 1e300
+    d = 1 / b
+    h = d
+    for i in range(1, 100_000):
+        an = -i * (i - a)
+        b += 2
+        d = an * d + b
+        d = d if abs(d) > 1e-300 else 1e-300
+        c = b + an / c
+        c = c if abs(c) > 1e-300 else 1e-300
+        d = 1 / d
+        h *= d * c
+        if abs(d * c - 1) < 1e-15:
+            break
+    return max(0.0, 1 - math.exp(lg) * h)
+
+
+def _gamma_quantile(a: float, p: float) -> float:
+    """x with P(a, x) = p, by bisection (a unit-scale gamma quantile; half a chi-square quantile with 2a d.f.)."""
+    lo, hi = 0.0, a + 20 * math.sqrt(a) + 20
+    for _ in range(200):
+        m = (lo + hi) / 2
+        if _gamma_p(a, m) < p:
+            lo = m
+        else:
+            hi = m
+        if hi - lo < 1e-9 * max(1.0, hi):
+            break
+    return (lo + hi) / 2
+
+
+def _wilson_hilferty(a: float, z: float) -> float:
+    k = 2 * a
+    return k * (1 - 2 / (9 * k) + z * math.sqrt(2 / (9 * k))) ** 3 / 2
+
+
+def garwood_bounds(n: int) -> tuple[float, float]:
+    """The exact (Garwood) two-sided 95% interval for a Poisson mean given an observed count n: lower
+    chi2(0.025; 2n) / 2 (0 for n = 0), upper chi2(0.975; 2n + 2) / 2. Exact (incomplete gamma) up to
+    ``GARWOOD_EXACT_MAX``; above it the Wilson-Hilferty cube-root form of the same quantiles, which agreed with exact
+    values to within 0.003 and erred outward at every count checked from 1,001 to 10^12 when this was written."""
+    if n <= GARWOOD_EXACT_MAX:
+        lo = 0.0 if n == 0 else _gamma_quantile(n, 0.025)
+        return lo, _gamma_quantile(n + 1, 0.975)
+    return _wilson_hilferty(n, -Z95), _wilson_hilferty(n + 1, Z95)
+
+
 def poisson_band(n: int) -> list:
-    """An approximate 95% band on a count (normal approximation to Poisson). A range, reported as one."""
-    s = POISSON_Z * math.sqrt(n)
-    return [max(0, int(math.floor(n - s))), int(math.ceil(n + s))]
+    """The exact Garwood 95% band on a count, rounded outward to 0.01. Impressions are the engine's full count for
+    the window, not a sample: the band says how far the count could move from one window to the next if the rate
+    behind it stayed the same (a Poisson model of period-to-period variability). It is not a forecast."""
+    lo, hi = garwood_bounds(n)
+    return [max(0.0, math.floor(lo * 100) / 100), math.ceil(hi * 100) / 100]
+
+
+def wilson_interval(clicks: int, impressions: int) -> Optional[list]:
+    """The Wilson score 95% interval for a CTR (clicks / impressions); null without impressions."""
+    if impressions <= 0:
+        return None
+    n, p, z2 = impressions, clicks / impressions, Z95 * Z95
+    den = 1 + z2 / n
+    mid = (p + z2 / (2 * n)) / den
+    half = Z95 * math.sqrt(p * (1 - p) / n + z2 / (4 * n * n)) / den
+    return [max(0.0, mid - half), min(1.0, mid + half)]
 
 
 def bucket(position: Optional[float]) -> Optional[str]:
@@ -166,18 +277,23 @@ def bucket(position: Optional[float]) -> Optional[str]:
     return None
 
 
+def in_curve(g: Optional[dict], brand: bool) -> bool:
+    """Whether a Search Console row is one of the curve's: established (at least the threshold), non-brand, with a
+    position bucket."""
+    return g is not None and not brand and g["impressions"] >= ESTABLISHED_MIN_IMPRESSIONS \
+        and bucket(g["position"]) is not None
+
+
 def ctr_curve(rows: list) -> dict:
     """This property's own CTR by position bucket, from established, non-brand Search Console rows: impression-
-    weighted (clicks summed over impressions summed). A bucket under the support minimums is null."""
+    weighted (clicks summed over impressions summed). A bucket under the support minimums is null. The sums are
+    kept so that a row's own expected CTR can leave the row out (``opportunity``)."""
     acc: dict = {}
     for r in rows:
         g = r["gsc"]
-        if g is None or r["intent_class"] == "brand" or g["impressions"] < ESTABLISHED_MIN_IMPRESSIONS:
+        if not in_curve(g, r["intent_class"] == "brand"):
             continue
-        b = bucket(g["position"])
-        if b is None:
-            continue
-        a = acc.setdefault(b, [0, 0, 0])
+        a = acc.setdefault(bucket(g["position"]), [0, 0, 0])
         a[0] += g["clicks"]
         a[1] += g["impressions"]
         a[2] += 1
@@ -185,15 +301,20 @@ def ctr_curve(rows: list) -> dict:
     for name, _ in BUCKETS:
         c, i, n = acc.get(name, (0, 0, 0))
         ok = n >= CURVE_MIN_QUERIES and i >= CURVE_MIN_IMPRESSIONS
-        out[name] = {"ctr": round(c / i, 6) if ok else None, "queries": n, "impressions": i,
+        out[name] = {"ctr": round(c / i, 6) if ok else None, "queries": n, "impressions": i, "clicks": c,
                      "status": "COMPUTED" if ok else "INSUFFICIENT_SUPPORT"}
     return out
 
 
 def opportunity(g: Optional[dict], curve: dict, brand: bool) -> dict:
-    """The CTR gap of one Search Console row against the property's own curve (modeled; not traffic)."""
-    base = {"data_class": "modeled", "basis": "this property's own CTR curve (ctr_curve)", "position_bucket": None,
-            "expected_ctr": None, "ctr_gap": None, "click_gap_modeled": None}
+    """The CTR gap of one Search Console row against the property's own curve (modeled; not traffic). The expected
+    CTR leaves the row itself out of its bucket (leave-one-out), and the support minimums apply to what is left.
+    The gap's 95% interval is the expected CTR minus the row's Wilson score CTR interval; the curve's own
+    uncertainty is not added, so the interval is a lower bound on the uncertainty. COMPUTED only when the row has at
+    least the established threshold of impressions and the interval excludes 0."""
+    base = {"data_class": "modeled", "basis": "this property's own CTR curve (ctr_curve), leave-one-out",
+            "position_bucket": None, "expected_ctr": None, "ctr_95": None, "ctr_gap": None, "ctr_gap_95": None,
+            "direction": None, "click_gap_modeled": None, "click_gap_modeled_95": None}
     if g is None:
         return {**base, "status": "NOT_APPLICABLE", "why": "no Search Console measurement"}
     if brand:
@@ -201,14 +322,31 @@ def opportunity(g: Optional[dict], curve: dict, brand: bool) -> dict:
     b = bucket(g["position"])
     if b is None or g["impressions"] == 0:
         return {**base, "status": "INCONCLUSIVE", "why": "no position or no impressions"}
-    exp = curve[b]["ctr"]
-    if exp is None:
-        return {**base, "position_bucket": b, "status": "INCONCLUSIVE",
-                "why": "the property's curve has too little support in this position bucket"}
+    ci = wilson_interval(g["clicks"], g["impressions"])
+    base = {**base, "position_bucket": b, "ctr_95": [round(ci[0], 6), round(ci[1], 6)]}
+    if g["impressions"] < ESTABLISHED_MIN_IMPRESSIONS:
+        return {**base, "status": "INCONCLUSIVE",
+                "why": f"fewer than {ESTABLISHED_MIN_IMPRESSIONS} impressions: too little data for a CTR gap"}
+    cb = curve[b]
+    c, i, n = cb["clicks"], cb["impressions"], cb["queries"]
+    if in_curve(g, brand):                                  # leave the row out of its own expected CTR
+        c, i, n = c - g["clicks"], i - g["impressions"], n - 1
+    if n < CURVE_MIN_QUERIES or i < CURVE_MIN_IMPRESSIONS:
+        return {**base, "status": "INCONCLUSIVE",
+                "why": "the property's curve has too little support in this position bucket without this row"}
+    exp = c / i
     gap = exp - g["ctr"]
-    return {**base, "position_bucket": b, "expected_ctr": exp, "ctr_gap": round(gap, 6),
-            "click_gap_modeled": max(0, round(gap * g["impressions"])), "status": "COMPUTED",
-            "why": "expected CTR at this position on this property minus the row's CTR, times its impressions"}
+    glo, ghi = exp - ci[1], exp - ci[0]
+    out = {**base, "expected_ctr": round(exp, 6), "ctr_gap": round(gap, 6),
+           "ctr_gap_95": [round(glo, 6), round(ghi, 6)],
+           "click_gap_modeled": max(0, round(gap * g["impressions"])),
+           "click_gap_modeled_95": [max(0, round(glo * g["impressions"])), max(0, round(ghi * g["impressions"]))]}
+    if glo <= 0 <= ghi:
+        return {**out, "status": "INCONCLUSIVE",
+                "why": "the gap's 95% interval includes 0: the row's CTR is not distinguishable from the curve"}
+    return {**out, "status": "COMPUTED", "direction": "below_curve" if glo > 0 else "above_curve",
+            "why": "expected CTR at this position on this property (row left out) minus the row's CTR, times its "
+                   "impressions; the interval is from the row's Wilson CTR interval"}
 
 
 # ====================================================================== the ledger
@@ -251,8 +389,17 @@ def build(tenant_id: str, run_id: str, generated_at: str, brands: list, gsc: Sou
           bing: SourceResult) -> dict:
     """The keyword ledger. Deterministic: the same inputs give the same ledger."""
     pii = {"queries": 0, "clicks": 0, "impressions": 0}
-    merged: dict = {}                 # norm -> {...}
+    pii_seen: set = set()             # distinct dropped queries (in memory only; a query in both sources, or on many
+    merged: dict = {}                 #  Bing dates, is one query). norm -> {...}
     dup_merged = 0
+
+    def drop(raw: str, c: int, i: int) -> None:
+        k = hashlib.sha256(normalize(raw).encode("utf-8", "surrogatepass")).digest()
+        if k not in pii_seen:
+            pii_seen.add(k)
+            pii["queries"] += 1
+        pii["clicks"] += c
+        pii["impressions"] += i
 
     def slot(raw: str) -> Optional[dict]:
         nonlocal dup_merged
@@ -275,9 +422,8 @@ def build(tenant_id: str, run_id: str, generated_at: str, brands: list, gsc: Sou
         for q, c, i, _ctr, pos in gsc.rows:
             e = slot(q)
             if e is None:
-                pii["queries"] += 1
-                pii["clicks"] += c
-                pii["impressions"] += i
+                if normalize(q):
+                    drop(q, c, i)
                 continue
             g = e["_g"]
             if g[3]:
@@ -290,9 +436,8 @@ def build(tenant_id: str, run_id: str, generated_at: str, brands: list, gsc: Sou
         for q, d, c, i, _cpos, ipos in bing.rows:
             e = slot(q)
             if e is None:
-                pii["queries"] += 1
-                pii["clicks"] += c
-                pii["impressions"] += i
+                if normalize(q):
+                    drop(q, c, i)
                 continue
             b = e["_b"]
             b[0] += c
@@ -327,10 +472,15 @@ def build(tenant_id: str, run_id: str, generated_at: str, brands: list, gsc: Sou
 
     rows = []
     for e in entries:
-        imp = max((e["gsc"] or {}).get("impressions", 0), (e["bing"] or {}).get("impressions", 0))
-        established = imp >= ESTABLISHED_MIN_IMPRESSIONS
+        # the tier is Search Console's count against the threshold (its window is the threshold's); a query only Bing
+        # measured is never tiered: Bing's rows are summed over its own multi-week dates, not comparable
+        bing_only = e["gsc"] is None
+        imp = (e["bing"] if bing_only else e["gsc"])["impressions"]
+        established = not bing_only and imp >= ESTABLISHED_MIN_IMPRESSIONS
         flags = []
-        if not established:
+        if bing_only:
+            flags.append("BING_ONLY_UNTIERED")
+        elif not established:
             flags.append("BELOW_THRESHOLD")
         elif imp < MEDIUM_MIN:
             flags.append("LOW_IMPRESSION_COUNT")
@@ -351,7 +501,8 @@ def build(tenant_id: str, run_id: str, generated_at: str, brands: list, gsc: Sou
             "EMERGING", "origin": "observed", "intent_class": e["intent_class"],
             "emerging_kinds": None if established else emerging_kinds(e["norm"]),
             "metrics": {"search_console": e["gsc"], "bing_webmaster": e["bing"]},
-            "volume_status": "MEASURED_ON_THIS_PROPERTY" if established else "BELOW_THRESHOLD",
+            "volume_status": "MEASURED_ON_THIS_PROPERTY" if established else "MEASURED_NOT_TIERED" if bing_only
+            else "BELOW_THRESHOLD",
             "market_volume": None,
             "opportunity": opportunity(e["gsc"], curve, e["intent_class"] == "brand"),
             "difficulty": None, "confidence": conf,
@@ -382,11 +533,14 @@ def build(tenant_id: str, run_id: str, generated_at: str, brands: list, gsc: Sou
         "sources": {"search_console": _source_view(gsc), "bing_webmaster": _source_view(bing),
                     "google_ads_keyword_planner": {"state": "NOT_BUILT",
                                                    "why": "interface only (keyword_planner.py); founder decision"}},
-        "thresholds": {"established_min_impressions": ESTABLISHED_MIN_IMPRESSIONS, "medium_min": MEDIUM_MIN,
+        "thresholds": {"established_min_impressions": ESTABLISHED_MIN_IMPRESSIONS,
+                       "established_on": "Search Console's count in its window; Bing-only queries are not tiered",
+                       "medium_min": MEDIUM_MIN,
                        "high_min": HIGH_MIN, "curve_min_queries": CURVE_MIN_QUERIES,
                        "curve_min_impressions": CURVE_MIN_IMPRESSIONS, "status": "founder-pending defaults"},
         "ctr_curve": {"source": "this property's own Search Console query rows in the window above: established, "
-                                "non-brand, impression-weighted", "buckets": curve,
+                                "non-brand, impression-weighted; a row's own expected CTR leaves the row out",
+                      "buckets": curve,
                       "not_used": "no published industry CTR curve is used"},
         "difficulty": {"computed": False, "why": "no owned data supports a keyword difficulty (no backlink or SERP "
                                                  "data); none is fabricated"},
@@ -461,14 +615,17 @@ def _derive(entries: list, rows: list, brands: list, run_id: str) -> tuple[list,
     was seen around at least FRAME_MIN_HEADS distinct heads. Each kept frame is applied to the other heads; a variant
     already observed is not derived again. No volume is given to any variant."""
     by_norm = {r["query"]["text"]: r for r in rows}
+    capitalised = {e["norm"] for e in entries if _has_capital(e["raw"])}
     heads = [r for r in rows if r["tier"] == "ESTABLISHED" and r["intent_class"] != "brand"
-             and 1 <= len(r["query"]["text"].split()) <= 4]
+             and 1 <= len(r["query"]["text"].split()) <= 4 and r["query"]["text"] not in capitalised]
     heads.sort(key=_order)
     heads = heads[:HEADS_CAP]
     head_text = [h["query"]["text"] for h in heads]
     support: dict = {}
     for e in entries:
         q = e["norm"]
+        if q in capitalised:                       # a capitalised word may be a name: never a frame's source
+            continue
         padded = f" {q} "
         for h in head_text:
             if h == q or f" {h} " not in padded:
@@ -477,12 +634,15 @@ def _derive(entries: list, rows: list, brands: list, run_id: str) -> tuple[list,
             extra = len(frame.split()) - 1
             if extra < 1 or extra > FRAME_MAX_EXTRA_WORDS or frame.count("{head}") != 1:
                 continue
+            if any(w not in FRAME_VOCAB for w in frame.split() if w != "{head}"):
+                continue                           # a word no rule here can classify could be a name
             support.setdefault(frame, {"heads": set(), "rows": set()})
             support[frame]["heads"].add(h)
             support[frame]["rows"].add(row_key(q))
     kept = sorted((f for f, s in support.items() if len(s["heads"]) >= FRAME_MIN_HEADS),
                   key=lambda f: (-len(support[f]["heads"]), f))[:FRAMES_CAP]
     frames = {"rule": f"frame_transfer/{VERSION}", "min_heads": FRAME_MIN_HEADS, "heads_considered": len(heads),
+              "vocabulary": "closed (FRAME_VOCAB): a frame adding any other word is not used",
               "kept": [{"frame": observed(f), "seen_with_heads": len(support[f]["heads"]),
                         "supporting_rows": sorted(support[f]["rows"])[:20]} for f in kept],
               "candidates_seen": len(support)}
@@ -504,14 +664,21 @@ def _derive(entries: list, rows: list, brands: list, run_id: str) -> tuple[list,
                 "metrics": {"search_console": None, "bing_webmaster": None},
                 "volume_status": "UNKNOWN_NOT_MEASURED", "market_volume": None,
                 "opportunity": {"status": "NOT_APPLICABLE", "why": "not measured", "data_class": "modeled",
-                                "basis": None, "position_bucket": None, "expected_ctr": None, "ctr_gap": None,
-                                "click_gap_modeled": None},
+                                "basis": None, "position_bucket": None, "expected_ctr": None, "ctr_95": None,
+                                "ctr_gap": None, "ctr_gap_95": None, "direction": None, "click_gap_modeled": None,
+                                "click_gap_modeled_95": None},
                 "difficulty": None, "confidence": "NONE", "uncertainty_flags": ["NOT_MEASURED"],
                 "near_duplicate": None,
                 "evidence": {"run_id": run_id, "rule": frames["rule"], "frame_sha256": hashlib.sha256(
                     f.encode("utf-8", "surrogatepass")).hexdigest(), "head_key": row_key(h),
                     "supporting_rows": sorted(support[f]["rows"])[:20], "pointers": []}})
     return out, frames
+
+
+def _has_capital(raw: str) -> bool:
+    """Whether the engine reported the query with a capitalised word (engines mostly report lower case, so a
+    capital is a sign of a proper noun). Conservative: any word starting with an upper-case letter counts."""
+    return any(w[:1].isupper() for w in unicodedata.normalize("NFKC", raw or "").split())
 
 
 # ====================================================================== the Theo / Naomi hand-off contract
@@ -529,7 +696,8 @@ def handoff(tenant_id: str, run_id: str, generated_at: str, rows: list) -> dict:
     for r in rows:
         if r["tier"] != "EMERGING":
             continue
-        g = (r["metrics"] or {}).get("search_console")
+        m = r["metrics"] or {}
+        g = m.get("search_console") or m.get("bing_webmaster")        # Bing's only for a Bing-only (untiered) row
         items.append({"key": r["key"], "query": r["query"], "origin": r["origin"],
                       "emerging_kinds": list(r["emerging_kinds"] or []), "volume_status": r["volume_status"],
                       "observed_counts": None if g is None else {"impressions": g["impressions"],
@@ -559,7 +727,7 @@ def validate_handoff(doc) -> list:
             continue
         if it["origin"] not in ORIGINS:
             p.append(f"items[{n}].origin")
-        if it["volume_status"] not in ("BELOW_THRESHOLD", "UNKNOWN_NOT_MEASURED"):
+        if it["volume_status"] not in ("BELOW_THRESHOLD", "MEASURED_NOT_TIERED", "UNKNOWN_NOT_MEASURED"):
             p.append(f"items[{n}].volume_status")
         if it["origin"] == "derived" and it["observed_counts"] is not None:
             p.append(f"items[{n}].observed_counts")

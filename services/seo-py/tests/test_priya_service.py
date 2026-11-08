@@ -1,5 +1,5 @@
 """Priya's keyword ledger in the service (svc_keywords.py; ADR 0047): NOT_CONNECTED / INCONCLUSIVE by default with no
-outbound call, record-first, the ledger handed out once and never stored, the shared Search Console read budget, kill
+outbound call, record-first, the ledger handed out once and never stored, the keyword ledger's own Search Console read budget (kept apart from audits'), kill
 switches before and during a run, client-tenant gates, tenant isolation, Google errors and partial pages, sampling
 and truncation flags, Bing (injected fake) kept apart, replay, the department manager, restart. No network."""
 
@@ -109,18 +109,43 @@ def test_replay_answers_the_summary_without_the_ledger_and_a_changed_body_confli
                                                       "bing_site_domain": "acme.test"}), 409, "REQUEST_ID_REUSED")
 
 
-def test_the_read_budget_is_shared_with_audits(tmp_path):
-    h, fake = setup(tmp_path, SEO_GSC_READS_PER_DAY="1")
+def _audit_sp(h):
+    a = h.ok(h.post("/tenants/acme/audits", {"request_id": rid(), "domain": "acme.test", "paths": ["/"]},
+                    andre=True), 201)
+    return next(e for e in a["report"]["agents"] if e["task"] == "search_performance")
+
+
+def test_ledger_reads_have_their_own_budget_and_never_starve_audits(tmp_path):
+    h, fake = setup(tmp_path, SEO_GSC_READS_PER_DAY="1", SEO_GSC_LEDGER_READS_PER_DAY="1")
     assert run(h)["ledger"]["status"] == "OK"
     n = len(fake.requests)
     out = run(h)
     assert out["ledger"]["sources"]["search_console"]["state"] == "GSC_BUDGET_EXHAUSTED"
     assert out["ledger"]["status"] == "INCONCLUSIVE" and out["envelope"]["outcome"] == "BLOCKED"
     assert len(fake.requests) == n
-    a = h.ok(h.post("/tenants/acme/audits", {"request_id": rid(), "domain": "acme.test", "paths": ["/"]},
-                    andre=True), 201)
-    sp = next(e for e in a["report"]["agents"] if e["task"] == "search_performance")
-    assert sp["reason"] == "GSC_BUDGET_EXHAUSTED"                     # the audit sees the same budget
+    assert _audit_sp(h)["reason"] != "GSC_BUDGET_EXHAUSTED"           # the audit's budget is untouched
+    assert _audit_sp(h)["reason"] == "GSC_BUDGET_EXHAUSTED"           # ... and its own (1) is now spent
+
+
+def test_audits_spending_their_budget_do_not_block_the_ledger(tmp_path):
+    h, fake = setup(tmp_path, SEO_GSC_READS_PER_DAY="1")
+    _audit_sp(h)
+    assert _audit_sp(h)["reason"] == "GSC_BUDGET_EXHAUSTED"
+    assert run(h)["ledger"]["sources"]["search_console"]["state"] == "OK"
+
+
+def test_the_default_ledger_budget_is_two_reads_a_day(tmp_path):
+    h, fake = setup(tmp_path)
+    assert [run(h)["ledger"]["sources"]["search_console"]["state"] for _ in range(3)] == \
+        ["OK", "OK", "GSC_BUDGET_EXHAUSTED"]
+
+
+@pytest.mark.parametrize("bad", ["0", "13", "two", "-1", "1.5"])
+def test_the_ledger_budget_setting_fails_closed(bad):
+    import config as config_mod
+    from helpers import base_env
+    with pytest.raises(RuntimeError, match="SEO_GSC_LEDGER_READS_PER_DAY must be a whole number from 1 to 12"):
+        config_mod.load({**base_env(), "SEO_GSC_LEDGER_READS_PER_DAY": bad})
 
 
 def test_kill_switches_before_the_run(tmp_path):
@@ -301,9 +326,9 @@ def test_the_department_manager_lists_and_can_restrict_priya(tmp_path):
 
 
 def test_runs_and_the_budget_survive_a_restart(tmp_path):
-    h, fake = setup(tmp_path, data_dir=str(tmp_path / "data"), SEO_GSC_READS_PER_DAY="1")
+    h, fake = setup(tmp_path, data_dir=str(tmp_path / "data"), SEO_GSC_LEDGER_READS_PER_DAY="1")
     out = run(h)
-    h2 = h.restart(SEO_GSC_READS_PER_DAY="1")
+    h2 = h.restart(SEO_GSC_LEDGER_READS_PER_DAY="1")
     runs = h2.ok(h2.get("/tenants/acme/keyword-ledger-runs"))
     assert runs[0]["run_id"] == out["run_id"] and runs[0]["ledger_sha256"] == out["ledger_sha256"]
     again = h2.ok(h2.post("/tenants/acme/keyword-ledger", {"request_id": rid()}), 201)

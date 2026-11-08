@@ -96,6 +96,30 @@ def test_pii_suspect_queries_never_enter_the_ledger_only_their_counts():
     assert led["rows"] == [] and led["counts"]["pii_suspect_dropped"]["queries"] == 2
 
 
+@pytest.mark.parametrize("q", ["123 main st springfield", "42 Wallaby Way Sydney", "1200 5th ave new york",
+                               "9 n elm blvd.", "flat 4b rug", "apt 12 carpet cleaning", "suite 200 dental",
+                               "po box 77", "springfield il 62701", "austin, tx 78701", "90210-1234 rug"])
+def test_street_addresses_are_dropped_as_personal_data(q):
+    led = build(gsc([(q, 1, 30, 0.03, 4.0)]))
+    assert led["rows"] == [] and led["counts"]["pii_suspect_dropped"] == {"queries": 1, "clicks": 1,
+                                                                          "impressions": 30}
+
+
+@pytest.mark.parametrize("q", ["rug cleaner near me", "4 way stop", "top 10 rug cleaners", "rug cleaner 90210"])
+def test_ordinary_queries_with_numbers_are_kept(q):
+    assert by_text(build(gsc([(q, 1, 30, 0.03, 4.0)])))[q]["origin"] == "observed"
+
+
+def test_dropped_queries_are_counted_once_across_sources_and_bing_weeks():
+    b = SourceResult("bing_webmaster", "OK", "OK",
+                     [("jane.doe@example.com", "2026-10-05", 1, 4, None, None),
+                      ("jane.doe@example.com", "2026-10-12", 0, 3, None, None),
+                      ("JANE.DOE@example.com", "2026-10-19", 0, 2, None, None),
+                      ("123 main st", "2026-10-05", 0, 6, None, None)], {"site_sha256": "s" * 64})
+    led = build(gsc([("jane.doe@example.com", 1, 5, 0.2, 1.0)]), b)
+    assert led["counts"]["pii_suspect_dropped"] == {"queries": 2, "clicks": 2, "impressions": 20}
+
+
 def test_ctr_curve_is_the_propertys_own_and_inconclusive_without_support():
     led = build(gsc(SITE))
     b3 = led["ctr_curve"]["buckets"]["3"]
@@ -103,13 +127,80 @@ def test_ctr_curve_is_the_propertys_own_and_inconclusive_without_support():
     assert b3["status"] == "COMPUTED" and b3["queries"] == 5 and b3["impressions"] == 2870
     assert b3["ctr"] == round(65 / 2870, 6)
     assert led["ctr_curve"]["buckets"]["1"]["status"] == "INSUFFICIENT_SUPPORT"      # only the brand row is there
+    # leave-one-out: with the row itself out, 4 queries remain in bucket "3", under the support minimum
     opp = by_text(led)["sofa cleaner"]["opportunity"]
-    assert opp["status"] == "COMPUTED" and opp["data_class"] == "modeled"
-    assert opp["expected_ctr"] == b3["ctr"] and opp["click_gap_modeled"] == max(0, round((b3["ctr"] - 0.02) * 300))
+    assert opp["status"] == "INCONCLUSIVE" and "without this row" in opp["why"] and opp["data_class"] == "modeled"
+    assert opp["expected_ctr"] is None and opp["ctr_95"] is not None
     assert by_text(led)["acme pricing"]["opportunity"]["status"] == "NOT_APPLICABLE"     # brand
     small = build(gsc([("a b", 1, 50, 0.02, 3.0), ("c d", 1, 60, 0.02, 3.0)]))
     assert by_text(small)["a b"]["opportunity"]["status"] == "INCONCLUSIVE"
     assert "not_used" in led["ctr_curve"]
+
+
+# Bucket "3": six peers at CTR 5% (1,000 impressions each), one row far below, one row on the curve.
+PEERS = [(f"peer{i} cleaner", 50, 1000, 0.05, 3.2) for i in range(6)]
+
+
+def test_ctr_gap_has_a_wilson_interval_and_leaves_the_row_out():
+    led = build(gsc(PEERS + [("dull cleaner", 5, 1000, 0.005, 3.1), ("fair cleaner", 48, 1000, 0.048, 3.3)]))
+    t = by_text(led)
+    dull = t["dull cleaner"]["opportunity"]
+    # its own expected CTR is the peers' and fair's (row left out): (300 + 48) / 7000
+    assert dull["expected_ctr"] == round(348 / 7000, 6) and dull["status"] == "COMPUTED"
+    lo, hi = dull["ctr_95"]
+    assert lo < 0.005 < hi and lo > 0 and hi < 0.012                       # Wilson score interval on 5 / 1000
+    glo, ghi = dull["ctr_gap_95"]
+    assert 0 < glo < dull["ctr_gap"] < ghi and dull["direction"] == "below_curve"
+    assert dull["click_gap_modeled_95"][0] <= dull["click_gap_modeled"] <= dull["click_gap_modeled_95"][1]
+    fair = t["fair cleaner"]["opportunity"]
+    assert fair["status"] == "INCONCLUSIVE" and "includes 0" in fair["why"]      # not distinguishable from the curve
+    assert fair["ctr_gap_95"][0] < 0 < fair["ctr_gap_95"][1]
+    peer = t["peer0 cleaner"]["opportunity"]                                  # the peer's expected CTR excludes itself
+    assert peer["expected_ctr"] == round((250 + 5 + 48) / 7000, 6)
+
+
+def test_a_thin_row_never_gets_a_computed_ctr_gap():
+    # 4 impressions at position 1.2 against a well-supported bucket "1": INCONCLUSIVE, never COMPUTED
+    top = [(f"top{i} cleaner", 300, 1000, 0.3, 1.1) for i in range(6)]
+    led = build(gsc(top + [("tiny cleaner", 0, 4, 0.0, 1.2)]))
+    r = by_text(led)["tiny cleaner"]
+    assert r["tier"] == "EMERGING" and r["opportunity"]["status"] == "INCONCLUSIVE"
+    assert "too little data" in r["opportunity"]["why"] and r["opportunity"]["ctr_gap"] is None
+    assert r["opportunity"]["ctr_95"][0] == 0.0 and r["opportunity"]["ctr_95"][1] > 0.4    # wide, said as wide
+
+
+def test_the_19_and_20_impression_boundary():
+    # peers at CTR 30%: 0 clicks in 20 impressions (Wilson upper bound 16%) is distinguishably below the curve
+    hi = [(f"peer{i} cleaner", 300, 1000, 0.3, 3.2) for i in range(6)]
+    rows = hi + [("nineteen cleaner", 0, 19, 0.0, 3.2), ("twenty cleaner", 0, 20, 0.0, 3.2)]
+    t = by_text(build(gsc(rows)))
+    n19, n20 = t["nineteen cleaner"], t["twenty cleaner"]
+    assert n19["tier"] == "EMERGING" and "BELOW_THRESHOLD" in n19["uncertainty_flags"]
+    assert n20["tier"] == "ESTABLISHED" and "LOW_IMPRESSION_COUNT" in n20["uncertainty_flags"]
+    assert n19["opportunity"]["status"] == "INCONCLUSIVE" and "too little data" in n19["opportunity"]["why"]
+    assert n20["opportunity"]["status"] == "COMPUTED" and n20["opportunity"]["direction"] == "below_curve"
+    # at CTR 5% the same 0 / 20 is not distinguishable: INCONCLUSIVE for the interval, not for thin data
+    low = by_text(build(gsc(PEERS + [("twenty cleaner", 0, 20, 0.0, 3.2)])))["twenty cleaner"]["opportunity"]
+    assert low["status"] == "INCONCLUSIVE" and "includes 0" in low["why"]
+    led = build(gsc(rows))
+    assert led["ctr_curve"]["buckets"]["3"]["queries"] == 7                  # the 20 is in the curve, the 19 is not
+    assert led["ctr_curve"]["buckets"]["3"]["impressions"] == 6020
+
+
+def test_poisson_band_is_the_exact_garwood_interval():
+    assert priya.poisson_band(0) == [0.0, 3.69]
+    assert priya.poisson_band(1) == [0.02, 5.58]
+    assert priya.poisson_band(4) == [1.08, 10.25]
+    assert priya.poisson_band(20) == [12.21, 30.89]
+    assert priya.poisson_band(1000) == [938.97, 1063.96]
+    # above the exact range the Wilson-Hilferty form; reference values: chi-square quantiles (scipy, offline)
+    for n, lo, hi in ((5000, 4862.359188694899, 5140.5489485350045), (10 ** 6, 998040.9833402939, 1001961.9119454322)):
+        b = priya.poisson_band(n)
+        assert b[0] <= lo and b[1] >= hi and lo - b[0] < 0.02 and b[1] - hi < 0.02
+    assert priya.wilson_interval(0, 0) is None
+    lo, hi = priya.wilson_interval(0, 20)
+    assert lo == 0.0 and abs(hi - priya.Z95 ** 2 / (20 + priya.Z95 ** 2)) < 1e-12
+    assert any("not sampling error" in x for x in priya.LIMITS)
 
 
 def test_emerging_variants_are_derived_deterministically_with_no_volume():
@@ -131,6 +222,21 @@ def test_emerging_variants_are_derived_deterministically_with_no_volume():
     assert rows["sofa cleaner near me"]["query"]["untrusted"] is True
     assert build(gsc(SITE)) == led                                   # deterministic
     assert build(gsc(list(reversed(SITE))))["rows"] == led["rows"]    # independent of row order
+
+
+def test_frames_are_never_built_from_name_like_words():
+    heads = [("rug cleaner", 30, 1200, 0.025, 3.2), ("carpet cleaner", 20, 900, 0.022, 3.4),
+             ("sofa cleaner", 6, 300, 0.02, 3.0)]
+    tail = [("rug cleaner john smith", 0, 5, 0.0, 9.0), ("carpet cleaner john smith", 0, 4, 0.0, 9.0),  # not vocab
+            ("Rug Cleaner Dallas", 0, 5, 0.0, 9.0), ("Carpet Cleaner Dallas", 0, 4, 0.0, 9.0),          # capitalised
+            ("best rug cleaner", 0, 5, 0.0, 9.0), ("best carpet cleaner", 0, 4, 0.0, 9.0)]
+    led = build(gsc(heads + tail))
+    kept = {f["frame"]["text"] for f in led["frames"]["kept"]}
+    assert kept == {"best {head}"}
+    texts = {r["query"]["text"] for r in led["rows"] if r["origin"] == "derived"}
+    assert texts == {"best sofa cleaner"}
+    assert not any("john" in x or "dallas" in x for x in texts)
+    assert any("Personal names cannot be reliably detected" in x for x in priya.LIMITS)
 
 
 def test_unicode_queries_are_kept_and_normalised():
@@ -188,9 +294,26 @@ def test_bing_numbers_are_kept_apart_from_search_consoles():
     assert r["metrics"]["bing_webmaster"]["avg_impression_position"] == round((6.0 * 60 + 9.0 * 40) / 100, 2)
     assert "BING_WINDOW_DIFFERS" in r["uncertainty_flags"] and "SINGLE_SOURCE" not in r["uncertainty_flags"]
     bo = t["bing only query"]
-    assert bo["tier"] == "ESTABLISHED" and bo["metrics"]["search_console"] is None
+    # Bing-only: measured (25 impressions over Bing's own dates) but never tiered against the 28-day threshold
+    assert bo["tier"] == "EMERGING" and bo["metrics"]["search_console"] is None
+    assert bo["volume_status"] == "MEASURED_NOT_TIERED" and bo["confidence"] == "NONE"
+    assert "BING_ONLY_UNTIERED" in bo["uncertainty_flags"] and "BELOW_THRESHOLD" not in bo["uncertainty_flags"]
     assert bo["metrics"]["bing_webmaster"]["avg_impression_position"] is None
     assert "SINGLE_SOURCE" in bo["uncertainty_flags"] and bo["opportunity"]["status"] == "NOT_APPLICABLE"
+    item = next(i for i in led["handoff"]["items"] if i["key"] == bo["key"])
+    assert item["observed_counts"]["source"] == "first_party:bing_webmaster" and priya.validate_handoff(
+        led["handoff"]) == []
+
+
+def test_the_tier_is_search_consoles_when_it_measured_the_query():
+    # Bing's weekly rows summed (12 weeks x 10 = 120) never lift a Search Console row of 5 impressions to ESTABLISHED
+    weeks = [("thin rug query", f"2026-08-{d:02d}", 0, 10, None, 5.0) for d in range(1, 29, 7)] + \
+            [("thin rug query", f"2026-09-{d:02d}", 0, 10, None, 5.0) for d in range(1, 29, 7)] + \
+            [("thin rug query", f"2026-10-{d:02d}", 0, 10, None, 5.0) for d in range(1, 29, 7)]
+    b = SourceResult("bing_webmaster", "OK", "OK", weeks, {"site_sha256": "s" * 64})
+    r = by_text(build(gsc([("thin rug query", 0, 5, 0.0, 9.0)]), b))["thin rug query"]
+    assert r["metrics"]["bing_webmaster"]["impressions"] == 120
+    assert r["tier"] == "EMERGING" and r["volume_status"] == "BELOW_THRESHOLD"
 
 
 def test_row_cap_keeps_established_first_and_says_how_many_were_dropped(monkeypatch):

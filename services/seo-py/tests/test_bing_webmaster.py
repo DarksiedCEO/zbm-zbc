@@ -57,7 +57,8 @@ def test_dates_are_parsed_in_the_offset_bing_gives():
     {"d": [], "extra": 1},
     {"d": {"Query": "x"}},
     {"d": [{"Query": "x", "Clicks": 1, "Impressions": 2}]},   # no Date
-    {"d": [{**row("x", 1, 2), "Surprise": 1}]},
+    {"d": [{**row("x", 1, 2), **{f"Extra{n}": n for n in range(bw.ROW_MAX_FIELDS)}}]},   # unbounded row
+    {"d": [{**row("x", 1, 2), "AvgClickPosition": "high", "Surprise": 1}]},   # a documented field still checked
     {"d": [{**row("x", 1, 2), "__type": "KeywordStats:#X"}]},
     {"d": [row("x", 3, 2)]},                                   # clicks > impressions
     {"d": [row("x", -1, 2)]},
@@ -74,6 +75,19 @@ def test_malformed_answers_are_protocol_errors(answer):
     fake.script = [(200, answer)]
     e = code_of(lambda: fake.client().query_stats(SITE, ok))
     assert e.code == "BING_PROTOCOL_ERROR"
+
+
+def test_unknown_extra_fields_are_ignored_and_required_fields_still_validated():
+    fake = FakeBing()
+    fake.script = [(200, {"d": [{**row("rug cleaner", 4, 60), "Surprise": {"nested": [1]}, "Country": "us"}]})]
+    rows, _ = fake.client().query_stats(SITE, ok)
+    assert len(rows) == 1 and rows[0][:4] == ("rug cleaner", rows[0][1], 4, 60) and len(rows[0]) == 6
+    for missing in ("Query", "Date", "Clicks", "Impressions"):
+        r = {**row("x", 1, 2), "Surprise": 1}
+        del r[missing]
+        fake = FakeBing()
+        fake.script = [(200, {"d": [r]})]
+        assert code_of(lambda: fake.client().query_stats(SITE, ok)).detail == "row_shape"
 
 
 def test_nan_and_non_json_and_gzip_and_oversized_bodies_are_refused():

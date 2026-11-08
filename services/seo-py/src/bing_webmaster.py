@@ -64,6 +64,7 @@ RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 ROW_FIELDS = frozenset({"__type", "AvgClickPosition", "AvgImpressionPosition", "Clicks", "Date", "Impressions",
                         "Query"})
 ROW_REQUIRED = frozenset({"Clicks", "Date", "Impressions", "Query"})
+ROW_MAX_FIELDS = 64                                  # unknown fields are ignored, but a row is never unbounded
 _DATE = re.compile(r"/Date\((-?[0-9]{1,15})([+-][0-9]{4})?\)/")
 _INT_MAX = 10 ** 15
 SITE_URL = re.compile(r"https?://[a-z0-9.-]{4,253}/")
@@ -166,8 +167,11 @@ def parse_date(v) -> str:
 
 def parse_query_stats(obj) -> list:
     """GetQueryStats' JSON answer -> rows (query, date, clicks, impressions, avg_click_position,
-    avg_impression_position). Strict: exactly ``{"d": [...]}``; every row the documented fields only; whole, finite,
-    non-negative counts with clicks <= impressions; positions finite and >= 0 or absent; a (query, date) pair once."""
+    avg_impression_position). Strict: exactly ``{"d": [...]}``; every row an object holding the required documented
+    fields (Query, Date, Clicks, Impressions), each validated, and the optional documented ones validated when
+    present; fields Bing adds that are not documented are ignored (never read, never passed on), up to
+    ``ROW_MAX_FIELDS`` per row; whole, finite, non-negative counts with clicks <= impressions; positions finite and
+    >= 0 or absent; a (query, date) pair once."""
     if not isinstance(obj, dict) or set(obj) != {"d"}:
         raise BingError("BING_PROTOCOL_ERROR", "answer_shape")
     rows = obj["d"]
@@ -175,7 +179,7 @@ def parse_query_stats(obj) -> list:
         raise BingError("BING_PROTOCOL_ERROR", "row_count")
     out, seen = [], set()
     for r in rows:
-        if not isinstance(r, dict) or not set(r) <= ROW_FIELDS or not ROW_REQUIRED <= set(r):
+        if not isinstance(r, dict) or len(r) > ROW_MAX_FIELDS or not ROW_REQUIRED <= set(r):
             raise BingError("BING_PROTOCOL_ERROR", "row_shape")
         t = r.get("__type")
         if t is not None and (not isinstance(t, str) or not t.startswith("QueryStats:")):

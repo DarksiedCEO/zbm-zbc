@@ -161,6 +161,7 @@ class Settings:
     gsc_timeout_s: int = 10
     gsc_deadline_s: int = 60
     gsc_reads_per_day: int = 4
+    gsc_ledger_reads_per_day: int = 2          # Priya's keyword-ledger reads: their own budget (ADR 0047)
     gsc_retention_days: int = 90
     perplexity_key: Optional[object] = field(default=None, repr=False)     # perplexity.ApiKey (masked repr)
     perplexity_protocol: str = "agent"
@@ -345,6 +346,7 @@ def _gsc(env, s: Settings) -> None:
     s.gsc_timeout_s = _int(env, "SEO_GSC_TIMEOUT_SECONDS", 10, 1, 60)
     s.gsc_deadline_s = _int(env, "SEO_GSC_DEADLINE_SECONDS", 60, 5, 300)
     s.gsc_reads_per_day = _int(env, "SEO_GSC_READS_PER_DAY", 4, 1, 48)
+    s.gsc_ledger_reads_per_day = _int(env, "SEO_GSC_LEDGER_READS_PER_DAY", 2, 1, 12)   # separate: never starves audits
     s.gsc_retention_days = _int(env, "SEO_GSC_RETENTION_DAYS", 90, 1, 480)
     need = gsc_requests_needed(s.gsc_max_pages, s.gsc_page_rows, s.gsc_max_rows)
     if s.gsc_max_requests < need:

@@ -98,6 +98,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
         self.schedules: dict[str, dict] = {}
         self.agent_states: dict[str, dict] = {}
         self.gsc_reads: dict[str, list] = {}             # tenant -> times of recorded Search Console reads (budget)
+        self.gsc_ledger_reads: dict[str, list] = {}      # tenant -> times of keyword-ledger reads (their own budget)
         self.engine_runs: dict[str, dict] = {}          # Wave 4: metered answer-engine runs (svc_engines.py)
         self.client_reports: dict[str, dict] = {}       # recorded client-report renders (svc_reports.py)
         self.keyword_runs: dict[str, dict] = {}         # Priya's keyword-ledger runs (svc_keywords.py; ADR 0047)

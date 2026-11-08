@@ -32,23 +32,33 @@ below. (Numbered 0047 to stay clear of a concurrent SEO branch; renumber at reba
 4. **Kill switches:** global, write, the tenant's, the new `capability:keywords`, `provider:gsc` and the new
    `provider:bing` (both also as `SEO_KILLED_CAPABILITIES` / `SEO_KILLED_PROVIDERS` at start), checked before the run,
    before every request and on every socket operation (the GSC connector's guard).
-5. **Budget.** A run that reads Search Console counts as one read against `SEO_GSC_READS_PER_DAY` (shared with audits
-   and scheduled re-audits; tested both ways). A run that cannot read (not connected, unbound, killed, over budget)
-   spends nothing.
+5. **Budget.** A run that reads Search Console counts as one read against its **own** budget,
+   `SEO_GSC_LEDGER_READS_PER_DAY` (default 2 per tenant in any 24 hours; a whole number 1..12, anything else refuses
+   start), kept apart from `SEO_GSC_READS_PER_DAY` (audits and scheduled re-audits) so ledger runs can never starve an
+   audit, and audits never block a ledger (tested both ways). A run that cannot read (not connected, unbound, killed,
+   over budget) spends nothing. (Review round 1, LOW a; it answers founder question 1 with a conservative default.)
 
-## The ledger (`priya-keyword-ledger/1`, rules version `2026-11-08.1`)
+## The ledger (`priya-keyword-ledger/1`, rules version `2026-11-08.2`)
 
 Every row: `key`, `query` (normalised: NFKC, invisible characters removed, case-folded, whitespace collapsed; carried
 as `observed` text, bounded and marked `untrusted` — data, never an instruction), `tier`, `origin` (observed /
 derived), `intent_class` (ADR 0017's classifier), `metrics` per source, `volume_status`, `market_volume` (always
 null), `opportunity`, `difficulty` (always null), `confidence`, `uncertainty_flags`, `near_duplicate`, `evidence`.
 
-- **ESTABLISHED**: at least 20 impressions in one source's window (`ESTABLISHED_MIN_IMPRESSIONS`; founder-pending
-  default). Confidence LOW below 100, MEDIUM below 1,000, HIGH at 1,000+ (MEDIUM at most when the read was
-  truncated). Each source's numbers are kept apart and never summed: Search Console's with the property hash, the
-  window (Pacific Time, final data, web, aggregated by property) and an approximate 95% Poisson band on impressions
-  (`impressions_poisson_95`, a range kept as a range); Bing's with its own date range. The metric is named
-  `impressions_on_this_property`: it is not market search volume.
+- **ESTABLISHED**: at least 20 impressions in **Search Console's** window (`ESTABLISHED_MIN_IMPRESSIONS`;
+  founder-pending default). The tier is decided on Search Console's count whenever Search Console measured the query;
+  Bing's rows cover their own multi-week dates, so their summed total is never compared with the 28-day threshold:
+  a query only Bing measured stays EMERGING, kept as measured, `volume_status` `MEASURED_NOT_TIERED`, flag
+  `BING_ONLY_UNTIERED`, confidence NONE. Confidence LOW below 100, MEDIUM below 1,000, HIGH at 1,000+ (MEDIUM at most
+  when the read was truncated). Each source's numbers are kept apart and never summed: Search Console's with the
+  property hash, the window (Pacific Time, final data, web, aggregated by property) and the **exact Garwood** 95%
+  Poisson interval on impressions (`impressions_poisson_95`: lower chi²(0.025; 2n)/2, upper chi²(0.975; 2n+2)/2,
+  rounded outward to 0.01; exact incomplete-gamma bounds up to n = 1,000, the Wilson–Hilferty form of the same
+  quantiles above, which agreed with exact values within 0.003 and erred outward at every count checked from 1,001 to
+  10^12); Bing's with its own date range. What the band means: impressions are the engine's full count for the
+  property in the window, not a sample, so the band is not sampling error; it models period-to-period variability
+  (how far such a count could move from one window to the next at an unchanged rate). It is not a forecast. The
+  metric is named `impressions_on_this_property`: it is not market search volume.
 - **EMERGING**: (a) observed queries below the threshold — their thin counts kept as measured, `BELOW_THRESHOLD`,
   confidence NONE; (b) derived variants with **no volume** (`UNKNOWN_NOT_MEASURED`, metrics null, flag
   `NOT_MEASURED`). Derivation is deterministic, no model: a *frame* is an observed query with one of the top 25
@@ -60,7 +70,7 @@ null), `opportunity`, `difficulty` (always null), `confidence`, `uncertainty_fla
 - **Uncertainty flags** (closed): BELOW_THRESHOLD, LOW_IMPRESSION_COUNT, SINGLE_SOURCE, GSC_ROWS_TRUNCATED (the read
   stopped at a row cap: the tail past it is unread), ANONYMISED_REMAINDER (Search Console's property totals exceed its
   query rows; the remainder is reported in `sources.search_console.unattributed`, never spread over rows),
-  NOT_MEASURED, NEAR_DUPLICATE, BING_WINDOW_DIFFERS.
+  NOT_MEASURED, NEAR_DUPLICATE, BING_WINDOW_DIFFERS, BING_ONLY_UNTIERED.
 - **Duplicates:** spellings that normalise to one query are merged (counted in `duplicate_spellings_merged`; one
   engine's rows only, so nothing is double counted). Near-duplicates (same words up to order, a plural `s` and stop
   words, on the lookalike fold) are grouped and flagged, **never summed** into one number.
@@ -99,7 +109,8 @@ stands for; whether AvgImpressionPosition is on Search Console's scale (so Bing 
 them and never fed into the CTR curve); GetKeywordStats' answer shape and meaning (its member page could not be read;
 a secondary source describes weekly keyword-research impressions per country/language — market data, which would
 also send the client's query text to Microsoft). The adapter is strict on the documented shape (exactly `{"d": [...]}`,
-documented row fields only, whole non-negative counts, clicks ≤ impressions, `/Date(ms±hhmm)/` dates between 2000 and
+the required documented row fields present and validated, optional documented fields validated when present, fields
+Bing adds that are not documented ignored — never read or passed on — up to 64 per row; whole non-negative counts, clicks ≤ impressions, `/Date(ms±hhmm)/` dates between 2000 and
 2100, no repeated query+date, NaN refused, identity encoding, 8 MiB cap), allowlists `ssl.bing.com` on 443 under
 `/webmaster/api.svc/json/`, never follows a redirect, retries only 429 / 5xx / transport errors with backoff inside a
 deadline and a request budget, keeps the key in a masked, unpicklable `ApiKey`, and never puts a URL (which carries the
@@ -118,8 +129,14 @@ account and developer token: a founder decision, not built.
 - **Opportunity** = the row's CTR gap against the **property's own** position curve: impression-weighted CTR per
   position bucket (1, 2, 3, 4-5, 6-10, 11-20, 21+) over the same window's established, non-brand Search Console rows;
   a bucket with fewer than 5 queries or 200 impressions is INSUFFICIENT_SUPPORT and every row in it INCONCLUSIVE.
-  `click_gap_modeled` = max(0, (expected − actual CTR) × impressions), data class `modeled`, not traffic. Brand rows
-  are NOT_APPLICABLE. No published industry CTR curve is used (none is this site, and their sources disagree).
+  A row's expected CTR **leaves the row itself out** of its bucket (leave-one-out), and the support minimums apply
+  to what is left. The row's CTR carries a **Wilson score 95% interval** (`ctr_95`); the gap's interval
+  (`ctr_gap_95`) is the expected CTR minus that interval. The curve's own uncertainty is not added, so the stated
+  interval understates the true uncertainty (said in the limitations). Status: INCONCLUSIVE for a row under the
+  20-impression threshold (thin data: never COMPUTED, whatever its position) and for a gap interval that includes 0;
+  COMPUTED otherwise, with `direction` `below_curve` / `above_curve`. `click_gap_modeled` = max(0, gap ×
+  impressions) with `click_gap_modeled_95` from the gap interval, data class `modeled`, not traffic. Brand rows are
+  NOT_APPLICABLE. No published industry CTR curve is used (none is this site, and their sources disagree).
 - **Difficulty** is null with a stated reason: no owned data (no backlink or SERP data) supports an Ahrefs-style
   keyword difficulty, and none is invented.
 - **Market volume** is null on every row with a stated reason.
@@ -127,11 +144,21 @@ account and developer token: a founder decision, not built.
 ## Personal data
 
 A query that ADR 0017's classifier calls `pii_suspect` (e-mails in any spelling, one phone-like run of 7+ digits not
-an ISO date, id- or token-like words), on the raw or the normalised text (fullwidth digits, lookalikes), never enters
-the ledger; only `pii_suspect_dropped` {queries, clicks, impressions}. Derived variants are checked the same way. The
-ledger is handed out once and not stored; the recorded summary holds hashes and counts. **Limitation:** names in
-queries are not detected (ADR 0017 GSC-12); the ledger shows the dashboard / agent runtime the query text Google or
-Bing reported (both already anonymise rare queries), so a query naming a person can appear in the answer.
+an ISO date, id- or token-like words, and — added in review round 1, `search_performance` rules `2026-11-08.1`, so
+Osei's query classes use it too — street addresses: a house number, one to four words and a street suffix, full or
+abbreviated (`st`, `ave`, `blvd`, `rd`, `ln`, `dr`, `ct`, `pl`, `hwy`, `pkwy`, …); unit, apartment, suite and flat
+numbers; `#12`; PO boxes; ZIP+4; a 5-digit ZIP next to a US state name or code), on the raw or the normalised text
+(fullwidth digits, lookalikes), never enters the ledger; only `pii_suspect_dropped` {queries, clicks, impressions},
+where `queries` counts **distinct** normalised queries (a query in both sources, or on many Bing dates, is one). The
+address rule is conservative and over-drops (`10 things to do in st louis` is dropped); a bare ZIP (`plumber 90210`)
+is kept. Derived variants are checked the same way, and a frame is built only from a query that has no capitalised
+word as the engine reported it, and only when every word it adds around the head is in a closed vocabulary
+(`priya.FRAME_VOCAB`: stop, question, constraint and commercial words and a short list of generic verbs); a head
+with a capitalised word is not used. The ledger is handed out once and not stored; the recorded summary holds hashes
+and counts. **Limitation:** personal names cannot be reliably detected (ADR 0017 GSC-12); the ledger shows the
+dashboard / agent runtime the query text Google or Bing reported (both already anonymise rare queries), so a query
+naming a person can appear in the answer as an observed row. The frame rules only stop such a word from being
+transferred into new variants.
 
 ## EMERGING hand-off to Theo and Naomi (contract only)
 
@@ -161,7 +188,8 @@ pages, sampling and truncation, Bing via an injected fake, crash, manager, resta
 
 ## Founder questions
 
-1. Is a Search Console read spent by Priya to share `SEO_GSC_READS_PER_DAY` with audits (built), or get its own?
+1. Priya's Search Console reads now have their own budget (`SEO_GSC_LEDGER_READS_PER_DAY`, default 2): keep the
+   default, or set another (1..12)?
 2. Thresholds: 20 impressions for ESTABLISHED, 100 / 1,000 for MEDIUM / HIGH — keep or set?
 3. Bing: approve wiring the key (a secret file like Search Console's), the onboarding step and a Bing read budget?
 4. May client query text be sent to Microsoft's GetKeywordStats (market data), or stay inside first-party reads?

@@ -18,7 +18,8 @@ What is kept (evidence class: OBSERVED, first-party; data class: measured):
     or two pages); at most ``TEMPLATE_CAP`` templates, the rest in ``{other}``;
   - by QUERY CLASS (grouped by ``query``, aggregated by property): each query is classified into a closed set and
     dropped. No query text, no hash of one, and no per-query row is ever kept. A query that looks like personal
-    data (an e-mail in any spelling, one phone-like run of 7+ digits not an ISO date, an id- or token-like word) is counted as ``pii_suspect`` — the class
+    data (an e-mail in any spelling, one phone-like run of 7+ digits not an ISO date, an id- or token-like word, a street
+    address, unit number, PO box, ZIP+4 or a ZIP next to a US state) is counted as ``pii_suspect`` — the class
     is checked FIRST, so such a query never counts as brand or anything else. Dropping beats hashing: a hash of a
     low-entropy name or e-mail is reversed by a dictionary.
   - the remainder: property totals minus the query-class sums is reported as ``unattributed`` (Google's anonymised
@@ -43,7 +44,9 @@ import lookalikes
 from agents import logs as logs_mod
 
 AGENT, TASK = "osei", "search_performance"
-VERSION = "2026-10-24.3"                     # query classes, templating and the aggregation rules below
+VERSION = "2026-11-08.1"                     # query classes, templating and the aggregation rules below
+# 2026-11-08.1 (Priya review round 1, M3): street addresses, unit / apartment numbers, PO boxes, ZIP+4 and a ZIP next
+#    to a US state are pii_suspect (looks_like_address)
 # .3 (AEGIS gl-gsc certification lows): {other} counts distinct normalised pages; CamelCase segments are {slug};
 #    the digit-run separators widened and ISO dates not counted
 # .2 (AEGIS gl-gsc L1, L4): the slug rule and the low-count collapse for page templates; the PII digit rule counts one
@@ -130,6 +133,33 @@ def longest_digit_run(text: str) -> int:
     return best
 
 
+_STREET_SUFFIX = (r"street|st|avenue|ave|av|road|rd|boulevard|blvd|lane|ln|drive|dr|court|ct|place|pl|terrace|ter|"
+                  r"way|circle|cir|highway|hwy|parkway|pkwy|square|sq|trail|trl|crescent|cres|close|alley|aly|"
+                  r"plaza|plz|route|rte|pike|freeway|fwy|expressway|expy|turnpike|tpke")
+_US_STATES = (r"al|ak|az|ar|ca|co|ct|de|dc|fl|ga|hi|id|il|in|ia|ks|ky|la|me|md|ma|mi|mn|ms|mo|mt|ne|nv|nh|nj|nm|ny|"
+              r"nc|nd|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|vt|va|wa|wv|wi|wy|alabama|alaska|arizona|arkansas|california|"
+              r"colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|"
+              r"louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|"
+              r"nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|"
+              r"pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|"
+              r"washington|west virginia|wisconsin|wyoming")
+_ADDRESS = (
+    # a house number, one to four street-name words, a street suffix (full or abbreviated): 123 main st, 9 n elm ave.
+    re.compile(r"(?<!\w)\d{1,6}[a-z]?\s+(?:[\w'.-]+\s+){1,4}(?:" + _STREET_SUFFIX + r")\.?(?!\w)"),
+    re.compile(r"(?<!\w)(?:apt|apartment|suite|ste|unit|flat|fl)\.?\s*#?\s*\d+[a-z]?(?!\w)"),   # apt 4b, suite 200
+    re.compile(r"(?<!\w)#\s*\d+[a-z]?(?!\w)"),                                                  # # 12
+    re.compile(r"(?<!\w)p\.?\s*o\.?\s*box\s*\d+"),                                             # po box 12
+    re.compile(r"(?<!\d)\d{5}\s*[-\u2010-\u2015\u2212]\s*\d{4}(?!\d)"),                        # zip+4
+    re.compile(r"(?<!\w)(?:" + _US_STATES + r")\.?\s*,?\s*\d{5}(?!\d)"),                       # tx 75001
+)
+
+
+def looks_like_address(folded: str) -> bool:
+    """A postal address or part of one, on the lookalike-folded text. Conservative: a query that matches is dropped
+    even when it is not an address (``10 things to do in st louis``). Personal names are NOT detected."""
+    return any(p.search(folded) for p in _ADDRESS)
+
+
 def _word_identifies(w: str) -> bool:
     """A word the log templater would replace (e-mail, UUID, file name, token, a letters-and-digits mix). A word of
     digits and separators only (``2020-2021``) is left to the digit-run rule instead of the templater's total count."""
@@ -146,7 +176,8 @@ def classify_query(q: str, brands: list) -> str:
     folded = _LOOKALIKE.fold_cased(t)
     words = folded.split()
     if "@" in folded or logs_mod._EMAIL.search(folded) or logs_mod._AT_WORD.search(folded) \
-            or longest_digit_run(folded) >= PII_DIGIT_RUN or any(_word_identifies(w) for w in words):
+            or longest_digit_run(folded) >= PII_DIGIT_RUN or any(_word_identifies(w) for w in words) \
+            or looks_like_address(folded):
         return "pii_suspect"
     squashed = re.sub(r"[^a-z0-9]", "", folded)
     if any(b in squashed for b in brands):

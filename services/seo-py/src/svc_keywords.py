@@ -6,7 +6,8 @@ Rules:
     approval token), a bound Finance (31) client and Compliance (38)'s current activation of it (ADR 0024, as for the
     client report; asked outside the lock, no override). The hub cannot run it: a run spends a Search Console read;
   - Search Console: only the property Andre bound to the tenant (svc_gsc.binding_ok); NOT_CONNECTED without a key;
-    the run counts as one read against SEO_GSC_READS_PER_DAY (shared with audits and scheduled re-audits);
+    the run counts as one read against its own budget, SEO_GSC_LEDGER_READS_PER_DAY (default 2, 1..12), kept apart
+    from SEO_GSC_READS_PER_DAY (audits and scheduled re-audits) so that ledger runs can never starve an audit;
   - Bing Webmaster Tools: only for one of the tenant's own registered domains (``bing_site_domain``); the port is
     NOT_CONNECTED in production (bing_webmaster.py: fixtures only);
   - kill switches: global, write, the tenant's, ``capability:keywords``, ``provider:gsc`` / ``provider:bing``, and
@@ -23,13 +24,13 @@ Rules:
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 
 import bing_webmaster as bw
 from agents import priya
 from agents import search_performance as sp
-from clock import iso
+from clock import iso, parse_iso
 from envelope import envelope, sha
 from errors import Conflict, Forbidden, Invalid, NotFound
 from gsc_client import GscError
@@ -129,7 +130,7 @@ class KeywordsMixin:
 
     def _kw_plan(self, tid: str, t: dict, sources: list, body: dict) -> dict:
         """Under the lock: what each requested source will do. Only a planned Search Console read is counted against
-        the tenant's read budget (when ``keyword_ledger_started`` is applied)."""
+        the tenant's keyword-ledger read budget (when ``keyword_ledger_started`` is applied)."""
         plan = {"gsc": {"read": False, "state": "NOT_REQUESTED"}, "bing": {"state": "NOT_REQUESTED"}}
         if "gsc" in sources:
             g = plan["gsc"]
@@ -141,7 +142,7 @@ class KeywordsMixin:
                 g["state"] = "GSC_PROPERTY_UNBOUND"
             elif self.kill_code(tenant=tid, provider="gsc", write=True):
                 g["state"] = "GSC_KILLED"
-            elif self._gsc_reads_used(tid) >= self.settings.gsc_reads_per_day:
+            elif self._gsc_ledger_reads_used(tid) >= self.settings.gsc_ledger_reads_per_day:
                 g["state"] = "GSC_BUDGET_EXHAUSTED"
             else:
                 start, end = sp.window(self.now(), self.settings.gsc_window_days)
@@ -295,8 +296,8 @@ class KeywordsMixin:
             {"start": d["window_start"], "end": d["window_end"]}, "andre_approved": bool(d.get("andre_approved")),
             "requested_by": d["actor"], "requested_at": at, "status": "running", "completed_at": None,
             "ledger_status": None, "outcome": None, "ledger_sha256": None, "counts": None, "source_states": None}
-        if d["gsc_read"]:                                  # one Search Console read against the tenant's budget
-            reads = self.gsc_reads.setdefault(d["tenant_id"], [])
+        if d["gsc_read"]:                                  # one read against the tenant's keyword-ledger budget
+            reads = self.gsc_ledger_reads.setdefault(d["tenant_id"], [])
             reads.append(at)
             del reads[:-200]
 
@@ -308,6 +309,10 @@ class KeywordsMixin:
     def _a_keyword_ledger_interrupted(self, d, at):
         self.keyword_runs[d["run_id"]].update(status="interrupted", completed_at=at, interrupted_reason=d["reason"],
                                               error_type=d.get("error_type"))
+
+    def _gsc_ledger_reads_used(self, tid: str) -> int:
+        since = self.now() - timedelta(days=1)
+        return sum(1 for at in self.gsc_ledger_reads.get(tid, []) if parse_iso(at) > since)
 
     def keyword_run_view(self, tid: str, run_id: str, replay: bool = False) -> dict:
         with self.lock:
