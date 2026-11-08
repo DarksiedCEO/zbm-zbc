@@ -76,7 +76,8 @@ MUST failure or ERROR.
 | `SEO_FETCH_MAX_BYTES` | 2 MiB | decoded body cap (64 KiB..10 MiB) |
 | `SEO_FETCH_MAX_REDIRECTS` | `5` | redirect cap (0..10), every hop re-checked |
 | `SEO_AUDIT_MAX_PAGES` | `10` | pages read per audit (1..25): the requested paths, plus same-site pages linked from them (ADR 0017 CR-12) up to this total |
-| `SEO_CRAWL_DELAY_MS` | `1000` | least time between two of an audit's requests to the site (0..10000 ms); a robots.txt `Crawl-delay` raises it up to 5 s, and above 5 s no pages are discovered (ADR 0017 CR-12) |
+| `SEO_CRAWL_DELAY_MS` | `1000` | least time between two of an audit's requests to the site (0..3000 ms); a robots.txt `Crawl-delay` raises it up to 3 s, and above 3 s no pages are discovered (ADR 0017 CR-12) |
+| `SEO_AUDIT_DEADLINE_SECONDS` | `90` | one deadline (30..600 s) over every request an audit makes to the site (robots.txt, requested and discovered pages, comparisons, canonical targets, sitemaps, llms.txt): no request starts that could end after it; areas it cut short are PARTIAL / FAILED with reason `AUDIT_DEADLINE`. The audit route answers synchronously: a caller must allow at least this long plus the answer-engine and Search Console steps (ADR 0017 CR-12) |
 | `SEO_PROBE_SAMPLES` | `5` | answers sampled per prompt per engine (3..50) |
 | `SEO_BOT_INFO_URL` | unset | an https page about the crawler, added to its User-Agent |
 | `SEO_LOG_HASH_KEY_FILE` | — (required with `SEO_DATA_DIR`) | key for the keyed hashes behind the distinct-client-IP sketch of uploaded logs (`openssl rand -hex 32`, mode 0600); no IP and no IP hash is ever stored |

@@ -20,7 +20,7 @@ import re
 from typing import Optional
 from urllib.parse import unquote, urlsplit
 
-from agents import CRAWL_DELAY_CAP, GONE_STATUSES, bots, host_of, split_url
+from agents import CRAWL_DELAY_CAP, DEADLINE_REASON, GONE_STATUSES, DeadlineReached, bots, host_of, split_url
 from agents.prompt_guard import personal_data
 from envelope import envelope, finding
 from primitives import Killed
@@ -80,8 +80,11 @@ def run(ctx) -> tuple[dict, dict]:
                            "sitemaps_declared": (rb["parsed"].sitemaps[:50] if rb["parsed"] else [])}
         findings += _robots_findings(ctx, rb, facts)
         state = {"fetched": 0, "canon_checked": 0}
-        for path in ctx.paths:
-            findings += _read_page(ctx, path, pages, state, facts, not_connected)
+        try:
+            for path in ctx.paths:
+                findings += _read_page(ctx, path, pages, state, facts, not_connected)
+        except DeadlineReached:
+            facts["deadline_reached"] = True
         # Page discovery (bounded): when the request named fewer pages than the per-audit cap, same-site pages linked
         # from the requested pages are read too, one level deep, in document order, up to the cap. Every discovered
         # path goes through the same fetcher (SSRF guard, robots.txt for our crawler, byte / time / redirect budgets)
@@ -92,8 +95,13 @@ def run(ctx) -> tuple[dict, dict]:
             # robots.txt asks for more time between requests than an audit may take: only the requested pages
             facts["discovery_stopped"] = "crawl_delay_above_cap"
             discovered = []
+        if ctx.deadline_hit:
+            discovered = []
         read = []
         started = ctx.monotonic()
+        # discovered pages leave room before the audit deadline for Delia's sitemap and llms.txt requests
+        horizon = (ctx.deadline - DELIA_RESERVE_REQUESTS * ctx.crawl_delay() - ctx.fetch_reserve_s
+                   if ctx.deadline is not None else started + DISCOVERY_TIME_BUDGET_S)
         budget = REQUESTS_PER_PAGE * max(ctx.max_pages, len(ctx.paths)) + CANONICAL_CHECK_MAX + 2
         for path in discovered:
             # politeness and a bounded audit: a discovered page is read only while the request budget and the time
@@ -101,19 +109,36 @@ def run(ctx) -> tuple[dict, dict]:
             if ctx.requests + REQUESTS_PER_PAGE > budget:
                 facts["discovery_stopped"] = "request_budget"
                 break
-            if ctx.monotonic() - started + REQUESTS_PER_PAGE * ctx.crawl_delay() > DISCOVERY_TIME_BUDGET_S:
+            if ctx.monotonic() + REQUESTS_PER_PAGE * ctx.crawl_delay() > min(horizon,
+                                                                             started + DISCOVERY_TIME_BUDGET_S):
                 facts["discovery_stopped"] = "time_budget"
                 break
             read.append(path)
-            findings += _read_page(ctx, path, pages, state, facts, not_connected)
+            try:
+                findings += _read_page(ctx, path, pages, state, facts, not_connected)
+            except DeadlineReached:
+                facts["deadline_reached"] = True
+                facts["discovery_stopped"] = "deadline"
+                read.pop()
+                break
         facts["pages_discovered"] = read
         facts["requests"] = ctx.requests
         fetched = state["fetched"]
         facts["pages_requested"], facts["pages_fetched"] = len(ctx.paths), fetched
+    except DeadlineReached:
+        # not even robots.txt could be asked in time: nothing observed
+        return envelope(AGENT, TASK, "FAILED", findings, methodology=METHODOLOGY.format(v=bots.VERSION),
+                        limitations=LIMITS, reason=DEADLINE_REASON, facts=facts), pages
     except Killed as k:
         return envelope(AGENT, TASK, "KILLED", [], methodology=METHODOLOGY.format(v=bots.VERSION),
                         limitations=LIMITS, reason=k.code, facts=facts), pages
     fetched = sum(1 for p in pages.values() if p["fetch"].ok and not p.get("refused"))
+    if facts.get("deadline_reached") and any(p not in pages for p in ctx.paths):
+        # the deadline stopped the requested pages: never OK; what was read is reported
+        facts["render_states"] = {p: v["render"]["state"] for p, v in pages.items()}
+        return envelope(AGENT, TASK, "PARTIAL" if fetched else "FAILED", findings,
+                        methodology=METHODOLOGY.format(v=bots.VERSION), limitations=LIMITS,
+                        not_connected=not_connected, facts=facts, reason=DEADLINE_REASON), pages
     if fetched == 0:
         outcome = "BLOCKED" if all(p["fetch"].state == "BLOCKED_BY_ROBOTS" or p.get("refused")
                                    for p in pages.values()) else "FAILED"
@@ -135,6 +160,7 @@ _DISCOVERY_SKIP_SEGMENTS = frozenset({
     "wp-admin", "wp-login", "wp-json", "xmlrpc", "account", "accounts", "myaccount", "my-account", "delete",
     "destroy", "api", "graphql", "cgi-bin", "cdn-cgi", "auth", "oauth"})
 REQUESTS_PER_PAGE = 3                  # crawler, browser comparison, repeat (the most one page costs)
+DELIA_RESERVE_REQUESTS = 12            # sitemaps (up to 1 + 10 children) and llms.txt, kept free of discovery
 DISCOVERY_TIME_BUDGET_S = 120.0        # discovered pages stop once the next could take the audit past this
 _DISCOVERY_PATH = re.compile(r"/[\x21-\x7e]{0,500}")
 
@@ -232,7 +258,11 @@ def _read_page(ctx, path: str, pages: dict, state: dict, facts: dict, not_connec
     if f.ok and extract is not None:
         # AEGIS L3: the browser-identity comparison honours robots.txt for OUR crawler too (it is only made
         # where our crawler may fetch, and from the same robots cache)
-        human = _fetch(ctx, url, ua="human")
+        try:
+            human = _fetch(ctx, url, ua="human")
+        except DeadlineReached:
+            pages[path]["access_diff"] = {"state": "INCONCLUSIVE", "signals": [], "why": "audit time limit reached"}
+            return findings
         hx = _extract_of(human, url)
         ad = diff_mod.access_diff(f, human, extract, hx)
         if ad["state"] == "BOT_DIFFERENTIAL":
@@ -240,9 +270,13 @@ def _read_page(ctx, path: str, pages: dict, state: dict, facts: dict, not_connec
             # a signal that also differs between our own two fetches is the page changing between requests, not
             # the site treating crawlers differently, and is dropped. Nothing stable left: INCONCLUSIVE, never a
             # finding.
-            again = _fetch(ctx, url)
-            ad = diff_mod.confirm(ad, diff_mod.access_diff(f, again, extract, _extract_of(again, url))
-                                  if again.ok else None)
+            try:
+                again = _fetch(ctx, url)
+            except DeadlineReached:
+                again = None
+            repeat = diff_mod.access_diff(f, again, extract, _extract_of(again, url)) \
+                if again is not None and again.ok else None
+            ad = diff_mod.confirm(ad, repeat)
         pages[path]["access_diff"] = ad
         if ad["state"] == "CRAWLER_REFUSED":
             # H3: not cloaking, not an error visitors see: one note that the site refuses unknown crawlers
@@ -399,7 +433,10 @@ def _page_findings(ctx, path: str, f, extract: Optional[dict], canon_checked: in
         if not same_url(c, f.final_url or url) and ctx.same_site(host) \
                 and canon_checked < CANONICAL_CHECK_MAX:
             canon_checked += 1
-            cf = _fetch(ctx, c)
+            try:
+                cf = _fetch(ctx, c)
+            except DeadlineReached:
+                cf = fetch_mod.FetchResult(url=c, state="DEADLINE")
             if not cf.ok:
                 # Gate 4: our own request for the canonical target failed (timeout, refused, robots.txt for our
                 # crawler). That says nothing about what the target answers: inconclusive, recorded as a fact, never

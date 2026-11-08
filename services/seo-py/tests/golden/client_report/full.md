@@ -331,7 +331,7 @@ Malformed or unsafe inputs were set aside unread (never parsed further):
 - bot families: ` 2026-10-10.1 `
 - report: ` seo-audit-report/1 `
 - schema rules: ` 2026-10-09.1 `
-- report renderer: ` seo-client-report/4 `
+- report renderer: ` seo-client-report/6 `
 
 ---
 

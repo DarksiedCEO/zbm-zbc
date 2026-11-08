@@ -1361,6 +1361,18 @@ CR-12. **Sellable report (Gate 4 run against zbestmedia.com, 2026-11-08; branch 
      our request could not read, inconclusive crawler/browser comparisons and unconfirmed older records are listed in
      the section as "Inconclusive (not reported as findings)". The audit report is `seo-audit-report/2`
      (`discovered_paths`); the renderer accepts /1 and /2. Tests: `tests/test_report_review47.py`.
+   - **Re-review of 0cf5b3c, closed.** llms.txt is absent only on 404 / 410; any other status is unreadable and the
+     area PARTIAL (`LLMS_TXT_UNREAD`). One deadline, `SEO_AUDIT_DEADLINE_SECONDS` (default 90, 30..600), covers every
+     request an audit makes to the site: no request starts that could end after it (its politeness wait plus the
+     fetcher's hard per-request bound, twice `SEO_FETCH_TIMEOUT_SECONDS`, at most a quarter of the deadline); discovery
+     keeps room for Delia's requests; an area the deadline cut short is PARTIAL (or FAILED when nothing was observed)
+     with reason `AUDIT_DEADLINE`; a comparison or canonical check it cut short is inconclusive. `SEO_CRAWL_DELAY_MS`
+     is 0..3000 and a robots.txt Crawl-delay is honoured up to 3 s (above: no discovery), so the default audit (about
+     50 requests at 1 s) fits the deadline. The audit route is synchronous: callers must allow at least the deadline
+     (the dashboard's `ORCHESTRATOR_TIMEOUT_MS` default of 10 s does not; follow-up). The answer-engine and Search
+     Console steps are not site requests and are bounded by their own budgets, not this deadline. The renderer is
+     `seo-client-report/6` (`/7` with the homepage observation): the output changed after /4 and /5, which were never
+     recorded in production and now answer `REPORT_CHANGED` on replay.
 
 ## Unlock list
 

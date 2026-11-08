@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 import traceback
 from pathlib import Path
 from typing import Optional
@@ -246,7 +247,12 @@ class AuditsMixin:
         ctx = RunContext(fetcher=self.ports.fetcher, renderer=self.ports.renderer, guard=self.guard(tid),
                          clock=self.clock, osei=o, domain=body["domain"], scheme=body["scheme"],
                          paths=list(body["paths"]), max_pages=self.settings.audit_max_pages,
-                         crawl_delay_s=self.settings.crawl_delay_ms / 1000)
+                         crawl_delay_s=self.settings.crawl_delay_ms / 1000,
+                         # one deadline over every request this audit makes to the site (SEO_AUDIT_DEADLINE_SECONDS);
+                         # no request starts that the fetcher's own hard bound (twice the per-phase timeout) could
+                         # carry past it
+                         deadline=time.monotonic() + self.settings.audit_deadline_s,
+                         fetch_reserve_s=min(2 * self.settings.fetch_timeout_s, self.settings.audit_deadline_s / 4))
         envs, pages = [], {}
         if self.ports.fetcher is None:
             envs.append(envelope("selene", "crawlability", "NOT_CONNECTED", [], methodology="no fetcher is wired",

@@ -23,6 +23,7 @@ import pytest
 import client_report as cr
 import config
 import report_fixtures as fx
+import agents as agents_mod
 from agents import delia, selene
 from envelope import finding
 from fixture_server import home_html, install_site
@@ -176,8 +177,8 @@ def test_frozen_renderer_is_byte_identical_to_the_pre_upgrade_golden_files(name,
 
 def test_render_as_dispatch():
     v = fx.fresh("full")
-    assert cr.render_as("seo-client-report/4", v, "acme", "html") == cr.render(v, "acme", "html")
-    for bad in ("seo-client-report/1", "seo-client-report/9", "", None):
+    assert cr.render_as("seo-client-report/6", v, "acme", "html") == cr.render(v, "acme", "html")
+    for bad in ("seo-client-report/1", "seo-client-report/4", "seo-client-report/5", "seo-client-report/9", "", None):
         with pytest.raises(cr.ReportInputError):
             cr.render_as(bad, v, "acme", "html")
 
@@ -190,7 +191,7 @@ def test_replay_by_recorded_renderer_and_unknown_version_refuses(tmp_path, monke
     monkeypatch.setattr(h.svc, "audit_view", lambda *a, **kw: copy.deepcopy(v))
     req = {"request_id": rid(), "format": "markdown"}
     first = h.svc.render_client_report("acme", v["audit_id"], req)
-    assert first["renderer_version"] == "seo-client-report/4"
+    assert first["renderer_version"] == "seo-client-report/6"
     assert h.svc.render_client_report("acme", v["audit_id"], req) == first          # current renderer replays too
     h.svc.client_reports[first["report_id"]]["renderer_version"] = "seo-client-report/1"
     with pytest.raises(Conflict) as exc:
@@ -273,19 +274,21 @@ def test_a_crawl_delay_above_the_cap_reads_only_the_requested_pages(srv):
     ctx, c = _polite_ctx(srv, 1.0)
     env, pages = selene.run(ctx)
     assert list(pages) == ["/"] and env["facts"]["discovery_stopped"] == "crawl_delay_above_cap"
-    assert max(c.waits) == 5.0
+    assert max(c.waits) == agents_mod.CRAWL_DELAY_CAP == 3.0
 
 
 @pytest.mark.local_http
 def test_discovery_stops_inside_the_time_budget(srv):
-    install_site(srv, robots="User-agent: *\nCrawl-delay: 5\nAllow: /\n")
+    install_site(srv, robots="User-agent: *\nCrawl-delay: 3\nAllow: /\n")
     srv.html("site.test", "/", _links(*[f"/p{i}" for i in range(24)]))
+    for i in range(24):
+        srv.html("site.test", f"/p{i}", home_html(title=f"P{i}", canonical=f"http://site.test/p{i}"))
     ctx, c = _polite_ctx(srv, 1.0, max_pages=25)
     env, pages = selene.run(ctx)
     assert env["facts"]["discovery_stopped"] == "time_budget"
     assert 1 < len(pages) < 25
     # the discovery loop never starts a page that could end past the budget
-    assert sum(c.waits) <= selene.DISCOVERY_TIME_BUDGET_S + 4 * 5.0
+    assert sum(c.waits) <= selene.DISCOVERY_TIME_BUDGET_S + 4 * 3.0
 
 
 @pytest.mark.local_http
@@ -300,9 +303,9 @@ def test_the_request_budget_bounds_a_crawl(srv):
 
 def test_crawl_delay_setting_bounds():
     assert config.load(base_env(SEO_CRAWL_DELAY_MS=None)).crawl_delay_ms == 1000
-    assert config.load(base_env(SEO_CRAWL_DELAY_MS="10000")).crawl_delay_ms == 10_000
+    assert config.load(base_env(SEO_CRAWL_DELAY_MS="3000")).crawl_delay_ms == 3000
     assert config.load(base_env(SEO_CRAWL_DELAY_MS="0")).crawl_delay_ms == 0
-    for bad in ("10001", "-1", "1.5", "x"):
+    for bad in ("3001", "10000", "-1", "1.5", "x"):
         with pytest.raises(RuntimeError):
             config.load(base_env(SEO_CRAWL_DELAY_MS=bad))
 
@@ -362,3 +365,121 @@ def test_both_report_versions_render_and_others_refuse():
     v["report"]["report_version"] = "seo-audit-report/3"
     with pytest.raises(cr.ReportInputError):
         cr.build(v, "acme")
+
+
+# ================================================================ re-review of PR 47 (0cf5b3c)
+
+# ---------------------------------------------------------------- 1. llms.txt is absent only on 404 / 410
+
+@pytest.mark.local_http
+@pytest.mark.parametrize("status", [401, 403, 429, 500, 503])
+def test_sitemap_404_with_llms_refused_or_failing_is_partial(srv, status):
+    install_site(srv, robots="User-agent: *\nAllow: /\n", llms=None)
+    srv.text("site.test", "/sitemap.xml", "x", status=404)
+    srv.text("site.test", "/llms.txt", "x", status=status)
+    ctx = _ctx(srv, max_pages=0)
+    selene.run(ctx)
+    env = delia.run(ctx)
+    assert env["outcome"] == "PARTIAL" and env["reason"] == "LLMS_TXT_UNREAD"
+    assert env["facts"]["llms_txt"] == {"state": "unreadable", "status": status}
+    assert "LLMS_TXT_ABSENT" not in {f["code"] for f in env["findings"]}
+
+
+@pytest.mark.local_http
+@pytest.mark.parametrize("status", [404, 410])
+def test_llms_404_and_410_are_absent(srv, status):
+    install_site(srv, robots="User-agent: *\nAllow: /\n", llms=None)
+    srv.text("site.test", "/llms.txt", "x", status=status)
+    ctx = _ctx(srv, max_pages=0)
+    selene.run(ctx)
+    env = delia.run(ctx)
+    assert env["outcome"] == "OK" and env["facts"]["llms_txt"]["state"] == "absent"
+
+
+# ---------------------------------------------------------------- 2. one overall deadline over every site request
+
+def _deadline_ctx(srv, deadline, reserve=0.0, delay=1.0, max_pages=10):
+    ctx, c = _polite_ctx(srv, delay, max_pages=max_pages)
+    ctx.deadline, ctx.fetch_reserve_s = deadline, reserve
+    return ctx, c
+
+
+@pytest.mark.local_http
+def test_no_request_starts_that_could_end_after_the_deadline(srv):
+    install_site(srv)
+    srv.html("site.test", "/", _links(*[f"/p{i}" for i in range(9)]))
+    ctx, c = _deadline_ctx(srv, deadline=4.2, reserve=0.5)
+    s_env, pages = selene.run(ctx)
+    d_env = delia.run(ctx)
+    assert ctx.deadline_hit and ctx.requests == len(srv.seen)
+    assert ctx.last_request + ctx.fetch_reserve_s <= ctx.deadline       # the last request could still finish in time
+    assert s_env["outcome"] == "OK" and s_env["facts"]["discovery_stopped"] in ("time_budget", "deadline")
+    assert d_env["outcome"] == "PARTIAL" and d_env["reason"] == "AUDIT_DEADLINE" and d_env["facts"]["deadline_reached"]
+    assert d_env["facts"]["sitemaps_read"] == 1 and "llms_txt" not in d_env["facts"]
+
+
+@pytest.mark.local_http
+def test_deadline_during_requested_pages_is_partial_with_the_reason(srv):
+    install_site(srv)
+    for p in ("/a", "/b", "/c"):
+        srv.html("site.test", p, home_html(canonical=f"http://site.test{p}"))
+    ctx = _ctx(srv, paths=("/", "/a", "/b", "/c"), max_pages=0)
+    c = _Clock()
+    ctx.crawl_delay_s, ctx.sleep, ctx.monotonic, ctx.deadline = 1.0, c.sleep, c.monotonic, 5.0
+    env, pages = selene.run(ctx)
+    assert env["outcome"] == "PARTIAL" and env["reason"] == "AUDIT_DEADLINE" and env["facts"]["deadline_reached"]
+    assert 0 < len(pages) < 4
+    assert all(p["access_diff"]["state"] in ("SAME", "INCONCLUSIVE") for p in pages.values() if "access_diff" in p)
+
+
+@pytest.mark.local_http
+def test_deadline_before_robots_is_failed_not_a_crash(srv):
+    install_site(srv)
+    ctx, _ = _deadline_ctx(srv, deadline=0.5, reserve=1.0)
+    env, pages = selene.run(ctx)
+    assert env["outcome"] == "FAILED" and env["reason"] == "AUDIT_DEADLINE" and pages == {} and srv.seen == []
+
+
+@pytest.mark.local_http
+def test_deadline_on_a_canonical_check_is_inconclusive(srv):
+    install_site(srv)
+    srv.html("site.test", "/", home_html(canonical="http://site.test/preferred"))
+    ctx, _ = _deadline_ctx(srv, deadline=1.5, reserve=0.0, max_pages=0)       # robots, page, then no room
+    env, _ = selene.run(ctx)
+    assert env["facts"]["canonical_checks_inconclusive"] == [{"path": "/", "fetch_state": "DEADLINE"}]
+    assert "CANONICAL_TARGET_NOT_200" not in {f["code"] for f in env["findings"]}
+
+
+@pytest.mark.parametrize("fmt", ["markdown", "html"])
+def test_deadline_reason_reads_plainly_in_the_report(fmt):
+    v = fx.fresh("full")
+    d = next(e for e in v["report"]["agents"] if e["agent"] == "delia")
+    d["outcome"], d["reason"] = "PARTIAL", "AUDIT_DEADLINE"
+    t, m = cr.render(v, "acme", fmt)
+    assert "time limit was reached before this check finished" in t.decode() and not m["coverage"]["complete"]
+
+
+def test_deadline_setting_bounds_and_service_wiring(tmp_path):
+    assert config.load(base_env()).audit_deadline_s == 90
+    assert config.load(base_env(SEO_AUDIT_DEADLINE_SECONDS="30")).audit_deadline_s == 30
+    assert config.load(base_env(SEO_AUDIT_DEADLINE_SECONDS="600")).audit_deadline_s == 600
+    for bad in ("29", "601", "0", "x"):
+        with pytest.raises(RuntimeError):
+            config.load(base_env(SEO_AUDIT_DEADLINE_SECONDS=bad))
+
+
+@pytest.mark.local_http
+def test_the_service_passes_one_deadline_and_a_bounded_reserve(tmp_path, srv, monkeypatch):
+    seen = {}
+    real = selene.run
+
+    def spy(ctx):
+        seen["deadline"], seen["reserve"], seen["delay"] = ctx.deadline, ctx.fetch_reserve_s, ctx.crawl_delay_s
+        seen["now"] = ctx.monotonic()
+        return real(ctx)
+    monkeypatch.setattr(selene, "run", spy)
+    install_site(srv)
+    h = Harness(tmp_path, ports=_ports(srv), SEO_AUDIT_DEADLINE_SECONDS="40", SEO_FETCH_TIMEOUT_SECONDS="10")
+    h.ok(h.post("/tenants/zbm/domains", {"request_id": rid(), "domains": ["site.test"]}, andre=True))
+    h.ok(h.post("/tenants/zbm/audits", {"request_id": rid(), "domain": "site.test", "scheme": "http"}), 201)
+    assert 35 < seen["deadline"] - seen["now"] <= 40 and seen["reserve"] == 10 and seen["delay"] == 0

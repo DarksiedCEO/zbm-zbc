@@ -22,7 +22,7 @@ import zlib
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from agents import host_of, split_url
+from agents import DEADLINE_REASON, DeadlineReached, host_of, split_url
 from envelope import envelope, finding
 from primitives import Killed
 
@@ -90,10 +90,13 @@ def _local(tag: str) -> tuple[str, str]:
 
 def run(ctx) -> dict:
     findings, facts, not_connected = [], {}, set()
+    deadline = False
     try:
         ctx.guard(capability="fetch", provider="web")
         findings += _sitemaps(ctx, facts)
         findings += _llms(ctx, facts)
+    except DeadlineReached:
+        deadline = True                            # stopped cleanly; what was observed is reported, never OK
     except Killed as k:
         return envelope(AGENT, TASK, "KILLED", [], methodology=METHODOLOGY.format(c=MAX_CHILDREN, s=BLOCK_SAMPLE),
                         limitations=LIMITS, reason=k.code, facts=facts)
@@ -109,6 +112,9 @@ def run(ctx) -> dict:
         outcome, reason = "PARTIAL", ("LLMS_TXT_UNREAD" if sitemaps_known else "SITEMAP_UNREAD")
     else:
         outcome, reason = "FAILED", "SITEMAP_UNREAD"
+    if deadline and outcome != "OK":
+        reason = DEADLINE_REASON
+        facts["deadline_reached"] = True
     return envelope(AGENT, TASK, outcome, findings, methodology=METHODOLOGY.format(c=MAX_CHILDREN, s=BLOCK_SAMPLE),
                     limitations=LIMITS, not_connected=not_connected, facts=facts, reason=reason)
 
@@ -302,6 +308,12 @@ def _llms(ctx, facts: dict) -> list:
         facts["llms_txt"] = {"state": "unreadable", "fetch_state": f.state}
         return [finding("LLMS_TXT_UNREADABLE", "info", "measured", "INSUFFICIENT_EVIDENCE", url=url, capability="P3",
                         detail={"fetch_state": f.state, "note": note})]
+    if f.status not in (200, 404, 410):
+        # re-review of PR 47 (H1 residual): only 404 / 410 say llms.txt is absent; 401 / 403 / 429 / 5xx (or any
+        # other status) say nothing about it: unreadable, and the area is PARTIAL
+        facts["llms_txt"] = {"state": "unreadable", "status": f.status}
+        return [finding("LLMS_TXT_UNREADABLE", "info", "measured", "INSUFFICIENT_EVIDENCE", url=url, capability="P3",
+                        detail={"fetch_state": f.state, "status": f.status, "note": note})]
     if f.status != 200:
         facts["llms_txt"] = {"state": "absent", "status": f.status}
         return [finding("LLMS_TXT_ABSENT", "info", "measured", "WATCH", url=url, capability="P3",

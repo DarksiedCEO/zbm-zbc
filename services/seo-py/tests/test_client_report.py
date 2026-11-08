@@ -387,7 +387,7 @@ def test_route_renders_a_real_audit_recorded_first_with_its_hash(tmp_path, srv):
     data = r["content"].encode()
     assert r["document_sha256"] == hashlib.sha256(data).hexdigest() and r["bytes"] == len(data)
     assert r["audit_report_sha256"] == a["report_sha256"] and r["media_type"] == "text/html; charset=utf-8"
-    assert r["renderer_version"] == "seo-client-report/5" and r["format"] == "html"
+    assert r["renderer_version"] == "seo-client-report/7" and r["format"] == "html"
     ev = h.ledger.of_type("client_report_rendered")
     assert len(ev) == 1
     p = ev[0]["_payload"]

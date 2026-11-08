@@ -36,7 +36,12 @@ def split_url(url) -> Optional[SplitResult]:
 
 
 GONE_STATUSES = (404, 410)
-CRAWL_DELAY_CAP = 5.0          # seconds; a robots.txt Crawl-delay above it stops discovery (see agents/selene.py)
+CRAWL_DELAY_CAP = 3.0          # seconds; a robots.txt Crawl-delay above it stops discovery (see agents/selene.py)
+DEADLINE_REASON = "AUDIT_DEADLINE"
+
+
+class DeadlineReached(Exception):
+    """The audit's overall time limit leaves no room for another request to the site (nothing was sent)."""
 
 
 def gone(pg: dict) -> bool:
@@ -70,6 +75,11 @@ class RunContext:
     monotonic: Callable = time.monotonic
     requests: int = 0                       # requests this audit made to the site (robots.txt included)
     last_request: Optional[float] = None
+    # one overall deadline (``monotonic`` time) over EVERY request of the audit to the site: no request starts that
+    # could end after it (its wait plus ``fetch_reserve_s``, the fetcher's own hard per-request bound)
+    deadline: Optional[float] = None
+    fetch_reserve_s: float = 0.0
+    deadline_hit: bool = False
     robots_cache: dict = field(default_factory=dict)
     robots: Optional[dict] = None          # filled by Selene, read by Delia and Roman
 
@@ -89,12 +99,17 @@ class RunContext:
         return parsed.crawl_delay(token) if parsed is not None else None
 
     def polite(self) -> None:
-        """Called before every request to the site: waits until ``crawl_delay()`` has passed since the last one."""
+        """Called before every request to the site: waits until ``crawl_delay()`` has passed since the last one.
+        Raises DeadlineReached (nothing is sent) when the request could not finish before the audit deadline."""
         delay = self.crawl_delay()
+        wait = 0.0
         if self.last_request is not None and delay > 0:
-            wait = self.last_request + delay - self.monotonic()
-            if wait > 0:
-                self.sleep(wait)
+            wait = max(0.0, self.last_request + delay - self.monotonic())
+        if self.deadline is not None and self.monotonic() + wait + self.fetch_reserve_s > self.deadline:
+            self.deadline_hit = True
+            raise DeadlineReached()
+        if wait > 0:
+            self.sleep(wait)
         self.last_request = self.monotonic()
         self.requests += 1
 

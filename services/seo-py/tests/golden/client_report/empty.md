@@ -153,7 +153,7 @@ Prompt volume: **NOT CONNECTED**. How often real people ask these questions is n
 - bot families: ` 2026-10-10.1 `
 - report: ` seo-audit-report/1 `
 - schema rules: ` 2026-10-09.1 `
-- report renderer: ` seo-client-report/4 `
+- report renderer: ` seo-client-report/6 `
 
 ---
 

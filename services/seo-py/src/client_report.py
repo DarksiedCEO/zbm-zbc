@@ -43,8 +43,9 @@ from agents.prompt_guard import personal_data
 # 2: the "cited = returned by search" definition; 4: executive summary, client-facing coverage instead of the internal
 # run outcome, plain-language limits (deduplicated), rule codes moved to an appendix, unconfirmed comparisons withheld
 # (5: the same with the homepage phone observation; 3 was that observation on renderer 2)
-RENDERER_VERSION = "seo-client-report/4"
-RENDERER_VERSION_HOMEPAGE = "seo-client-report/5"
+# (6 / 7: the same after the independent review of PR 47; /4 and /5 were never recorded in production)
+RENDERER_VERSION = "seo-client-report/6"
+RENDERER_VERSION_HOMEPAGE = "seo-client-report/7"
 SUPPORTED_REPORT_VERSIONS = ("seo-audit-report/1", "seo-audit-report/2")   # 2 adds discovered_paths
 FORMATS = {"markdown": "text/markdown; charset=utf-8", "html": "text/html; charset=utf-8"}
 
@@ -152,6 +153,8 @@ STATUS = {
 }
 NOT_CLEAN = ("Nothing is reported here because this area was not checked. This is not a clean result.")
 REASON_TEXT = {
+    "AUDIT_DEADLINE": "The audit's time limit was reached before this check finished; only what was observed is "
+                      "reported.",
     "SITEMAP_UNREAD": "A sitemap could not be read (no usable answer), so the sitemap check is incomplete.",
     "LLMS_TXT_UNREAD": "llms.txt could not be read (no usable answer), so whether it is published is not known.",
     "GSC_NOT_CONNECTED": "Google Search Console is not connected to this service.",
@@ -388,7 +391,7 @@ _R = {
     "SITEMAP_LASTMOD_ALL_IDENTICAL": ("Every sitemap URL has the same lastmod", "Set <lastmod> per URL from the "
                                       "page's real last change, or leave it out.", (("count", "num"),)),
     "LLMS_TXT_UNREADABLE": ("llms.txt could not be read", "Nothing required: llms.txt is optional and "
-                            "non-standard.", (("fetch_state", "token"),)),
+                            "non-standard.", (("fetch_state", "token"), ("status", "num"))),
     "LLMS_TXT_ABSENT": ("No llms.txt", "Nothing required: llms.txt is an emerging, non-standard convention and its "
                         "absence is not a defect.", (("status", "num"),)),
     "LLMS_TXT_NOT_UTF8": ("llms.txt is not UTF-8", "Save llms.txt as UTF-8 text.", ()),
