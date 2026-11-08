@@ -1017,7 +1017,7 @@ def test_non_dictionary_brands_match_case_insensitively_as_at_a4af277(brand, tex
 @pytest.mark.parametrize("terms,text,want", [
     (["Zoom"], "Zoom in on the map to see it.", "LOW"),           # sentence-initial capital is grammar
     (["Zoom"], "Done. Zoom in again.", "LOW"),
-    (["Zoom"], 'He said: "Zoom works." Then left.', "HIGH"),      # after a colon: mid-sentence
+    (["Zoom"], 'He said: "Zoom works." Then left.', "LOW"),       # after a colon / an opening quote (round 5)
     (["Zoom"], "We met on Zoom yesterday.", "HIGH"),               # capitalised mid-sentence: a name
     (["Zoom"], "zoom in on the map", "LOW"),
     (["Apple", "Notion"], "the notion of apple pie", "LOW"),       # two common words never confirm each other
@@ -1038,3 +1038,32 @@ def test_an_unknown_mentioned_not_cited_rate_has_no_interval_either():
     for rate in (r["metrics"]["by_engine_prompt"][0]["mentioned_not_cited"], r["metrics"]["totals"]["mentioned_not_cited"],
                  r["metrics"]["by_engine"]["openai"]["mentioned_not_cited"]):
         assert rate["value"] is None and rate["ci95"] is None and rate["unknown"] == "MENTIONS_UNCONFIRMED", rate
+
+
+
+@pytest.mark.parametrize("terms,text,want", [
+    (["Target"], "Tips:\n- Target the right audience", "LOW"),
+    (["Zoom"], "## Zoom in on details", "LOW"),
+    (["Ring"], "* Ring the bell", "LOW"),
+    (["Target"], "1) Target buyers", "LOW"),
+    (["Zoom"], "Steps: Zoom in", "LOW"),
+    (["Apple"], 'He said "Apple is good."', "LOW"),             # decided: a quoted sentence starts at the quote
+    (["Zoom"], "> Zoom out to see it", "LOW"),
+    (["Target"], "Intro\r\n\r\n   +  Target buyers first", "LOW"),
+    (["Ring"], "Options:\n\u2022 Ring doorbells", "LOW"),
+    (["Zoom"], "a) Zoom calls", "LOW"),
+    (["Target"], "Shop at Target today.", "HIGH"),               # mid-sentence capital: a name
+    (["Zoom"], "- We met on Zoom yesterday.", "HIGH"),            # a bullet, but the brand is mid-sentence
+    (["Zoom"], "Use (Zoom) for calls", "HIGH"),
+])
+def test_markdown_structure_and_quotes_start_a_sentence_for_common_word_brands(terms, text, want):
+    # round 5: bullets, numbered items, headings, blockquotes, line starts, after ":" and after an opening quote
+    assert callum.brand_mention.mention(text, terms)["confidence"] == want, text
+
+
+def test_line_structure_is_kept_but_multi_word_terms_still_span_a_line_break():
+    bm = callum.brand_mention
+    assert bm._ws_lines("a \u00a0 b\r\n\n  c") == "a b\nc"
+    assert bm.mentioned("Try Z Best\nMedia now", ["Z Best Media"])
+    _, p = audit_prompt("Target", ["Tips:\n- Target the right audience"] * 3)   # through the real audit path
+    assert p["class"] == "MENTION_UNCONFIRMED" and p["mention_rate"] is None

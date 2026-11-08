@@ -149,8 +149,11 @@ B5a. **Brand matching** (review round 1 L1, `agents/brand_mention.py`, shared wi
     COMMON-WORD term — on the bundled list (`agents/common_words.txt`, self-authored for this repository, ~325 words
     incl. ford, zoom, stripe, oracle, visa, subway, ring, monday; no third-party licence) or declared
     `common_word: true`, with no disambiguation rule — needs confirmation: a match capitalised as configured that
-    does not start a sentence (a capital at the start of the text or after `.`/`!`/`?` is grammar: `Zoom in on the
-    map` alone does not confirm; a lower-case match never does), the client's domain named in the answer, a
+    does not start a sentence (round 5: a capital is grammar at the start of the text or a line, a markdown list
+    item `-`/`*`/`+`/`•`/`1.`/`1)`/`a)`, a heading `#`, a blockquote `>`, after `.`/`!`/`?`/`:`/`;`, or right after an
+    opening quote — `He said "Apple is good."` is a quoted sentence; line structure is read with line breaks kept;
+    so `Zoom in on the map`, `- Target the right audience`, `## Zoom in`, `1) Target buyers`, `Steps: Zoom in` do
+    not confirm; a lower-case match never does), the client's domain named in the answer, a
     citation of the client, or another brand term of the set that is not itself a common word (two common words
     never confirm each other: `the notion of apple pie` with Apple and Notion stays unconfirmed). A mention made only by unconfirmed terms is `MENTIONED_NOT_CITED`
     `confidence: LOW_CONFIDENCE`

@@ -32,10 +32,14 @@ self-authored: ``apple``, ``zoom``, ``notion``, ...) or one the tenant declares 
 disambiguation rule (``case_sensitive``, ``context_terms``, ``negative_terms``; ``common_word: false`` opts out) has
 UNCONFIRMED matches unless one of these confirms them:
 
-  - a match capitalised as the term is configured (``Apple``, ``Zoom``) that does NOT start a sentence: a
-    capital at the start of the text or after ``.``, ``!``, ``?`` (optionally through a quote or bracket; line breaks
-    are spaces after whitespace normalisation) is grammar, not a name, so ``Zoom in on the map`` alone is not confirmation; a lower-case match
-    (``apple pie``) never confirms;
+  - a match capitalised as the term is configured (``Apple``, ``Zoom``) that does NOT start a sentence. A capital
+    is grammar, not a name (review rounds 4-5), when the word starts the text or a line, a markdown list item
+    (``-``, ``*``, ``+``, ``•``, ``1.``, ``1)``, ``a)``), a heading (``#``), a blockquote (``>``), or follows ``.``,
+    ``!``, ``?``, ``:`` or ``;`` (optionally through closing quotes / brackets), or directly follows an opening quote
+    (``He said "Apple is good."`` is a quoted sentence: not confirmation). Line structure is read on the answer with
+    its line breaks kept (whitespace runs are normalised, a run holding a line break stays one line break). So
+    ``Zoom in on the map``, ``- Target the right audience``, ``## Zoom in``, ``1) Target buyers`` and ``Steps: Zoom
+    in`` alone are not confirmation; a lower-case match (``apple pie``) never confirms;
   - the same answer names the client's domain (``acme.com``) or cites the client;
   - the same answer names another brand term of the set that is NOT itself a common word (two common words never
     confirm each other: ``the notion of apple pie`` with terms Apple and Notion stays unconfirmed).
@@ -74,7 +78,9 @@ def common_words() -> frozenset:
 
 @functools.lru_cache(maxsize=512)
 def _pattern(term: str, case_sensitive: bool) -> "re.Pattern":
-    return re.compile(r"(?<!\w)" + re.escape(_ws(term)) + r"(?!\w)", 0 if case_sensitive else re.IGNORECASE)
+    # words of a term may be separated by a space or a line break in the answer (the text keeps its line breaks)
+    body = r"[ \n]".join(re.escape(w) for w in _ws(term).split(" "))
+    return re.compile(r"(?<!\w)" + body + r"(?!\w)", 0 if case_sensitive else re.IGNORECASE)
 
 
 @functools.lru_cache(maxsize=256)
@@ -84,6 +90,16 @@ def _domain_pattern(domain: str) -> "re.Pattern":
 
 def _ws(text: str) -> str:
     return " ".join((text or "").split())             # str.split() splits on every Unicode whitespace, NBSP included
+
+
+_WS_RUN = re.compile(r"\s+")
+_LINE_BREAKS = frozenset("\n\r\x0b\x0c\x1c\x1d\x1e\x85\u2028\u2029")
+
+
+def _ws_lines(text: str) -> str:
+    """Whitespace normalised but LINE STRUCTURE kept (round 5): a run of whitespace holding a line break becomes one
+    ``\n``, any other run one space; so list items, headings and quotes can still be recognised."""
+    return _WS_RUN.sub(lambda m: "\n" if any(c in _LINE_BREAKS for c in m.group(0)) else " ", text or "").strip()
 
 
 def _any(text: str, words) -> bool:
@@ -149,11 +165,27 @@ def _matches(text: str, rule: dict, stats: Optional[dict] = None) -> list:
     return out
 
 
-_SENTENCE_START = re.compile(r"(?:^|[.!?]['\"\u2019\u201d)\]]*\s)['\"\u2018\u201c(\[]*$")
+# round 5: what may come before a word that starts a sentence. On its line: nothing, or markdown structure — bullets
+# (- * + •), numbered items (1. / 1) / a)), headings (#), blockquotes (>) — optionally then opening quotes/brackets.
+_LINE_START = re.compile(r"^[ \t]*(?:(?:[-*+\u2022\u2023\u25e6]|\d{1,3}[.)]|[A-Za-z][.)]|#{1,6}|>+)[ \t]*)*"
+                         r"['\"\u2018\u201c(\[*_]*$")
+# after sentence punctuation or a colon (optionally closing quotes / brackets), then optional opening quotes; or
+# directly after an opening quote ('He said "Apple is good."': a quoted sentence starts there)
+_AFTER_PUNCT = re.compile(r"(?:[.!?:;]['\"\u2019\u201d)\]*_]*[ \t]+['\"\u2018\u201c(\[*_]*"
+                          r"|(?:^|[ \t(\[])['\"\u2018\u201c])$")
+_LOOKBACK = 32
 
 
 def _sentence_initial(text: str, start: int) -> bool:
-    return _SENTENCE_START.search(text[max(0, start - 8):start] if start > 8 else text[:start]) is not None
+    """The match at ``start`` begins a sentence, a line, a list item, a heading, a quote or follows a colon. Bounded
+    look-back (``_LOOKBACK`` characters), so the check is constant work per match."""
+    lo = max(0, start - _LOOKBACK)
+    nl = text.rfind("\n", lo, start)
+    if nl != -1 or lo == 0:
+        line = text[nl + 1 if nl != -1 else 0:start]
+        if _LINE_START.search(line):
+            return True
+    return _AFTER_PUNCT.search(text[lo:start]) is not None
 
 
 def _common(rule: dict) -> bool:
@@ -175,7 +207,7 @@ def mention(text: str, terms: list, rules: Optional[list] = None, domain: Option
             client_cited: bool = False, stats: Optional[dict] = None) -> dict:
     """``{"mentioned", "confidence" (HIGH / LOW / None), "terms"}``. LOW only when every term named is an
     unconfirmed common word and the answer neither names ``domain`` nor cites the client."""
-    t = _ws(text)
+    t = _ws_lines(text)
     named = []
     for r in normalise(terms, rules):
         found = _matches(t, r, stats)
