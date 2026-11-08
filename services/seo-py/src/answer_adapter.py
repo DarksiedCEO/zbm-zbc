@@ -454,11 +454,9 @@ class HttpAnswerEngine:
             for b in h.get("content") or ():
                 if not self._allowed_block(b):
                     raise EngineError("ENGINE_PROTOCOL_ERROR", "HISTORY_BLOCK_NOT_ALLOWED")
-        has_content = any("content" in h for h in history)
+        # review round 5: no history at all without this conversation's record (text-only included)
         if not isinstance(conversation, Conversation) or conversation.engine != self.name:
-            if has_content:
-                raise EngineError("ENGINE_PROTOCOL_ERROR", "HISTORY_BLOCK_NOT_RECEIVED")
-            return
+            raise EngineError("ENGINE_PROTOCOL_ERROR", "HISTORY_NO_RECORD")
         why = conversation.check(history)
         if why is not None:
             raise EngineError("ENGINE_PROTOCOL_ERROR", why)

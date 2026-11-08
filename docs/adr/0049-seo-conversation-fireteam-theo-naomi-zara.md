@@ -392,18 +392,49 @@ numbers below are on fixtures written by the builder and overstate what an adver
    this chat…"); persona games ("you are ShopBot", "act as …GPT", "your new name is …Bot", "you are no longer an
    assistant", "let's play a game … you are"). False alarms kept down by model-directed forms: "jailbreak-proof
    phone cases", "reply only with your availability", "print your instructions sheet" are not flagged (tested).
-   **Measured on the builder's fixtures (tests/fixtures/injection/labelled.json, 240 cases):** the round-3 splits
-   (dev 60, held-out 50) and a new dev split (dev2, 60: 30 / 30) were used for tuning; a NEW held-out split
-   (heldout2, 70: 35 injections / 35 benign across every new family and language), written after the tuning and
-   evaluated once without any change afterwards: **precision 0.972 (35/36; Wilson 95% 0.858–0.995), recall 1.000
-   (35/35; Wilson 95% 0.901–1.0)**; its one false alarm, "Role: system administrator (on-site).", is left as
-   measured. The test asserts ≥ 0.85 on every split. These are self-measured on author-written text; the independent
-   reviewer's next unseen set is the measure that counts.
+   Measured numbers: see "Review round 5" — the self-measured round-4 headline is withdrawn.
 3. **Structural second guard (opt-in, `SEO_THEO_STACKED_CHECK`, default 0).** For a complete native multi-turn chain,
    the final question is asked once more as stacked questions with NO earlier answers in context (one extra request,
    reserved with the chain); when the lexical final pick differs, the chain is flagged `DIVERGENT_UNDER_HISTORY`
    (`divergent_under_history` per chain summary, finding `THEO_DIVERGENT_UNDER_HISTORY`). Disclosed as a heuristic:
    a different pick may be the history's influence (an injection included) or ordinary sampling variation; it is
    reported, not used to exclude a chain. Tested (divergent, not divergent, reserved with the chain, off by default).
+   (Superseded in round 5: the check is now the BASIS of the native pattern.)
 4. This section replaces round 3's 1.00 / 1.00 claim (above).
+
+## Review round 5 (7b906d15: REJECTED — ReDoS, swallowed kill, guard does not generalise)
+
+1. **ReDoS fixed (HIGH).** The guard ran page-controlled re-sent text through patterns such as
+   `(?m)^\s*-?\s*role\s*:…`, cubic on whitespace / newline input. Now: every repetition in every guard pattern is
+   BOUNDED (`\s{0,8}`, `\s{1,8}`, `\w{1,40}`, `.{1,80}`, `#{2,8}`, …; the helper regexes too), proved structurally by
+   a test that walks each compiled pattern's parse tree and refuses any unbounded or over-4,096 repeat (no wall-clock
+   assertion); whitespace runs are collapsed by a linear split before any pattern runs; a text longer than
+   `MAX_SCAN_CHARS` (20,000) is not scanned but flagged (fail closed). Tests on 100,000-character whitespace and
+   newline inputs assert the size bounds.
+2. **Kill switch during the structural re-ask (MEDIUM).** `_stacked_check` no longer swallows it: a `Killed`
+   (kill switch, member cancellation) and an adapter `ENGINE_KILLED` propagate and stop the run (tested for both and
+   for the guard before the re-ask); only other failures leave the check `None` (not checked).
+3. **No history without a record (LOW).** The adapter refuses ANY history — text-only included — unless it comes with
+   this engine's `Conversation` record (`HISTORY_NO_RECORD`); the record then binds every assistant turn as in round 4.
+4. **The structural guard is the basis; the regex guard is auxiliary (DESIGN).** Native multi-turn chains produce the
+   "invisible at turn one → recommended later" pattern (`INVISIBLE_THEN_RECOMMENDED`) ONLY when EVERY complete chain
+   of that topic × engine was re-asked without history (`_stacked_check`) and gave the same pick, and none was flagged
+   by the auxiliary injection guard (`divergent_under_history.agreed_clean == complete`). Otherwise — check OFF,
+   check failed, any divergence, any flag — the chain set is `INVISIBLE_AT_OPENING_RECOMMENDED_UNCHECKED`, reported
+   apart (finding `THEO_NATIVE_PATTERN_NOT_STRUCTURALLY_CHECKED`, INSUFFICIENT_EVIDENCE); Zara re-derives this from
+   the counts and holds any payload that claims more. **The check is budget-gated and OFF by default
+   (`SEO_THEO_STACKED_CHECK`), so with it OFF native chains report per-turn data and every other pattern, but never
+   the native invisible-then-recommended pattern.** The regex guard (`INJECTION_SUSPECTED`) is now an auxiliary flag
+   only: flagged chains stay in the rates, are reported (`injection_suspected.chains`), and cannot support the native
+   pattern. The structural check is itself a heuristic (sampling variation also changes picks) and is disclosed as one.
+5. **Honest numbers (replacing the self-measured round-4 headline of precision 0.972 / recall 1.000).** Independent
+   measurements of the auxiliary regex guard:
+   - the round-4 reviewer's unseen set, before round 4: recall 0.53 (37/70), precision 0.93;
+   - the same reviewer's set after round 4: recall 0.843, precision 1.000 — **after tuning**: round 4 added pattern
+     families for the miss categories that reviewer reported (its cases were not read), so this set is no longer
+     independent of the tuning;
+   - a FRESH independent set (round 5): **recall 0.246, precision 0.789**.
+   Pattern detection does not generalise; the guard is auxiliary and no claim rests on it. The builder's own fixture
+   splits (`tests/fixtures/injection/labelled.json`) remain as regression tests only (they assert ≥ 0.85 on text the
+   builder wrote) and are not a measure of the guard.
 

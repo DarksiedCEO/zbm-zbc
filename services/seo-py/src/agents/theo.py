@@ -30,14 +30,17 @@ Two context modes, chosen per engine and named in every output (review round 1, 
                          request per turn carrying the earlier USER questions only. It approximates a conversation and
                          its pattern says so (``INVISIBLE_AT_OPENING_RECOMMENDED_STACKED``).
 Injection (review round 2): in native mode an earlier answer is re-sent, so text injected into it may steer the
-engine's later answers, the classified final one included; Theo's plan and logic cannot be altered by it. A chain
-with any answer that agents/injection_guard.py flags (instruction-like text aimed at the model, in any text the answer
-would carry back) is INJECTION_SUSPECTED, in either mode: kept out of every rate and pattern, its finals reported
-apart. Every content block sent back must be an allowed type that this engine returned earlier in this chain (the
-adapter's ``Conversation`` provenance record; anything else is refused). An earlier answer goes back as the
-provider's content blocks exactly as received (Anthropic: server_tool_use / web_search_tool_result / cited text
-blocks; Gemini: the parts, PROVISIONAL), never truncated: a history over the adapter's cap ends the chain
-INCOMPLETE (``HISTORY_TOO_LARGE``).
+engine's later answers, the classified final one included; Theo's plan and logic cannot be altered by it. The BASIS of
+the defence is structural (review round 5): the native "invisible at turn one, recommended later" pattern is claimed
+only when every complete chain's final question was re-asked WITHOUT history (``_stacked_check``, opt-in
+``SEO_THEO_STACKED_CHECK``, default OFF) and gave the same pick; otherwise it is
+``INVISIBLE_AT_OPENING_RECOMMENDED_UNCHECKED``, reported apart. With the check OFF, native chains report per-turn data
+but never that pattern. agents/injection_guard.py is an AUXILIARY flag only (INJECTION_SUSPECTED: reported, kept in
+the rates, and it too keeps a chain from supporting the native pattern). Every content block sent back must be an
+allowed type that this engine returned earlier in this chain (the adapter's ``Conversation`` provenance record;
+anything else is refused). An earlier answer goes back as the provider's content blocks exactly as received
+(Anthropic: server_tool_use / web_search_tool_result / cited text blocks; Gemini: the parts, PROVISIONAL), never
+truncated: a history over the adapter's cap ends the chain INCOMPLETE (``HISTORY_TOO_LARGE``).
 Budget: a native turn k carries k-1 earlier answers, so it is reserved and charged as k reserve units (a stacked turn
 as 1); a whole chain is reserved before its first turn, so a cap never cuts a chain in half.
 
@@ -87,9 +90,9 @@ MAX_ROWS = 2000
 # review round 2: an earlier answer goes back as the provider's content blocks exactly as received, never cut; a
 # history over the adapter's MAX_HISTORY_BYTES makes the chain INCOMPLETE (HISTORY_TOO_LARGE) before any request
 HISTORY_BYTES_DEFAULT = 256 * 1024
-# instruction-like text aimed at the model (review rounds 2-3): agents/injection_guard.py scans EVERY text an answer
-# would carry back (answer text, cited_text, result titles, Gemini parts); a flagged row flags its whole chain, which is
-# INJECTION_SUSPECTED and kept out of every rate and pattern (reported apart)
+# instruction-like text aimed at the model (review rounds 2-5): agents/injection_guard.py scans EVERY text an answer
+# would carry back (answer text, cited_text, result titles, Gemini parts); a flagged row flags its whole chain
+# (INJECTION_SUSPECTED, an AUXILIARY flag since round 5: reported, never the basis of a claim)
 PRIYA_FOLLOWUP_MIN_SHARED = 2
 FOLLOWUPS = {"compare": "What are the main options to compare for this, and how do they differ?",
              "decide": "Which one would you recommend, and why?"}
@@ -98,10 +101,11 @@ CONTEXT_TEMPLATE = "Earlier in this conversation I asked:\n{earlier}\nMy next qu
 TURN_KINDS = ("opening", "compare", "priya_followup", "decide")
 CHAIN_STATUS = ("COMPLETE", "INCOMPLETE", "LOOP_STOPPED", "NOT_ASKED")
 OUTCOMES = ("RECOMMENDED", "NOT_RECOMMENDED", "MIXED")
-PATTERNS = ("INVISIBLE_THEN_RECOMMENDED", "INVISIBLE_AT_OPENING_RECOMMENDED_STACKED", "VISIBLE_AND_RECOMMENDED",
-            "RECOMMENDED_OPENING_MIXED", "VISIBLE_THEN_NOT_RECOMMENDED", "NOT_RECOMMENDED", "MIXED", "INCONCLUSIVE")
-RECOMMENDED_PATTERNS = PATTERNS[:4]
-NOT_RECOMMENDED_PATTERNS = PATTERNS[4:6]
+PATTERNS = ("INVISIBLE_THEN_RECOMMENDED", "INVISIBLE_AT_OPENING_RECOMMENDED_UNCHECKED",
+            "INVISIBLE_AT_OPENING_RECOMMENDED_STACKED", "VISIBLE_AND_RECOMMENDED", "RECOMMENDED_OPENING_MIXED",
+            "VISIBLE_THEN_NOT_RECOMMENDED", "NOT_RECOMMENDED", "MIXED", "INCONCLUSIVE")
+RECOMMENDED_PATTERNS = PATTERNS[:5]
+NOT_RECOMMENDED_PATTERNS = PATTERNS[5:7]
 STRENGTHS = ("STRONG", "WEAK", "NONE")
 CUES = re.compile(r"\b(recommend|recommended|recommendation|best choice|best option|top pick|go with|i would choose|"
                   r"i'd choose|my pick|the winner)\b", re.IGNORECASE)
@@ -128,9 +132,11 @@ LIMITS = [
     "questions re-sent in one request). A stacked chain approximates a conversation.",
     "In native multi-turn, text injected into an engine's answer is re-sent to that engine and may steer its later "
     "answers, the classified final one included. Theo's plan and logic cannot be altered by it (the user turns are "
-    "fixed before turn one), but the engine can. A chain with any answer flagged by the injection guard (answer "
-    "text, cited text, result titles, Gemini parts) is INJECTION_SUSPECTED and excluded from every rate and pattern "
-    "(reported apart); the guard is lexical, measured on an author-written fixture set (ADR 0049).",
+    "fixed before turn one), but the engine can. The basis of the defence is structural: the native 'invisible at "
+    "turn one, recommended later' pattern is claimed only when every complete chain was re-asked without history "
+    "(SEO_THEO_STACKED_CHECK, default OFF) and gave the same pick; with the check OFF native chains report per-turn "
+    "data but never that pattern. The lexical injection flag (INJECTION_SUSPECTED) is auxiliary only: an "
+    "independent fresh set measured it at recall 0.246 / precision 0.789.",
     "Follow-ups are fixed templates plus at most one of Priya's emerging queries; real users ask other follow-ups. "
     "No LLM-generated follow-up exists (not built).",
     "The final answer is read lexically (a cue word, the first entity named and not negated or contrasted away in "
@@ -589,8 +595,12 @@ def _stacked_check(port, turns, guard, meter, ctx, final) -> Optional[bool]:
     try:
         guard(capability="ai_probe", provider=getattr(port, "name", None))
         a = port.ask(render(turns, len(turns) - 1), guard=guard, meter=meter)
-    except Killed:
+    except Killed:                                     # a kill switch or a member cancellation stops the run
         raise
+    except EngineError as err:
+        if err.code == "ENGINE_KILLED":                # review round 5: never swallowed
+            raise Killed(_switch_code(err)) from None
+        return None
     except Exception:  # noqa: BLE001 - a failed check is no finding, never a failed chain
         return None
     if not isinstance(a, ProviderAnswer) or a.status != "ANSWER" or not isinstance(a.text, str):
@@ -616,9 +626,13 @@ def client_outcome(rec: int, nc: int) -> Optional[str]:
     return "NOT_RECOMMENDED" if rec == 0 else "MIXED"
 
 
-def pattern_of(outcome: Optional[str], visible: int, any_mention: int, nc: int, mode: str) -> str:
+def pattern_of(outcome: Optional[str], visible: int, any_mention: int, nc: int, mode: str,
+               structurally_agreed: bool = False) -> str:
     """One rule, used by Theo and re-checked by Zara. Visible at turn one = a confirmed mention in at least 2/3 of
-    the complete chains; invisible = no mention of ANY confidence in any of them."""
+    the complete chains; invisible = no mention of ANY confidence in any of them. Review round 5: the native claim
+    "invisible at turn one, recommended later" needs the STRUCTURAL check on EVERY complete chain — re-asked without
+    history, same pick, and no auxiliary injection flag (``structurally_agreed``); otherwise the chain set is
+    ``INVISIBLE_AT_OPENING_RECOMMENDED_UNCHECKED``, reported apart."""
     if outcome is None:
         return "INCONCLUSIVE"
     if outcome == "MIXED":
@@ -626,16 +640,21 @@ def pattern_of(outcome: Optional[str], visible: int, any_mention: int, nc: int, 
     vis = visible * 3 >= nc * 2
     if outcome == "RECOMMENDED":
         if any_mention == 0:
-            return "INVISIBLE_THEN_RECOMMENDED" if mode == NATIVE else "INVISIBLE_AT_OPENING_RECOMMENDED_STACKED"
+            if mode != NATIVE:
+                return "INVISIBLE_AT_OPENING_RECOMMENDED_STACKED"
+            return "INVISIBLE_THEN_RECOMMENDED" if structurally_agreed else \
+                "INVISIBLE_AT_OPENING_RECOMMENDED_UNCHECKED"
         return "VISIBLE_AND_RECOMMENDED" if vis else "RECOMMENDED_OPENING_MIXED"
     return "VISIBLE_THEN_NOT_RECOMMENDED" if vis else "NOT_RECOMMENDED"
 
 
 def _summary(t: dict, e: str, turns: list, flags: list, samples: list, mode: str,
              native_status: Optional[str] = None) -> dict:
-    # an INJECTION_SUSPECTED chain (native mode) is kept out of every rate and pattern and reported apart
-    complete = [c for c in samples if c["status"] == "COMPLETE" and not c.get("injection_suspected")]
-    injected = [c for c in samples if c["status"] == "COMPLETE" and c.get("injection_suspected")]
+    # review round 5: the regex injection flag is AUXILIARY: flagged chains stay in the rates, are reported, and
+    # (like an unchecked or divergent chain) cannot support the native "invisible -> recommended" pattern
+    complete = [c for c in samples if c["status"] == "COMPLETE"]
+    injected = [c for c in samples if c.get("injection_suspected")]
+    agreed = [c for c in complete if c.get("divergent_under_history") is False and not c.get("injection_suspected")]
     by_turn = []
     for k, turn in enumerate(turns):
         ans = [c["turns"][k] for c in complete]
@@ -669,34 +688,27 @@ def _summary(t: dict, e: str, turns: list, flags: list, samples: list, mode: str
         if c["status"] != "COMPLETE":
             key = c["reason"] or c["status"]
             incomplete[key] = incomplete.get(key, 0) + 1
-    if injected:
-        incomplete["INJECTION_SUSPECTED"] = len(injected)
-    inj_final = {"client": 0, "competitor": {}, "other": 0}
-    for c in injected:
-        f = c["final"]
-        if f["counts"] and f["winner"] == "client":
-            inj_final["client"] += 1
-        elif f["counts"] and f["winner"] == "competitor":
-            inj_final["competitor"][f["name"]] = inj_final["competitor"].get(f["name"], 0) + 1
-        else:
-            inj_final["other"] += 1
     nc = len(complete)
     outcome = client_outcome(rec["client"], nc)
     first = by_turn[0]
     pattern = pattern_of(outcome, first["client_mentioned"]["k"],
-                         first["client_mentioned"]["k"] + first["client_mentioned_unconfirmed"], nc, mode)
+                         first["client_mentioned"]["k"] + first["client_mentioned_unconfirmed"], nc, mode,
+                         nc > 0 and len(agreed) == nc)
     strength = "STRONG" if nc >= MIN_USABLE and outcome in ("RECOMMENDED", "NOT_RECOMMENDED") else \
         "WEAK" if nc else "NONE"
     return {"topic_key": t["topic_key"], "engine": e, "context_mode": mode, "native_status": native_status,
             "divergent_under_history": {"checked": sum(1 for c in samples if c.get("divergent_under_history")
                                                        is not None),
                                         "divergent": sum(1 for c in samples if c.get("divergent_under_history")),
+                                        "agreed_clean": len(agreed),
                                         "note": "heuristic: the final question re-asked without the earlier answers "
                                                 "(opt-in SEO_THEO_STACKED_CHECK); a different pick may be the "
                                                 "history's influence, or ordinary sampling variation"},
-            "injection_suspected": {"chains": len(injected), "final_recommended": inj_final,
-                                    "note": "an answer held instruction-like text and was re-sent to the engine; "
-                                            "these chains are excluded from every rate and pattern"},
+            "injection_suspected": {"chains": len(injected), "complete": sum(1 for c in injected
+                                                                             if c["status"] == "COMPLETE"),
+                                    "note": "AUXILIARY lexical flag (instruction-like text in a re-sent answer); "
+                                            "not a reliable detector: flagged chains stay in the rates and cannot "
+                                            "support the native invisible-then-recommended pattern"},
             "chains": len(samples), "complete": nc,
             "loop_stopped": sum(1 for c in samples if c["status"] == "LOOP_STOPPED"),
             "not_complete": dict(sorted(incomplete.items())), "turns_planned": len(turns),

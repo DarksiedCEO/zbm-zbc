@@ -101,7 +101,10 @@ def check_chains(chains, topic_key: str) -> Optional[str]:
         if not isinstance(fr, dict) or not isinstance(bt, list) or not bt or not isinstance(bt[0], dict):
             return "THEO_PAYLOAD_INVALID"
         inj = c["injection_suspected"]
-        if not isinstance(inj, dict) or not isinstance(inj.get("chains"), int) or inj["chains"] < 0:
+        dv = c["divergent_under_history"]
+        if not isinstance(inj, dict) or not isinstance(inj.get("chains"), int) or inj["chains"] < 0 \
+                or not isinstance(dv, dict) or not all(isinstance(dv.get(k), int) and dv[k] >= 0
+                                                       for k in ("checked", "divergent", "agreed_clean")):
             return "THEO_PAYLOAD_INVALID"
         rec, named = _counts(fr.get("recommended")), _counts(fr.get("named_first_only"))
         none, unknown = fr.get("none"), fr.get("unknown")
@@ -114,12 +117,14 @@ def check_chains(chains, topic_key: str) -> Optional[str]:
             return "THEO_PAYLOAD_INVALID"
         nc = c["complete"]
         if nc > c["chains"] or rec + named + none != nc or unknown != c["chains"] - nc \
-                or inj["chains"] > c["chains"] - nc:
+                or inj["chains"] > c["chains"] or dv["checked"] > nc or dv["divergent"] > dv["checked"] \
+                or dv["agreed_clean"] > dv["checked"] - dv["divergent"]:
             return "THEO_SELF_CONTRADICTION"
         outcome = theo.client_outcome(fr["recommended"]["client"], nc)
         if outcome != c["client_outcome"] or c["client_recommended"].get("k") != fr["recommended"]["client"]:
             return "THEO_SELF_CONTRADICTION"
-        if theo.pattern_of(outcome, vis, vis + low, nc, c["context_mode"]) != c["pattern"]:
+        agreed_all = nc > 0 and dv["agreed_clean"] == nc       # the structural basis of the native pattern
+        if theo.pattern_of(outcome, vis, vis + low, nc, c["context_mode"], agreed_all) != c["pattern"]:
             return "THEO_SELF_CONTRADICTION"
         strength = "STRONG" if nc >= theo.MIN_USABLE and outcome in ("RECOMMENDED", "NOT_RECOMMENDED") else \
             "WEAK" if nc else "NONE"
