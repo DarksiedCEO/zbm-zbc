@@ -165,6 +165,42 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
   (seed 2), `seo-py/R0012`, `seo-py/R0014`, `seo-py/R0015` (seed 3).
 - Status: FIXED (seo-py war room fixes, ADR 0017 W3-3; commit `be9093c` on branch `seo-dept-02-wave1`): Delia reads every crawled URL through `agents.split_url` / `host_of`, which answer None for a URL `urlsplit` cannot read. Defence in depth for all three: a run that raises anyway is closed `interrupted` `RUN_FAILED` at once (`svc_audits._execute_audit`), never a 500 left `running`. Tests: `services/seo-py/tests/test_warroom_fixes.py`. The replay cases pass and stay as regression cases.
 
+## WR-F011 — seo-py: Anthropic text blocks are joined with no boundary, so a sentence-initial common-word brand reads as a name (headline Mentioned-Not-Cited)
+
+- Department: Search & Answer Intelligence (2), `services/seo-py/src/anthropic_engine.py` (`text = "".join(b.text for b in texts)`; OpenAI and Google join parts the same way) with `agents/brand_mention.py` `_after_break` (a sentence break needs `.`/`!`/`?`/`:`/`;` THEN a space).
+- What happens: an Anthropic answer with the documented pre-search text block (`"I'll search for revenue recovery agencies."`, the suite's own fixture) followed by an answer block that starts with a common-word brand (`"Zoom in on the map to see it."`) becomes `"...agencies.Zoom in on the map..."`; the brand no longer starts a sentence, so it is CONFIRMED: a HIGH-confidence MENTIONED_NOT_CITED row, the headline rate and the `callum.mnc_priority/2` list. The same text through OpenAI / Perplexity is LOW_CONFIDENCE, as pinned.
+- Minimal repro: a citation run, brand `Zoom`, Anthropic answering the fixture shape with final text block `Zoom in on the map to see it.` and a competitor citation: rows are `MENTIONED_NOT_CITED confidence HIGH`. `python3 devtools/warroom/run.py --replay seo-py-callum/R0009`.
+- Why it is a MUST failure: ADR 0046 B5a rounds 3-6 (a sentence-initial common word is unconfirmed: never in the headline rate or the MNC list).
+- Replay: `seo-py-callum/R0009`, `seo-py-callum/R0010`, `seo-py-callum/R0013`, `seo-py-callum/R0014`, `seo-py-callum/R0015`, `seo-py-callum/R0016`, `seo-py-callum/R0017`, `seo-py-callum/R0018`, `seo-py-callum/R0019`, `seo-py-callum/R0024`, `seo-py-callum/R0025`, `seo-py-callum/R0026`, `seo-py-callum/R0027`, `seo-py-callum/R0034`, `seo-py-callum/R0035`, `seo-py-callum/R0036`, `seo-py-callum/R0037`, `seo-py-callum/R0038`, `seo-py-callum/R0042`, `seo-py-callum/R0043`, `seo-py-callum/R0044`, `seo-py-callum/R0045`, `seo-py-callum/R0046`.
+- Status: OPEN (for the Callum builder; not fixed in the war-room PR).
+
+## WR-F012 — seo-py: Callum's evidence excerpt keeps a secret the answer text carries (the engine's own API key)
+
+- Department: Search & Answer Intelligence (2), `services/seo-py/src/agents/callum.py` `excerpt` (screened only by `prompt_guard.personal_data`).
+- What happens: an answer whose text holds the engine's key near the brand (`Z Best Media is listed. Authorization: Bearer <key>`) is stored verbatim in every row's `evidence.excerpt` — in the run response and in the append-only log (`audit_export`). Keys that happen to contain a long digit run are withheld as `personal_data:number` by luck; the OpenAI test key is not.
+- Minimal repro: `python3 devtools/warroom/run.py --replay seo-py-callum/R0011` (secret-echo `answer_text`).
+- Why it is a MUST failure: ADR 0046 A4 / ADR 0017 W4-5 (no output ever carries a key) and B5 (bounded, screened evidence).
+- Replay: `seo-py-callum/R0011`.
+- Status: OPEN.
+
+## WR-F013 — seo-py: a cited URL's path is stored verbatim, so a key in the path reaches rows, evidence and the log
+
+- Department: Search & Answer Intelligence (2), `services/seo-py/src/agents/callum.py` `stored_url` (query and fragment dropped, the path kept unless it looks like personal data).
+- What happens: a citation `https://site.test/<engine key>` is a STRENGTH_URL row whose `url`, `chain.cited.url` and `evidence.url` hold the key; it is in the response and the log.
+- Minimal repro: `python3 devtools/warroom/run.py --replay seo-py-callum/R0012` (secret-echo `cited_path`).
+- Why it is a MUST failure: as WR-F012.
+- Replay: `seo-py-callum/R0012`.
+- Status: OPEN.
+
+## WR-F014 — seo-py: a client URL that redirects to a raw-Unicode lookalike host is credited as STRENGTH_URL
+
+- Department: Search & Answer Intelligence (2), `services/seo-py/src/primitives/fetch.py` (a redirect `Location` with a non-ASCII host is `REFUSED_URL` and the result carries NO redirect history) with `agents/callum.py` `classify_citation` (a failed resolution falls back to the cited host).
+- What happens: `https://acme.com/x` answers `301 Location: https://аcme.com/go` (Cyrillic а). The fetcher refuses the Location, returns `redirects: []`, Callum sees `RESOLUTION_FAILED` with no hop and classifies the cited host: STRENGTH_URL. The same redirect to the A-label `https://xn--cme-5cd.com/go` resolves and is correctly LOOKALIKE_URL. The generated redirect chains find the same thing through any client hop followed by a raw-Unicode lookalike.
+- Minimal repro: resolution ON, cited `https://acme.com/wr-<hex of https://аcme.com/go>` on the war room's fake web (`python3 devtools/warroom/run.py --replay seo-py-callum/R0001`).
+- Why it is a MUST failure: ADR 0046 B4 M1 (a lookalike at ANY hop is never the client, wherever the chain goes).
+- Replay: `seo-py-callum/R0001`, `seo-py-callum/R0002`, `seo-py-callum/R0003`, `seo-py-callum/R0004`, `seo-py-callum/R0005`, `seo-py-callum/R0006`, `seo-py-callum/R0007`, `seo-py-callum/R0008`, `seo-py-callum/R0020`, `seo-py-callum/R0021`, `seo-py-callum/R0022`, `seo-py-callum/R0023`, `seo-py-callum/R0028`, `seo-py-callum/R0029`, `seo-py-callum/R0030`, `seo-py-callum/R0031`, `seo-py-callum/R0032`, `seo-py-callum/R0033`, `seo-py-callum/R0039`, `seo-py-callum/R0040`, `seo-py-callum/R0041`, `seo-py-callum/R0047`, `seo-py-callum/R0048`, `seo-py-callum/R0049`, `seo-py-callum/R0050`.
+- Status: OPEN.
+
 ## AEGIS round 2 (review of the WR-F006 / WR-F007 fixes)
 
 - **N-H1 (High) — service-py: the WR-F006 fold made long non-Latin messages slow under the service lock.** A
