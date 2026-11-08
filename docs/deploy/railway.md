@@ -693,6 +693,7 @@ Everything else finance-py reads — leave at the default (services/finance-py/R
 | `SEO_NON_PRODUCTION` | no | no | `0` | `1` = in-memory, tests only |
 | `SEO_KILL_GLOBAL`, `SEO_KILLED_CAPABILITIES`, `SEO_KILLED_PROVIDERS` | no | no | `0`, empty, empty | kill switches at start (sticky) |
 | `SEO_FETCH_TIMEOUT_SECONDS`, `SEO_FETCH_MAX_BYTES`, `SEO_FETCH_MAX_REDIRECTS`, `SEO_AUDIT_MAX_PAGES`, `SEO_PROBE_SAMPLES`, `SEO_BOT_INFO_URL` | no | no | `10`, 2 MiB, `5`, `10`, `5`, unset | fetcher and audit limits |
+| `SEO_CRAWL_DELAY_MS`, `SEO_AUDIT_DEADLINE_SECONDS` | no | no | `1000`, `90` | audit politeness (0..3000 ms between requests) and the overall audit deadline (30..600 s); the audit route is synchronous, so a caller must wait at least the deadline. Not in `deploy/docker/maintenance/app_env_names.json` (that file is built into the pinned f5fa44b images): the maintenance launcher, dormant at Gate 5, would not pass them, and the defaults apply |
 | `SEO_LOG_MAX_BYTES`, `SEO_LOG_RETENTION_DAYS`, `SEO_LOG_MAX_OPEN_INGESTS`, `SEO_LOG_MAX_INGESTS`, `SEO_LOG_TENANT_BYTES` | no | no | 256 MiB, `90`, `2`, `30`, 1 GiB | log ingests |
 | `SEO_BOT_VERIFY_DNS`, `SEO_BOT_VERIFY_MAX` | no | no | `0`, `200` | |
 | `SEO_SCHEDULE_BUDGET_RUNS`, `SEO_SCHEDULE_PERIOD_DAYS`, `SEO_FINANCE_TIMEOUT_SECONDS` | no | no | `8`, `30`, `5` | |

@@ -2,14 +2,30 @@
 
 Prepared by Z Best Media.
 
-## Cover
+## Executive summary
+
+**Complete audit: all 6 areas checked.** 3 page(s), as requested.
+
+**What was checked:** Crawlability, Sitemaps and ` llms.txt `, Content structure, Entity consistency, Search performance (Google Search Console), AI visibility (answer engines).
+
+**Top issues, most important first:**
+
+1. **` robots.txt ` blocks a search crawler** (high; Crawlability; 1 location(s)). A search engine's crawler is told not to read some or all of your pages, which can keep them out of its results. *Recommended:* Remove or narrow the Disallow rule for this crawler unless blocking it is intended.
+2. **Business detail differs from your record** (high; Entity consistency; 1 location(s)). Search engines and AI assistants may show business details that differ from your records. *Recommended:* Change the markup to match your business record exactly (the record is the authority). The values are in the audit record.
+3. **Page asks not to be indexed (noindex)** (medium; Crawlability; 1 location(s)). This page asks search engines not to list it, so it can be missing from search results. *Recommended:* Remove the noindex (meta robots or X-Robots-Tag header) if this page should appear in search; keep it if hiding it is intended.
+4. **Structured data has errors** (medium; Content structure; 1 location(s)). Search engines and AI assistants read this markup to understand your business; with required details missing they may ignore it or show incomplete details. *Recommended:* Add the required properties listed below to the JSON-LD.
+5. **Not exactly one H1 heading** (medium; Content structure; 1 location(s)). A missing or repeated main heading makes the page's topic less clear. *Recommended:* Give the page one H1 that states its topic.
+
+6 more issue(s) are listed in the sections below.
+
+**What to do first:** ` robots.txt ` blocks a search crawler (Crawlability). Remove or narrow the Disallow rule for this crawler unless blocking it is intended.
+
+## Audit details
 
 - **Website audited:** ` https://acme.test `
-- **Audit ID:** ` seo-aud-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa `
-- **Run:** 2026-10-24 09:00:00 UTC to 2026-10-24 09:02:30 UTC
-- **Run outcome:** PARTIAL (whether every check could run; not a score)
-- **Audit record:** report SHA-256 ` bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb `, recorded on a tamper-evident ledger when the audit completed.
-- **Pages audited (3):** ` / `, ` /about `, ` /pricing `
+- **Audit run:** 2026-10-24 09:00:00 UTC to 2026-10-24 09:02:30 UTC
+- **Coverage:** Complete audit: all 6 areas checked
+- **Pages requested (3):** ` / `, ` /about `, ` /pricing `
 
 ### What was checked
 
@@ -22,7 +38,7 @@ Prepared by Z Best Media.
 | Search performance (Google Search Console) | **CHECKED** | 0 | Google data for 2026-09-24 to 2026-10-21 (Pacific Time, final data; Google's figures lag about 3 days) |
 | AI visibility (answer engines) | **CHECKED** | 2 | observed during the run; refresh recommended by 2026-10-31 |
 
-Findings are counted per rule (one rule may affect several pages). An area marked NOT CONNECTED, NOT COVERED or NOT CHECKED was not observed: it has no findings because it could not be looked at, not because there is nothing there.
+Findings are counted per issue (one issue may affect several pages). An area marked NOT CONNECTED, NOT COVERED or NOT CHECKED was not observed: it has no findings because it could not be looked at, not because there is nothing there.
 
 ### Not connected for this audit
 
@@ -34,10 +50,10 @@ Findings are counted per rule (one rule may affect several pages). An area marke
 
 ### How to read this report
 
-- Every finding states its **severity** (critical, high, medium, low, info), its **evidence class** (OBSERVED: measured by this audit's own requests; INFERRED: drawn by a stated rule; ESTIMATED: an estimate with its assumption), the **rule** that produced it, and a **recommended fix**.
+- Every finding states its **severity** (critical, high, medium, low, info), its **evidence class** (OBSERVED: measured by this audit's own requests; INFERRED: drawn by a stated rule; ESTIMATED: an estimate with its assumption) and a **recommended fix**.
 - There is no overall score and no grade. Findings of different kinds are not added together.
 - This report does not promise rankings, traffic or citations by any search or answer engine, and it makes no comparison claims about any other provider.
-- Text from your pages, sitemaps and robots.txt is quoted as data only. Other URLs are shown as templates (identifiers replaced by placeholders such as {slug} or {number}); the exact URLs are in the audit record.
+- Text from your pages, sitemaps and robots.txt is quoted as data only. Addresses the audit found by following links are shown as templates (identifiers replaced by placeholders such as {slug} or {number}); the exact addresses are in the audit record.
 
 ## Crawlability
 
@@ -48,7 +64,7 @@ Data freshness: observed during the run; refresh recommended by 2026-10-25.
 ### ` robots.txt ` blocks a search crawler
 
 - **Severity:** high · **Recommended action:** Fix
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` ROBOTS_BLOCKS_SEARCH_CRAWLER ` · **Area:** ` P2 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** Remove or narrow the Disallow rule for this crawler unless blocking it is intended.
 - **Where:** ` /robots.txt `
 - **Evidence at ` /robots.txt `:** token: ` Bingbot `; blocked paths: ` /pricing `; rules: ` Disallow: /pricing `
@@ -56,14 +72,14 @@ Data freshness: observed during the run; refresh recommended by 2026-10-25.
 ### Page asks not to be indexed (noindex)
 
 - **Severity:** medium · **Recommended action:** Test a change
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` NOINDEX ` · **Area:** ` P1 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** Remove the noindex (meta robots or X-Robots-Tag header) if this page should appear in search; keep it if hiding it is intended.
 - **Where:** ` /pricing `
 
 ### Redirect chain
 
 - **Severity:** medium · **Recommended action:** Fix
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` REDIRECT_CHAIN ` · **Area:** ` P1 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** Point links and redirects straight at the final URL (one hop), using a permanent (301/308) redirect.
 - **Where:** ` /about `
 - **Evidence at ` /about `:** statuses: 301, 302; hops: 2; temporary: yes; final url: ` /{slug} `
@@ -71,14 +87,14 @@ Data freshness: observed during the run; refresh recommended by 2026-10-25.
 ### No canonical link
 
 - **Severity:** low · **Recommended action:** Monitor (may be intentional)
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` CANONICAL_MISSING ` · **Area:** ` P1 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** Add a self-referencing rel=canonical to the page.
 - **Where:** ` / `, ` /pricing `
 
 ### ` robots.txt ` blocks an AI or dataset crawler
 
 - **Severity:** info · **Recommended action:** Monitor (may be intentional)
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` ROBOTS_BLOCKS_AI_OR_DATASET_CRAWLER ` · **Area:** ` P2 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** No fix needed if this is your policy. If you want this operator to read your site, allow its user-agent token.
 - **Where:** ` /robots.txt `
 - **Evidence at ` /robots.txt `:** token: ` GPTBot `; purpose: ` ai_training `; blocked paths: ` / `; rules: ` Disallow: / `
@@ -92,21 +108,21 @@ Data freshness: observed during the run; refresh recommended by 2026-10-25.
 ### Sitemap lists URLs on another host
 
 - **Severity:** medium · **Recommended action:** Fix
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` SITEMAP_LOC_OTHER_HOST ` · **Area:** ` P3 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** List only URLs of this site in its sitemap.
 - **Evidence:** count: 2; examples: ` {offsite} (cdn.example) `
 
 ### Every sitemap URL has the same lastmod
 
 - **Severity:** low · **Recommended action:** Test a change
-- **Evidence:** INFERRED (drawn by a stated rule from what was observed, not measured directly: every URL carries the same lastmod, so it likely does not reflect real changes) · **Rule:** ` SITEMAP_LASTMOD_ALL_IDENTICAL ` · **Area:** ` P3 `
+- **Evidence:** INFERRED (drawn by a stated rule from what was observed, not measured directly: every URL carries the same lastmod, so it likely does not reflect real changes)
 - **Fix:** Set \<lastmod\> per URL from the page's real last change, or leave it out.
 - **Evidence:** count: 40
 
 ### No ` llms.txt `
 
 - **Severity:** info · **Recommended action:** Monitor (may be intentional)
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` LLMS_TXT_ABSENT ` · **Area:** ` P3 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** Nothing required: ` llms.txt ` is an emerging, non-standard convention and its absence is not a defect.
 - **Where:** ` /llms.txt `
 - **Evidence at ` /llms.txt `:** status: 404
@@ -120,7 +136,7 @@ Data freshness: observed during the run; refresh recommended by 2026-10-31.
 ### Not exactly one H1 heading
 
 - **Severity:** medium · **Recommended action:** Fix
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` H1_COUNT ` · **Area:** ` P3 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** Give the page one H1 that states its topic.
 - **Where:** ` /pricing `
 - **Evidence at ` /pricing `:** h1 count: 0
@@ -128,15 +144,15 @@ Data freshness: observed during the run; refresh recommended by 2026-10-31.
 ### Structured data has errors
 
 - **Severity:** medium · **Recommended action:** Fix
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` STRUCTURED_DATA_ERRORS ` · **Area:** ` P3 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** Add the required properties listed below to the JSON-LD.
 - **Where:** ` /about `
-- **Evidence at ` /about `:** issues: ` REQUIRED_MISSING LocalBusiness address `
+- **Evidence at ` /about `:** issues: required property ` address ` is missing from ` LocalBusiness `
 
 ### Title length outside the usual range
 
 - **Severity:** low · **Recommended action:** Test a change
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` TITLE_LENGTH ` · **Area:** ` P3 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** Consider a title of roughly 15-65 characters that describes the page (a heuristic, not a rule).
 - **Where:** ` / `
 - **Evidence at ` / `:** length: 80; heuristic range: 15, 65
@@ -150,7 +166,7 @@ Data freshness: observed during the run; refresh recommended by 2026-10-31.
 ### Business detail differs from your record
 
 - **Severity:** high · **Recommended action:** Fix
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` ENTITY_FIELD_MISMATCH ` · **Area:** ` P6 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** Change the markup to match your business record exactly (the record is the authority). The values are in the audit record.
 - **Where:** ` / `
 - **Evidence at ` / `:** field: ` telephone `
@@ -212,14 +228,14 @@ Prompt volume: **NOT CONNECTED**. How often real people ask these questions is n
 ### Not mentioned or cited; other sources were
 
 - **Severity:** medium · **Recommended action:** Test a change
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` CITATION_OPPORTUNITY ` · **Area:** ` P4 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** Test a page that answers this question directly; see which kinds of sources were cited instead.
 - **Evidence:** engine: ` perplexity `; question: Question 2; usable answers: 5; cited instead: ` yelp.com (3 answers) `, ` rival.test (2 answers) (a competitor you named) `
 
 ### Cited in at least half of the answers
 
 - **Severity:** info · **Recommended action:** Monitor (may be intentional)
-- **Evidence:** OBSERVED (measured by this audit's own requests) · **Rule:** ` CITATION_STRENGTH ` · **Area:** ` P4 `
+- **Evidence:** OBSERVED (measured by this audit's own requests)
 - **Fix:** Keep the cited pages current and accurate.
 - **Evidence:** engine: ` perplexity `; question: Question 1; usable answers: 5; citation rate: 80.0% (95% interval 37.5% to 96.4%); mention rate: 100.0% (95% interval 56.5% to 100.0%)
 
@@ -227,7 +243,7 @@ Prompt volume: **NOT CONNECTED**. How often real people ask these questions is n
 
 ### Applies to the whole audit
 
-- Wave 1 reads public pages only; nothing here is paired with traffic, conversions or revenue (credit is not causation).
+- This audit reads public pages only; nothing here is paired with traffic, conversions or revenue (credit is not causation).
 - No single visibility score is produced.
 
 ### Crawlability
@@ -278,18 +294,44 @@ Prompt volume: **NOT CONNECTED**. How often real people ask these questions is n
 
 - One sample of N answers at one time from one account.
 
+## Appendix: audit record
+
+- **Audit ID:** ` seo-aud-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa `
+- **Audit record:** report SHA-256 ` bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb `, recorded on a tamper-evident ledger when the audit completed.
+
+### Reference codes
+
+For support requests: the reference code of each finding in this report.
+
+| Finding | Reference |
+|---|---|
+| Business detail differs from your record | ` ENTITY_FIELD_MISMATCH ` |
+| Cited in at least half of the answers | ` CITATION_STRENGTH ` |
+| Every sitemap URL has the same lastmod | ` SITEMAP_LASTMOD_ALL_IDENTICAL ` |
+| No canonical link | ` CANONICAL_MISSING ` |
+| No ` llms.txt ` | ` LLMS_TXT_ABSENT ` |
+| Not exactly one H1 heading | ` H1_COUNT ` |
+| Not mentioned or cited; other sources were | ` CITATION_OPPORTUNITY ` |
+| Page asks not to be indexed (noindex) | ` NOINDEX ` |
+| Redirect chain | ` REDIRECT_CHAIN ` |
+| Sitemap lists URLs on another host | ` SITEMAP_LOC_OTHER_HOST ` |
+| Structured data has errors | ` STRUCTURED_DATA_ERRORS ` |
+| Title length outside the usual range | ` TITLE_LENGTH ` |
+| ` robots.txt ` blocks a search crawler | ` ROBOTS_BLOCKS_SEARCH_CRAWLER ` |
+| ` robots.txt ` blocks an AI or dataset crawler | ` ROBOTS_BLOCKS_AI_OR_DATASET_CRAWLER ` |
+
 ### Inputs set aside
 
 Malformed or unsafe inputs were set aside unread (never parsed further):
 
-- ` XML_DOCTYPE_REFUSED `: 1
+- xml doctype refused: 1
 
 ### Versions
 
 - bot families: ` 2026-10-10.1 `
 - report: ` seo-audit-report/1 `
 - schema rules: ` 2026-10-09.1 `
-- report renderer: ` seo-client-report/2 `
+- report renderer: ` seo-client-report/6 `
 
 ---
 

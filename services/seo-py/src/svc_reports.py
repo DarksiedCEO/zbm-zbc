@@ -49,16 +49,23 @@ class ReportsMixin:
                 raise Conflict(R("AUDIT_NOT_COMPLETED"))
             rk = self.rk("client_report", f"{tid}/{aid}", body)
             prev = self._idem("andre", rk, body)
+            if prev:
+                # a replay is rendered by the renderer the document was RECORDED under (review of PR 47, M4): the same
+                # bytes as delivered, or REPORT_CHANGED when the retained view changed since; never a newer layout
+                rec = self.client_reports[prev[1]]
+                try:
+                    data, _model = client_report.render_as(rec["renderer_version"], view, tid, fmt,
+                                                           self.settings.report_branding)
+                except client_report.ReportInputError:
+                    raise Conflict(R("REPORT_CHANGED")) from None
+                if rec["document_sha256"] != client_report.document_sha256(data):
+                    raise Conflict(R("REPORT_CHANGED"))
+                return self._report_answer(rec, data)
             try:
                 data, model = client_report.render(view, tid, fmt, self.settings.report_branding)
             except client_report.ReportInputError:
                 raise Conflict(R("REPORT_NOT_RENDERABLE")) from None
             dsha = client_report.document_sha256(data)
-            if prev:
-                rec = self.client_reports[prev[1]]
-                if rec["document_sha256"] != dsha:
-                    raise Conflict(R("REPORT_CHANGED"))
-                return self._report_answer(rec, data)
             rid = derived_id("rpt", tid, aid, rk)
             rec = {"report_id": rid, "tenant_id": tid, "audit_id": aid, "format": fmt,
                    "renderer_version": model["renderer_version"],

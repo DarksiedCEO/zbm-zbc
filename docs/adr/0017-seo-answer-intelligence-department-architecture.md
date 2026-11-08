@@ -1299,6 +1299,106 @@ CR-11. **Integration with the Agent API migration (golive-wave2, Oct 25 2026).**
    annotation-only and an `ftp:` tenant URL are not cited; the report shows "Mentioned but not cited", the competitor
    cited instead, and the definition twice), and the hash case, each mutation-checked.
 
+CR-12. **Sellable report (Gate 4 run against zbestmedia.com, 2026-11-08; branch `claude/seo-report-sellable-20261108`).**
+   Supersedes the cover and finding-card parts of CR-2 and CR-4. Renderer `seo-client-report/4` (`/5` with the homepage
+   phone observation). Tests: `tests/test_report_sellable.py`.
+   - **Coverage, not the run outcome.** The document no longer prints the internal run outcome (a delivered report
+     showed "Run outcome: FAILED"). The cover and the executive summary state "Complete audit: all 6 areas checked",
+     "Partial audit: N of 6 areas checked (K of them only in part)" or "No area could be checked (0 of 6)", and list
+     every area not checked with its plain reason. Counted from the same per-area statuses as CR-3, so no area is ever
+     claimed checked that was not. The recorded outcome stays in the model (`run_outcome`) and in the audit record.
+   - **Executive summary** first: what was checked, the top issues (at most 5, plus how many more) and what to do
+     first. Deterministic, derived only from the findings shown below it: ranked by severity, then a closed business-
+     impact tier per rule (`IMPACT`: 1 can keep pages out of search / AI answers, 2 how the business appears, 3
+     hygiene), then decision (ACT, TEST, WATCH), then pages affected; info findings and findings with no recommended
+     change are not issues. Impact sentences say "can" / "may"; nothing is promised.
+   - **Client language.** Rule and reason codes are off the finding cards and status lines; a reference table
+     (finding, code) is in the appendix with the audit id and report hash. Limitations and methods pass through
+     `client_text` (programme names such as "Wave 1" become "this audit"; code-shaped words become plain words; a line
+     about an internal product is dropped); Zero-Day and ORCA Publish are no longer listed as "not connected".
+     Structured-data issues read as sentences ("required property `address` is missing from `ProfessionalService`"),
+     with the crawled names still quoted and screened. Each limitation line is stated once: a line two areas share is
+     under "Applies to the whole audit", a line one area states only under that area.
+   - **Inconclusive comparisons are never findings.** In the document: a `BOT_DIFFERENTIAL` without `confirmed: true`
+     (every one recorded before this change), a `CANONICAL_TARGET_NOT_200` whose own fetch did not answer, and any
+     finding whose detail says `INCONCLUSIVE` are left out, with a note in that area's limits. In the crawl
+     (`primitives/diff.py`, `agents/selene.py`): canonical URLs are compared normalised (scheme and host case, default
+     port, trailing slash); a browser request answered 401/403/405/429/503 while our crawler got the page is a
+     bot-protection challenge, INCONCLUSIVE; a difference is reported only when it holds on a repeat request by our
+     crawler (signals that also differ between our own two requests are dropped; none left = INCONCLUSIVE); a canonical
+     target our request could not read is a fact (`canonical_checks_inconclusive`), not a finding.
+   - **Bounded page discovery.** Root cause of "1 page audited": the request's `paths` default is `["/"]` and only
+     requested paths were read. Selene now also reads same-site pages linked from the requested pages (one level,
+     document order) up to `SEO_AUDIT_MAX_PAGES` in total (default 10, max 25), skipping query strings, non-page files,
+     other hosts and ports, nofollow links, action-like paths (logout, cart, admin, ...), paths that look like personal
+     data and paths robots.txt disallows for our crawler; with robots.txt unreadable nothing is discovered. Every fetch
+     goes through the same fetcher (SSRF guard, budgets, redirects re-checked). The report records `discovered_paths`;
+     the client document lists them as templates, never as links.
+   - **A sitemap observed missing is a finding, not a failed area.** `/sitemap.xml` answering 404 or 410 is
+     `SITEMAP_MISSING` in a checked area; only a fetch that did not answer, or 401/403/5xx, leaves it unobserved.
+   - Not verifiable here: the Gate 4 report itself and zbestmedia.com (no outbound access from the build sandbox). Why
+     4 of 6 areas were not checked is reasoned from the code: Search Console not connected and no market-question set
+     (both expected until connected), no business record on file for the entity check, and the sitemap area failing
+     (a 404 sitemap was counted as a failure before this change, or a fetch that did not answer).
+   - **Independent review of PR 47 (CONDITIONAL), closed on the same branch.** H1: the sitemap area is OK only when
+     every sitemap was read or seen missing AND llms.txt is known present or absent; else PARTIAL (`SITEMAP_UNREAD` /
+     `LLMS_TXT_UNREAD`, plain reason) or FAILED. H2: 401/403/405/429 are `PAGE_ACCESS_REFUSED` (info,
+     INSUFFICIENT_EVIDENCE, out of the summary, page counted unread); `PAGE_HTTP_ERROR` (with its visitor-impact
+     sentence) only for 404/410/5xx, other 4xx `PAGE_HTTP_ERROR_OTHER` (low, WATCH); an error page's content is never
+     judged (its extract is not kept; 404/410 pages do not count against content coverage); older records'
+     `PAGE_HTTP_ERROR` with 401/403/405/429 are reclassified in the document. H3: our crawler refused
+     (401/403/405/429/503) while a browser identity is served is `CRAWLER_REFUSED`: one `PAGE_ACCESS_REFUSED` note
+     ("whether Google, Bing or AI crawlers are refused cannot be seen from here"), not cloaking, not a visitor error.
+     M4: a replay renders with the renderer the document was recorded under: `client_report_legacy.py` is a4af277's
+     renderer frozen (checked byte-for-byte against the a4af277 golden files in `tests/golden/client_report_legacy/`),
+     current versions use `client_report.py`, an unknown recorded version answers `REPORT_CHANGED`. L5: discovery judges
+     the percent-decoded path; `;` parameters, double encoding, control characters and dot-folders are refused; a
+     segment, its stem or any of its words on a wider list (account, sign-in, register, password, delete, api, wp-json,
+     admin, login, cart, ...) is skipped. L6: politeness `SEO_CRAWL_DELAY_MS` (default 1000 ms, 0..10000) between every
+     request of an audit to the site (Selene and Delia), raised by robots.txt `Crawl-delay` up to 5 s; above 5 s no
+     page is discovered; discovered pages also stop at a request budget (3 per page of `SEO_AUDIT_MAX_PAGES` plus the
+     canonical checks) and a 120 s time budget. L7: internal names are reworded, never dropped. L8: a canonical target
+     our request could not read, inconclusive crawler/browser comparisons and unconfirmed older records are listed in
+     the section as "Inconclusive (not reported as findings)". The audit report is `seo-audit-report/2`
+     (`discovered_paths`); the renderer accepts /1 and /2. Tests: `tests/test_report_review47.py`.
+   - **Re-review of 0cf5b3c, closed.** llms.txt is absent only on 404 / 410; any other status is unreadable and the
+     area PARTIAL (`LLMS_TXT_UNREAD`). One deadline, `SEO_AUDIT_DEADLINE_SECONDS` (default 90, 30..600), covers every
+     request an audit makes to the site: no request starts that could end after it (its politeness wait plus the
+     fetcher's hard per-request bound, twice `SEO_FETCH_TIMEOUT_SECONDS`, at most a quarter of the deadline); discovery
+     keeps room for Delia's requests; an area the deadline cut short is PARTIAL (or FAILED when nothing was observed)
+     with reason `AUDIT_DEADLINE`; a comparison or canonical check it cut short is inconclusive. `SEO_CRAWL_DELAY_MS`
+     is 0..3000 and a robots.txt Crawl-delay is honoured up to 3 s (above: no discovery). The default audit (about
+     50 requests at 1 s) fits the deadline only on a site that answers quickly; see the next item for slow sites. The audit route is synchronous: callers must allow at least the deadline
+     (the dashboard's `ORCHESTRATOR_TIMEOUT_MS` default of 10 s does not; follow-up). The answer-engine and Search
+     Console steps are not site requests and are bounded by their own budgets, not this deadline. The renderer is
+     `seo-client-report/6` (`/7` with the homepage observation): the output changed after /4 and /5, which were never
+     recorded in production and now answer `REPORT_CHANGED` on replay.
+   - **Re-review of 9d0d2b4, closed.** The reserve before the deadline is one whole worst-case fetch, twice
+     `SEO_FETCH_TIMEOUT_SECONDS` (nested robots.txt fetches share it), and the service refuses to start when that is
+     more than half of `SEO_AUDIT_DEADLINE_SECONDS` (the error names both). Work the deadline cut is recorded per kind in
+     Selene's `deadline_cut` facts (comparisons, canonical checks, discovered pages): comparisons or canonical checks
+     cut make the crawlability area PARTIAL with `AUDIT_DEADLINE`, discovered pages cut leave it OK (optional scope),
+     and the report names each cut as "Cut short by the audit time limit". Discovery reserves Delia's maximum requests (`delia.MAX_REQUESTS`, 21: up to 10 declared sitemaps, 10 index
+     children and llms.txt; a page costs at most 4: crawler, canonical target, browser comparison, repeat) at
+     the larger of the politeness wait and the slowest response seen so far, plus one worst-case fetch, so on a slow
+     site fewer pages are discovered instead of Delia being cut; if still short, Delia is PARTIAL `AUDIT_DEADLINE`.
+   - **Round-3 review of ed79935, closed.** Name resolution is inside each fetch's one deadline
+     (`primitives/fetch.py` `Fetcher._resolve`, the shape of `finance_client._Resolver`): the resolver runs on a daemon
+     thread under a process-wide gate of `DNS_WORKERS` (8) slots and is waited for only for the time left, so a slow
+     or hung resolver on any hop or nested robots.txt fetch ends that fetch as `TIMEOUT` within twice the timeout
+     (every slot busy: `DNS_FAILED` at once; a slot always returns to the gate it was taken from). Delia's reserve is
+     `delia.MAX_REQUESTS` = 2 x `MAX_CHILDREN` + 1 = 21; Selene's `REQUESTS_PER_PAGE` is 4 (the canonical check
+     included).
+   - **Round-4 review of 3ddca3e, closed.** A full DNS gate is our capacity, not the site's DNS: the fetch waits for a
+     slot within its own deadline and otherwise ends `RESOURCE_LIMIT`. robots.txt fetched under `RESOURCE_LIMIT` is
+     `not_checked`: never cached and never treated as unreachable / disallow-all (a fetch needing it is refused
+     `RESOURCE_LIMIT`). Selene, Delia and the pages they read record it (`service_busy_pages`, `service_busy`) with no
+     finding; an area it left incomplete carries reason `SERVICE_BUSY` ("Our audit service was busy ... This says
+     nothing about your site"); a recorded finding with fetch state `RESOURCE_LIMIT` is never shown. An IP-literal host
+     takes no DNS slot and no thread; the resolver still sees it, synchronously (a numeric lookup answers at once,
+     and the certified address checks expect the call), and the SSRF policy still applies. A fetch that wins a slot
+     with no time left gives it back and starts no lookup.
+
 ## Unlock list
 
 Answer-engine adapters with scoped, short-lived credentials (OpenAI, Anthropic, Google); a renderer; Bing Webmaster; a

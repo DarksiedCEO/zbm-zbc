@@ -147,14 +147,18 @@ def test_estimated_and_inferred_say_so_with_their_basis():
 
 
 def test_every_finding_has_severity_evidence_rule_and_fix():
+    """Every finding card states severity, evidence and fix; its rule code is no longer on the card (client
+    language, Gate 4 item 4) but in the appendix's reference table, one row per finding."""
     t = render("full", "markdown")
     blocks = re.findall(r"^### .*?(?=^### |^## )", t, re.S | re.M)
-    findings = [b for b in blocks if "**Rule:**" in b]
+    findings = [b for b in blocks if "**Fix:**" in b]
     assert len(findings) == 14
     for b in findings:
         assert re.search(r"\*\*Severity:\*\* (critical|high|medium|low|info)", b)
         assert re.search(r"\*\*Evidence:\*\* (OBSERVED|INFERRED|ESTIMATED|MODELED|UNKNOWN) \(", b)
-        assert re.search(r"\*\*Rule:\*\* ` [A-Z0-9_]+ `", b) and "**Fix:**" in b
+        assert "**Rule:**" not in b and not re.search(r"` [A-Z][A-Z0-9]*(_[A-Z0-9]+)+ `", b)
+    appendix = t[t.index("## Appendix: audit record"):]
+    assert len(re.findall(r"^\| .* \| ` [A-Z0-9_]+ ` \|$", appendix, re.M)) == 14
 
 
 def test_operational_spend_findings_stay_out_of_the_client_report():
@@ -281,7 +285,7 @@ def test_crawled_urls_are_templates_and_request_paths_stay_as_written():
     assert "` /{slug}/{slug}/{email}/{number} `" in t
     assert "` {offsite} (evil.test) `" in t and "` {unreadable} `" in t
     f = render("full", "markdown")
-    assert "**Pages audited (3):** ` / `, ` /about `, ` /pricing `" in f
+    assert "**Pages requested (3):** ` / `, ` /about `, ` /pricing `" in f
     assert "final url: ` /{slug} `" in f                       # /about-us: a hyphenated slug never kept
 
 
@@ -383,7 +387,7 @@ def test_route_renders_a_real_audit_recorded_first_with_its_hash(tmp_path, srv):
     data = r["content"].encode()
     assert r["document_sha256"] == hashlib.sha256(data).hexdigest() and r["bytes"] == len(data)
     assert r["audit_report_sha256"] == a["report_sha256"] and r["media_type"] == "text/html; charset=utf-8"
-    assert r["renderer_version"] == "seo-client-report/3" and r["format"] == "html"
+    assert r["renderer_version"] == "seo-client-report/7" and r["format"] == "html"
     ev = h.ledger.of_type("client_report_rendered")
     assert len(ev) == 1
     p = ev[0]["_payload"]
@@ -636,7 +640,8 @@ def test_no_unobserved_status_ever_reads_clean(outcome, with_findings, fmt):
     assert row and row.group(1).strip() == cr.DASH
     if with_findings and outcome in _MAY_CARRY_FINDINGS:
         assert "Notes from the run are listed under Methodology and limits." in body
-        assert "Run note: Page not read: robots.txt disallows our crawler (rule PAGE_BLOCKED_FOR_OUR_CRAWLER)" in t
+        assert "Run note: Page not read: robots.txt disallows our crawler" in t
+        assert "PAGE_BLOCKED_FOR_OUR_CRAWLER" not in t.replace("\\_", "_")      # no internal rule code
 
 
 @pytest.mark.parametrize("fmt", ["markdown", "html"])
@@ -1026,17 +1031,22 @@ def test_callum_methodology_is_shown_even_when_the_prompt_set_hash_has_a_digit_r
 
 
 def test_historical_view_replays_recorded_renderer_two_without_backfill(h, monkeypatch):
-    """Real recording/idempotency over a retained legacy view; provider/delivery is not involved."""
+    """Real recording/idempotency over a retained legacy view; provider/delivery is not involved. The first render
+    is recorded under renderer 2 (the renderer in force before seo-client-report/4, as for the Gate 4 report); its
+    replay with the same request id after the upgrade answers the same bytes, the recorded hash and renderer 2."""
+    import client_report_legacy as crl
     h.tenant('acme', kind='own', domains=('acme.test',))
     legacy = fx.fresh('full')
     original = copy.deepcopy(legacy)
     monkeypatch.setattr(h.svc, 'audit_view', lambda *a, **kw: copy.deepcopy(legacy))
     req = {'request_id': rid(), 'format': 'html'}
-    first = h.svc.render_client_report('acme', legacy['audit_id'], req)
+    with monkeypatch.context() as before_upgrade:
+        before_upgrade.setattr(cr, 'render', lambda v, t, f, b: crl.render(v, t, f, crl.Branding(b.name, b.accent)))
+        first = h.svc.render_client_report('acme', legacy['audit_id'], req)
     events = len(h.ledger.of_type('client_report_rendered'))
     second = h.svc.render_client_report('acme', legacy['audit_id'], req)
-    assert first == second and first['renderer_version'] == 'seo-client-report/2'
-    assert first['document_sha256'] == hashlib.sha256(cr.render(legacy, 'acme', 'html')[0]).hexdigest()
+    assert first == second and first["renderer_version"] == "seo-client-report/2"
+    assert first['document_sha256'] == hashlib.sha256(crl.render(legacy, 'acme', 'html')[0]).hexdigest()
     assert len(h.ledger.of_type('client_report_rendered')) == events == 1
     assert legacy == original
     entity = next(e for e in legacy['report']['agents'] if e['agent']=='entity_check')

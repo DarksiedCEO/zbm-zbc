@@ -22,7 +22,7 @@ import zlib
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from agents import host_of, split_url
+from agents import DEADLINE_REASON, DeadlineReached, host_of, split_url
 from envelope import envelope, finding
 from primitives import Killed
 
@@ -30,6 +30,9 @@ AGENT, TASK = "delia", "sitemaps_and_llms_txt"
 NS = "http://www.sitemaps.org/schemas/sitemap/0.9"
 MAX_URLS_PER_FILE = 50_000
 MAX_CHILDREN = 10
+# the most requests one run makes: up to MAX_CHILDREN sitemaps declared in robots.txt (or /sitemap.xml), up to
+# MAX_CHILDREN children of sitemap indexes, and llms.txt (Selene reserves this many before the audit deadline)
+MAX_REQUESTS = 2 * MAX_CHILDREN + 1
 DECOMPRESSED_MAX = 8 * 1024 * 1024
 BLOCK_SAMPLE = 500
 SAMPLE_PATHS = 500
@@ -90,20 +93,55 @@ def _local(tag: str) -> tuple[str, str]:
 
 def run(ctx) -> dict:
     findings, facts, not_connected = [], {}, set()
+    deadline = False
     try:
         ctx.guard(capability="fetch", provider="web")
         findings += _sitemaps(ctx, facts)
         findings += _llms(ctx, facts)
+    except DeadlineReached:
+        deadline = True                            # stopped cleanly; what was observed is reported, never OK
     except Killed as k:
         return envelope(AGENT, TASK, "KILLED", [], methodology=METHODOLOGY.format(c=MAX_CHILDREN, s=BLOCK_SAMPLE),
                         limitations=LIMITS, reason=k.code, facts=facts)
-    read_any = facts.get("sitemaps_read", 0) > 0 or facts.get("llms_txt", {}).get("state") in ("present", "absent")
-    outcome = "OK" if read_any and not facts.get("sitemap_fetch_failures") else ("PARTIAL" if read_any else "FAILED")
+    # a sitemap observed missing (404 / 410) is an observation too: the area was checked
+    observed_sitemaps = facts.get("sitemaps_read", 0) > 0 or facts.get("sitemaps_missing", 0) > 0
+    sitemaps_known = observed_sitemaps and not facts.get("sitemap_fetch_failures")
+    llms_known = facts.get("llms_txt", {}).get("state") in ("present", "absent")
+    # review of PR 47 (H1): the area is CHECKED only when both halves were observed (every sitemap read or seen
+    # missing, AND llms.txt seen present or absent); one half observed is PARTIAL with the reason; none is FAILED
+    if sitemaps_known and llms_known:
+        outcome, reason = "OK", None
+    elif observed_sitemaps or llms_known:
+        outcome, reason = "PARTIAL", ("LLMS_TXT_UNREAD" if sitemaps_known else "SITEMAP_UNREAD")
+    else:
+        outcome, reason = "FAILED", "SITEMAP_UNREAD"
+    if outcome != "OK" and facts.get("service_busy"):
+        # round-5/6 review: only when our own capacity limit touched this run. A real site failure in this area
+        # outranks it; SERVICE_BUSY is the reason only when being busy is the sole cause. Without busy, the reason
+        # above stands unchanged. A sitemap that was fetched but set aside (quarantined, undecompressible) is a real
+        # site failure only when no sitemap was observed (none read, none seen missing), as in the non-busy rule.
+        llms = facts.get("llms_txt", {})
+        sitemap_real = facts.get("sitemap_fetch_failures", 0) - facts.get("sitemaps_busy", 0) > 0 or (
+            not observed_sitemaps and any(f["code"] in ("SITEMAP_QUARANTINED", "SITEMAP_DECOMPRESS_FAILED")
+                                          for f in findings))
+        llms_real = llms.get("state") == "unreadable" and llms.get("fetch_state") != "RESOURCE_LIMIT"
+        if sitemap_real:
+            reason = "SITEMAP_UNREAD"
+        elif llms_real:
+            reason = "LLMS_TXT_UNREAD"
+        else:
+            reason = "SERVICE_BUSY"
+    if deadline and outcome != "OK":
+        reason = DEADLINE_REASON
+        facts["deadline_reached"] = True
     return envelope(AGENT, TASK, outcome, findings, methodology=METHODOLOGY.format(c=MAX_CHILDREN, s=BLOCK_SAMPLE),
-                    limitations=LIMITS, not_connected=not_connected, facts=facts)
+                    limitations=LIMITS, not_connected=not_connected, facts=facts, reason=reason)
 
 
 def _fetch(ctx, url: str, accept: str):
+    polite = getattr(ctx, "polite", None)
+    if polite is not None:
+        polite()                                   # the same politeness wait as Selene's requests
     f = ctx.fetcher.fetch(url, robots_cache=ctx.robots_cache, guard=ctx.guard, accept=accept)
     if f.state == "KILLED":
         raise Killed(f.detail or "KILLED")
@@ -117,7 +155,7 @@ def _sitemaps(ctx, facts: dict) -> list:
     facts["sitemaps_declared"] = declared[:50]
     facts["sitemaps_cross_host_not_read"] = [u for u in declared if u not in same][:50]
     queue = same[:MAX_CHILDREN] or [ctx.url("/sitemap.xml")]
-    seen, urls, lastmods, read, failures = set(), [], [], 0, 0
+    seen, urls, lastmods, read, failures, missing_n = set(), [], [], 0, 0, 0
     children_followed = 0
     while queue:
         sm = queue.pop(0)
@@ -126,12 +164,25 @@ def _sitemaps(ctx, facts: dict) -> list:
         seen.add(sm)
         f = _fetch(ctx, sm, "application/xml,text/xml;q=0.9,*/*;q=0.5")
         ctx.osei.observed("sitemap", sm, f.state)
-        if not f.ok or f.status != 200:
+        if f.state == "RESOURCE_LIMIT":
+            # our capacity, not the site: no finding about the client's sitemap; the area is incomplete
             failures += 1
+            facts["service_busy"] = True
+            facts["sitemaps_busy"] = facts.get("sitemaps_busy", 0) + 1
+            continue
+        if not f.ok or f.status != 200:
+            # Gate 4: a sitemap URL that answers 404 / 410 was OBSERVED to be missing (a finding, SITEMAP_MISSING);
+            # only a fetch that failed or an answer that is neither the sitemap nor "not found" (401/403/5xx...)
+            # leaves the sitemap area unobserved
+            if not (f.ok and f.status in (404, 410)):
+                failures += 1
+            else:
+                missing_n += 1
             if f.state == "TOO_LARGE":
                 ctx.osei.quarantine("sitemap", "TOO_LARGE", sm, None)
-            out.append(finding("SITEMAP_MISSING" if f.ok and f.status == 404 else "SITEMAP_UNREADABLE",
-                               "medium", "measured", "ACT" if f.ok and f.status == 404 else "INSUFFICIENT_EVIDENCE",
+            missing = f.ok and f.status in (404, 410)
+            out.append(finding("SITEMAP_MISSING" if missing else "SITEMAP_UNREADABLE",
+                               "medium", "measured", "ACT" if missing else "INSUFFICIENT_EVIDENCE",
                                url=sm, capability="P3", detail={"fetch_state": f.state, "status": f.status}))
             continue
         body = f.body or b""
@@ -178,7 +229,8 @@ def _sitemaps(ctx, facts: dict) -> list:
         if file_urls > MAX_URLS_PER_FILE:
             out.append(finding("SITEMAP_TOO_MANY_URLS", "high", "measured", "ACT", url=sm, capability="P3",
                                detail={"urls": file_urls, "limit": MAX_URLS_PER_FILE}))
-    facts.update(sitemaps_read=read, sitemap_fetch_failures=failures, sitemap_urls=len(urls),
+    facts.update(sitemaps_read=read, sitemap_fetch_failures=failures, sitemaps_missing=missing_n,
+                 sitemap_urls=len(urls),
                  sitemap_children_followed=children_followed)
     sample = []
     for u, _ in urls:
@@ -277,10 +329,20 @@ def _llms(ctx, facts: dict) -> list:
     f = _fetch(ctx, url, "text/plain,text/markdown;q=0.9,*/*;q=0.5")
     ctx.osei.observed("llms_txt", url, f.state)
     note = "llms.txt is an emerging, non-standard convention (llmstxt.org proposal)"
+    if f.state == "RESOURCE_LIMIT":
+        facts["llms_txt"] = {"state": "unreadable", "fetch_state": f.state}
+        facts["service_busy"] = True                # our capacity, not the site: no finding
+        return []
     if not f.ok:
         facts["llms_txt"] = {"state": "unreadable", "fetch_state": f.state}
         return [finding("LLMS_TXT_UNREADABLE", "info", "measured", "INSUFFICIENT_EVIDENCE", url=url, capability="P3",
                         detail={"fetch_state": f.state, "note": note})]
+    if f.status not in (200, 404, 410):
+        # re-review of PR 47 (H1 residual): only 404 / 410 say llms.txt is absent; 401 / 403 / 429 / 5xx (or any
+        # other status) say nothing about it: unreadable, and the area is PARTIAL
+        facts["llms_txt"] = {"state": "unreadable", "status": f.status}
+        return [finding("LLMS_TXT_UNREADABLE", "info", "measured", "INSUFFICIENT_EVIDENCE", url=url, capability="P3",
+                        detail={"fetch_state": f.state, "status": f.status, "note": note})]
     if f.status != 200:
         facts["llms_txt"] = {"state": "absent", "status": f.status}
         return [finding("LLMS_TXT_ABSENT", "info", "measured", "WATCH", url=url, capability="P3",

@@ -35,6 +35,8 @@ th{background:var(--soft)}
 .sev-critical{color:#8a1c1c}.sev-high{color:#b33a00}.sev-medium{color:#8a5a00}.sev-low{color:#35537a}.sev-info{color:#555}
 .meta{color:var(--muted);font-size:13px}
 ul{padding-left:20px}
+.summary{background:var(--soft);border-radius:6px;padding:4px 18px 10px;margin:0 0 24px}
+.summary h2{margin-top:14px}.summary ul{padding-left:22px}.summary li{margin:6px 0}
 .preview{background:#fff4d6;border:1px solid #c9a227;padding:8px 12px;margin-bottom:16px;font-weight:600}
 footer{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;color:var(--muted);font-size:13px}
 @media print{body{font-size:11pt}main{max-width:none;padding:0}h2{break-after:avoid}section.area{break-before:page}
@@ -46,15 +48,30 @@ a{color:inherit;text-decoration:none}}
 <header class="cover">
 <h1>SEO technical audit: <code>acme.test</code></h1>
 <p class="brand">Prepared by Z Best Media</p>
+</header>
+<section class="summary" id="summary">
+<h2>Executive summary</h2>
+<p class="coverage"><strong>No area could be checked (0 of 6).</strong> 1 page(s), as requested.</p>
+<p><strong>Not covered by this report:</strong></p>
+<ul>
+<li>Crawlability: not checked. No page of your site could be read.</li>
+<li>Sitemaps and llms.txt: not checked. This audit did not include this check.</li>
+<li>Content structure: not checked. This audit did not include this check.</li>
+<li>Entity consistency: not checked. Not enough could be observed to report on this area.</li>
+<li>Search performance (Google Search Console): not checked. Google Search Console is not connected to this service.</li>
+<li>AI visibility (answer engines): not checked. No set of market questions was chosen for this audit, so no answer engine was asked anything.</li>
+</ul>
+<p><strong>What to do first:</strong> Nothing could be checked, so there is nothing to act on yet; the audit should be run again.</p>
+</section>
+<section>
+<h2>Audit details</h2>
 <dl class="facts">
 <dt>Website audited</dt><dd><code>https://acme.test</code></dd>
-<dt>Audit ID</dt><dd><code>seo-aud-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</code></dd>
-<dt>Run</dt><dd>2026-10-24 09:00:00 UTC to 2026-10-24 09:02:30 UTC</dd>
-<dt>Run outcome</dt><dd>NOT_CONNECTED (whether every check could run; not a score)</dd>
-<dt>Audit record</dt><dd>report SHA-256 <code>bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb</code>, recorded on a tamper-evident ledger when the audit completed</dd>
-<dt>Pages audited (1)</dt><dd><a href="https://acme.test/" rel="nofollow noopener noreferrer"><code>/</code></a></dd>
+<dt>Audit run</dt><dd>2026-10-24 09:00:00 UTC to 2026-10-24 09:02:30 UTC</dd>
+<dt>Coverage</dt><dd>No area could be checked (0 of 6)</dd>
+<dt>Pages requested (1)</dt><dd><a href="https://acme.test/" rel="nofollow noopener noreferrer"><code>/</code></a></dd>
 </dl>
-</header>
+</section>
 <section>
 <h2>What was checked</h2>
 <table><thead><tr><th>Area</th><th>Status</th><th>Findings</th><th>Data freshness</th></tr></thead><tbody>
@@ -65,7 +82,7 @@ a{color:inherit;text-decoration:none}}
 <tr><td>Search performance (Google Search Console)</td><td><span class="status st-off">NOT CONNECTED</span></td><td>—</td><td>not observed in this audit</td></tr>
 <tr><td>AI visibility (answer engines)</td><td><span class="status st-off">NOT COVERED</span></td><td>—</td><td>not observed in this audit</td></tr>
 </tbody></table>
-<p>Findings are counted per rule (one rule may affect several pages). An area marked NOT CONNECTED, NOT COVERED or NOT CHECKED was not observed: it has no findings because it could not be looked at, not because there is nothing there.</p>
+<p>Findings are counted per issue (one issue may affect several pages). An area marked NOT CONNECTED, NOT COVERED or NOT CHECKED was not observed: it has no findings because it could not be looked at, not because there is nothing there.</p>
 <h3>Not connected for this audit</h3>
 <ul>
 <li>Perplexity answer engine.</li>
@@ -76,17 +93,17 @@ a{color:inherit;text-decoration:none}}
 </ul>
 <h3>How to read this report</h3>
 <ul>
-<li>Every finding states its <strong>severity</strong> (critical, high, medium, low, info), its <strong>evidence class</strong> (OBSERVED: measured by this audit's own requests; INFERRED: drawn by a stated rule; ESTIMATED: an estimate with its assumption), the <strong>rule</strong> that produced it, and a <strong>recommended fix</strong>.</li>
+<li>Every finding states its <strong>severity</strong> (critical, high, medium, low, info), its <strong>evidence class</strong> (OBSERVED: measured by this audit's own requests; INFERRED: drawn by a stated rule; ESTIMATED: an estimate with its assumption) and a <strong>recommended fix</strong>.</li>
 <li>There is no overall score and no grade. Findings of different kinds are not added together.</li>
 <li>This report does not promise rankings, traffic or citations by any search or answer engine, and it makes no comparison claims about any other provider.</li>
-<li>Text from your pages, sitemaps and robots.txt is quoted as data only. Other URLs are shown as templates (identifiers replaced by placeholders such as {slug} or {number}); the exact URLs are in the audit record.</li>
+<li>Text from your pages, sitemaps and robots.txt is quoted as data only. Addresses the audit found by following links are shown as templates (identifiers replaced by placeholders such as {slug} or {number}); the exact addresses are in the audit record.</li>
 </ul>
 </section>
 <section class="area" id="crawlability">
 <h2>Crawlability</h2>
 <p><span class="status st-off">NOT CONNECTED</span> Whether search and AI crawlers can reach and index the audited pages: robots.txt, status codes, redirects, noindex signals and canonical links.</p>
 <p class="meta">Data freshness: not observed in this audit.</p>
-<p class="notclean">The data source for this area is not connected for this audit. Nothing is reported here because this area was not checked. This is not a clean result.</p>
+<p class="notclean">No page of your site could be read. Nothing is reported here because this area was not checked. This is not a clean result.</p>
 </section>
 <section class="area" id="sitemaps">
 <h2>Sitemaps and llms.txt</h2>
@@ -110,36 +127,43 @@ a{color:inherit;text-decoration:none}}
 <h2>Search performance (Google Search Console)</h2>
 <p><span class="status st-off">NOT CONNECTED</span> Clicks, impressions, click-through rate and position from your own Google Search Console property, when it is connected.</p>
 <p class="meta">Data freshness: not observed in this audit.</p>
-<p class="notclean">Google Search Console is not connected to this service. Nothing is reported here because this area was not checked. This is not a clean result. (reason <code>GSC_NOT_CONNECTED</code>)</p>
+<p class="notclean">Google Search Console is not connected to this service. Nothing is reported here because this area was not checked. This is not a clean result.</p>
 </section>
 <section class="area" id="ai">
 <h2>AI visibility (answer engines)</h2>
 <p><span class="status st-off">NOT COVERED</span> Whether answer engines (Perplexity when connected) cite or mention your site for a fixed set of market questions, sampled several times each. Cited means the engine&#x27;s search returned a page of your site for the answer (cited = returned by search); it does not mean the answer&#x27;s text linked to that page.</p>
 <p class="meta">Data freshness: not observed in this audit.</p>
-<p class="notclean">No set of market questions was chosen for this audit, so no answer engine was asked anything. Nothing is reported here because this area was not checked. This is not a clean result. (reason <code>NO_PROMPT_SET</code>)</p>
+<p class="notclean">No set of market questions was chosen for this audit, so no answer engine was asked anything. Nothing is reported here because this area was not checked. This is not a clean result.</p>
 <p>Prompt volume: <strong>NOT CONNECTED</strong>. How often real people ask these questions is not known.</p>
 </section>
 <section class="area">
 <h2>Methodology and limits</h2>
 <h3>Applies to the whole audit</h3>
 <ul>
-<li>Wave 1 reads public pages only; nothing here is paired with traffic, conversions or revenue (credit is not causation).</li>
+<li>This audit reads public pages only; nothing here is paired with traffic, conversions or revenue (credit is not causation).</li>
 <li>No single visibility score is produced.</li>
 </ul>
 <h3>Crawlability</h3>
-<p><strong>Method.</strong> no fetcher is wired</p>
+<p><strong>Method.</strong> No page could be read: the page reader was not available for this audit.</p>
 <h3>Entity consistency</h3>
 <p><strong>Method.</strong> Organization / LocalBusiness JSON-LD compared with the canonical entity record.</p>
 <h3>Search performance (Google Search Console)</h3>
 <p><strong>Method.</strong> Search Analytics for the bound property.</p>
 <h3>AI visibility (answer engines)</h3>
 <p><strong>Method.</strong> No prompt set was given for this audit; no engine was asked anything.</p>
+</section>
+<section class="area" id="appendix">
+<h2>Appendix: audit record</h2>
+<dl class="facts">
+<dt>Audit ID</dt><dd><code>seo-aud-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</code></dd>
+<dt>Audit record</dt><dd>report SHA-256 <code>bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb</code>, recorded on a tamper-evident ledger when the audit completed</dd>
+</dl>
 <h3>Versions</h3>
 <ul>
 <li>bot families: <code>2026-10-10.1</code></li>
 <li>report: <code>seo-audit-report/1</code></li>
 <li>schema rules: <code>2026-10-09.1</code></li>
-<li>report renderer: <code>seo-client-report/2</code></li>
+<li>report renderer: <code>seo-client-report/6</code></li>
 </ul>
 </section>
 <footer>Prepared by Z Best Media. This report recommends changes; it does not make any change to your site.</footer>

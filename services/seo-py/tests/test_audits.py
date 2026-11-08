@@ -39,7 +39,7 @@ def test_own_property_audit_end_to_end(tmp_path, srv):
     a = h.ok(audit(h), 201)
     assert a["status"] == "completed" and a["invoice_id"] is None and a["tenant_kind"] == "own"
     r = a["report"]
-    assert r["report_version"] == "seo-audit-report/1" and r["outcome"] == "PARTIAL"
+    assert r["report_version"] == "seo-audit-report/2" and r["outcome"] == "PARTIAL"
     agents = {e["agent"]: e for e in r["agents"]}
     assert set(agents) == {"selene", "delia", "roman", "entity_check", "callum", "naomi", "osei"}
     assert agents["selene"]["outcome"] == "OK" and agents["delia"]["outcome"] == "OK"
