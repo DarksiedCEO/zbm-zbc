@@ -1,38 +1,49 @@
 """
 Theo — Conversation Mining (ADR 0049). ONE job: track multi-turn conversation chains (opening question -> follow-ups
 -> final AI recommendation) for the client's topics, and record per turn whether and where the client and its
-competitors appear, and what the final turn recommends. A brand can be invisible at turn one and win by turn three;
-an opening-prompt probe (Callum, the audit) cannot see that.
+competitors appear, and what the final turn recommends. A brand can be invisible at turn one and recommended by turn
+three; an opening-prompt probe (Callum, the audit) cannot see that.
 
 Theo does not classify citation sources (Callum), size demand (Naomi), cross-check anything (Zara), write, publish,
 or call a model except through the multi-engine adapter (answer_adapter.py).
 
-Follow-up generation (deterministic; ``FOLLOWUPS_VERSION``). The whole chain is planned BEFORE the first question is
-asked, from the topic and Priya's emerging queries only — never from an engine's answer, so text inside an answer
-(a prompt injection included) cannot add, change or reorder a follow-up:
+Follow-up generation (deterministic; ``FOLLOWUPS_VERSION``). The whole USER side of the chain is planned BEFORE the
+first question is asked, from the topic and Priya's emerging queries only — never from an engine's answer, so text
+inside an answer (a prompt injection included) cannot add, change or reorder a follow-up or Theo's logic:
   turn 1  the topic as written;
   turn 2  ``compare``  (fixed template);
   turn 3  for a prompt-set topic, at most ONE of Priya's emerging items (kind ``constraint`` or ``question``) that
           shares at least ``PRIYA_FOLLOWUP_MIN_SHARED`` content words with the topic, first by key, as
           ``PRIYA_FOLLOWUP``; otherwise nothing;
   last    ``decide``   (fixed template): the final-recommendation turn.
-A planned turn whose normalised text repeats an earlier turn is not asked (``LOOP_PREVENTED``); a chain whose
-answer repeats an earlier answer of the same chain stops (``LOOP_STOPPED``); at most ``MAX_TURNS`` turns. LLM-
-generated follow-ups would go only through the adapter and are NOT BUILT (``SEO_THEO_LLM_FOLLOWUPS`` refuses start).
+A planned turn whose normalised text repeats an earlier turn is not asked (``LOOP_PREVENTED``); a chain whose answer
+repeats an earlier answer of the same chain stops (``LOOP_STOPPED``); at most ``MAX_TURNS`` turns. LLM-generated
+follow-ups would go only through the adapter and are NOT BUILT (``SEO_THEO_LLM_FOLLOWUPS`` refuses start).
 
-Context mode ``user_turns_only`` (the honest limit). The adapter is single-question and stateless, so turn k is ONE
-request carrying the earlier USER questions of the chain as a numbered list, then the new question. The engine's
-own earlier answers are not sent back: a consumer chat app would include them, so these chains approximate a real
-conversation, they do not replay one. Native multi-turn (each engine's message array) is not built.
+Two context modes, chosen per engine and named in every output (review round 1, MED 5):
+  ``native_multi_turn``  the engine's own earlier answers go back to it as assistant messages, in the provider's
+                         documented multi-turn shape (the adapter's ``history``; Anthropic Messages and Gemini
+                         generateContent, whose multi-turn docs were read: ``MULTI_TURN_DOCS`` in each module). Only
+                         these chains may be called "invisible at turn one, recommended by the last turn"
+                         (``INVISIBLE_THEN_RECOMMENDED``).
+  ``stacked_questions``  the fallback for an engine whose multi-turn shape was not read (OpenAI, Perplexity): ONE
+                         request per turn carrying the earlier USER questions only. It approximates a conversation and
+                         its pattern says so (``INVISIBLE_AT_OPENING_RECOMMENDED_STACKED``).
+Budget: a native turn k carries k-1 earlier answers, so it is reserved and charged as k reserve units (a stacked turn
+as 1); a whole chain is reserved before its first turn, so a cap never cuts a chain in half.
 
 Per turn, from the answer (in memory; only a bounded, PII-screened excerpt is kept, and none for a Priya topic):
 the client mentioned (agents/brand_mention.py, with its confidence) and cited (the cited HOST is the client's: exact,
 www. twin or subdomain via agents/domain_match.py; a lookalike never; a redirector host makes it UNKNOWN — Theo does
 not resolve URLs, Callum does), the client's rank among the named entities, each competitor term mentioned, the
-competitor domains cited. The final recommendation (complete chains only) is LEXICAL: the entity named first in the
-first sentence of the last answer that holds a recommendation cue (``CUES``), else the entity named first; never
-higher than MEDIUM confidence, LOW when its mention is unconfirmed. An incomplete chain (engine failure, refusal,
-budget, loop) has an UNKNOWN final recommendation — never the last turn's answer passed off as the final one.
+competitor domains cited.
+
+The final answer (complete chains only) is read LEXICALLY (``recommendation``): the first entity named, and not
+negated or contrasted away (``not``, ``n't``, ``avoid``, ``instead of``, ``rather than``, ``over``, ``<x>er than``,
+``... is not recommended``; within the clause), in the first sentence holding a recommendation cue is
+``recommended`` — counted as a recommendation only when its mention is confirmed (HIGH), the same threshold the
+opening turn uses; otherwise the first such entity in the answer is only ``named first in the final answer``,
+reported apart and never counted as a win. An incomplete chain's final answer is UNKNOWN.
 
 No agent touches service state, the ledger or the log: the service records what this module returns.
 """
@@ -53,12 +64,16 @@ from ports import NOT_CONNECTED, ProviderAnswer
 from primitives import Killed
 
 AGENT, TASK = "theo", "conversation_chains"
-VERSION = "theo-rules/2026-11-08.1"
+VERSION = "theo-rules/2026-11-08.2"
+# .2 (review round 1): native multi-turn mode, negation / contrast in the final answer, one confidence threshold at
+#    both ends, the client's own outcome decides pattern and strength, context-weighted reservations
 FOLLOWUPS_VERSION = "theo-followups/2026-11-08.1"
-CONTRACT = "theo.conversation_chains/1"
-CONTEXT_MODE = "user_turns_only"
+CONTRACT = "theo.conversation_chains/2"
+NATIVE, STACKED = "native_multi_turn", "stacked_questions"
+CONTEXT_MODES = (NATIVE, STACKED)
 MAX_TURNS = 4
 MAX_ROWS = 2000
+MAX_ASSISTANT_CHARS = 4000            # one earlier answer sent back in native mode (longer: cut, flagged)
 PRIYA_FOLLOWUP_MIN_SHARED = 2
 FOLLOWUPS = {"compare": "What are the main options to compare for this, and how do they differ?",
              "decide": "Which one would you recommend, and why?"}
@@ -66,26 +81,38 @@ PRIYA_FOLLOWUP = "What about this: {query}"
 CONTEXT_TEMPLATE = "Earlier in this conversation I asked:\n{earlier}\nMy next question: {question}"
 TURN_KINDS = ("opening", "compare", "priya_followup", "decide")
 CHAIN_STATUS = ("COMPLETE", "INCOMPLETE", "LOOP_STOPPED", "NOT_ASKED")
-PATTERNS = ("INVISIBLE_THEN_RECOMMENDED", "VISIBLE_AND_RECOMMENDED", "VISIBLE_THEN_NOT_RECOMMENDED",
-            "NOT_RECOMMENDED", "INCONCLUSIVE")
+OUTCOMES = ("RECOMMENDED", "NOT_RECOMMENDED", "MIXED")
+PATTERNS = ("INVISIBLE_THEN_RECOMMENDED", "INVISIBLE_AT_OPENING_RECOMMENDED_STACKED", "VISIBLE_AND_RECOMMENDED",
+            "RECOMMENDED_OPENING_MIXED", "VISIBLE_THEN_NOT_RECOMMENDED", "NOT_RECOMMENDED", "MIXED", "INCONCLUSIVE")
+RECOMMENDED_PATTERNS = PATTERNS[:4]
+NOT_RECOMMENDED_PATTERNS = PATTERNS[4:6]
 STRENGTHS = ("STRONG", "WEAK", "NONE")
-WINNERS = ("client", "competitor", "none", "unknown")
 CUES = re.compile(r"\b(recommend|recommended|recommendation|best choice|best option|top pick|go with|i would choose|"
                   r"i'd choose|my pick|the winner)\b", re.IGNORECASE)
+# negation / contrast before an entity, within its clause; and after it ("Acme is not recommended")
+_NEG_BEFORE = re.compile(r"(\bnot\b|n't\b|\bnever\b|\bavoid\w*|\binstead of\b|\brather than\b|\bover\b|\bunlike\b|"
+                         r"\bstay away from\b|\bskip\b|\bno longer\b|\b\w+er than\b|\b(?:more|less) \w+ than\b|"
+                         r"\bsuperior to\b|\bexcept\b)", re.IGNORECASE)
+_NEG_AFTER = re.compile(r"^[^.;:!?]{0,30}?\b(is not|isn't|are not|aren't|was not|wasn't|would not|wouldn't|"
+                        r"should not|shouldn't|not recommended|falls short|is worse)\b", re.IGNORECASE)
+_CLAUSE = re.compile(r"[.!?\n;,:()—]|\s-\s|\bbut\b|\bhowever\b|\bwhereas\b|\bwhile\b", re.IGNORECASE)
 _SENTENCE = re.compile(r"[^.!?\n]+[.!?]?")
 _CONTENT = re.compile(r"[^\W\d_]{3,}")
 _STOP = frozenset({"the", "and", "for", "with", "what", "which", "who", "how", "why", "when", "where", "does", "are",
                    "can", "best", "near", "about", "this", "that", "your", "from", "into", "than"})
 LIMITS = [
-    "Context mode user_turns_only: each turn re-sends the earlier USER questions of the chain, not the engine's own "
-    "earlier answers (the adapter is single-question). A consumer chat app keeps its answers in context, so these "
-    "chains approximate a conversation; they are not a replay of one.",
+    "Context mode is per engine: native_multi_turn (the engine's earlier answers sent back as assistant messages; "
+    "Anthropic and Gemini, whose documented multi-turn shapes were read) or stacked_questions (OpenAI and "
+    "Perplexity: earlier USER questions re-sent in one request). A stacked chain approximates a conversation.",
     "Follow-ups are fixed templates plus at most one of Priya's emerging queries; real users ask other follow-ups. "
     "No LLM-generated follow-up exists (not built).",
-    "The final recommendation is lexical (a cue word and the first entity named in that sentence): it does not "
-    "understand the answer, so it is never more than MEDIUM confidence.",
+    "The final answer is read lexically (a cue word, the first entity named and not negated or contrasted away in "
+    "that clause): it does not understand the answer, so a recommendation is never more than MEDIUM confidence, and "
+    "an entity merely named first is reported as 'named first in the final answer', never as a recommendation.",
     "Cited means the engine's structured citation names the client's host. Cited URLs are not resolved here (that is "
     "Callum's job): a citation on a redirector host leaves 'cited' UNKNOWN.",
+    "Spend on engines that report no cost is a reserve estimate; a native turn carrying k-1 earlier answers is booked "
+    "as k reserves, an estimate of its larger context, not a measured cost.",
     "One account, one time, N samples per chain: observations, not search truth. Nothing here is a visibility score "
     "or calibrated against traffic or revenue.",
 ]
@@ -142,18 +169,38 @@ def render(turns: list, k: int) -> str:
 
 # ---------------------------------------------------------------------------------------------- per-turn observation
 
-def _positions(text: str, terms: list, rules: Optional[list]) -> Optional[int]:
-    t = brand_mention._ws_lines(text)
-    best = None
-    for r in brand_mention.normalise(terms, rules):
-        for _w, at in brand_mention._matches(t, r):
-            best = at if best is None or at < best else best
-    return best
-
-
 def _host(url: str) -> str:
     p = split_url(url)
     return (p.hostname or "").lower() if p is not None else ""
+
+
+def _mentions(text: str, ctx: dict) -> list:
+    """Every entity mention: (position, kind, name, end, confidence), in text order (whitespace-normalised text)."""
+    t = brand_mention._ws_lines(text)
+    out = []
+    cm = brand_mention.mention(text, ctx["terms"], ctx["rules"], ctx["domain"], client_cited=ctx.get("_cited", False))
+    if cm["mentioned"]:
+        for r in brand_mention.normalise(ctx["terms"], ctx["rules"]):
+            for w, at in brand_mention._matches(t, r):
+                out.append((at, "client", None, at + len(w), cm["confidence"]))
+    for name in ctx["competitor_terms"]:
+        m = brand_mention.mention(text, [name])
+        if m["mentioned"]:
+            for r in brand_mention.normalise([name], None):
+                for w, at in brand_mention._matches(t, r):
+                    out.append((at, "competitor", name, at + len(w), m["confidence"]))
+    return sorted(out, key=lambda e: (e[0], e[1], e[2] or "")), t
+
+
+def negated(t: str, start: int, end: int) -> bool:
+    """The mention at [start, end) is negated or contrasted away within its clause (lexical; module docstring)."""
+    pre = t[max(0, start - 80):start]
+    cut = None
+    for cut in _CLAUSE.finditer(pre):
+        pass
+    if cut is not None:
+        pre = pre[cut.end():]
+    return bool(_NEG_BEFORE.search(pre) or _NEG_AFTER.search(t[end:end + 60]))
 
 
 def observe(a: ProviderAnswer, ctx: dict) -> dict:
@@ -167,52 +214,55 @@ def observe(a: ProviderAnswer, ctx: dict) -> dict:
     redirector = any(h in REDIRECTOR_HOSTS for h in hosts)
     cited = True if on_client else (None if redirector else False)
     m = brand_mention.mention(text, ctx["terms"], ctx["rules"], ctx["domain"], client_cited=on_client)
-    entities = []
-    if m["mentioned"]:
-        entities.append(("client", None, _positions(text, ctx["terms"], ctx["rules"]), m["confidence"]))
+    found, _t = _mentions(text, {**ctx, "_cited": on_client})
+    first: dict = {}
+    for e in found:
+        first.setdefault((e[1], e[2]), e)
+    order = sorted(first.values(), key=lambda e: e[0])
+    rank = next((i + 1 for i, e in enumerate(order) if e[1] == "client"), None)
     comps = []
     for name in ctx["competitor_terms"]:
         cm = brand_mention.mention(text, [name])
-        pos = _positions(text, [name], None) if cm["mentioned"] else None
         comps.append({"name": name, "mentioned": cm["mentioned"], "confidence": cm["confidence"]})
-        if cm["mentioned"]:
-            entities.append(("competitor", name, pos, cm["confidence"]))
-    order = sorted(entities, key=lambda e: (e[2] if e[2] is not None else 10 ** 9, e[0], e[1] or ""))
-    rank = next((i + 1 for i, e in enumerate(order) if e[0] == "client"), None)
     comp_cited = sorted({d for d in ctx["competitor_domains"] for h in hosts if domain_match.on_site(h, d)})
     return {"client": {"mentioned": m["mentioned"], "confidence": m["confidence"], "cited": cited,
                        "rank": rank, "lookalike_cited": lookalike},
             "competitors": comps, "competitor_domains_cited": comp_cited,
-            "order": [e[0] if e[0] == "client" else f"competitor:{e[1]}" for e in order],
-            "citations": len(cites), "_entities": order}
+            "order": [e[1] if e[1] == "client" else f"competitor:{e[2]}" for e in order],
+            "citations": len(cites), "_on_client": on_client}
 
 
 def recommendation(a: ProviderAnswer, ctx: dict) -> dict:
-    """The final turn's recommendation, lexically (module docstring)."""
-    text = " ".join((a.text or "").split("\n"))
-    for s in _SENTENCE.findall(a.text or ""):
-        if not CUES.search(s):
+    """The final answer, lexically (module docstring). ``counts`` is True only for a recommendation the opening
+    turn's threshold would also accept: a cue sentence and a confirmed (HIGH) mention."""
+    text = a.text or ""
+    on_client = observe(a, ctx)["_on_client"]
+    found, t = _mentions(text, {**ctx, "_cited": on_client})
+    live = [e for e in found if not negated(t, e[0], e[3])]
+    for sm in _SENTENCE.finditer(t):
+        if not CUES.search(sm.group(0)):
             continue
-        o = observe(ProviderAnswer("ANSWER", s), ctx)["_entities"]
-        if o:
-            return _winner(o[0], "cue_sentence")
-    o = observe(ProviderAnswer("ANSWER", text), ctx)["_entities"]
-    if o:
-        return _winner(o[0], "first_mention")
-    return {"winner": "none", "name": None, "basis": "none_named", "confidence": "LOW"}
-
-
-def _winner(e: tuple, basis: str) -> dict:
-    conf = "MEDIUM" if basis == "cue_sentence" and e[3] == brand_mention.HIGH else "LOW"
-    return {"winner": e[0], "name": e[1], "basis": basis, "confidence": conf}
+        inside = [e for e in live if sm.start() <= e[0] < sm.end()]
+        if inside:
+            e = inside[0]
+            high = e[4] == brand_mention.HIGH
+            return {"winner": e[1], "name": e[2], "basis": "cue_sentence", "counts": high,
+                    "confidence": "MEDIUM" if high else "LOW",
+                    "wording": "recommended in the final answer" if high else "named first in the final answer"}
+    if live:
+        e = live[0]
+        return {"winner": e[1], "name": e[2], "basis": "named_first", "counts": False, "confidence": "LOW",
+                "wording": "named first in the final answer"}
+    return {"winner": "none", "name": None, "basis": "none_named", "counts": False, "confidence": "LOW",
+            "wording": "no entity named (or every one negated) in the final answer"}
 
 
 # ---------------------------------------------------------------------------------------------- collection
 
 class CallCap:
-    """Theo's own per-run cap on the calls ONE conversation run may reserve across every engine
+    """Theo's own per-run cap on the reserve units ONE conversation run may reserve across every engine
     (``SEO_THEO_RUN_MAX_CALLS``; 0 = OFF: nothing is asked). A whole chain is reserved before its first turn, so the
-    cap never cuts a chain in half: a chain that does not fit is not started."""
+    cap never cuts a chain in half: a chain that does not fit is not started. A native turn k counts k units."""
 
     def __init__(self, limit: int):
         self.limit, self.used = limit, 0
@@ -224,6 +274,46 @@ class CallCap:
             return "THEO_RUN_CALL_CAP"
         self.used += calls
         return None
+
+
+class _ContextMeter:
+    """The adapter's meter for one native turn that carries earlier answers: the request must fit ``weight``
+    reserves, and a request of unknown cost is charged ``weight`` reserves (fail closed)."""
+
+    def __init__(self, inner, weight: int):
+        self.inner, self.weight = inner, weight
+
+    @property
+    def per_call(self):
+        return getattr(self.inner, "per_call", None)
+
+    @property
+    def over_reserve(self):
+        return getattr(self.inner, "over_reserve", False)
+
+    def before(self) -> None:
+        self.inner.before()
+        pc, spent, cap = self.per_call, getattr(self.inner, "spent", None), getattr(self.inner, "reserved_spend", None)
+        if pc is not None and spent is not None and cap is not None and spent() + pc * self.weight > cap:
+            raise EngineError("ENGINE_BUDGET_EXHAUSTED", "RESERVATION_SPENT")
+
+    def after(self, cost) -> None:
+        self.inner.after(cost)
+        try:
+            unknown = cost is None or float(cost) <= 0
+        except (TypeError, ValueError):
+            unknown = True
+        if unknown and hasattr(self.inner, "charge_context"):
+            self.inner.charge_context(self.weight - 1)
+
+
+def mode_of(port) -> str:
+    return NATIVE if getattr(port, "multi_turn", False) is True else STACKED
+
+
+def units(turns: list, mode: str) -> int:
+    n = len(turns)
+    return n * (n + 1) // 2 if mode == NATIVE else n
 
 
 def _sha(text: str) -> str:
@@ -242,7 +332,7 @@ def run_chains(topics: list, plans: dict, engines: dict, engine_names: list, n: 
     for e in engine_names:
         port = engines.get(e)
         s = {"port": port, "outcome": None, "stop": None, "stop_detail": None, "answers": 0, "errors": 0,
-             "protocol_run": 0, "chains_asked": 0, "chains_not_asked": 0, "run": None}
+             "protocol_run": 0, "chains_asked": 0, "chains_not_asked": 0, "run": None, "mode": mode_of(port)}
         if port is None or not getattr(port, "connected", False):
             s["outcome"] = NOT_CONNECTED
         elif getattr(port, "metered", False):
@@ -257,9 +347,8 @@ def run_chains(topics: list, plans: dict, engines: dict, engine_names: list, n: 
         for ti, t in enumerate(topics):
             topic_chains = []
             for e in engine_names:
-                s = st[e]
-                summary = _chains_for(t, ti, plans[t["topic_key"]], e, s, n, guard, cap, ctx, clock, iso, rows)
-                topic_chains.append(summary)
+                topic_chains.append(_chains_for(t, ti, plans[t["topic_key"]], e, st[e], n, guard, cap, ctx, clock,
+                                                iso, rows))
             chains += topic_chains
             if emit is not None:
                 emit(t["topic_key"], topic_chains)
@@ -278,7 +367,8 @@ def run_chains(topics: list, plans: dict, engines: dict, engine_names: list, n: 
             out = {"ENGINE_BUDGET_EXHAUSTED": "BLOCKED", "THEO_RUN_CALL_CAP": "BLOCKED", "BUDGET_OFF": "BLOCKED",
                    "ENGINE_NOT_CONNECTED": NOT_CONNECTED}.get(s["stop"], "FAILED")
         view[e] = {"outcome": out, "reason": s["stop"], "reason_detail": s["stop_detail"], "usage": s["usage"],
-                   "chains_asked": s["chains_asked"], "chains_not_asked": s["chains_not_asked"]}
+                   "chains_asked": s["chains_asked"], "chains_not_asked": s["chains_not_asked"],
+                   "context_mode": s["mode"]}
     return {"engines": view, "chains": chains, "rows": rows[:MAX_ROWS], "rows_truncated": len(rows) > MAX_ROWS}
 
 
@@ -296,17 +386,18 @@ def _chains_for(t, ti, plan, e, s, n, guard, cap, ctx, clock, iso, rows) -> dict
                             "final": _unknown()})
             continue
         samples.append(_one_chain(t, ti, si, n, turns, e, s, guard, cap, ctx, clock, iso, rows))
-    return _summary(t, e, turns, plan["flags"], samples)
+    return _summary(t, e, turns, plan["flags"], samples, s["mode"])
 
 
 def _unknown() -> dict:
-    return {"winner": "unknown", "name": None, "basis": "chain_incomplete", "confidence": None}
+    return {"winner": "unknown", "name": None, "basis": "chain_incomplete", "counts": False, "confidence": None,
+            "wording": "unknown: the chain did not complete"}
 
 
 def _one_chain(t, ti, si, n, turns, e, s, guard, cap, ctx, clock, iso, rows) -> dict:
-    port = s["port"]
+    port, mode = s["port"], s["mode"]
     attempts = int(getattr(port, "attempts", 1) or 1)
-    need = len(turns) * attempts
+    need = units(turns, mode) * attempts
     meter = None
     why = cap.take(need)
     if why is not None:
@@ -324,17 +415,23 @@ def _one_chain(t, ti, si, n, turns, e, s, guard, cap, ctx, clock, iso, rows) -> 
             return {"sample": si, "status": "NOT_ASKED", "reason": err.code, "turns": [], "final": _unknown()}
     s["chains_asked"] += 1
     done: list = []
+    history: list = []
     answers_seen: set = set()
     status, reason, final = "COMPLETE", None, None
     takes_guard = bool(getattr(port, "accepts_guard", False))
     for k, turn in enumerate(turns):
-        prompt = render(turns, k)
         guard(capability="ai_probe", provider=e)
         row = {"topic_key": t["topic_key"], "engine": e, "sample": si, "turn": k + 1, "kind": turn["kind"],
-               "turn_source": turn["source"], "priya_key": turn["priya_key"], "observed_at": iso(clock.now())}
+               "turn_source": turn["source"], "priya_key": turn["priya_key"], "context_mode": mode,
+               "observed_at": iso(clock.now())}
         err_code = err_detail = None
         try:
-            a = port.ask(prompt, guard=guard, meter=meter) if takes_guard else port.ask(prompt)
+            if mode == NATIVE:
+                m = meter if meter is None or k == 0 else _ContextMeter(meter, k + 1)
+                a = port.ask(turn["_text"], guard=guard, meter=m, history=list(history) if history else None)
+            else:
+                prompt = render(turns, k)
+                a = port.ask(prompt, guard=guard, meter=meter) if takes_guard else port.ask(prompt)
         except Killed:
             raise
         except EngineError as err:
@@ -373,10 +470,12 @@ def _one_chain(t, ti, si, n, turns, e, s, guard, cap, ctx, clock, iso, rows) -> 
         s["answers"] += 1
         s["protocol_run"] = 0
         obs = observe(a, ctx)
-        obs.pop("_entities")
+        obs.pop("_on_client")
         ex = excerpt(a.text, ctx["terms"]) if t["source"] == "prompt_set" else \
             {"basis": None, "excerpt": None, "withheld": "PRIYA_QUERY_CONTEXT"}
-        rows.append({**row, **meta, "status": "ANSWER", **obs, "evidence": ex})
+        cut = mode == NATIVE and len(a.text) > MAX_ASSISTANT_CHARS
+        rows.append({**row, **meta, "status": "ANSWER", **obs, "evidence": ex,
+                     **({"history_answer_truncated": True} if cut else {})})
         done.append({"turn": k + 1, "kind": turn["kind"], "status": "ANSWER", "client": obs["client"],
                      "competitors_mentioned": [c["name"] for c in obs["competitors"] if c["mentioned"]]})
         h = meta["answer_sha256"]
@@ -391,6 +490,12 @@ def _one_chain(t, ti, si, n, turns, e, s, guard, cap, ctx, clock, iso, rows) -> 
                 break
         if k + 1 == len(turns):
             final = recommendation(a, ctx)
+        elif mode == NATIVE:
+            if not a.text.strip():                      # nothing to send back as the assistant's turn
+                status, reason = "INCOMPLETE", "EMPTY_ANSWER_MID_CHAIN"
+                break
+            history += [{"role": "user", "text": turn["_text"]},
+                        {"role": "assistant", "text": a.text[:MAX_ASSISTANT_CHARS]}]
     if status != "COMPLETE":
         final = _unknown()
     return {"sample": si, "status": status, "reason": reason, "turns": done, "final": final}
@@ -403,7 +508,32 @@ def _rate(k: int, nn: int) -> dict:
             "interval": "wilson_95", "directional": nn < MIN_USABLE}
 
 
-def _summary(t: dict, e: str, turns: list, flags: list, samples: list) -> dict:
+def client_outcome(rec: int, nc: int) -> Optional[str]:
+    """The client's own outcome over complete chains: RECOMMENDED in at least 2/3, NOT_RECOMMENDED in none, else
+    MIXED (a 1-of-5 win is MIXED, never a strong recommendation)."""
+    if nc == 0:
+        return None
+    if rec * 3 >= nc * 2:
+        return "RECOMMENDED"
+    return "NOT_RECOMMENDED" if rec == 0 else "MIXED"
+
+
+def pattern_of(outcome: Optional[str], visible: int, any_mention: int, nc: int, mode: str) -> str:
+    """One rule, used by Theo and re-checked by Zara. Visible at turn one = a confirmed mention in at least 2/3 of
+    the complete chains; invisible = no mention of ANY confidence in any of them."""
+    if outcome is None:
+        return "INCONCLUSIVE"
+    if outcome == "MIXED":
+        return "MIXED"
+    vis = visible * 3 >= nc * 2
+    if outcome == "RECOMMENDED":
+        if any_mention == 0:
+            return "INVISIBLE_THEN_RECOMMENDED" if mode == NATIVE else "INVISIBLE_AT_OPENING_RECOMMENDED_STACKED"
+        return "VISIBLE_AND_RECOMMENDED" if vis else "RECOMMENDED_OPENING_MIXED"
+    return "VISIBLE_THEN_NOT_RECOMMENDED" if vis else "NOT_RECOMMENDED"
+
+
+def _summary(t: dict, e: str, turns: list, flags: list, samples: list, mode: str) -> dict:
     complete = [c for c in samples if c["status"] == "COMPLETE"]
     by_turn = []
     for k, turn in enumerate(turns):
@@ -411,45 +541,54 @@ def _summary(t: dict, e: str, turns: list, flags: list, samples: list) -> dict:
         by_turn.append({"turn": k + 1, "kind": turn["kind"], "source": turn["source"],
                         "client_mentioned": _rate(sum(1 for x in ans if x["client"]["mentioned"]
                                                       and x["client"]["confidence"] == brand_mention.HIGH), len(ans)),
+                        "client_mentioned_unconfirmed": sum(1 for x in ans if x["client"]["mentioned"]
+                                                            and x["client"]["confidence"] != brand_mention.HIGH),
                         "client_cited": _rate(sum(1 for x in ans if x["client"]["cited"] is True), len(ans)),
                         "client_cited_unknown": sum(1 for x in ans if x["client"]["cited"] is None),
                         "competitor_mentioned": _rate(sum(1 for x in ans if x["competitors_mentioned"]), len(ans))})
-    finals: dict = {"client": 0, "competitor": {}, "none": 0}
+    rec = {"client": 0, "competitor": {}}
+    named = {"client": 0, "competitor": {}}
+    none = 0
     winners = []
     for c in complete:
         f = c["final"]
-        if f["winner"] == "competitor":
-            finals["competitor"][f["name"]] = finals["competitor"].get(f["name"], 0) + 1
-            winners.append("competitor:" + f["name"])
+        if f["winner"] == "none":
+            none += 1
+            winners.append("no_recommendation")
+            continue
+        box = rec if f["counts"] else named
+        if f["winner"] == "client":
+            box["client"] += 1
         else:
-            finals[f["winner"]] += 1
-            winners.append(f["winner"])
+            box["competitor"][f["name"]] = box["competitor"].get(f["name"], 0) + 1
+        winners.append(("client" if f["winner"] == "client" else "competitor:" + f["name"]) if f["counts"]
+                       else "no_recommendation")
     incomplete: dict = {}
     for c in samples:
         if c["status"] != "COMPLETE":
             key = c["reason"] or c["status"]
             incomplete[key] = incomplete.get(key, 0) + 1
     nc = len(complete)
-    client_final = _rate(finals["client"], nc)
-    modal = max((winners.count(w) for w in set(winners)), default=0)
-    if nc == 0:
-        pattern, strength = "INCONCLUSIVE", "NONE"
-    else:
-        first = by_turn[0]["client_mentioned"]["k"]
-        won = finals["client"]
-        pattern = ("INVISIBLE_THEN_RECOMMENDED" if not first and won else "VISIBLE_AND_RECOMMENDED" if first and won
-                   else "VISIBLE_THEN_NOT_RECOMMENDED" if first else "NOT_RECOMMENDED")
-        strength = "STRONG" if nc >= MIN_USABLE and modal * 3 >= nc * 2 else "WEAK"
-    return {"topic_key": t["topic_key"], "engine": e, "chains": len(samples), "complete": nc,
+    outcome = client_outcome(rec["client"], nc)
+    first = by_turn[0]
+    pattern = pattern_of(outcome, first["client_mentioned"]["k"],
+                         first["client_mentioned"]["k"] + first["client_mentioned_unconfirmed"], nc, mode)
+    strength = "STRONG" if nc >= MIN_USABLE and outcome in ("RECOMMENDED", "NOT_RECOMMENDED") else \
+        "WEAK" if nc else "NONE"
+    return {"topic_key": t["topic_key"], "engine": e, "context_mode": mode, "chains": len(samples), "complete": nc,
             "loop_stopped": sum(1 for c in samples if c["status"] == "LOOP_STOPPED"),
             "not_complete": dict(sorted(incomplete.items())), "turns_planned": len(turns),
             "plan_flags": list(flags), "by_turn": by_turn,
-            "final_recommendation": {"client": finals["client"],
-                                     "competitor": dict(sorted(finals["competitor"].items())),
-                                     "none": finals["none"], "unknown": len(samples) - nc,
-                                     "basis": "lexical (CUES, first entity named)", "max_confidence": "MEDIUM"},
-            "client_recommended": client_final, "unstable": len(set(winners)) > 1, "pattern": pattern,
-            "strength": strength}
+            "final_recommendation": {"recommended": {"client": rec["client"],
+                                                     "competitor": dict(sorted(rec["competitor"].items()))},
+                                     "named_first_only": {"client": named["client"],
+                                                          "competitor": dict(sorted(named["competitor"].items()))},
+                                     "none": none, "unknown": len(samples) - nc,
+                                     "basis": "lexical: a cue sentence and a confirmed mention, negation-aware; "
+                                              "'named first in the final answer' is reported apart, never a win",
+                                     "max_confidence": "MEDIUM"},
+            "client_recommended": _rate(rec["client"], nc), "client_outcome": outcome,
+            "unstable": len(set(winners)) > 1, "pattern": pattern, "strength": strength}
 
 
 # ---------------------------------------------------------------------------------------------- the envelope
@@ -457,7 +596,8 @@ def _summary(t: dict, e: str, turns: list, flags: list, samples: list) -> dict:
 def output(tenant_id: str, run_id: str, topics: list, plans: dict, res: dict, n: int) -> dict:
     """The Theo -> Zara hand-off (``CONTRACT``)."""
     return {"contract": CONTRACT, "producer": AGENT, "tenant_id": tenant_id, "run_id": run_id, "rules": VERSION,
-            "followups": FOLLOWUPS_VERSION, "context_mode": CONTEXT_MODE, "samples_per_chain": n,
+            "followups": FOLLOWUPS_VERSION,
+            "context_modes": {e: v["context_mode"] for e, v in res["engines"].items()}, "samples_per_chain": n,
             "topics": [{"topic_key": t["topic_key"], "source": t["source"], "priya_key": t["priya_key"],
                         "turns_planned": [{"kind": x["kind"], "source": x["source"], "priya_key": x["priya_key"]}
                                           for x in plans[t["topic_key"]]["turns"]]} for t in topics],
@@ -467,11 +607,14 @@ def output(tenant_id: str, run_id: str, topics: list, plans: dict, res: dict, n:
 def envelope_for(outcome: str, res: Optional[dict], contract: Optional[dict], topics: list, plans: dict,
                  reason: Optional[str] = None) -> dict:
     method = (f"Each topic asked as a {MAX_TURNS}-turn-at-most chain (opening, compare, at most one of Priya's "
-              "emerging queries, decide), planned before the first question from the topic and Priya's items only "
-              f"({FOLLOWUPS_VERSION}); context mode {CONTEXT_MODE}; each chain sampled N times per engine through the "
-              "multi-engine adapter. Per turn: client and competitor mentions (whole-word, with confidence), client "
-              "rank, client host cited. Final recommendation lexical on the last turn of a COMPLETE chain only. "
-              f"Rates over complete chains, 95% Wilson intervals, directional under {MIN_USABLE}. Rules {VERSION}.")
+              "emerging queries, decide), the user side planned before the first question from the topic and "
+              f"Priya's items only ({FOLLOWUPS_VERSION}); per engine native_multi_turn (earlier answers sent back "
+              "as assistant messages) or stacked_questions (earlier questions only); each chain sampled N times. "
+              "Per turn: client and competitor mentions (whole-word, with confidence), client rank, client host "
+              "cited. Final answer read lexically on COMPLETE chains only (negation-aware; a recommendation needs a "
+              "cue and a confirmed mention, as the opening does). Pattern and strength from the client's own "
+              f"outcome. Rates over complete chains, 95% Wilson intervals, directional under {MIN_USABLE}. "
+              f"Rules {VERSION}.")
     tv = [{**{k: v for k, v in t.items() if not k.startswith("_")},
            "turns_planned": [x["kind"] for x in plans.get(t["topic_key"], {}).get("turns", [])],
            "plan_flags": plans.get(t["topic_key"], {}).get("flags", [])} for t in topics]
@@ -508,17 +651,22 @@ def _findings(res: dict) -> list:
     out = []
     for c in res["chains"]:
         d = {"engine": c["engine"], "topic_key": c["topic_key"], "complete_chains": c["complete"],
-             "pattern": c["pattern"], "client_recommended": c["client_recommended"]}
-        directional = c["complete"] < MIN_USABLE
-        dec = "INSUFFICIENT_EVIDENCE" if directional else "TEST"
-        if c["pattern"] == "INVISIBLE_THEN_RECOMMENDED":
+             "context_mode": c["context_mode"], "pattern": c["pattern"],
+             "client_recommended": c["client_recommended"]}
+        dec = "INSUFFICIENT_EVIDENCE" if c["complete"] < MIN_USABLE else "TEST"
+        if c["pattern"] == "INVISIBLE_THEN_RECOMMENDED":            # native multi-turn only
             out.append(finding("THEO_INVISIBLE_THEN_RECOMMENDED", "info", "measured", dec, capability="P4", detail=d))
+        elif c["pattern"] == "INVISIBLE_AT_OPENING_RECOMMENDED_STACKED":
+            out.append(finding("THEO_RECOMMENDED_WHEN_QUESTIONS_STACKED", "info", "measured",
+                               "INSUFFICIENT_EVIDENCE", capability="P4", detail=d))
         elif c["pattern"] == "VISIBLE_THEN_NOT_RECOMMENDED":
             out.append(finding("THEO_VISIBLE_THEN_NOT_RECOMMENDED", "medium", "measured", dec, capability="P4",
                                detail=d))
-        if c["final_recommendation"]["competitor"]:
+        elif c["pattern"] == "MIXED":
+            out.append(finding("THEO_CHAIN_MIXED", "low", "measured", "WATCH", capability="P4", detail=d))
+        if c["final_recommendation"]["recommended"]["competitor"]:
             out.append(finding("THEO_COMPETITOR_RECOMMENDED", "medium", "measured", dec, capability="P9",
-                               detail={**d, "competitor": c["final_recommendation"]["competitor"]}))
+                               detail={**d, "competitor": c["final_recommendation"]["recommended"]["competitor"]}))
         if c["unstable"]:
             out.append(finding("THEO_CHAIN_UNSTABLE", "low", "measured", "WATCH", capability="P4", detail=d))
         if c["loop_stopped"]:
@@ -529,4 +677,3 @@ def _findings(res: dict) -> list:
             out.append(finding("ENGINE_RUN_STOPPED", "low", "measured", "WATCH", capability="P4",
                                detail={"engine": e, "reason": v["reason"], "outcome": v["outcome"]}))
     return out
-

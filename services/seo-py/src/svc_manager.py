@@ -66,12 +66,12 @@ REGISTRY = {
                         "Priya's priya-emerging-handoff/1 items (follow-up templates only)",
                         "the prompt set's brand terms and competitor domains, the run's competitor terms",
                         "answers from the multi-engine adapter (ADR 0046), within SEO_THEO_RUN_MAX_CALLS"],
-             "outputs": ["theo.conversation_chains/1 to Zara: per topic x engine the chain pattern, strength, "
+             "outputs": ["theo.conversation_chains/2 to Zara: per topic x engine the chain pattern, strength, "
                          "per-turn client / competitor rates and the final-recommendation distribution",
                          "conversation_chains envelope (per-turn rows with bounded evidence)"]},
     "zara": {"assignment": "fireteam lead: cross-check Theo's chains against Naomi's volume as they arrive; flag, "
                            "downgrade or hold before anything moves downstream (never mines or estimates)",
-             "inputs": ["theo.conversation_chains/1 (per topic, as emitted)", "naomi.prompt_volume/1 (per topic)"],
+             "inputs": ["theo.conversation_chains/2 (per topic, as emitted)", "naomi.prompt_volume/1 (per topic)"],
              "outputs": ["zara.conversation_volume/1 (the only fireteam output downstream: verdict, conflicts, "
                          "decision, priority basis per topic)", "zara.priya_feedback/1 for Priya's emerging-query "
                          "loop (contract only, not consumed)"]},

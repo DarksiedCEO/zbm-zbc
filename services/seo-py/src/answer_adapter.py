@@ -320,6 +320,13 @@ class HttpAnswerEngine:
     ALLOWED_HOSTS: frozenset = frozenset()
     MAX_RESPONSE_BYTES = MAX_RESPONSE_BYTES
     MAX_PROMPT_CHARS = 2000
+    # ADR 0049: native multi-turn (earlier turns sent as the provider's own user / assistant messages). Only an
+    # engine whose documented multi-turn request shape was read sets MULTI_TURN (its MULTI_TURN_DOCS say where);
+    # ``ask(..., history=...)`` on any other engine is refused, never approximated
+    MULTI_TURN = False
+    MULTI_TURN_DOCS: Optional[dict] = None
+    MAX_HISTORY_TURNS = 8
+    MAX_HISTORY_CHARS = 40_000
 
     def _init_http(self, key: ApiKey, timeout_s: float, attempts: int, backoff_s: tuple,
                    transport: Optional[httpx.BaseTransport], network_backend, monotonic: Callable[[], float],
@@ -353,6 +360,33 @@ class HttpAnswerEngine:
     def _body(self, model: str, prompt: str) -> bytes:
         raise NotImplementedError
 
+    def _body_turns(self, model: str, history: list, prompt: str) -> bytes:
+        """The request carrying earlier turns (``history``: [{"role": "user"|"assistant", "text"}], oldest first)
+        and the new user prompt. Only engines with MULTI_TURN implement it."""
+        raise NotImplementedError
+
+    @property
+    def multi_turn(self) -> bool:
+        return bool(self.MULTI_TURN)
+
+    def _check_history(self, history) -> None:
+        """Alternating user / assistant turns starting with user, bounded: anything else is refused before a
+        request is built (ADR 0049)."""
+        if not self.MULTI_TURN:
+            raise EngineError("ENGINE_PROTOCOL_ERROR", "MULTI_TURN_NOT_SUPPORTED")
+        if not isinstance(history, list) or not history or len(history) > 2 * self.MAX_HISTORY_TURNS \
+                or len(history) % 2:
+            raise EngineError("ENGINE_PROTOCOL_ERROR", "REQUEST_REFUSED")
+        total = 0
+        for i, h in enumerate(history):
+            if not isinstance(h, dict) or set(h) != {"role", "text"} \
+                    or h["role"] != ("user" if i % 2 == 0 else "assistant") \
+                    or not isinstance(h["text"], str) or not h["text"]:
+                raise EngineError("ENGINE_PROTOCOL_ERROR", "REQUEST_REFUSED")
+            total += len(h["text"])
+        if total > self.MAX_HISTORY_CHARS:
+            raise EngineError("ENGINE_PROTOCOL_ERROR", "REQUEST_REFUSED")
+
     def _parse(self, raw: bytes, model: str) -> ProviderAnswer:
         raise NotImplementedError
 
@@ -368,14 +402,20 @@ class HttpAnswerEngine:
     # ------------------------------------------------------------------ public
 
     def ask(self, prompt: str, model: Optional[str] = None, guard: Optional[Callable] = None,
-            meter=None) -> ProviderAnswer:
+            meter=None, history: Optional[list] = None) -> ProviderAnswer:
         """One question, at most ``attempts`` requests, all within one hard deadline. ``guard`` is the kill-switch
         check (raises to stop); ``meter`` charges every request against the run's budget reservation
-        (``before()`` raises ENGINE_BUDGET_EXHAUSTED; ``after(cost)``)."""
+        (``before()`` raises ENGINE_BUDGET_EXHAUSTED; ``after(cost)``). ``history`` (ADR 0049, MULTI_TURN engines
+        only): earlier turns, sent as the provider's own user / assistant messages; None = one question, the
+        request exactly as before."""
         model = model or self.model
         if model not in self.models or not isinstance(prompt, str) or not 1 <= len(prompt) <= self.MAX_PROMPT_CHARS:
             raise EngineError("ENGINE_PROTOCOL_ERROR", "REQUEST_REFUSED")
-        body = self._body(model, prompt)
+        if history is None:
+            body = self._body(model, prompt)
+        else:
+            self._check_history(history)
+            body = self._body_turns(model, history, prompt)
         end = self._mono() + self.timeout_s
         last = "ENGINE_UNAVAILABLE"
         for attempt in range(self.attempts):

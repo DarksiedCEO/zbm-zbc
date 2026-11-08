@@ -144,6 +144,18 @@ def request_body(model: str, prompt: str, max_uses: int = 3) -> bytes:
                        "tools": [{"type": TOOL_TYPE, "name": "web_search", "max_uses": max_uses}]}).encode("utf-8")
 
 
+# ADR 0049: the Messages API is stateless; earlier turns are sent as alternating user / assistant messages
+MULTI_TURN_DOCS = {"url": "https://platform.claude.com/docs/en/build-with-claude/working-with-messages",
+                   "read": "2026-11-08", "shape": "messages: [{role: user, content}, {role: assistant, content}, ...]"}
+
+
+def request_body_turns(model: str, history: list, prompt: str, max_uses: int = 3) -> bytes:
+    """``request_body`` with the earlier turns before the new user message (plain-text assistant content)."""
+    msgs = [{"role": h["role"], "content": h["text"]} for h in history] + [{"role": "user", "content": prompt}]
+    return json.dumps({"model": model, "max_tokens": MAX_TOKENS, "system": SYSTEM_PROMPT, "messages": msgs,
+                       "tools": [{"type": TOOL_TYPE, "name": "web_search", "max_uses": max_uses}]}).encode("utf-8")
+
+
 def parse_response(body: bytes, allowed_models: tuple = MODELS) -> ProviderAnswer:
     try:
         obj = strict_json(body)
@@ -251,6 +263,12 @@ class AnthropicEngine(HttpAnswerEngine):
 
     def _body(self, model: str, prompt: str) -> bytes:
         return request_body(model, prompt, self.max_searches)
+
+    MULTI_TURN = True
+    MULTI_TURN_DOCS = MULTI_TURN_DOCS
+
+    def _body_turns(self, model: str, history: list, prompt: str) -> bytes:
+        return request_body_turns(model, history, prompt, self.max_searches)
 
     def _parse(self, raw: bytes, model: str) -> ProviderAnswer:
         return parse_response(raw, (model,))

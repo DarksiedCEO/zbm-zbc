@@ -31,7 +31,10 @@ request record holds its SHA-256 and item count; topics from it are reported by 
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from typing import Optional
 
 from agents import fireteam_topics, naomi, priya_handoff, theo, zara
@@ -79,9 +82,12 @@ class ConversationsMixin:
             items, past_cap = priya_handoff.items(handoff)
             vid = derived_id("cnv", tid, actor, rk)
             ref = {"prompt_set_id": ps["prompt_set_id"], "version": ps["version"], "sha256": ps["sha256"]}
-            hand = None if handoff is None else {"sha256": sha(handoff), "items": len(items),
+            verification = self._handoff_verification(tid, body)
+            hand = None if handoff is None else {"sha256": priya_handoff.canonical_sha(handoff), "items": len(items),
                                                  "items_past_cap": past_cap, "priya_run_id_sha256":
-                                                 sha(handoff.get("run_id")), "verified_against_priya_record": False}
+                                                 sha(handoff.get("run_id")),
+                                                 "verified_against_priya_record": verification["state"] == "VERIFIED",
+                                                 "verification": verification}
             data = {"conversation_run_id": vid, "tenant_id": tid, "tenant_kind": t["kind"], "domain": body["domain"],
                     "prompt_set": ref, "engines": ps["engines"], "andre_approved": bool(andre),
                     "competitor_terms_sha256": sha(sorted(body.get("competitor_terms") or [])),
@@ -94,11 +100,12 @@ class ConversationsMixin:
                     "prompt_set_version": ref["version"], "prompt_set_sha256": ref["sha256"],
                     "engines": ps["engines"], "andre_approved": bool(andre),
                     "priya_handoff_sha256": None if hand is None else hand["sha256"],
-                    "priya_handoff_items": None if hand is None else hand["items"]}, (actor, rk))]
+                    "priya_handoff_items": None if hand is None else hand["items"],
+                    "priya_handoff_verification": verification["state"]}, (actor, rk))]
             self._commit("conversation_run_requested", self._req(data, actor, rk, body, vid), actor, evidence=ev)
             self.running_conversation_runs.add(vid)
         return self._execute_conversation_run(vid, tid, body["domain"], ps, items,
-                                              list(body.get("competitor_terms") or []))
+                                              list(body.get("competitor_terms") or []), verification)
 
     def _conversation_rules(self, t: dict, tid: str, body: dict, andre: bool) -> Optional[str]:
         """Under the lock: the authorisation rules. Returns the Finance client a client tenant is bound to."""
@@ -117,6 +124,10 @@ class ConversationsMixin:
                 raise Forbidden(R("HANDOFF_TENANT_MISMATCH"))
             if problems:
                 raise Invalid(R("HANDOFF_INVALID"), field="priya_handoff")
+            if self._handoff_verification(tid, body)["state"] == "FAILED":
+                raise Invalid(R("HANDOFF_VERIFICATION_FAILED"), field="priya_handoff_sha256")
+        elif body.get("priya_run_id") is not None or body.get("priya_handoff_sha256") is not None:
+            raise Invalid(R("HANDOFF_INVALID"), field="priya_handoff")
         if t["kind"] != "client":
             return None
         if not andre:
@@ -125,6 +136,20 @@ class ConversationsMixin:
         if not client:
             raise Conflict(R("TENANT_FINANCE_CLIENT_UNBOUND"))
         return client
+
+    def _handoff_verification(self, tid: str, body: dict) -> dict:
+        """Under the lock. The hand-off against Priya's stored run record (agents/priya_handoff.py RECORD_CONTRACT):
+        Priya's service keeps ``keyword_runs`` (PR #50); on this base it does not exist, so nothing is VERIFIED."""
+        doc = body.get("priya_handoff")
+        if doc is None:
+            return {"state": "NOT_VERIFIED", "reason": "NO_HANDOFF"}
+        runs = getattr(self, "keyword_runs", None)
+        rid_ = body.get("priya_run_id")
+        record = runs.get(rid_) if isinstance(runs, dict) and isinstance(rid_, str) else None
+        v = priya_handoff.verify(doc, tid, rid_, body.get("priya_handoff_sha256"), record)
+        if v["state"] == "NOT_VERIFIED" and runs is None and v["reason"] == "PRIYA_RECORD_NOT_FOUND":
+            v = {"state": "NOT_VERIFIED", "reason": "PRIYA_NOT_INSTALLED"}
+        return v
 
     # ------------------------------------------------------------------ the swarm
 
@@ -137,7 +162,7 @@ class ConversationsMixin:
                                             None if a is None else a["audit_id"])
 
     def _execute_conversation_run(self, vid: str, tid: str, domain: str, ps: dict, items: list,
-                                  competitor_terms: list) -> dict:
+                                  competitor_terms: list, verification: dict) -> dict:
         from svc_audits import _where
         try:
             guard = self.guard(tid)
@@ -146,7 +171,8 @@ class ConversationsMixin:
             box = zara.Crosscheck(tid, vid, topics)
             try:
                 guard(agent="zara")
-                out = self._swarm(vid, tid, domain, ps, items, competitor_terms, guard, topics, plans, box)
+                out = self._swarm(vid, tid, domain, ps, items, competitor_terms, guard, topics, plans, box,
+                                  verification)
             except Killed as k:
                 return self._interrupt_conversation_run(tid, vid, k.code)
             except Exception as exc:  # noqa: BLE001 - a run that crashes is closed now, never left running
@@ -175,7 +201,8 @@ class ConversationsMixin:
             with self.lock:
                 self.running_conversation_runs.discard(vid)
 
-    def _swarm(self, vid, tid, domain, ps, items, competitor_terms, guard, topics, plans, box) -> dict:
+    def _swarm(self, vid, tid, domain, ps, items, competitor_terms, guard, topics, plans, box,
+               verification: dict) -> dict:
         ctx = {"domain": domain, "terms": ps["brand_terms"], "rules": ps.get("brand_term_rules"),
                "competitor_terms": competitor_terms, "competitor_domains": list(ps.get("competitor_domains") or [])}
         engines = self.ports.engines
@@ -183,20 +210,33 @@ class ConversationsMixin:
         budget = self.engine_budget(tid, vid, ps, subject="conversation_run")
         cap = theo.CallCap(self.settings.theo_run_max_calls)
 
+        cancel = {m: threading.Event() for m in ("theo", "naomi")}
+
+        def member_guard(m):
+            def g(**kw):
+                if cancel[m].is_set():                     # LOW 7: past its wait, a member stops at its next step
+                    raise Killed("MEMBER_TIMED_OUT")
+                guard(**kw)
+            return g
+
         def run_theo():
-            guard(agent="theo")
-            res = theo.run_chains(topics, plans, engines, ps["engines"], n, guard, budget, cap, ctx, self.clock,
-                                  emit=lambda k, chains: box.receive("theo", k, chains))
-            return res
+            g = member_guard("theo")
+            g(agent="theo")
+            return theo.run_chains(topics, plans, engines, ps["engines"], n, g, budget, cap, ctx, self.clock,
+                                   emit=lambda k, chains: box.receive("theo", k, chains))
 
         def run_naomi():
-            guard(agent="naomi")
+            member_guard("naomi")(agent="naomi")
             return naomi.run(topics, items, tid, vid, self._gsc_context(tid),
-                             emit=lambda k, est: box.receive("naomi", k, est))
+                             emit=lambda k, est: box.receive("naomi", k, est), verification=verification)
 
         results: dict = {}
         killed: Optional[str] = None
-        with ThreadPoolExecutor(max_workers=2, thread_name_prefix="seo-fireteam") as pool:
+        # one bounded overall wait for the members (SEO_FIRETEAM_MEMBER_TIMEOUT_SECONDS): a member still running at
+        # the end is closed TIMED_OUT (Zara reports PARTIAL), told to stop, and never waited for
+        end = time.monotonic() + self.settings.fireteam_member_timeout_s
+        pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="seo-fireteam")
+        try:
             futs = {}
             for m, fn in (("theo", run_theo), ("naomi", run_naomi)):
                 if self.agent_blocked(m):
@@ -206,7 +246,13 @@ class ConversationsMixin:
                 futs[m] = pool.submit(fn)
             for m, f in futs.items():
                 try:
-                    res = f.result()
+                    res = f.result(timeout=max(0.0, end - time.monotonic()))
+                except FutureTimeout:
+                    cancel[m].set()
+                    log.error("fireteam member %s did not finish within its wait", m)
+                    results[m] = ("TIMED_OUT", None, "MEMBER_TIMED_OUT")
+                    box.member_closed(m, "TIMED_OUT", "MEMBER_TIMED_OUT")
+                    continue
                 except Killed as k:
                     if k.code == "AGENT_RESTRICTED":       # restricted between the check and its first step
                         results[m] = ("RESTRICTED", None, k.code)
@@ -225,6 +271,8 @@ class ConversationsMixin:
                 doc = theo.output(tid, vid, topics, plans, res, n) if m == "theo" else res
                 box.member_contract(m, doc)
                 box.member_closed(m, "DONE")
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
         if killed is not None:
             raise Killed(killed)
         guard(agent="zara")
@@ -238,7 +286,7 @@ class ConversationsMixin:
     def _theo_env(r, topics, plans, tid, vid, n) -> dict:
         state, res, why = r
         if state != "DONE":
-            outcome = {"RESTRICTED": "RESTRICTED", "KILLED": "KILLED"}.get(state, "FAILED")
+            outcome = {"RESTRICTED": "RESTRICTED", "KILLED": "KILLED"}.get(state, "FAILED")   # TIMED_OUT: FAILED
             return theo.envelope_for(outcome, None, None, topics, plans, reason=why)
         outcome, reason = theo.outcome_of(res) if topics else ("INSUFFICIENT_EVIDENCE", "NO_TOPICS")
         return theo.envelope_for(outcome, res, theo.output(tid, vid, topics, plans, res, n), topics, plans,

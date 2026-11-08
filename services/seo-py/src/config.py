@@ -176,6 +176,8 @@ class Settings:
     callum_resolve_max: int = 40
     # ADR 0049: the calls ONE conversation-fireteam run may reserve across every engine (Theo); 0 = OFF, nothing asked
     theo_run_max_calls: int = 0
+    # ADR 0049 review round 1 LOW 7: the overall wait for the fireteam's members; past it a member is TIMED_OUT
+    fireteam_member_timeout_s: int = 600
     report_branding: object = field(default_factory=lambda: _default_branding())   # client_report.Branding
     bind_addr: str = "127.0.0.1"
     port: int = 8500
@@ -213,7 +215,7 @@ NOT_BUILT = {
     "SEO_ZERO_DAY_URL": "Zero-Day: a port only in Wave 1 (NOT_CONNECTED)",
     "SEO_ORCA_PUBLISH_URL": "ORCA Publish: a port only in Wave 1 (NOT_CONNECTED)",
     "SEO_CLIENTFIX_URL": "Department 28 clientfix (fix execution): not in Wave 1",
-    # ADR 0049: Theo's follow-ups are deterministic templates; LLM-generated follow-ups (through the adapter) are not built
+    # ADR 0049: Theo's follow-ups are deterministic templates; LLM-generated follow-ups (adapter only) are not built
     "SEO_THEO_LLM_FOLLOWUPS": "LLM-generated conversation follow-ups for Theo: not built (templates only)",
 }
 INVOICE_VERIFICATION_MODES = ("finance", "trust")
@@ -635,6 +637,7 @@ def load(env: Optional[dict] = None) -> Settings:
     _perplexity(env, s)
     _answer_engines(env, s)
     s.theo_run_max_calls = _int(env, "SEO_THEO_RUN_MAX_CALLS", 0, 0, 2000)
+    s.fireteam_member_timeout_s = _int(env, "SEO_FIRETEAM_MEMBER_TIMEOUT_SECONDS", 600, 1, 3600)
     s.report_branding = _branding(env)
     s.bind_addr = (env.get("SEO_BIND_ADDR") or "127.0.0.1").strip()
     s.port = _int(env, "SEO_PORT", 8500, 1024, 65535)

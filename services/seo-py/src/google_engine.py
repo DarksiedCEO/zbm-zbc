@@ -152,6 +152,20 @@ def request_body(model: str, prompt: str) -> bytes:
                        "tools": [{"google_search": {}}]}).encode("utf-8")
 
 
+# ADR 0049: generateContent's ``contents`` "for multi-turn queries like chat ... contains the conversation history
+# and the latest request" (the API reference's Chat example alternates role user / model)
+MULTI_TURN_DOCS = {"url": "https://ai.google.dev/api/generate-content", "read": "2026-11-08",
+                   "shape": "contents: [{role: user, parts}, {role: model, parts}, ...]"}
+
+
+def request_body_turns(model: str, history: list, prompt: str) -> bytes:
+    """``request_body`` with the earlier turns (assistant = role ``model``) before the new user content."""
+    contents = [{"role": "user" if h["role"] == "user" else "model", "parts": [{"text": h["text"]}]}
+                for h in history] + [{"role": "user", "parts": [{"text": prompt}]}]
+    return json.dumps({"systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]}, "contents": contents,
+                       "tools": [{"google_search": {}}]}).encode("utf-8")
+
+
 def parse_response(body: bytes, allowed_models: tuple = MODELS) -> ProviderAnswer:
     try:
         obj = strict_json(body)
@@ -248,6 +262,12 @@ class GoogleEngine(HttpAnswerEngine):
 
     def _body(self, model: str, prompt: str) -> bytes:
         return request_body(model, prompt)
+
+    MULTI_TURN = True
+    MULTI_TURN_DOCS = MULTI_TURN_DOCS
+
+    def _body_turns(self, model: str, history: list, prompt: str) -> bytes:
+        return request_body_turns(model, history, prompt)
 
     def _parse(self, raw: bytes, model: str) -> ProviderAnswer:
         return parse_response(raw, (model,))

@@ -183,3 +183,7 @@ class ConversationRunCreate(Strict):
     competitor_terms: Annotated[list[Annotated[StrictStr, Field(min_length=2, max_length=80)]],
                                 Field(max_length=10)] = []
     priya_handoff: Optional[dict] = None
+    # review round 1 HIGH 1b: the run that produced the hand-off and the SHA-256 of its canonical form, checked against
+    # Priya's stored run record (agents/priya_handoff.py); without them the hand-off is NOT_VERIFIED (capped THIN)
+    priya_run_id: Optional[Annotated[StrictStr, Field(pattern=r"^seo-[a-z]{3}-[0-9a-f]{40}$")]] = None
+    priya_handoff_sha256: Optional[Annotated[StrictStr, Field(pattern=r"^[0-9a-f]{64}$")]] = None

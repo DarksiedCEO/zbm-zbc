@@ -4,6 +4,7 @@ including its consumer rules (tenant, self-contradicting counts). Pure."""
 
 from __future__ import annotations
 
+import copy
 import math
 
 from agents import fireteam_topics, naomi, priya_handoff
@@ -39,8 +40,14 @@ def test_the_band_always_holds_the_count_and_widens_with_it():
         if prev is not None:
             assert b["high"] - b["low"] >= prev
         prev = b["high"] - b["low"]
-    lo, hi = naomi.garwood(1000), naomi.garwood(1001)                      # the approximation errs outward
-    assert hi["low"] <= lo["low"] + 1 and hi["high"] >= lo["high"]
+    assert naomi.garwood(100)["method"].startswith("exact") and naomi.garwood(101)["method"].startswith("Wilson")
+
+
+def test_the_approximation_above_the_threshold_is_never_narrower_than_the_exact_band():
+    for k in (101, 102, 150, 200, 333, 500, 777, 1000, 2000):
+        ex, ap = naomi.garwood_exact(k), naomi.garwood_approx(k)
+        assert ap["low"] <= ex["low"] and ap["high"] >= ex["high"], (k, ex, ap)
+        assert ap["high"] - ap["low"] <= (ex["high"] - ex["low"]) * 1.15         # outward, but not absurdly
 
 
 # ---------------------------------------------------------------------------------------------- the estimator
@@ -77,11 +84,16 @@ def test_an_observed_thin_item_is_a_directional_proxy_band_with_low_confidence()
     assert "PROXY_NOT_PROMPT_VOLUME" in est["flags"] and "value" not in est      # never a bare number
 
 
-def test_confidence_is_never_high_even_for_a_large_count():
+def test_an_unverified_signal_is_capped_thin_and_confidence_is_never_high():
     big = {**GSC, "impressions": 50_000, "clicks": 10, "source": "bing_webmaster"}
     it = item("a", PS["prompts"][0], counts=big, status="MEASURED_NOT_TIERED")
     est = naomi.estimate_topic(_topic([it])[0], it)
+    assert est["reliability"] == "THIN" and est["confidence"] == "LOW" and est["verified"] is False
+    assert "HANDOFF_NOT_VERIFIED" in est["flags"] and est["signals"][0]["reliability_if_verified"] == "STRONG"
+    assert est["signals"][0]["data_class"] == "claimed"
+    est = naomi.estimate_topic(_topic([it])[0], it, verified=True)
     assert est["reliability"] == "STRONG" and est["confidence"] == "MEDIUM" and "BING_WINDOW_DIFFERS" in est["flags"]
+    assert "HANDOFF_NOT_VERIFIED" not in est["flags"]
 
 
 def test_context_from_the_latest_audit_is_never_a_topic_estimate():
@@ -118,6 +130,47 @@ def test_a_self_contradicting_count_is_refused():
     assert "items[0].observed_counts" in priya_handoff.validate(handoff(derived), "zbm")
     nan = item("a", "q one", counts={**GSC, "impressions": math.inf})
     assert priya_handoff.validate(handoff(nan), "zbm") == ["items[0].observed_counts"]
+
+
+def test_every_item_type_is_bounded_and_checked_against_how_priya_builds_it():
+    forged = item("a", "q one", counts={**GSC, "impressions": 10 ** 12, "source": "bing_webmaster"},
+                  status="MEASURED_NOT_TIERED")                            # the review's 10^12 forgery
+    assert priya_handoff.validate(handoff(forged), "zbm") == ["items[0].observed_counts"]
+    wrong_src = item("a", "q one", counts={**GSC, "source": "search_console"}, status="MEASURED_NOT_TIERED")
+    assert priya_handoff.validate(handoff(wrong_src), "zbm") == ["items[0].observed_counts.source"]
+    bing_below = item("a", "q one", counts={**GSC, "source": "bing_webmaster"})
+    assert priya_handoff.validate(handoff(bing_below), "zbm") == ["items[0].observed_counts.source"]
+    future = item("a", "q one", counts={**GSC, "date_range": {"start": "2026-11-01", "end": "2026-12-01"}})
+    assert priya_handoff.validate(handoff(future), "zbm") == ["items[0].observed_counts.date_range"]
+    inverted = item("a", "q one", counts={**GSC, "date_range": {"start": "2026-11-01", "end": "2026-10-01"}})
+    assert priya_handoff.validate(handoff(inverted), "zbm") == ["items[0].observed_counts.date_range"]
+    unmeasured = item("a", "q one", status="UNKNOWN_NOT_MEASURED")             # observed but "not measured"
+    assert priya_handoff.validate(handoff(unmeasured), "zbm") == ["items[0].volume_status"]
+    derived_wrong = item("a", "q one", origin="derived", status="BELOW_THRESHOLD")
+    assert priya_handoff.validate(handoff(derived_wrong), "zbm") == ["items[0].volume_status"]
+    ok = item("a", "q one", counts={**GSC, "impressions": 9_000_000, "source": "bing_webmaster"},
+              status="MEASURED_NOT_TIERED")
+    assert priya_handoff.validate(handoff(ok), "zbm") == []
+
+
+def test_verification_against_priyas_record():
+    doc = handoff(item("a", "q one", counts=dict(GSC)))
+    h = priya_handoff.canonical_sha(doc)
+    rec = {"run_id": doc["run_id"], "tenant_id": "zbm", "status": "completed", "handoff_sha256": h, "handoff_items": 1}
+    v = priya_handoff.verify
+    assert v(doc, "zbm", doc["run_id"], h, rec) == {"state": "VERIFIED", "reason": None}
+    assert v(doc, "zbm", None, None, rec)["state"] == "NOT_VERIFIED"
+    assert v(doc, "zbm", doc["run_id"], h, None)["reason"] == "PRIYA_RECORD_NOT_FOUND"
+    assert v(doc, "zbm", doc["run_id"], h, {**rec, "tenant_id": "acme"})["reason"] == "PRIYA_RECORD_NOT_FOUND"
+    assert v(doc, "zbm", doc["run_id"], h, {**rec, "handoff_sha256": None})["reason"] == \
+        "PRIYA_RECORD_HAS_NO_HANDOFF_HASH"
+    assert v(doc, "zbm", doc["run_id"], h, {**rec, "status": "running"})["reason"] == "PRIYA_RUN_NOT_COMPLETED"
+    assert v(doc, "zbm", doc["run_id"], "0" * 64, rec) == {"state": "FAILED", "reason": "DOCUMENT_HASH_MISMATCH"}
+    tampered = copy.deepcopy(doc)
+    tampered["items"][0]["observed_counts"]["impressions"] = 19
+    assert v(tampered, "zbm", doc["run_id"], priya_handoff.canonical_sha(tampered), rec)["reason"] == \
+        "RECORD_HASH_MISMATCH"
+    assert v(doc, "zbm", "seo-kwr-" + "9" * 40, h, rec)["reason"] == "RUN_ID_MISMATCH"
 
 
 def test_wrong_schema_untrusted_flag_and_duplicate_keys_are_refused():

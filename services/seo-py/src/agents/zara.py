@@ -17,6 +17,8 @@ tenant or run, names a topic nobody planned, or contradicts itself is HELD, neve
   VOLUME_WITHOUT_CHAIN         Naomi: a measured proxy; Theo: no complete chain on any engine
   UNSTABLE_CHAIN               Theo: the complete chains of one engine recommend different entities
   ENGINES_DISAGREE             Theo: one engine's chains recommend the client, another's a competitor
+  HANDOFF_NOT_VERIFIED         Naomi: the volume rests on a hand-off not verified against Priya's record (BLOCKING:
+                               the topic is never CLEARED, never TEST, and volume is never a priority basis)
 Verdicts (closed): CLEARED (both halves, no conflict), FLAGGED (both halves, conflicts listed; passes downstream with
 its decision downgraded), PARTIAL (one member's half is missing because that member failed / was restricted / did not
 run: the present half passes, the missing half is ``null`` with the reason — Zara never fills it in), NOTHING_OBSERVED
@@ -24,7 +26,7 @@ run: the present half passes, the missing half is ``null`` with the reason — Z
 half is invalid or contradictory, or both are missing: nothing passes downstream for that topic).
 Downstream decision (closed vocabulary of the envelope): never ACT. TEST only for a CLEARED topic with a STRONG
 chain and at least MODERATE volume; WATCH for other CLEARED topics; INSUFFICIENT_EVIDENCE for FLAGGED and PARTIAL.
-``priority_basis`` says what a consumer may rank on: ``chain_and_volume`` (CLEARED with MODERATE+ volume),
+``priority_basis`` says what a consumer may rank on: ``chain_and_volume`` (CLEARED with verified MODERATE+ volume),
 ``chain_only`` (volume thin or unknown: a consumer must not rank by volume), ``volume_only``, ``none``.
 Priya's emerging-query loop receives, for each topic that came from her hand-off and was not HELD, the chain pattern,
 the volume reliability and the conflicts (``to_priya``); nothing consumes it yet (contract only).
@@ -43,13 +45,13 @@ VERSION = "zara-rules/2026-11-08.1"
 CONTRACT = "zara.conversation_volume/1"
 VERDICTS = ("CLEARED", "FLAGGED", "PARTIAL", "NOTHING_OBSERVED", "HELD")
 CONFLICTS = ("STRONG_CHAIN_THIN_VOLUME", "STRONG_CHAIN_UNKNOWN_VOLUME", "VOLUME_WITHOUT_CHAIN", "UNSTABLE_CHAIN",
-             "ENGINES_DISAGREE")
+             "ENGINES_DISAGREE", "HANDOFF_NOT_VERIFIED")
 HOLDS = ("THEO_PAYLOAD_INVALID", "NAOMI_PAYLOAD_INVALID", "THEO_SELF_CONTRADICTION", "NAOMI_SELF_CONTRADICTION",
          "TOPIC_NOT_PLANNED", "BOTH_MEMBERS_MISSING", "DUPLICATE_PAYLOAD", "THEO_TENANT_OR_RUN_MISMATCH",
          "NAOMI_TENANT_OR_RUN_MISMATCH")
 _CONTRACTS = {"theo": theo.CONTRACT, "naomi": naomi.CONTRACT}
 MEMBERS = ("theo", "naomi")
-MEMBER_STATES = ("DONE", "FAILED", "RESTRICTED", "KILLED", "NOT_RUN")
+MEMBER_STATES = ("DONE", "FAILED", "RESTRICTED", "KILLED", "TIMED_OUT", "NOT_RUN")
 RULE = "Zara changes no member's number: she pairs, flags, downgrades and holds; a missing half is never filled in"
 LIMITS = [
     "Zara checks consistency between two members' outputs; she does not re-measure either. A CLEARED topic is "
@@ -58,44 +60,64 @@ LIMITS = [
     "reason to hold back a priority, not proof that either is wrong.",
 ]
 
-_CHAIN_KEYS = {"topic_key", "engine", "chains", "complete", "loop_stopped", "not_complete", "turns_planned",
-               "plan_flags", "by_turn", "final_recommendation", "client_recommended", "unstable", "pattern", "strength"}
-_VOL_KEYS = {"topic_key", "proxy_for", "estimator", "status", "reliability", "confidence", "band", "unit", "window",
-             "signals", "flags", "unknown_reason"}
+_CHAIN_KEYS = {"topic_key", "engine", "context_mode", "chains", "complete", "loop_stopped", "not_complete",
+               "turns_planned", "plan_flags", "by_turn", "final_recommendation", "client_recommended",
+               "client_outcome", "unstable", "pattern", "strength"}
+_VOL_KEYS = {"topic_key", "proxy_for", "estimator", "status", "verified", "reliability", "confidence", "band", "unit",
+             "window", "signals", "flags", "unknown_reason"}
 
 
 def _num(x) -> bool:
     return isinstance(x, (int, float)) and not isinstance(x, bool)
 
 
+def _counts(box) -> Optional[int]:
+    if not isinstance(box, dict) or not isinstance(box.get("client"), int) or not isinstance(box.get("competitor"),
+                                                                                             dict):
+        return None
+    vals = list(box["competitor"].values())
+    if not all(isinstance(v, int) and v >= 0 for v in vals) or box["client"] < 0:
+        return None
+    return box["client"] + sum(vals)
+
+
 def check_chains(chains, topic_key: str) -> Optional[str]:
-    """None when Theo's half for a topic is well-formed and consistent; else the hold reason."""
+    """None when Theo's half for a topic is well-formed and consistent; else the hold reason. The pattern, outcome
+    and strength are RE-DERIVED here from the counts with Theo's own rule and must agree (review round 1 MED 4)."""
     if not isinstance(chains, list) or not chains:
         return "THEO_PAYLOAD_INVALID"
     for c in chains:
         if not isinstance(c, dict) or set(c) != _CHAIN_KEYS or c["topic_key"] != topic_key:
             return "THEO_PAYLOAD_INVALID"
-        if c["pattern"] not in theo.PATTERNS or c["strength"] not in theo.STRENGTHS:
+        if c["pattern"] not in theo.PATTERNS or c["strength"] not in theo.STRENGTHS \
+                or c["context_mode"] not in theo.CONTEXT_MODES \
+                or c["client_outcome"] not in theo.OUTCOMES + (None,):
             return "THEO_PAYLOAD_INVALID"
         if not all(isinstance(c[k], int) and c[k] >= 0 for k in ("chains", "complete", "loop_stopped")):
             return "THEO_PAYLOAD_INVALID"
-        fr = c["final_recommendation"]
-        if not isinstance(fr, dict) or not isinstance(c["by_turn"], list) or not c["by_turn"]:
+        fr, bt = c["final_recommendation"], c["by_turn"]
+        if not isinstance(fr, dict) or not isinstance(bt, list) or not bt or not isinstance(bt[0], dict):
             return "THEO_PAYLOAD_INVALID"
-        if c["complete"] > c["chains"]:
+        rec, named = _counts(fr.get("recommended")), _counts(fr.get("named_first_only"))
+        none, unknown = fr.get("none"), fr.get("unknown")
+        if rec is None or named is None or not isinstance(none, int) or not isinstance(unknown, int):
+            return "THEO_PAYLOAD_INVALID"
+        try:
+            vis = bt[0]["client_mentioned"]["k"]
+            low = bt[0]["client_mentioned_unconfirmed"]
+        except (KeyError, TypeError):
+            return "THEO_PAYLOAD_INVALID"
+        nc = c["complete"]
+        if nc > c["chains"] or rec + named + none != nc or unknown != c["chains"] - nc:
             return "THEO_SELF_CONTRADICTION"
-        won = fr.get("client", 0) + sum((fr.get("competitor") or {}).values()) + fr.get("none", 0)
-        if won != c["complete"] or fr.get("unknown") != c["chains"] - c["complete"]:
+        outcome = theo.client_outcome(fr["recommended"]["client"], nc)
+        if outcome != c["client_outcome"] or c["client_recommended"].get("k") != fr["recommended"]["client"]:
             return "THEO_SELF_CONTRADICTION"
-        if (c["complete"] == 0) != (c["pattern"] == "INCONCLUSIVE") or \
-                (c["complete"] == 0 and c["strength"] != "NONE"):
+        if theo.pattern_of(outcome, vis, vis + low, nc, c["context_mode"]) != c["pattern"]:
             return "THEO_SELF_CONTRADICTION"
-        first = c["by_turn"][0]["client_mentioned"]["k"]
-        if c["pattern"] == "INVISIBLE_THEN_RECOMMENDED" and (first or not fr.get("client")):
-            return "THEO_SELF_CONTRADICTION"
-        if c["pattern"] in ("VISIBLE_THEN_NOT_RECOMMENDED", "NOT_RECOMMENDED") and fr.get("client"):
-            return "THEO_SELF_CONTRADICTION"
-        if c["strength"] == "STRONG" and c["complete"] < theo.MIN_USABLE:
+        strength = "STRONG" if nc >= theo.MIN_USABLE and outcome in ("RECOMMENDED", "NOT_RECOMMENDED") else \
+            "WEAK" if nc else "NONE"
+        if strength != c["strength"]:
             return "THEO_SELF_CONTRADICTION"
     return None
 
@@ -109,15 +131,20 @@ def check_volume(v, topic_key: str) -> Optional[str]:
         return "NAOMI_PAYLOAD_INVALID"
     if v["status"] == "UNKNOWN":
         if v["band"] is not None or v["signals"] or v["reliability"] != "NONE" or v["confidence"] != "NONE" \
-                or v["unknown_reason"] not in naomi.UNKNOWN_REASONS:
+                or v["unknown_reason"] not in naomi.UNKNOWN_REASONS or v["verified"] is not None:
             return "NAOMI_SELF_CONTRADICTION"
         return None
     b = v["band"]
     if not isinstance(b, dict) or not _num(b.get("low")) or not _num(b.get("high")) or b["low"] < 0 \
-            or b["low"] > b["high"] or not v["signals"] or v["reliability"] == "NONE":
+            or b["low"] > b["high"] or not v["signals"] or v["reliability"] == "NONE" \
+            or not isinstance(v["verified"], bool) or not isinstance(v["flags"], list):
         return "NAOMI_SELF_CONTRADICTION"
     k = v["signals"][0].get("observed_impressions")
-    if not isinstance(k, int) or naomi._reliability(k) != v["reliability"] or not b["low"] <= k <= b["high"]:
+    if not isinstance(k, int) or isinstance(k, bool) or not b["low"] <= k <= b["high"]:
+        return "NAOMI_SELF_CONTRADICTION"
+    # an unverified signal is THIN whatever its count, and says so (review round 1 HIGH 1c)
+    want = naomi._reliability(k) if v["verified"] else "THIN"
+    if v["reliability"] != want or ("HANDOFF_NOT_VERIFIED" in v["flags"]) == v["verified"]:
         return "NAOMI_SELF_CONTRADICTION"
     if v["confidence"] != ("LOW" if v["reliability"] == "THIN" else "MEDIUM"):
         return "NAOMI_SELF_CONTRADICTION"
@@ -135,11 +162,13 @@ def conflicts(chains: list, vol: dict) -> list:
         out.append("VOLUME_WITHOUT_CHAIN")
     if any(c["unstable"] for c in chains):
         out.append("UNSTABLE_CHAIN")
-    pro = any(c["complete"] and c["final_recommendation"]["client"] * 2 > c["complete"] for c in chains)
-    con = any(c["complete"] and sum(c["final_recommendation"]["competitor"].values()) * 2 > c["complete"]
-              for c in chains)
+    pro = any(c["client_outcome"] == "RECOMMENDED" for c in chains)
+    con = any(c["complete"] and sum(c["final_recommendation"]["recommended"]["competitor"].values()) * 2 >
+              c["complete"] for c in chains)
     if pro and con:
         out.append("ENGINES_DISAGREE")
+    if vol["status"] != "UNKNOWN" and vol["verified"] is not True:
+        out.append("HANDOFF_NOT_VERIFIED")                 # blocking: never CLEARED, never TEST, never ranked
     return out
 
 
@@ -157,11 +186,15 @@ class Crosscheck:
         self.unplanned: list = []
         self.dupes: list = []
         self.bad: dict = {}
+        self.late: list = []
         self.checks = {"received": {m: 0 for m in MEMBERS}, "checked_on_arrival": 0, "checked_at_close": 0}
         self._lock = threading.Lock()
 
     def receive(self, member: str, topic_key: str, payload) -> None:
         with self._lock:
+            if member in self.closed:                     # a member past its wait (or closed): never used
+                self.late.append({"member": member, "topic_key": str(topic_key)[:40]})
+                return
             self.checks["received"][member] += 1
             if topic_key not in self.topics:
                 self.unplanned.append({"member": member, "topic_key": str(topic_key)[:40]})
@@ -233,7 +266,8 @@ class Crosscheck:
         if not (has_c and has_v):
             item.update(verdict="PARTIAL", conflicts=[],
                         downstream={"passes": True, "decision": "INSUFFICIENT_EVIDENCE",
-                                    "priority_basis": "chain_only" if has_c else "volume_only"})
+                                    "priority_basis": "chain_only" if has_c else
+                                    "volume_only" if vo["status"] != "UNKNOWN" and vo["verified"] is True else "none"})
             return item
         if not any(c["complete"] for c in ch) and vo["status"] == "UNKNOWN":
             item.update(verdict="NOTHING_OBSERVED", conflicts=[],
@@ -241,13 +275,14 @@ class Crosscheck:
             return item
         cf = conflicts(ch, vo)
         strong = any(c["strength"] == "STRONG" for c in ch)
-        vol_ok = vo["reliability"] in ("MODERATE", "STRONG")
+        vol_ok = vo["reliability"] in ("MODERATE", "STRONG") and vo["verified"] is True
+        vol_usable = vo["status"] != "UNKNOWN" and vo["verified"] is True
         if cf:
             item.update(verdict="FLAGGED", conflicts=cf,
                         downstream={"passes": True, "decision": "INSUFFICIENT_EVIDENCE",
                                     "priority_basis": "chain_only" if any(c["complete"] for c in ch) and not vol_ok
                                     else "chain_and_volume" if vol_ok and any(c["complete"] for c in ch)
-                                    else "volume_only" if vo["status"] != "UNKNOWN" else "none"})
+                                    else "volume_only" if vol_usable else "none"})
         else:
             item.update(verdict="CLEARED", conflicts=[],
                         downstream={"passes": True, "decision": "TEST" if strong and vol_ok else "WATCH",
@@ -280,17 +315,18 @@ class Crosscheck:
                     "items": items, "to_priya": {"contract": "zara.priya_feedback/1", "consumer": "priya",
                                                  "state": "NOT_CONSUMED", "items": to_priya},
                     "unplanned_payloads": self.unplanned[:50], "duplicate_payloads": self.dupes[:50],
+                    "late_payloads": self.late[:50],
                     "checks": {**self.checks, "received": dict(self.checks["received"])}, "rule": RULE}
 
 
 def _chain_view(c: dict) -> dict:
-    return {k: c[k] for k in ("engine", "chains", "complete", "pattern", "strength", "unstable",
-                              "client_recommended", "final_recommendation")}
+    return {k: c[k] for k in ("engine", "context_mode", "chains", "complete", "pattern", "strength", "unstable",
+                              "client_outcome", "client_recommended", "final_recommendation")}
 
 
 def _volume_view(v: dict) -> dict:
-    return {k: v[k] for k in ("status", "reliability", "confidence", "band", "unit", "window", "unknown_reason",
-                              "flags")}
+    return {k: v[k] for k in ("status", "verified", "reliability", "confidence", "band", "unit", "window",
+                              "unknown_reason", "flags")}
 
 
 def envelope_for(result: dict) -> dict:

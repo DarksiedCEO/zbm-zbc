@@ -27,8 +27,9 @@ def chains_for(t, plans, script=WIN, n=3):
     return res, {c["topic_key"]: [c] for c in res["chains"]}
 
 
-def volumes_for(t, items=()):
-    out = naomi.run(t, list(items), "zbm", RUN, {"state": "UNAVAILABLE"})
+def volumes_for(t, items=(), verified=False):
+    out = naomi.run(t, list(items), "zbm", RUN, {"state": "UNAVAILABLE"},
+                    verification={"state": "VERIFIED" if verified else "NOT_VERIFIED", "reason": None})
     return out, {v["topic_key"]: v for v in out["topics"]}
 
 
@@ -49,22 +50,38 @@ def test_a_strong_chain_with_thin_volume_is_flagged_and_never_ranked_by_volume()
     vout, vol = volumes_for(t, its)
     r = box_with(t, plans, res, ch, vout, vol)
     i = r["items"][0]
-    assert i["verdict"] == "FLAGGED" and i["conflicts"] == ["STRONG_CHAIN_THIN_VOLUME"]
+    assert i["verdict"] == "FLAGGED" and i["conflicts"] == ["STRONG_CHAIN_THIN_VOLUME", "HANDOFF_NOT_VERIFIED"]
     assert i["downstream"] == {"passes": True, "decision": "INSUFFICIENT_EVIDENCE", "priority_basis": "chain_only"}
     j = r["items"][1]
     assert j["conflicts"] == ["STRONG_CHAIN_UNKNOWN_VOLUME"] and j["volume"]["status"] == "UNKNOWN"
     assert r["checks"]["checked_on_arrival"] == 2 and r["status"] == "OK"
 
 
-def test_a_cleared_topic_with_moderate_volume_may_be_tested_never_acted_on():
+def test_a_cleared_topic_with_verified_moderate_volume_may_be_tested_never_acted_on():
     its = [item("a", PS2["prompts"][0], counts={**GSC, "impressions": 300, "source": "bing_webmaster"},
                 status="MEASURED_NOT_TIERED")]
     t, plans = topics(ps={**PS, "prompts": PS2["prompts"][:1]}, items=its)
     res, ch = chains_for(t, plans)
-    vout, vol = volumes_for(t, its)
+    vout, vol = volumes_for(t, its, verified=True)
     i = box_with(t, plans, res, ch, vout, vol)["items"][0]
     assert i["verdict"] == "CLEARED" and i["downstream"]["decision"] == "TEST"
     assert i["downstream"]["priority_basis"] == "chain_and_volume"
+
+
+def test_an_unverified_hand_off_blocks_test_and_volume_priority_even_at_a_huge_count():
+    its = [item("a", PS2["prompts"][0], counts={**GSC, "impressions": 9_000_000, "source": "bing_webmaster"},
+                status="MEASURED_NOT_TIERED")]
+    t, plans = topics(ps={**PS, "prompts": PS2["prompts"][:1]}, items=its)
+    res, ch = chains_for(t, plans)
+    vout, vol = volumes_for(t, its)                                       # not verified
+    v = vol[t[0]["topic_key"]]
+    assert v["reliability"] == "THIN" and v["signals"][0]["reliability_if_verified"] == "STRONG"
+    i = box_with(t, plans, res, ch, vout, vol)["items"][0]
+    assert i["verdict"] == "FLAGGED" and "HANDOFF_NOT_VERIFIED" in i["conflicts"]
+    assert i["downstream"] == {"passes": True, "decision": "INSUFFICIENT_EVIDENCE", "priority_basis": "chain_only"}
+    forged = copy.deepcopy(vol)                                           # a payload claiming STRONG unverified
+    forged[t[0]["topic_key"]].update(reliability="STRONG", confidence="MEDIUM")
+    assert box_with(t, plans, res, ch, vout, forged)["items"][0]["hold_reason"] == "NAOMI_SELF_CONTRADICTION"
 
 
 def test_volume_without_any_complete_chain_is_flagged():
@@ -74,8 +91,11 @@ def test_volume_without_any_complete_chain_is_flagged():
     res, ch = chains_for(t, plans, script={1: EngineError("ENGINE_UNAVAILABLE")}, n=1)
     vout, vol = volumes_for(t, its)
     i = box_with(t, plans, res, ch, vout, vol)["items"][0]
-    assert i["verdict"] == "FLAGGED" and i["conflicts"] == ["VOLUME_WITHOUT_CHAIN"]
-    assert i["downstream"]["priority_basis"] == "volume_only"
+    assert i["verdict"] == "FLAGGED" and i["conflicts"] == ["VOLUME_WITHOUT_CHAIN", "HANDOFF_NOT_VERIFIED"]
+    assert i["downstream"]["priority_basis"] == "none"                     # unverified volume is never a basis
+    vout, vol = volumes_for(t, its, verified=True)
+    i = box_with(t, plans, res, ch, vout, vol)["items"][0]
+    assert i["conflicts"] == ["VOLUME_WITHOUT_CHAIN"] and i["downstream"]["priority_basis"] == "volume_only"
 
 
 def test_nothing_observed_is_not_cleared():
@@ -174,9 +194,10 @@ def test_engines_disagreeing_and_unstable_chains_are_flagged():
     k = t[0]["topic_key"]
     res, ch = chains_for(t, plans)
     lose = copy.deepcopy(ch[k][0])
-    lose.update(engine="anthropic", pattern="NOT_RECOMMENDED",
-                final_recommendation={**lose["final_recommendation"], "client": 0, "competitor": {"RivalCo": 3}})
-    lose["by_turn"][0]["client_mentioned"]["k"] = 0
+    lose.update(engine="anthropic", pattern="NOT_RECOMMENDED", client_outcome="NOT_RECOMMENDED",
+                final_recommendation={**lose["final_recommendation"],
+                                      "recommended": {"client": 0, "competitor": {"RivalCo": 3}}})
+    lose["client_recommended"] = {**lose["client_recommended"], "k": 0}
     mixed = copy.deepcopy(ch[k][0])
     mixed.update(engine="google", unstable=True)
     vout, vol = volumes_for(t)
@@ -217,3 +238,31 @@ def test_priya_topics_feed_back_to_priya_without_query_text():
     fb = r["to_priya"]["items"]
     assert [x["priya_key"] for x in fb] == [its[0]["key"]] and fb[0]["volume_reliability"] == "THIN"
     assert "reimburse" not in repr(r)
+
+
+def test_a_stacked_chain_claiming_true_multi_turn_invisibility_is_held():
+    t, plans = topics(ps={**PS, "prompts": PS2["prompts"][:1]})
+    res, ch = chains_for(t, plans)
+    k = t[0]["topic_key"]
+    assert ch[k][0]["pattern"] == "INVISIBLE_AT_OPENING_RECOMMENDED_STACKED"
+    lie = copy.deepcopy(ch)
+    lie[k][0]["pattern"] = "INVISIBLE_THEN_RECOMMENDED"
+    vout, vol = volumes_for(t)
+    assert box_with(t, plans, res, lie, vout, vol)["items"][0]["hold_reason"] == "THEO_SELF_CONTRADICTION"
+    strong = copy.deepcopy(ch)
+    strong[k][0].update(complete=3, strength="STRONG", client_outcome="MIXED", pattern="MIXED")
+    assert box_with(t, plans, res, strong, vout, vol)["items"][0]["hold_reason"] == "THEO_SELF_CONTRADICTION"
+
+
+def test_a_payload_arriving_after_its_member_was_closed_is_never_used():
+    t, plans = topics(ps={**PS, "prompts": PS2["prompts"][:1]})
+    _res, ch = chains_for(t, plans)
+    _vout, vol = volumes_for(t)
+    b = zara.Crosscheck("zbm", RUN, t)
+    b.receive("naomi", t[0]["topic_key"], vol[t[0]["topic_key"]])
+    b.member_closed("naomi", "DONE")
+    b.member_closed("theo", "TIMED_OUT", "MEMBER_TIMED_OUT")
+    b.receive("theo", t[0]["topic_key"], ch[t[0]["topic_key"]])              # too late
+    r = b.result()
+    assert r["late_payloads"] == [{"member": "theo", "topic_key": t[0]["topic_key"]}]
+    assert r["items"][0]["chain"] is None and r["items"][0]["chain_missing"] == "THEO_TIMED_OUT:MEMBER_TIMED_OUT"

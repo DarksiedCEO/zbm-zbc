@@ -8,9 +8,10 @@ estimates a DIRECTIONAL PROXY from owned / free signals only, and says so on eve
   signal                                                      | state on this branch
   ------------------------------------------------------------|-----------------------------------------------------
   Priya's EMERGING item for the topic (priya-emerging-handoff/1)| read when the caller passes the hand-off: its
-    observed_counts = this property's impressions for that exact | ``observed_counts`` (Search Console or Bing, as
-    query, below Priya's ESTABLISHED threshold                   | Priya measured them; NOT verified against a Priya
-                                                                 | record: Priya stores only a hash)
+    observed_counts = this property's impressions for that exact | ``observed_counts`` (Search Console below Priya's
+    query: Search Console under her ESTABLISHED threshold        | threshold, or a Bing-only count of any size);
+    (BELOW_THRESHOLD), or a Bing-only count (MEASURED_NOT_TIERED)| VERIFIED only against Priya's stored run record
+                                                                 | (agents/priya_handoff.py); until then capped THIN
   the latest completed audit's Search Console query-class totals | read when present: the property's impressions of
     (``search_performance.by_query_class.classes.question``)     | ALL question-form queries; context only, never
                                                                  | attributed to one topic
@@ -22,12 +23,17 @@ The estimator (``ESTIMATOR``), per topic:
   2. a derived item, a refused item or no item -> ``status: UNKNOWN`` with the reason; band null; reliability NONE;
   3. an observed item -> one SIGNAL per source (never summed across sources: Search Console and Bing cover different
      windows): the observed impression count k, its window, and the exact Garwood 95% Poisson band on k (lower
-     chi2(0.025; 2k)/2, upper chi2(0.975; 2k+2)/2, computed here by bisection on the Poisson CDF up to k = 1,000 and
-     the Wilson-Hilferty form above, rounded OUTWARD to 0.01). The band models how far such a count could move from
-     one window to the next at an unchanged rate (impressions are the engine's full count, not a sample);
-  4. reliability from k: THIN (< 20, Priya's threshold), MODERATE (< 1,000), STRONG (>= 1,000); confidence LOW for
-     THIN, MEDIUM otherwise — NEVER HIGH: search impressions on one property are a proxy for how often people ask an
-     AI engine about the topic, not a measurement of it;
+     chi2(0.025; 2k)/2, upper chi2(0.975; 2k+2)/2, computed here by bisection on the Poisson CDF up to
+     k = ``GARWOOD_EXACT_MAX`` and the Wilson-Hilferty form with an outward margin above, rounded OUTWARD to 0.01;
+     tests prove the approximation never narrows the exact band). The band models how far such a count could move
+     from one window to the next at an unchanged rate (impressions are the engine's full count, not a sample);
+  4. reliability from k: THIN (< 20, Priya's threshold), MODERATE (< 1,000), STRONG (>= 1,000) — but ONLY for a
+     VERIFIED hand-off: an unverified signal (the caller's claim; Priya does not record the hand-off hash yet) is
+     capped at THIN whatever its count, flagged ``HANDOFF_NOT_VERIFIED``, with the uncapped tier reported as
+     ``reliability_if_verified``. Confidence LOW for THIN, MEDIUM otherwise — NEVER HIGH: search impressions on one
+     property are a proxy for how often people ask an AI engine about the topic, not a measurement of it.
+     What THIN means in practice: a Search Console signal from the hand-off is under 20 by Priya's rule; a Bing-only
+     signal can be any size, and is THIN here only while unverified;
 The estimate's unit is ``impressions_on_this_property`` over the signal's window: it is not market volume and not a
 count of AI prompts. Naomi asks no engine and spends nothing.
 """
@@ -42,23 +48,23 @@ from agents import fireteam_topics, priya_handoff
 from envelope import envelope, finding
 
 AGENT, TASK = "naomi", "prompt_volume_estimate"
-ESTIMATOR = "naomi-estimator/2026-11-08.1"
+ESTIMATOR = "naomi-estimator/2026-11-08.2"     # .2: unverified signals capped THIN; exact band to 100
 CONTRACT = "naomi.prompt_volume/1"
 STATUSES = ("DIRECTIONAL_PROXY", "UNKNOWN")
 RELIABILITY = ("NONE", "THIN", "MODERATE", "STRONG")
 CONFIDENCE = ("NONE", "LOW", "MEDIUM")
 UNKNOWN_REASONS = ("NO_OWNED_SIGNAL", "PRIYA_DERIVED_NOT_MEASURED", "PRIYA_ITEM_NOT_MEASURED", "TOPIC_REFUSED")
 THIN_BELOW, STRONG_FROM = 20, 1000
-GARWOOD_EXACT_MAX = 1000
+GARWOOD_EXACT_MAX = 100              # exact bisection up to here; Wilson-Hilferty (outward) above
 UNIT = "impressions_on_this_property"
 PROXY_FOR = "how often this topic is asked of AI answer engines (directional proxy; not measured anywhere)"
 LIMITS = [
     "No source measures how often a prompt is asked of an AI engine; every estimate here is a directional proxy "
     "from owned search data (impressions on the client's own property), never prompt volume.",
-    "Priya's hand-off carries only EMERGING items (below her 20-impression threshold), so a signal from it is THIN "
-    "by construction; ESTABLISHED queries are not handed off.",
-    "The hand-off arrives in the request (Priya's ledger is not stored), so its counts are not verified against a "
-    "Priya record here.",
+    "Priya's hand-off carries only EMERGING items: a Search Console count under her 20-impression threshold, or a "
+    "Bing-only count of any size. ESTABLISHED queries are not handed off.",
+    "A hand-off not verified against Priya's stored run record is a claim: every signal from it is capped at THIN "
+    "(HANDOFF_NOT_VERIFIED). Priya does not record the hand-off hash yet, so today nothing is verified.",
     "Search Console omits anonymised queries and returns top rows only; a topic with no row is UNKNOWN, not zero.",
     "The Garwood band models period-to-period variability of a full count at an unchanged rate; it is not a "
     "forecast and not sampling error.",
@@ -81,7 +87,7 @@ def _pois_cdf(k: int, mu: float) -> float:
 def _solve(k: int, target: float) -> float:
     """mu with P(X <= k; mu) = target (decreasing in mu), by bisection."""
     lo, hi = 0.0, k + 20.0 + 10.0 * math.sqrt(k + 1)
-    for _ in range(200):
+    for _ in range(80):
         mid = (lo + hi) / 2
         if _pois_cdf(k, mid) > target:
             lo = mid
@@ -96,19 +102,26 @@ def _wh(k2: float, p: float) -> float:
     return k2 * (1 - 2 / (9 * k2) + z * math.sqrt(2 / (9 * k2))) ** 3 / 2
 
 
-def garwood(k: int) -> dict:
-    if k < 0:
-        raise ValueError("count")
-    if k <= GARWOOD_EXACT_MAX:
-        low = 0.0 if k == 0 else _solve(k - 1, 0.975)
-        high = _solve(k, 0.025)
-        how = "exact (Poisson CDF bisection)"
-    else:
-        low, high = _wh(2 * k, 0.025), _wh(2 * k + 2, 0.975)
-        low, high = low * 0.999, high * 1.001             # outward margin over the approximation
-        how = "Wilson-Hilferty"
+def _round(low: float, high: float, how: str) -> dict:
     return {"low": math.floor(low * 100) / 100, "high": math.ceil(high * 100) / 100,
             "interval": "garwood_poisson_95", "method": how}
+
+
+def garwood_exact(k: int) -> dict:
+    low = 0.0 if k == 0 else _solve(k - 1, 0.975)
+    return _round(low, _solve(k, 0.025), "exact (Poisson CDF bisection)")
+
+
+def garwood_approx(k: int) -> dict:
+    """Wilson-Hilferty with an outward margin (0.2%): never narrower than the exact band (tested)."""
+    low, high = _wh(2 * k, 0.025), _wh(2 * k + 2, 0.975)
+    return _round(low * 0.998, high * 1.002, "Wilson-Hilferty (outward margin)")
+
+
+def garwood(k: int) -> dict:
+    if not isinstance(k, int) or k < 0:
+        raise ValueError("count")
+    return garwood_exact(k) if k <= GARWOOD_EXACT_MAX else garwood_approx(k)
 
 
 # ---------------------------------------------------------------------------------------------- the estimator
@@ -124,7 +137,7 @@ def _reliability(k: int) -> str:
     return "THIN" if k < THIN_BELOW else "MODERATE" if k < STRONG_FROM else "STRONG"
 
 
-def _signal(c: dict, item: dict) -> dict:
+def _signal(c: dict, item: dict, verified: bool) -> dict:
     k = c["impressions"]
     band = garwood(k)
     days = _days(c["date_range"])
@@ -132,12 +145,13 @@ def _signal(c: dict, item: dict) -> dict:
                                                   "high": math.ceil(band["high"] / days * 1000) / 1000}
     return {"source": f"priya_handoff:{c['source']}", "priya_key": item["key"], "observed_impressions": k,
             "window": dict(c["date_range"]), "window_days": days, "band": band, "band_per_day": per_day,
-            "reliability": _reliability(k), "unit": UNIT, "data_class": "measured",
+            "reliability": _reliability(k) if verified else "THIN", "reliability_if_verified": _reliability(k),
+            "unit": UNIT, "data_class": "measured" if verified else "claimed",
             "provenance": {"producer": "priya", "contract": priya_handoff.SCHEMA,
-                           "volume_status": item["volume_status"], "verified_against_priya_record": False}}
+                           "volume_status": item["volume_status"], "verified_against_priya_record": verified}}
 
 
-def estimate_topic(t: dict, item: Optional[dict]) -> dict:
+def estimate_topic(t: dict, item: Optional[dict], verified: bool = False) -> dict:
     base = {"topic_key": t["topic_key"], "proxy_for": PROXY_FOR, "estimator": ESTIMATOR}
     if t.get("refused"):
         return {**base, **_unknown("TOPIC_REFUSED")}
@@ -148,20 +162,21 @@ def estimate_topic(t: dict, item: Optional[dict]) -> dict:
     c = item.get("observed_counts")
     if c is None:
         return {**base, **_unknown("PRIYA_ITEM_NOT_MEASURED")}
-    sig = _signal(c, item)
+    sig = _signal(c, item, verified)
     signals = [sig]
-    flags = ["SINGLE_SOURCE", "PROXY_NOT_PROMPT_VOLUME", "HANDOFF_NOT_VERIFIED"]
+    flags = ["SINGLE_SOURCE", "PROXY_NOT_PROMPT_VOLUME"] + ([] if verified else ["HANDOFF_NOT_VERIFIED"])
     if c["source"] == "bing_webmaster":
         flags.append("BING_WINDOW_DIFFERS")
     rel = sig["reliability"]
     return {**base, "status": "DIRECTIONAL_PROXY", "reliability": rel,
             "confidence": "LOW" if rel == "THIN" else "MEDIUM", "band": dict(sig["band"]), "unit": UNIT,
-            "window": dict(sig["window"]), "signals": signals, "flags": flags, "unknown_reason": None}
+            "window": dict(sig["window"]), "signals": signals, "flags": flags, "unknown_reason": None,
+            "verified": verified}
 
 
 def _unknown(reason: str) -> dict:
-    return {"status": "UNKNOWN", "reliability": "NONE", "confidence": "NONE", "band": None, "unit": UNIT,
-            "window": None, "signals": [], "flags": [], "unknown_reason": reason}
+    return {"status": "UNKNOWN", "verified": None, "reliability": "NONE", "confidence": "NONE", "band": None,
+            "unit": UNIT, "window": None, "signals": [], "flags": [], "unknown_reason": reason}
 
 
 def context_from_audit(report: Optional[dict], audit_id: Optional[str]) -> dict:
@@ -179,23 +194,27 @@ def context_from_audit(report: Optional[dict], audit_id: Optional[str]) -> dict:
 
 
 def run(topics: list, handoff_items: list, tenant_id: str, run_id: str, context: dict,
-        emit=None) -> dict:
-    """Naomi's estimates for every topic (``emit(topic_key, estimate)`` as each is made, for Zara)."""
+        emit=None, verification: Optional[dict] = None) -> dict:
+    """Naomi's estimates for every topic (``emit(topic_key, estimate)`` as each is made, for Zara).
+    ``verification``: the hand-off's agents.priya_handoff.verify result; anything but VERIFIED caps every signal."""
+    verified = (verification or {}).get("state") == "VERIFIED"
     out = []
     for t in topics:
-        est = estimate_topic(t, fireteam_topics.item_for(t, handoff_items))
+        est = estimate_topic(t, fireteam_topics.item_for(t, handoff_items), verified)
         out.append(est)
         if emit is not None:
             emit(t["topic_key"], est)
     return {"contract": CONTRACT, "producer": AGENT, "tenant_id": tenant_id, "run_id": run_id,
             "estimator": ESTIMATOR, "unit": UNIT, "topics": out, "context": context,
+            "handoff_verification": dict(verification or {"state": "NOT_VERIFIED", "reason": "NO_HANDOFF"}),
             "not_connected": ["bing_webmaster (direct)", "prompt_volume (no source exists; owner rule: no paid panel)"]}
 
 
 def envelope_for(outcome: str, contract: Optional[dict], reason: Optional[str] = None) -> dict:
     method = (f"Directional proxy per topic from owned signals only ({ESTIMATOR}): the topic's Priya EMERGING item "
               "(its observed impressions on this property, one signal per source, never summed), with an exact "
-              "Garwood 95% Poisson band; reliability THIN under 20, MODERATE under 1,000, STRONG from 1,000; "
+              "Garwood 95% Poisson band; reliability THIN under 20, MODERATE under 1,000, STRONG from 1,000 for a "
+              "hand-off verified against Priya's record, THIN for every unverified signal; "
               "confidence never HIGH (a proxy); UNKNOWN, never 0, without a signal. The latest audit's Search "
               "Console question-class impressions are context only.")
     if contract is None:

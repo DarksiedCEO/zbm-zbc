@@ -61,7 +61,8 @@ def test_a_run_mines_chains_sizes_volume_and_zara_crosschecks(tmp_path):
     z = h.ok(h.get(f"/tenants/zbm/conversation-runs/{v['conversation_run_id']}/crosscheck"))
     assert z["contract"] == "zara.conversation_volume/1" and z["status"] == "OK"
     assert [i["verdict"] for i in z["items"]] == ["FLAGGED", "FLAGGED"]
-    assert z["items"][0]["conflicts"] == ["STRONG_CHAIN_THIN_VOLUME"]
+    assert z["items"][0]["conflicts"] == ["STRONG_CHAIN_THIN_VOLUME", "HANDOFF_NOT_VERIFIED"]
+    assert v["priya_handoff"]["verification"] == {"state": "NOT_VERIFIED", "reason": "NO_VERIFICATION_CLAIM"}
     assert z["checks"]["checked_on_arrival"] + z["checks"]["checked_at_close"] == 2
     assert "theo" not in z and "rows" not in json.dumps(z)                  # downstream sees Zara's contract only
     lst = h.ok(h.get("/tenants/zbm/conversation-runs"))
@@ -103,9 +104,10 @@ def test_the_theo_cap_is_off_by_default_nothing_is_asked_and_naomi_still_runs(tm
     assert p.prompts == [] and v["result"]["theo"]["outcome"] == "BLOCKED"
     assert v["result"]["theo"]["reason"] == "BUDGET_OFF" and v["result"]["naomi"]["outcome"] == "OK"
     z = v["result"]["zara"]["facts"]["contract"]                        # volume, but no chain: flagged, not ranked
-    assert [(i["verdict"], i["conflicts"]) for i in z["items"]] == [("FLAGGED", ["VOLUME_WITHOUT_CHAIN"])] * 2
+    assert [(i["verdict"], i["conflicts"]) for i in z["items"]] == \
+        [("FLAGGED", ["VOLUME_WITHOUT_CHAIN", "HANDOFF_NOT_VERIFIED"])] * 2
     assert z["items"][0]["downstream"] == {"passes": True, "decision": "INSUFFICIENT_EVIDENCE",
-                                           "priority_basis": "volume_only"}
+                                           "priority_basis": "none"}
 
 
 def test_llm_follow_ups_are_not_built_and_refuse_start():
@@ -262,3 +264,103 @@ def test_the_department_lists_the_fireteam_with_one_job_each(tmp_path):
         assert d["agents"][a]["scorecard"]["conversation_runs"]["completed"] == 1
     assert "theo" not in d["not_built_agents"] and "zara" not in d["not_built_agents"]
     assert "never mines or estimates" in d["agents"]["zara"]["registry"]["assignment"]
+
+
+# ---------------------------------------------------------------------------------------------- review round 1
+
+def bing_doc(impressions):
+    return handoff(item("a", "who recovers amazon reimbursement revenue",
+                        counts={**GSC, "impressions": impressions, "clicks": 0, "source": "bing_webmaster"},
+                        status="MEASURED_NOT_TIERED"))
+
+
+def test_the_ten_to_the_twelfth_forgery_is_refused_and_a_large_unverified_count_never_clears(tmp_path):
+    h = svc(tmp_path)
+    psid = pset(h)
+    h.refused(run(h, psid, priya_handoff=bing_doc(10 ** 12)), 422, "HANDOFF_INVALID")
+    v = h.ok(run(h, psid, priya_handoff=bing_doc(9_000_000)), 201)
+    vol = v["result"]["naomi"]["facts"]["contract"]["topics"][0]
+    assert vol["reliability"] == "THIN" and vol["verified"] is False
+    z = v["result"]["zara"]["facts"]["contract"]["items"][0]
+    assert z["verdict"] == "FLAGGED" and "HANDOFF_NOT_VERIFIED" in z["conflicts"]
+    assert z["downstream"]["decision"] != "TEST" and z["downstream"]["priority_basis"] == "chain_only"
+    assert v["priya_handoff"]["verification"]["reason"] == "NO_VERIFICATION_CLAIM"
+
+
+def test_a_hand_off_verified_against_priyas_record_lifts_the_cap(tmp_path):
+    from agents import priya_handoff as ph
+    h = svc(tmp_path)
+    psid = pset(h)
+    doc = bing_doc(300)
+    sha = ph.canonical_sha(doc)
+    claim = {"priya_handoff": doc, "priya_run_id": doc["run_id"], "priya_handoff_sha256": sha}
+    v = h.ok(run(h, psid, **claim), 201)                                    # Priya not installed: NOT_VERIFIED
+    assert v["priya_handoff"]["verification"] == {"state": "NOT_VERIFIED", "reason": "PRIYA_NOT_INSTALLED"}
+    h.svc.keyword_runs = {doc["run_id"]: {"run_id": doc["run_id"], "tenant_id": "zbm", "status": "completed",
+                                          "handoff_sha256": sha, "handoff_items": 1}}
+    v = h.ok(run(h, psid, **claim), 201)
+    assert v["priya_handoff"]["verification"]["state"] == "VERIFIED"
+    vol = v["result"]["naomi"]["facts"]["contract"]["topics"][0]
+    assert vol["verified"] is True and vol["reliability"] == "MODERATE" and vol["confidence"] == "MEDIUM"
+    z = v["result"]["zara"]["facts"]["contract"]["items"][0]
+    assert "HANDOFF_NOT_VERIFIED" not in z["conflicts"]
+    tampered = bing_doc(301)                                               # a document that is not what Priya recorded
+    h.refused(run(h, psid, priya_handoff=tampered, priya_run_id=doc["run_id"],
+                  priya_handoff_sha256=ph.canonical_sha(tampered)), 422, "HANDOFF_VERIFICATION_FAILED")
+    h.refused(run(h, psid, priya_handoff=doc, priya_run_id=doc["run_id"], priya_handoff_sha256="0" * 64), 422,
+              "HANDOFF_VERIFICATION_FAILED")
+    h.refused(run(h, psid, priya_run_id=doc["run_id"], priya_handoff_sha256=sha), 422, "HANDOFF_INVALID")
+
+
+def test_a_member_past_its_wait_is_timed_out_and_zara_reports_partial(tmp_path):
+    import threading
+    gate = threading.Event()
+
+    def slow(prompt):
+        gate.wait(10)                                                      # released at the end of the test
+        return WIN[1]
+    h = svc(tmp_path, port=Port({1: slow, 2: WIN[2], 3: WIN[3]}), SEO_FIRETEAM_MEMBER_TIMEOUT_SECONDS="1")
+    try:
+        v = h.ok(run(h, pset(h), priya_handoff=doc()), 201)
+    finally:
+        gate.set()
+    res = v["result"]
+    assert res["theo"]["outcome"] == "FAILED" and res["theo"]["reason"] == "MEMBER_TIMED_OUT"
+    z = res["zara"]["facts"]["contract"]
+    assert z["status"] == "PARTIAL" and z["members"]["theo"] == {"state": "TIMED_OUT", "reason": "MEMBER_TIMED_OUT"}
+    assert all(i["chain"] is None for i in z["items"]) and res["naomi"]["outcome"] == "OK"
+
+
+def test_the_member_wait_is_bounded_in_config():
+    import pytest
+    from helpers import base_env
+    assert config_mod.load(base_env()).fireteam_member_timeout_s == 600
+    for bad in ("0", "3601", "x"):
+        with pytest.raises(RuntimeError, match="SEO_FIRETEAM_MEMBER_TIMEOUT_SECONDS"):
+            config_mod.load(base_env(SEO_FIRETEAM_MEMBER_TIMEOUT_SECONDS=bad))
+
+
+def test_native_multi_turn_bodies_follow_each_providers_documented_shape():
+    import answer_adapter as aa
+    import pytest
+    hist = [{"role": "user", "text": "first question"}, {"role": "assistant", "text": "first answer"}]
+    fa = te.fake("anthropic")
+    te.make("anthropic", fa).ask("second question", history=hist)
+    assert fa.requests[0]["body"]["messages"] == [{"role": "user", "content": "first question"},
+                                                  {"role": "assistant", "content": "first answer"},
+                                                  {"role": "user", "content": "second question"}]
+    fg = te.fake("google")
+    te.make("google", fg).ask("second question", history=hist)
+    assert [c["role"] for c in fg.requests[0]["body"]["contents"]] == ["user", "model", "user"]
+    assert fg.requests[0]["body"]["contents"][1]["parts"] == [{"text": "first answer"}]
+    fo = te.fake("openai")
+    with pytest.raises(aa.EngineError) as e:                               # its multi-turn shape was not read
+        te.make("openai", fo).ask("second question", history=hist)
+    assert e.value.detail == "MULTI_TURN_NOT_SUPPORTED" and fo.requests == []
+    for bad in ([{"role": "assistant", "text": "x"}, {"role": "user", "text": "y"}],
+                [{"role": "user", "text": "x"}], [{"role": "user", "text": "x"}, {"role": "assistant", "text": ""}]):
+        with pytest.raises(aa.EngineError):
+            te.make("anthropic", te.fake("anthropic")).ask("q", history=bad)
+    plain = te.fake("anthropic")
+    te.make("anthropic", plain).ask("only question")                        # no history: the body as before
+    assert plain.requests[0]["body"]["messages"] == [{"role": "user", "content": "only question"}]
