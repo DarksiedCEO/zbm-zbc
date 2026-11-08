@@ -37,7 +37,8 @@ from primitives.parse import SCHEMA_RULES_VERSION
 from reasons import R
 
 log = logging.getLogger("seo.audits")
-REPORT_VERSION = "seo-audit-report/1"
+# 2: ``discovered_paths`` (Selene's bounded page discovery, ADR 0017 CR-12)
+REPORT_VERSION = "seo-audit-report/2"
 _PATH_OK = re.compile(r"/[\x21-\x7e]{0,500}")
 GLOBAL_LIMITS = [
     "Wave 1 reads public pages only. First-party truth (Bing Webmaster Tools, analytics, CRM; Search Console unless "
@@ -244,7 +245,8 @@ class AuditsMixin:
         started = iso(self.now())
         ctx = RunContext(fetcher=self.ports.fetcher, renderer=self.ports.renderer, guard=self.guard(tid),
                          clock=self.clock, osei=o, domain=body["domain"], scheme=body["scheme"],
-                         paths=list(body["paths"]), max_pages=self.settings.audit_max_pages)
+                         paths=list(body["paths"]), max_pages=self.settings.audit_max_pages,
+                         crawl_delay_s=self.settings.crawl_delay_ms / 1000)
         envs, pages = [], {}
         if self.ports.fetcher is None:
             envs.append(envelope("selene", "crawlability", "NOT_CONNECTED", [], methodology="no fetcher is wired",

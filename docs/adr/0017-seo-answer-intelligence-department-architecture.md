@@ -1340,6 +1340,27 @@ CR-12. **Sellable report (Gate 4 run against zbestmedia.com, 2026-11-08; branch 
      4 of 6 areas were not checked is reasoned from the code: Search Console not connected and no market-question set
      (both expected until connected), no business record on file for the entity check, and the sitemap area failing
      (a 404 sitemap was counted as a failure before this change, or a fetch that did not answer).
+   - **Independent review of PR 47 (CONDITIONAL), closed on the same branch.** H1: the sitemap area is OK only when
+     every sitemap was read or seen missing AND llms.txt is known present or absent; else PARTIAL (`SITEMAP_UNREAD` /
+     `LLMS_TXT_UNREAD`, plain reason) or FAILED. H2: 401/403/405/429 are `PAGE_ACCESS_REFUSED` (info,
+     INSUFFICIENT_EVIDENCE, out of the summary, page counted unread); `PAGE_HTTP_ERROR` (with its visitor-impact
+     sentence) only for 404/410/5xx, other 4xx `PAGE_HTTP_ERROR_OTHER` (low, WATCH); an error page's content is never
+     judged (its extract is not kept; 404/410 pages do not count against content coverage); older records'
+     `PAGE_HTTP_ERROR` with 401/403/405/429 are reclassified in the document. H3: our crawler refused
+     (401/403/405/429/503) while a browser identity is served is `CRAWLER_REFUSED`: one `PAGE_ACCESS_REFUSED` note
+     ("whether Google, Bing or AI crawlers are refused cannot be seen from here"), not cloaking, not a visitor error.
+     M4: a replay renders with the renderer the document was recorded under: `client_report_legacy.py` is a4af277's
+     renderer frozen (checked byte-for-byte against the a4af277 golden files in `tests/golden/client_report_legacy/`),
+     current versions use `client_report.py`, an unknown recorded version answers `REPORT_CHANGED`. L5: discovery judges
+     the percent-decoded path; `;` parameters, double encoding, control characters and dot-folders are refused; a
+     segment, its stem or any of its words on a wider list (account, sign-in, register, password, delete, api, wp-json,
+     admin, login, cart, ...) is skipped. L6: politeness `SEO_CRAWL_DELAY_MS` (default 1000 ms, 0..10000) between every
+     request of an audit to the site (Selene and Delia), raised by robots.txt `Crawl-delay` up to 5 s; above 5 s no
+     page is discovered; discovered pages also stop at a request budget (3 per page of `SEO_AUDIT_MAX_PAGES` plus the
+     canonical checks) and a 120 s time budget. L7: internal names are reworded, never dropped. L8: a canonical target
+     our request could not read, inconclusive crawler/browser comparisons and unconfirmed older records are listed in
+     the section as "Inconclusive (not reported as findings)". The audit report is `seo-audit-report/2`
+     (`discovered_paths`); the renderer accepts /1 and /2. Tests: `tests/test_report_review47.py`.
 
 ## Unlock list
 

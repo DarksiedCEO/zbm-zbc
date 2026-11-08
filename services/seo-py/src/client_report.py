@@ -45,7 +45,7 @@ from agents.prompt_guard import personal_data
 # (5: the same with the homepage phone observation; 3 was that observation on renderer 2)
 RENDERER_VERSION = "seo-client-report/4"
 RENDERER_VERSION_HOMEPAGE = "seo-client-report/5"
-SUPPORTED_REPORT_VERSIONS = ("seo-audit-report/1",)
+SUPPORTED_REPORT_VERSIONS = ("seo-audit-report/1", "seo-audit-report/2")   # 2 adds discovered_paths
 FORMATS = {"markdown": "text/markdown; charset=utf-8", "html": "text/html; charset=utf-8"}
 
 TEXT_MAX = 160                 # characters of one untrusted text value
@@ -152,6 +152,8 @@ STATUS = {
 }
 NOT_CLEAN = ("Nothing is reported here because this area was not checked. This is not a clean result.")
 REASON_TEXT = {
+    "SITEMAP_UNREAD": "A sitemap could not be read (no usable answer), so the sitemap check is incomplete.",
+    "LLMS_TXT_UNREAD": "llms.txt could not be read (no usable answer), so whether it is published is not known.",
     "GSC_NOT_CONNECTED": "Google Search Console is not connected to this service.",
     "GSC_PROPERTY_UNBOUND": "No Search Console property is linked to your account here yet.",
     "GSC_PROPERTY_NOT_GRANTED": "The Search Console property has not granted this service read access.",
@@ -204,6 +206,8 @@ PLAIN_REASON_TEXT = {
     "no answer-engine port is connected; no engine was asked anything": "No answer engine is connected for this "
                                                                         "audit; none was asked anything.",
     "no prompt-volume source is connected": "No source for how often people ask these questions is connected.",
+    "a prompt-volume port reported connected, but Wave 1 defines no volume contract to read":
+        "How often people ask these questions cannot be measured yet: no source for it is available.",
 }
 FETCH_STATE_TEXT = {
     "OK": "answered", "REFUSED_URL": "address refused as unsafe or malformed",
@@ -277,6 +281,15 @@ SUMMARY_MAX = 5
 # Internal wording that never reaches a client document (plain-language rewrites; applied to text this service wrote,
 # never to crawled text, which is data and shown as quoted)
 _CLIENT_WORDS = (
+    (re.compile(r"^The volume adapter contract is not defined in Wave[- ]?\d+\.?$"),
+     "How often people ask these questions cannot be measured yet: no source for it is available."),
+    (re.compile(r"\bORCA Publish\b"), "publishing"),
+    (re.compile(r"\bZero-Day\b"), "early-warning monitoring"),
+    (re.compile(r"\b(?:Department \d+ )?clientfix\b"), "fix execution"),
+    (re.compile(r"\bDepartment \d+\b"), "another of our teams"),
+    (re.compile(r"\bAEGIS\b"), "our independent review"),
+    (re.compile(r"\bORCA\b"), "our platform"),
+    (re.compile(r"\badapter contract\b"), "data source"),
     (re.compile(r"\bin Wave[- ]?\d+\b"), "in this audit"),
     (re.compile(r"(^|(?<=[.;:] ))Wave[- ]?\d+\b"), "This audit"),
     (re.compile(r"\bWave[- ]?\d+\b"), "this audit"),
@@ -287,7 +300,6 @@ _CLIENT_WORDS = (
     (re.compile(r"^no fetcher is wired$"), "No page could be read: the page reader was not available for this audit."),
     (re.compile(r"\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b"), lambda m_: m_.group(0).replace("_", " ").lower()),
 )
-_INTERNAL_LINE = re.compile(r"\bORCA\b|Zero-Day|\bDepartment \d+|\bclientfix\b|\bAEGIS\b|\badapter contract\b")
 
 
 # Per rule: (title, plain-English fix, detail keys shown with their kind). A key not listed is never rendered.
@@ -314,6 +326,14 @@ _R = {
                                      "audited, allow the ZBM-SEO-Audit user-agent for it.", ()),
     "PAGE_UNREACHABLE": ("Page could not be reached", "Check that the page is online and reachable from the public "
                          "internet, then re-run the audit.", (("fetch_state", "token"),)),
+    "PAGE_ACCESS_REFUSED": ("Our audit crawler was refused (inconclusive)", "Nothing is known to be wrong for "
+                            "visitors. The site refused or rate-limited our audit crawler (ZBM-SEO-Audit), so this "
+                            "page could not be checked. Whether Google, Bing or AI crawlers are refused too cannot be seen "
+                            "from here: check your bot protection or firewall allows verified search and AI crawlers, "
+                            "and allow ZBM-SEO-Audit if you want this page audited.",
+                            (("status", "num"), ("browser_served", "bool"))),
+    "PAGE_HTTP_ERROR_OTHER": ("Page answered our request with an unusual status", "Check that the page loads "
+                              "normally; it answered our request with the status below.", (("status", "num"),)),
     "PAGE_HTTP_ERROR": ("Page answers with an error status", "Make the page answer 200, or redirect it permanently "
                         "(301) to its replacement.", (("status", "num"),)),
     "REDIRECT_CHAIN": ("Redirect chain", "Point links and redirects straight at the final URL (one hop), using a "
@@ -465,12 +485,10 @@ def safe_text(s: Any, limit: int = TEXT_MAX) -> str:
 
 
 def client_text(s: Any) -> Optional[str]:
-    """Text this service wrote (methodology, limitations, reasons) in client language: internal programme names and
-    code-shaped words rewritten as plain words; a line about an internal product is dropped (None). Never applied to
-    crawled text."""
+    """Text this service wrote (methodology, limitations, reasons) in client language: internal programme and product
+    names and code-shaped words rewritten as plain words. Never drops a line (review of PR 47, L7); None only for a
+    value that is not text. Never applied to crawled text."""
     if not isinstance(s, str):
-        return None
-    if _INTERNAL_LINE.search(s):
         return None
     t = s
     for rx, rep in _CLIENT_WORDS:
@@ -733,6 +751,15 @@ def _status(env: Optional[dict]) -> dict:
             "reason_code": reason if isinstance(reason, str) and _CODE.fullmatch(reason) else None}
 
 
+def _reclassified(f: dict) -> dict:
+    """A run recorded before the review of PR 47 (H2) called a 401 / 403 / 405 / 429 answer PAGE_HTTP_ERROR (an error
+    visitors see). In the client document it is what it is: our crawler was refused, inconclusive, info only."""
+    d = f.get("detail") if isinstance(f.get("detail"), dict) else {}
+    if f["code"] == "PAGE_HTTP_ERROR" and d.get("status") in (401, 403, 405, 429):
+        return {**f, "code": "PAGE_ACCESS_REFUSED", "severity": "info", "decision": "INSUFFICIENT_EVIDENCE"}
+    return f
+
+
 def _groups(findings: list, ctx: _Ctx) -> list:
     groups: dict = {}
     for f in findings:
@@ -740,6 +767,7 @@ def _groups(findings: list, ctx: _Ctx) -> list:
             continue
         if f["code"] in INTERNAL_CODES or not _visible(f):
             continue
+        f = _reclassified(f)
         sev, dc, dec = f.get("severity"), f.get("data_class"), f.get("decision")
         if sev not in SEVERITY_ORDER or dc not in EVIDENCE or dec not in DECISION_TEXT:
             # refused, never downgraded (AEGIS L-10): the recorded report holds a value outside the closed vocabularies
@@ -900,6 +928,33 @@ def _freshness(key: str, report: dict, env: Optional[dict], tiers: dict) -> str:
     return f"observed during the run; refresh recommended by {_ts_plus(fin, days)}"
 
 
+def _inconclusive(key: str, env: Optional[dict], report: dict) -> list:
+    """What this area could not decide, in plain words, shown in the section (review of PR 47, L8): never a finding,
+    never silent. From the recorded findings an older run kept (unconfirmed comparisons), from Selene's facts
+    (canonical targets our request could not read) and from the per-page comparison states."""
+    out = []
+    hidden = sum(1 for f in ((env or {}).get("findings") or []) if isinstance(f, dict)
+                 and f.get("code") not in INTERNAL_CODES and not _visible(f))
+    if hidden:
+        out.append(f"{hidden} recorded comparison(s) could not be confirmed (a difference between what our crawler and "
+                   "a browser were served that was not checked on a repeat request, or a page our own request could "
+                   "not read) and are not reported as findings.")
+    if key != "crawlability" or not isinstance(env, dict):
+        return out
+    facts = env.get("facts") if isinstance(env.get("facts"), dict) else {}
+    canon = facts.get("canonical_checks_inconclusive")
+    if isinstance(canon, list) and canon:
+        out.append(f"{len(canon)} canonical link target(s) could not be checked: our own request for the target got no "
+                   "usable answer, so whether the target loads is inconclusive. Not reported as a finding.")
+    pages = report.get("pages") if isinstance(report.get("pages"), dict) else {}
+    diffs = sum(1 for p in pages.values() if isinstance(p, dict) and p.get("access_diff") == "INCONCLUSIVE")
+    if diffs:
+        out.append(f"{diffs} comparison(s) of what our crawler and a browser were served were inconclusive (the page "
+                   "changed between requests, a request failed, or bot protection answered the browser request). "
+                   "Not reported as findings.")
+    return out
+
+
 def _key(x: str) -> str:
     return " ".join(x.lower().split()).rstrip(".")
 
@@ -1018,12 +1073,7 @@ def build(audit: dict, tenant_id: str, branding: Branding = DEFAULT_BRANDING, pr
         sec["notes"] = [] if st["checked"] else [_note(g) for g in sec["groups"]]
         if not st["checked"]:
             sec["groups"] = []
-        hidden = sum(1 for f in ((env or {}).get("findings") or []) if isinstance(f, dict)
-                     and f.get("code") not in INTERNAL_CODES and not _visible(f))
-        if hidden and st["checked"]:
-            sec["notes"].append(f"{hidden} comparison(s) could not be confirmed (a difference between what our crawler "
-                                "and a browser were served that did not hold on a repeat request, or a page our own "
-                                "request could not read) and are not reported as findings.")
+        sec["inconclusive"] = _inconclusive(key, env, report) if st["checked"] else []
         sections.append(sec)
     nc = sorted({x for x in (report.get("not_connected") or []) if isinstance(x, str)} - INTERNAL_NOT_CONNECTED)
     not_connected = [NOT_CONNECTED_TEXT[x] for x in nc if x in NOT_CONNECTED_TEXT]
@@ -1266,6 +1316,8 @@ def _md_section(s: dict) -> list:
         L += _md_ai(s)
     if not st["checked"] and s["notes"]:
         L += ["Notes from the run are listed under Methodology and limits.", ""]
+    if s.get("inconclusive"):
+        L += ["**Inconclusive (not reported as findings):**", ""] + [f"- {md(x)}" for x in s["inconclusive"]] + [""]
     if st["checked"] and not s["groups"]:
         L += [md(_no_findings(st)), ""]
     if s["dropped"] and st["checked"]:                 # AEGIS N-1: never under an area that was not checked
@@ -1530,6 +1582,9 @@ def _h_section(s: dict, pages: dict) -> list:
         o += _h_ai(s)
     if not st["checked"] and s["notes"]:
         o.append("<p>Notes from the run are listed under Methodology and limits.</p>")
+    if s.get("inconclusive"):
+        o += ["<p><strong>Inconclusive (not reported as findings):</strong></p>", "<ul>"]
+        o += [f"<li>{h(x)}</li>" for x in s["inconclusive"]] + ["</ul>"]
     if st["checked"] and not s["groups"]:
         o.append(f"<p>{h(_no_findings(st))}</p>")
     if s["dropped"] and st["checked"]:                 # AEGIS N-1
@@ -1629,6 +1684,30 @@ def render(audit: dict, tenant_id: str, fmt: str, branding: Branding = DEFAULT_B
     model = build(audit, tenant_id, branding, preview)
     text = render_markdown(model) if fmt == "markdown" else render_html(model)
     return text.encode("utf-8"), model
+
+
+# Review of PR 47 (M4): a document recorded under an earlier renderer replays byte-identically with that renderer, so
+# a delivered report stays reproducible against the document hash on the ledger. New renders use the current one.
+LEGACY_RENDERER_VERSIONS = ("seo-client-report/2", "seo-client-report/3")
+CURRENT_RENDERER_VERSIONS = (RENDERER_VERSION, RENDERER_VERSION_HOMEPAGE)
+
+
+def render_as(version: str, audit: dict, tenant_id: str, fmt: str,
+              branding: Branding = DEFAULT_BRANDING) -> tuple[bytes, dict]:
+    """(document bytes, model) rendered by the renderer ``version`` names (a recorded render's version). An unknown
+    version refuses (ReportInputError): never a silent substitute."""
+    if version in CURRENT_RENDERER_VERSIONS:
+        return render(audit, tenant_id, fmt, branding)
+    if version in LEGACY_RENDERER_VERSIONS:
+        import client_report_legacy as legacy
+        if fmt not in legacy.FORMATS:
+            raise ReportInputError("unknown format")
+        try:
+            lb = legacy.Branding(branding.name, branding.accent)
+        except ValueError:
+            raise ReportInputError("branding") from None
+        return legacy.render(audit, tenant_id, fmt, lb)
+    raise ReportInputError("unknown renderer version")
 
 
 def document_sha256(data: bytes) -> str:

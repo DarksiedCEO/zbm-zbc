@@ -76,6 +76,7 @@ MUST failure or ERROR.
 | `SEO_FETCH_MAX_BYTES` | 2 MiB | decoded body cap (64 KiB..10 MiB) |
 | `SEO_FETCH_MAX_REDIRECTS` | `5` | redirect cap (0..10), every hop re-checked |
 | `SEO_AUDIT_MAX_PAGES` | `10` | pages read per audit (1..25): the requested paths, plus same-site pages linked from them (ADR 0017 CR-12) up to this total |
+| `SEO_CRAWL_DELAY_MS` | `1000` | least time between two of an audit's requests to the site (0..10000 ms); a robots.txt `Crawl-delay` raises it up to 5 s, and above 5 s no pages are discovered (ADR 0017 CR-12) |
 | `SEO_PROBE_SAMPLES` | `5` | answers sampled per prompt per engine (3..50) |
 | `SEO_BOT_INFO_URL` | unset | an https page about the crawler, added to its User-Agent |
 | `SEO_LOG_HASH_KEY_FILE` | — (required with `SEO_DATA_DIR`) | key for the keyed hashes behind the distinct-client-IP sketch of uploaded logs (`openssl rand -hex 32`, mode 0600); no IP and no IP hash is ever stored |

@@ -16,6 +16,7 @@ The run context is passed in; no agent touches service state, the ledger or the 
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 from urllib.parse import SplitResult, urlsplit
@@ -32,6 +33,17 @@ def split_url(url) -> Optional[SplitResult]:
     except ValueError:
         return None
     return p
+
+
+GONE_STATUSES = (404, 410)
+CRAWL_DELAY_CAP = 5.0          # seconds; a robots.txt Crawl-delay above it stops discovery (see agents/selene.py)
+
+
+def gone(pg: dict) -> bool:
+    """A page the site answered "not found" / "gone" for: reported by Selene (a broken link), not content to judge,
+    and not counted against the content areas' coverage."""
+    f = pg.get("fetch")
+    return bool(f is not None and getattr(f, "state", None) == "OK" and getattr(f, "status", None) in GONE_STATUSES)
 
 
 def host_of(url) -> Optional[str]:
@@ -51,8 +63,40 @@ class RunContext:
     paths: list = field(default_factory=lambda: ["/"])
     # the most pages one audit reads (requested + discovered). 0 = no discovery: only the requested paths are read
     max_pages: int = 0
+    # politeness: the least time between two of this audit's requests to the site (robots.txt Crawl-delay raises it,
+    # up to a cap); ``sleep`` / ``monotonic`` are injectable so tests measure the waits without waiting
+    crawl_delay_s: float = 0.0
+    sleep: Callable = time.sleep
+    monotonic: Callable = time.monotonic
+    requests: int = 0                       # requests this audit made to the site (robots.txt included)
+    last_request: Optional[float] = None
     robots_cache: dict = field(default_factory=dict)
     robots: Optional[dict] = None          # filled by Selene, read by Delia and Roman
+
+    def crawl_delay(self) -> float:
+        """Seconds between two requests: the configured floor, raised by robots.txt's Crawl-delay for our crawler
+        (or ``*``) up to CRAWL_DELAY_CAP."""
+        from primitives.fetch import PRODUCT_TOKEN
+        delay = max(0.0, float(self.crawl_delay_s or 0))
+        asked = self.robots_crawl_delay(PRODUCT_TOKEN)
+        if asked is not None:
+            delay = max(delay, min(asked, CRAWL_DELAY_CAP))
+        return delay
+
+    def robots_crawl_delay(self, token: str) -> Optional[float]:
+        rb = self.robots or {}
+        parsed = rb.get("parsed")
+        return parsed.crawl_delay(token) if parsed is not None else None
+
+    def polite(self) -> None:
+        """Called before every request to the site: waits until ``crawl_delay()`` has passed since the last one."""
+        delay = self.crawl_delay()
+        if self.last_request is not None and delay > 0:
+            wait = self.last_request + delay - self.monotonic()
+            if wait > 0:
+                self.sleep(wait)
+        self.last_request = self.monotonic()
+        self.requests += 1
 
     @property
     def origin(self) -> str:

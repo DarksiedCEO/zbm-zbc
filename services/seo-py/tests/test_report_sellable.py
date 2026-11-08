@@ -287,7 +287,8 @@ def test_recorded_inconclusive_comparisons_never_reach_the_client(fmt):
     t = doc.decode()
     assert "Crawlers are served different content" not in t and "Canonical target does not answer" not in t
     assert "Canonical points to another host" not in t
-    assert "3 comparison(s) could not be confirmed" in t
+    assert "3 recorded comparison(s) could not be confirmed" in t
+    assert "Inconclusive (not reported as findings)" in t
     crawl = next(s for s in model["sections"] if s["key"] == "crawlability")
     assert crawl["groups"] == [] and crawl["status"]["checked"]
     assert all(i["area"] != "Crawlability" for i in model["summary"]["issues"])
@@ -392,13 +393,20 @@ def test_each_limitation_line_is_stated_once(fmt):
     assert len(every) == len({cr._key(x) for x in every})
 
 
-def test_client_text_rewrites_and_drops_internal_lines():
+def test_client_text_rewrites_internal_lines_and_never_drops_one():
     assert cr.client_text("Listed URLs are not checked in Wave 1.") == "Listed URLs are not checked in this audit."
     assert cr.client_text("Wave 1 reads public pages only.").startswith("This audit reads")
     assert cr.client_text("ports only in Wave 1 (founder-pending flag 5)") == "ports only in this audit"
     assert cr.client_text("Classes: STRENGTH, MENTIONED_NOT_CITED.") == "Classes: STRENGTH, mentioned not cited."
-    assert cr.client_text("Zero-Day is a port.") is None and cr.client_text("ORCA Publish later.") is None
+    assert cr.client_text("The volume adapter contract is not defined in Wave 1.") == \
+        "How often people ask these questions cannot be measured yet: no source for it is available."
+    assert cr.client_text("Zero-Day is a port.") == "early-warning monitoring is a port."
+    assert cr.client_text("ORCA Publish later.") == "publishing later."
+    assert cr.client_text("fix execution is Department 28 clientfix's") == "fix execution is fix execution's"
+    assert cr.client_text("AEGIS reviewed it") == "our independent review reviewed it"
     assert cr.client_text(None) is None
+    for line in ("Zero-Day is a port.", "ORCA Publish later.", "The volume adapter contract is not defined in Wave 1."):
+        assert cr.client_text(line) and not JARGON.search(cr.client_text(line))
 
 
 def test_structured_data_issue_reads_as_a_sentence_with_crawled_names_quoted():

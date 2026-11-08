@@ -1031,17 +1031,22 @@ def test_callum_methodology_is_shown_even_when_the_prompt_set_hash_has_a_digit_r
 
 
 def test_historical_view_replays_recorded_renderer_two_without_backfill(h, monkeypatch):
-    """Real recording/idempotency over a retained legacy view; provider/delivery is not involved."""
+    """Real recording/idempotency over a retained legacy view; provider/delivery is not involved. The first render
+    is recorded under renderer 2 (the renderer in force before seo-client-report/4, as for the Gate 4 report); its
+    replay with the same request id after the upgrade answers the same bytes, the recorded hash and renderer 2."""
+    import client_report_legacy as crl
     h.tenant('acme', kind='own', domains=('acme.test',))
     legacy = fx.fresh('full')
     original = copy.deepcopy(legacy)
     monkeypatch.setattr(h.svc, 'audit_view', lambda *a, **kw: copy.deepcopy(legacy))
     req = {'request_id': rid(), 'format': 'html'}
-    first = h.svc.render_client_report('acme', legacy['audit_id'], req)
+    with monkeypatch.context() as before_upgrade:
+        before_upgrade.setattr(cr, 'render', lambda v, t, f, b: crl.render(v, t, f, crl.Branding(b.name, b.accent)))
+        first = h.svc.render_client_report('acme', legacy['audit_id'], req)
     events = len(h.ledger.of_type('client_report_rendered'))
     second = h.svc.render_client_report('acme', legacy['audit_id'], req)
-    assert first == second and first["renderer_version"] == "seo-client-report/4"
-    assert first['document_sha256'] == hashlib.sha256(cr.render(legacy, 'acme', 'html')[0]).hexdigest()
+    assert first == second and first["renderer_version"] == "seo-client-report/2"
+    assert first['document_sha256'] == hashlib.sha256(crl.render(legacy, 'acme', 'html')[0]).hexdigest()
     assert len(h.ledger.of_type('client_report_rendered')) == events == 1
     assert legacy == original
     entity = next(e for e in legacy['report']['agents'] if e['agent']=='entity_check')

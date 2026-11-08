@@ -20,7 +20,7 @@ import re
 from typing import Optional
 from urllib.parse import unquote, urlsplit
 
-from agents import bots, host_of, split_url
+from agents import CRAWL_DELAY_CAP, GONE_STATUSES, bots, host_of, split_url
 from agents.prompt_guard import personal_data
 from envelope import envelope, finding
 from primitives import Killed
@@ -47,6 +47,7 @@ LIMITS = ["Observed from one network location at one time; a CDN or firewall may
           "Rendering is not connected: content inserted by JavaScript was not seen."]
 HTML_TYPES = ("text/html", "application/xhtml+xml")
 CANONICAL_CHECK_MAX = 5
+REFUSED_STATUSES = (401, 403, 405, 429)
 
 
 def _noindex(fetch, extract: Optional[dict]) -> bool:
@@ -67,6 +68,7 @@ def run(ctx) -> tuple[dict, dict]:
     not_connected = set()
     try:
         ctx.guard(capability="fetch", provider="web")
+        ctx.polite()
         rb = ctx.fetcher.robots(ctx.origin, guard=ctx.guard)
         ctx.robots = rb
         ctx.robots_cache[_origin_key(ctx.origin)] = rb
@@ -84,17 +86,37 @@ def run(ctx) -> tuple[dict, dict]:
         # from the requested pages are read too, one level deep, in document order, up to the cap. Every discovered
         # path goes through the same fetcher (SSRF guard, robots.txt for our crawler, byte / time / redirect budgets)
         discovered = discover_paths(ctx, pages)
-        facts["pages_discovered"] = list(discovered)
+        asked = ctx.robots_crawl_delay(fetch_mod.PRODUCT_TOKEN)
+        facts["crawl_delay_seconds"] = ctx.crawl_delay()
+        if discovered and asked is not None and asked > CRAWL_DELAY_CAP:
+            # robots.txt asks for more time between requests than an audit may take: only the requested pages
+            facts["discovery_stopped"] = "crawl_delay_above_cap"
+            discovered = []
+        read = []
+        started = ctx.monotonic()
+        budget = REQUESTS_PER_PAGE * max(ctx.max_pages, len(ctx.paths)) + CANONICAL_CHECK_MAX + 2
         for path in discovered:
+            # politeness and a bounded audit: a discovered page is read only while the request budget and the time
+            # budget allow its worst case (crawler, browser comparison, repeat)
+            if ctx.requests + REQUESTS_PER_PAGE > budget:
+                facts["discovery_stopped"] = "request_budget"
+                break
+            if ctx.monotonic() - started + REQUESTS_PER_PAGE * ctx.crawl_delay() > DISCOVERY_TIME_BUDGET_S:
+                facts["discovery_stopped"] = "time_budget"
+                break
+            read.append(path)
             findings += _read_page(ctx, path, pages, state, facts, not_connected)
+        facts["pages_discovered"] = read
+        facts["requests"] = ctx.requests
         fetched = state["fetched"]
         facts["pages_requested"], facts["pages_fetched"] = len(ctx.paths), fetched
     except Killed as k:
         return envelope(AGENT, TASK, "KILLED", [], methodology=METHODOLOGY.format(v=bots.VERSION),
                         limitations=LIMITS, reason=k.code, facts=facts), pages
-    fetched = sum(1 for p in pages.values() if p["fetch"].ok)
+    fetched = sum(1 for p in pages.values() if p["fetch"].ok and not p.get("refused"))
     if fetched == 0:
-        outcome = "BLOCKED" if all(p["fetch"].state == "BLOCKED_BY_ROBOTS" for p in pages.values()) else "FAILED"
+        outcome = "BLOCKED" if all(p["fetch"].state == "BLOCKED_BY_ROBOTS" or p.get("refused")
+                                   for p in pages.values()) else "FAILED"
     else:
         outcome = "OK" if fetched == len(pages) else "PARTIAL"
     facts["render_states"] = {p: v["render"]["state"] for p, v in pages.items()}
@@ -105,8 +127,15 @@ def run(ctx) -> tuple[dict, dict]:
 # Discovery: what a linked path must look like to be read. Only page-like paths (no file extension, or an HTML one);
 # no query string (faceted, session and tracking URLs are not pages to audit); never an action-like path.
 DISCOVERY_EXTENSIONS = ("", ".html", ".htm", ".php", ".asp", ".aspx")
-_DISCOVERY_SKIP_SEGMENTS = frozenset({"logout", "log-out", "signout", "sign-out", "unsubscribe", "cart", "checkout",
-                                      "wp-admin", "wp-login.php", "admin", "login", "cdn-cgi"})
+# a path segment (percent-decoded, lower-cased) is skipped when it, its stem without extension, or any of its
+# hyphen / underscore / dot separated words is one of these (account, sign-in, delete, API and admin areas)
+_DISCOVERY_SKIP_SEGMENTS = frozenset({
+    "login", "log-in", "logout", "log-out", "signin", "sign-in", "signout", "sign-out", "signup", "sign-up",
+    "register", "password", "passwd", "unsubscribe", "cart", "checkout", "basket", "admin", "administrator",
+    "wp-admin", "wp-login", "wp-json", "xmlrpc", "account", "accounts", "myaccount", "my-account", "delete",
+    "destroy", "api", "graphql", "cgi-bin", "cdn-cgi", "auth", "oauth"})
+REQUESTS_PER_PAGE = 3                  # crawler, browser comparison, repeat (the most one page costs)
+DISCOVERY_TIME_BUDGET_S = 120.0        # discovered pages stop once the next could take the audit past this
 _DISCOVERY_PATH = re.compile(r"/[\x21-\x7e]{0,500}")
 
 
@@ -154,15 +183,25 @@ def _candidate(ctx, link) -> Optional[str]:
             or p.username or p.password or not ctx.same_site(p.hostname):
         return None
     path = p.path or "/"
-    if not _DISCOVERY_PATH.fullmatch(path) or path.startswith("//") or "\\" in path or "#" in path:
+    if not _DISCOVERY_PATH.fullmatch(path) or path.startswith("//") or "\\" in path or "#" in path or ";" in path:
         return None
-    last = path.rstrip("/").rsplit("/", 1)[-1].lower()
+    dec = unquote(path)
+    # judged on the decoded path (review of PR 47, L5: /%61dmin is /admin); a still-encoded path after one decode
+    # (double encoding) or a decoded control / space / backslash character is refused outright
+    if "%" in dec or any(ord(c) < 0x21 or c in "\\;" or ord(c) == 0x7f for c in dec):
+        return None
+    segs = [s for s in dec.lower().split("/") if s]
+    for seg in segs:
+        if seg.startswith("."):                       # dot-folders and dot-files: /.git/config, /.well-known, /.env
+            return None
+        stem = seg.rsplit(".", 1)[0]
+        if {seg, stem, *re.split(r"[-_.+~]", seg)} & _DISCOVERY_SKIP_SEGMENTS:
+            return None
+    last = segs[-1] if segs and not dec.endswith("/") else ""
     ext = last[last.rfind("."):] if "." in last else ""
     if ext not in DISCOVERY_EXTENSIONS:
         return None
-    if any(seg.lower() in _DISCOVERY_SKIP_SEGMENTS for seg in path.split("/")):
-        return None
-    if personal_data(unquote(path)) is not None:
+    if personal_data(dec) is not None:
         return None
     return path
 
@@ -171,9 +210,7 @@ def _read_page(ctx, path: str, pages: dict, state: dict, facts: dict, not_connec
     """Fetch and judge one page (requested or discovered); fills ``pages[path]``."""
     findings = []
     url = ctx.url(path)
-    f = ctx.fetcher.fetch(url, robots_cache=ctx.robots_cache, guard=ctx.guard)
-    if f.state == "KILLED":
-        raise Killed(f.detail or "KILLED")
+    f = _fetch(ctx, url)
     ctx.osei.observed("page", url, f.state)
     extract = None
     if f.state == "TOO_LARGE":
@@ -183,8 +220,11 @@ def _read_page(ctx, path: str, pages: dict, state: dict, facts: dict, not_connec
     rstate = render_mod.render_state(f, extract, ctx.renderer, ctx.guard)
     if rstate["state"] == "RAW_OK_RENDER_NOT_CONNECTED":
         not_connected.add("render")
-    pages[path] = {"fetch": f, "extract": extract, "render": {k: v for k, v in rstate.items()
-                                                             if k != "rendered_extract"}}
+    # an error page (4xx / 5xx) is not the page: Roman and the entity check never judge its content
+    pages[path] = {"fetch": f, "extract": extract if f.ok and (f.status or 0) < 400 else None,
+                   "render": {k: v for k, v in rstate.items() if k != "rendered_extract"}}
+    if f.ok and f.status in REFUSED_STATUSES:
+        pages[path]["refused"] = True
     if f.ok:
         state["fetched"] += 1
     page_findings, state["canon_checked"] = _page_findings(ctx, path, f, extract, state["canon_checked"], facts)
@@ -192,9 +232,7 @@ def _read_page(ctx, path: str, pages: dict, state: dict, facts: dict, not_connec
     if f.ok and extract is not None:
         # AEGIS L3: the browser-identity comparison honours robots.txt for OUR crawler too (it is only made
         # where our crawler may fetch, and from the same robots cache)
-        human = ctx.fetcher.fetch(url, ua="human", robots_cache=ctx.robots_cache, guard=ctx.guard)
-        if human.state == "KILLED":
-            raise Killed(human.detail or "KILLED")
+        human = _fetch(ctx, url, ua="human")
         hx = _extract_of(human, url)
         ad = diff_mod.access_diff(f, human, extract, hx)
         if ad["state"] == "BOT_DIFFERENTIAL":
@@ -202,16 +240,31 @@ def _read_page(ctx, path: str, pages: dict, state: dict, facts: dict, not_connec
             # a signal that also differs between our own two fetches is the page changing between requests, not
             # the site treating crawlers differently, and is dropped. Nothing stable left: INCONCLUSIVE, never a
             # finding.
-            again = ctx.fetcher.fetch(url, robots_cache=ctx.robots_cache, guard=ctx.guard)
-            if again.state == "KILLED":
-                raise Killed(again.detail or "KILLED")
+            again = _fetch(ctx, url)
             ad = diff_mod.confirm(ad, diff_mod.access_diff(f, again, extract, _extract_of(again, url))
                                   if again.ok else None)
         pages[path]["access_diff"] = ad
+        if ad["state"] == "CRAWLER_REFUSED":
+            # H3: not cloaking, not an error visitors see: one note that the site refuses unknown crawlers
+            findings = [x for x in findings if not (x["url"] == url and x["code"] in (
+                "PAGE_HTTP_ERROR", "PAGE_HTTP_ERROR_OTHER", "PAGE_ACCESS_REFUSED"))]
+            findings.append(finding("PAGE_ACCESS_REFUSED", "info", "measured", "INSUFFICIENT_EVIDENCE", url=url,
+                                    capability="P2", detail={"status": f.status, "browser_served": True}))
+            pages[path]["refused"] = True
         if ad["state"] == "BOT_DIFFERENTIAL":
             findings.append(finding("BOT_DIFFERENTIAL", "high", "measured", "TEST", url=url,
                                     capability="P2", detail={"signals": ad["signals"], "confirmed": True}))
     return findings
+
+
+def _fetch(ctx, url: str, **kw):
+    """Every Selene request after robots.txt: politeness wait first, then the one fetcher (SSRF guard, robots.txt for
+    our crawler, byte / time / redirect budgets)."""
+    ctx.polite()
+    f = ctx.fetcher.fetch(url, robots_cache=ctx.robots_cache, guard=ctx.guard, **kw)
+    if f.state == "KILLED":
+        raise Killed(f.detail or "KILLED")
+    return f
 
 
 def _extract_of(f, url: str) -> Optional[dict]:
@@ -291,9 +344,17 @@ def _page_findings(ctx, path: str, f, extract: Optional[dict], canon_checked: in
         out.append(finding("PAGE_UNREACHABLE", "high", "measured", "INSUFFICIENT_EVIDENCE", url=url,
                            detail={"fetch_state": f.state, "detail": f.detail}))
         return out, canon_checked
-    if f.status >= 400:
+    if f.status in REFUSED_STATUSES:
+        # H2: refused or rate-limited (401 / 403 / 405 / 429) says nothing about what visitors get: inconclusive,
+        # info only, never in the executive summary; the page's content is not judged
+        out.append(finding("PAGE_ACCESS_REFUSED", "info", "measured", "INSUFFICIENT_EVIDENCE", url=url,
+                           capability="P2", detail={"status": f.status}))
+        return out, canon_checked
+    if f.status in GONE_STATUSES or f.status >= 500:
         out.append(finding("PAGE_HTTP_ERROR", "high" if f.status >= 500 else "medium", "measured", "ACT", url=url,
                            detail={"status": f.status}))
+    elif f.status >= 400:
+        out.append(finding("PAGE_HTTP_ERROR_OTHER", "low", "measured", "WATCH", url=url, detail={"status": f.status}))
     if f.redirects:
         chain = [r["status"] for r in f.redirects]
         sev = "medium" if len(chain) > 1 else "low"
@@ -301,6 +362,8 @@ def _page_findings(ctx, path: str, f, extract: Optional[dict], canon_checked: in
                            "ACT" if len(chain) > 1 else "WATCH", url=url,
                            detail={"statuses": chain, "hops": len(chain), "final_url": f.final_url,
                                    "temporary": any(s in (302, 303, 307) for s in chain)}))
+    if f.status >= 400:
+        return out, canon_checked                      # an error page's canonical / noindex are not the page's
     if f.content_type not in ("text/html", "application/xhtml+xml"):
         out.append(finding("PAGE_NOT_HTML", "low", "measured", "WATCH", url=url,
                            detail={"content_type": f.content_type}))
@@ -336,9 +399,7 @@ def _page_findings(ctx, path: str, f, extract: Optional[dict], canon_checked: in
         if not same_url(c, f.final_url or url) and ctx.same_site(host) \
                 and canon_checked < CANONICAL_CHECK_MAX:
             canon_checked += 1
-            cf = ctx.fetcher.fetch(c, robots_cache=ctx.robots_cache, guard=ctx.guard)
-            if cf.state == "KILLED":
-                raise Killed(cf.detail or "KILLED")
+            cf = _fetch(ctx, c)
             if not cf.ok:
                 # Gate 4: our own request for the canonical target failed (timeout, refused, robots.txt for our
                 # crawler). That says nothing about what the target answers: inconclusive, recorded as a fact, never

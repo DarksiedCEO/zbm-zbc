@@ -13,7 +13,7 @@ number across engines (spec: no single visibility score unless its methodology i
 
 from __future__ import annotations
 
-from agents import bots
+from agents import bots, gone
 from envelope import envelope, finding, observed
 from primitives.parse import ORG_TYPES, SCHEMA_RULES_VERSION
 
@@ -101,7 +101,8 @@ def run(ctx, pages: dict) -> dict:
                                 capability="P3", detail={"note": "no Organization / LocalBusiness node on any "
                                                                  "audited page"}))
     read = sum(1 for p in pages.values() if p.get("extract") is not None)
-    outcome = "OK" if read and read == len(pages) else ("PARTIAL" if read else "INSUFFICIENT_EVIDENCE")
+    total = sum(1 for p in pages.values() if not gone(p))       # a 404 / 410 page is Selene's finding, not content
+    outcome = "OK" if read and read == total else ("PARTIAL" if read else "INSUFFICIENT_EVIDENCE")
     methodology = METHODOLOGY.format(v=SCHEMA_RULES_VERSION, n=RAW_TEXT_MIN,
                                      bots=", ".join(f"{e}: {t}" for e, t in bots.ENGINE_SEARCH_BOT.items()))
     return envelope(AGENT, TASK, outcome, findings, methodology=methodology, limitations=LIMITS,

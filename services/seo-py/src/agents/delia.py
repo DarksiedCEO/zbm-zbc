@@ -99,13 +99,24 @@ def run(ctx) -> dict:
                         limitations=LIMITS, reason=k.code, facts=facts)
     # a sitemap observed missing (404 / 410) is an observation too: the area was checked
     observed_sitemaps = facts.get("sitemaps_read", 0) > 0 or facts.get("sitemaps_missing", 0) > 0
-    read_any = observed_sitemaps or facts.get("llms_txt", {}).get("state") in ("present", "absent")
-    outcome = "OK" if read_any and not facts.get("sitemap_fetch_failures") else ("PARTIAL" if read_any else "FAILED")
+    sitemaps_known = observed_sitemaps and not facts.get("sitemap_fetch_failures")
+    llms_known = facts.get("llms_txt", {}).get("state") in ("present", "absent")
+    # review of PR 47 (H1): the area is CHECKED only when both halves were observed (every sitemap read or seen
+    # missing, AND llms.txt seen present or absent); one half observed is PARTIAL with the reason; none is FAILED
+    if sitemaps_known and llms_known:
+        outcome, reason = "OK", None
+    elif observed_sitemaps or llms_known:
+        outcome, reason = "PARTIAL", ("LLMS_TXT_UNREAD" if sitemaps_known else "SITEMAP_UNREAD")
+    else:
+        outcome, reason = "FAILED", "SITEMAP_UNREAD"
     return envelope(AGENT, TASK, outcome, findings, methodology=METHODOLOGY.format(c=MAX_CHILDREN, s=BLOCK_SAMPLE),
-                    limitations=LIMITS, not_connected=not_connected, facts=facts)
+                    limitations=LIMITS, not_connected=not_connected, facts=facts, reason=reason)
 
 
 def _fetch(ctx, url: str, accept: str):
+    polite = getattr(ctx, "polite", None)
+    if polite is not None:
+        polite()                                   # the same politeness wait as Selene's requests
     f = ctx.fetcher.fetch(url, robots_cache=ctx.robots_cache, guard=ctx.guard, accept=accept)
     if f.state == "KILLED":
         raise Killed(f.detail or "KILLED")

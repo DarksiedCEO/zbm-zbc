@@ -95,6 +95,15 @@ def access_diff(bot_fetch, human_fetch, bot_extract: Optional[dict], human_extra
     signals = []
     if bot_fetch.state == "BLOCKED_BY_ROBOTS":
         return {"state": "INCONCLUSIVE", "signals": [], "why": "robots.txt disallows our crawler on this path"}
+    if bot_fetch.status in CHALLENGE_STATUSES and human_fetch.status in CHALLENGE_STATUSES:
+        return {"state": "INCONCLUSIVE", "signals": [], "why": "both requests were refused or challenged"}
+    if bot_fetch.status in CHALLENGE_STATUSES and (human_fetch.status or 0) < 400:
+        # Review of PR 47 (H3): our crawler refused while a browser identity is served is the site refusing UNKNOWN
+        # crawlers (bot protection), not cloaking and not an error visitors see. Whether the major search and AI
+        # crawlers (verified by IP) are refused too cannot be told from here.
+        return {"state": "CRAWLER_REFUSED", "signals": [], "bot_status": bot_fetch.status,
+                "why": "the site refused our crawler but served a browser identity; whether verified search and AI "
+                       "crawlers are refused cannot be observed from here"}
     if human_fetch.status in CHALLENGE_STATUSES and (bot_fetch.status or 0) < 400:
         return {"state": "INCONCLUSIVE", "signals": [],
                 "why": "the browser-identity request was challenged or refused (bot protection); no claim either way"}
