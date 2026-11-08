@@ -1068,3 +1068,61 @@ def test_non_busy_outcomes_match_the_pre_change_rule(srv, case):
     else:
         want = ("FAILED", "SITEMAP_UNREAD")
     assert (env["outcome"], env["reason"]) == want
+
+
+
+# ================================================================ round-7 review of d03c333
+
+class _PatternGate(_FakeGate):
+    """Slots granted in a fixed order: True = a slot, False = every slot busy."""
+
+    def __init__(self, pattern):
+        super().__init__(allow=0)
+        self.pattern = list(pattern)
+
+    def acquire(self, blocking=True, timeout=None):
+        self.offered.append(timeout)
+        return self.pattern.pop(0) if self.pattern else False
+
+
+@pytest.mark.local_http
+@pytest.mark.parametrize("case,pattern,llms,want", [
+    # quarantined s1 + 404 s2 observed; llms.txt finds us busy: busy is the sole cause
+    ("llms_busy", [True, True, False], None, ("PARTIAL", "SERVICE_BUSY")),
+    # quarantined s1 + 404 s2 observed, s3 busy; llms.txt answers 403: llms.txt is the real missing half
+    ("llms403_sitemap_busy", [True, True, False, True], 403, ("PARTIAL", "LLMS_TXT_UNREAD")),
+    # same, llms.txt times out (a real non-answer from the site): llms.txt is the missing half
+    ("llms_timeout_sitemap_busy", [True, True, False, True], "stall", ("PARTIAL", "LLMS_TXT_UNREAD")),
+])
+def test_a_quarantined_plus_missing_sitemap_never_gets_a_sitemap_reason_when_busy(srv, monkeypatch, case, pattern,
+                                                                                    llms, want):
+    """A sitemap seen missing (404) is an observation: the non-busy rule never says the sitemap half is incomplete
+    for quarantined + 404, so a busy run must not either."""
+    from fixture_server import stall
+    robots = ("User-agent: *\nAllow: /\nSitemap: http://site.test/s1.xml\nSitemap: http://site.test/s2.xml\n"
+              + ("Sitemap: http://site.test/s3.xml\n" if len(pattern) == 4 else ""))
+    install_site(srv, robots=robots, llms=None)
+    srv.text("site.test", "/s1.xml", _DOCTYPE_SITEMAP, ctype="application/xml")
+    srv.text("site.test", "/s2.xml", "nope", status=404)
+    if llms == 403:
+        srv.text("site.test", "/llms.txt", "no", status=403)
+    elif llms == "stall":
+        srv.routes[("site.test", "/llms.txt")] = stall(5)
+    env = _delia_after(srv, None, monkeypatch, _PatternGate(pattern))
+    assert env["facts"]["service_busy"] and (env["outcome"], env["reason"]) == want
+    assert "SITEMAP_QUARANTINED" in {f["code"] for f in env["findings"]}
+    if llms == "stall":
+        assert env["facts"]["llms_txt"]["fetch_state"] == "TIMEOUT"
+
+
+@pytest.mark.local_http
+@pytest.mark.parametrize("llms", [None, 403])
+def test_quarantined_plus_missing_without_busy_matches_the_non_busy_rule(srv, llms):
+    robots = "User-agent: *\nAllow: /\nSitemap: http://site.test/s1.xml\nSitemap: http://site.test/s2.xml\n"
+    install_site(srv, robots=robots, llms=None if llms else "# T\n\n## S\n- [a](http://site.test/)\n")
+    srv.text("site.test", "/s1.xml", _DOCTYPE_SITEMAP, ctype="application/xml")
+    srv.text("site.test", "/s2.xml", "nope", status=404)
+    if llms:
+        srv.text("site.test", "/llms.txt", "no", status=403)
+    env = _delia_after(srv, None)
+    assert (env["outcome"], env["reason"]) == (("PARTIAL", "LLMS_TXT_UNREAD") if llms else ("OK", None))
