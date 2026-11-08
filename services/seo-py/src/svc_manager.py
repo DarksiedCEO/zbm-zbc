@@ -21,7 +21,7 @@ from envelope import sha
 from errors import Conflict, Forbidden, Invalid, Unavailable
 from reasons import R
 
-AGENTS = ("selene", "delia", "roman", "entity_check", "callum", "naomi", "osei")
+AGENTS = ("selene", "delia", "roman", "entity_check", "callum", "idris", "naomi", "osei")
 # The agent registry (ADR 0046, owner rule: every agent has a human name, ONE job, and an entry with its assignment,
 # inputs and outputs). Shared plumbing (primitives/, answer_adapter.py and the engine adapters, the ports) is not an
 # agent and is not listed. Shown on GET /seo/v1/department.
@@ -47,6 +47,18 @@ REGISTRY = {
                            "LOOKALIKE_URL / MENTIONED_NOT_CITED / INCONCLUSIVE rows with evidence, metrics with "
                            "confidence)",
                            "callum.mnc_priority/2 (the Mentioned-Not-Cited list for Roman and Adaeze)"]},
+    "idris": {"assignment": "competitor visibility: the client's AI share of voice against its competitors, and "
+                            "emerging competitors",
+              "inputs": ["the tenant's competitor set (at most 20 tracked competitors: names, terms, rules, domains)",
+                         "the answers of Callum's citation runs (the same adapter answers, read while in memory; a "
+                         "recent run is reused, never re-asked: svc_competitors.py)",
+                         "the tenant's emerging-competitor dismissals"],
+              "outputs": ["competitor_visibility envelope (idris.share_of_voice/1: presence, mention share and "
+                          "citation share per brand x engine x prompt with Wilson intervals, UNKNOWN when it cannot "
+                          "be told; opportunities and strengths; EMERGING_COMPETITOR / WATCH candidates)",
+                          "competitor observations recorded per citation run (counts, pointers and, per emerging "
+                          "candidate, at most 3 excerpts of at most 160 characters, PII-screened and marked "
+                          "untrusted; never a whole answer)"]},
     "naomi": {"assignment": "prompt volume with confidence bands",
               "inputs": ["a prompt-volume source (NOT_CONNECTED)"], "outputs": ["prompt_volume envelope (audit)"]},
     "osei": {"assignment": "data hygiene, first-party truth and search-truth drift",
@@ -55,8 +67,8 @@ REGISTRY = {
              "outputs": ["data_hygiene and search_performance envelopes", "drift reports"]},
 }
 # Named in the spec, NOT built (no code, no registry entry until they are): Adaeze (content gap) is a consumer of
-# callum.mnc_priority/2; Marcus, Priya, Theo, Zara, Idris, Vesper, Julian, Sable, Farrah (ADR 0017).
-NOT_BUILT_AGENTS = ("adaeze", "marcus", "priya", "theo", "zara", "idris", "vesper", "julian", "sable", "farrah")
+# callum.mnc_priority/2; Marcus, Priya, Theo, Zara, Vesper, Julian, Sable, Farrah (ADR 0017). Idris: ADR 0048.
+NOT_BUILT_AGENTS = ("adaeze", "marcus", "priya", "theo", "zara", "vesper", "julian", "sable", "farrah")
 STATES = ("active", "watch", "retrain", "restricted", "retired")
 MOVES = {"active": ("watch", "restricted"), "watch": ("active", "retrain", "restricted"),
          "retrain": ("active", "watch", "restricted"), "restricted": ("active", "retrain", "retired"),
@@ -164,7 +176,8 @@ class ManagerMixin:
                 "engine_runs": self.engine_scorecard() if agent == "callum" else None,
                 "citation_runs": self.citation_scorecard() if agent == "callum" else None,
                 "basis": "completed audit reports, finished log ingests, recorded drift reports and (Callum) "
-                         "recorded answer-engine reservations and settlements"}
+                         "recorded answer-engine reservations and settlements",
+                **({"visibility_runs": self.visibility_scorecard()} if agent == "idris" else {})}
 
     def _queues(self, agent: str) -> dict:
         running = len(self.running_audits)

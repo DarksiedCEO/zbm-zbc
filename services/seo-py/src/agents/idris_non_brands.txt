@@ -1,0 +1,36 @@
+# Idris (ADR 0048, review round 3): names that are never an emerging competitor (NON_BRAND_TERM, whole-name match after
+# the fold). Self-authored for this repository from general knowledge (no third-party list, no licence). Comma-separated.
+# platform features and programmes
+seller central, vendor central, brand registry, buy box, amazon fba, fulfillment by amazon, amazon ppc, amazon ads,
+amazon advertising, sponsored products, sponsored brands, sponsored display, a+ content, account health, seller university,
+google ads, google search, search console, google analytics, google business profile, google merchant center, meta ads,
+facebook ads, tiktok shop, shopify plus, amazon business, walmart marketplace, prime, amazon prime
+# AI assistants and model names
+meta ai, le chat, deepseek, grok, mistral, llama, bard, siri, alexa, gpt, gpt-4, gpt-4o, gpt-4.1, gpt-5, gpt-5 mini, o1, o3,
+chatgpt plus, chatgpt pro, chatgpt enterprise, claude pro, claude sonnet, claude opus, claude haiku, gemini advanced,
+gemini pro, gemini flash, gemini 2.5 pro, gemini 2.5 flash, ai overviews, ai overview, ai mode, searchgpt, copilot pro,
+microsoft copilot, perplexity pro, bing chat, google ai, forbes advisor, fin ai
+# events and dates
+black friday, cyber monday, prime day, prime big deal days, memorial day, labor day, fourth of july, independence day,
+super bowl, thanksgiving, christmas, new year, holiday season, back to school, singles day, boxing day, q1, q2, q3, q4,
+prosper show, amazon accelerate, dreamforce, inbound, saastr annual, web summit, ces, sxsw, money20/20,
+billion dollar seller summit, shoptalk, nrf big show
+# job titles, roles and teams
+ceo, cfo, cto, coo, cmo, cro, vp, svp, evp, president, founder, co-founder, head, director, manager, controller,
+account manager, account executive, brand manager, marketplace manager, product manager, marketing manager,
+chief revenue officer, chief executive officer, chief marketing officer, chief financial officer, head of growth,
+head of marketing, head of sales, customer success manager, customer success managers, sales team, operations team,
+finance team, finance department, marketing team, support team, hvac technician, technician, consultant, analyst
+# generic business phrases
+customer service, customer support, terms of service, privacy policy, return policy, small business, enterprise,
+mid-market, growth, finance, operations, sales, marketing, support, platinum, gold, silver, premium, starter, pro plan,
+free plan, free trial, case study, white paper, best practices
+# acronyms
+mrr, arr, nrr, grr, cac, ltv, roas, acos, tacos, b2b, b2c, d2c, dtc, smb, smbs, sme, smes, hvac, ac, hr, vat, gst, ppc,
+crm, crms, erp, gaap, ifrs, asc 606, kpi, kpis, okr, okrs, cpc, cpm, ctr, seo, sem, aeo, geo, ga, ga4, gtm, api, sdk,
+saas, paas, iaas, llm, llms, nlp, ui, ux, roi, faq, faqs, usd, eur, gbp, eu, uk, us, usa, uae, nyc, la, sf
+# nationalities and languages
+american, british, english, german, french, spanish, italian, chinese, japanese, korean, indian, canadian, australian,
+mexican, brazilian, european, asian, african, latin, russian, ukrainian, polish, dutch, swedish, turkish, arabic
+# honorifics (a fragment alone is never a name)
+mr, mrs, ms, dr, prof, sir, st, jr, sr

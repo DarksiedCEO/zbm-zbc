@@ -174,6 +174,8 @@ class Settings:
     answer_engines: dict = field(default_factory=dict, repr=False)
     callum_resolve_urls: bool = False
     callum_resolve_max: int = 40
+    idris_classifier_engine: Optional[str] = None     # ADR 0048 round 2: OFF unless an engine is named
+    idris_ner: bool = False                           # ADR 0048 round 3: the optional spaCy NER signal
     report_branding: object = field(default_factory=lambda: _default_branding())   # client_report.Branding
     bind_addr: str = "127.0.0.1"
     port: int = 8500
@@ -562,6 +564,16 @@ def _answer_engines(env, s: "Settings") -> None:
         s.answer_engines[name] = _answer_engine(env, s, name)
     s.callum_resolve_urls = _flag(env, "SEO_CALLUM_RESOLVE_URLS")
     s.callum_resolve_max = _int(env, "SEO_CALLUM_RESOLVE_MAX", 40, 1, 200)
+    engine = (env.get("SEO_IDRIS_CLASSIFIER_ENGINE") or "").strip()
+    if engine and engine not in ("openai", "anthropic", "google", "perplexity"):
+        raise RuntimeError("SEO_IDRIS_CLASSIFIER_ENGINE must be openai, anthropic, google or perplexity (or unset)")
+    s.idris_classifier_engine = engine or None
+    s.idris_ner = _flag(env, "SEO_IDRIS_NER")
+    if s.idris_ner:
+        import importlib.util
+        if importlib.util.find_spec("spacy") is None or importlib.util.find_spec("en_core_web_sm") is None:
+            raise RuntimeError("SEO_IDRIS_NER=1 needs spaCy and en_core_web_sm 3.8.0 installed "
+                               "(services/seo-py/requirements-ner.txt); refusing to start without them")
 
 
 def _default_branding():

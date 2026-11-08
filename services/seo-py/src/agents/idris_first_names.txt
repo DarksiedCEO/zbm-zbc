@@ -1,0 +1,20 @@
+# Idris (ADR 0048): common first names. A 2-3 word candidate starting with one of these, with no form signal
+# (legal suffix, mixed case, digits, a host name) and no generic word after it, is treated as a person's name
+# (PERSON_NAME), never an emerging competitor. Provenance (review round 2): common US given names as published in
+# the US Social Security Administration's popular-names data — a US federal government work, PUBLIC DOMAIN, no
+# licence obligation — plus common short forms and a few widely known business figures' first names. A heuristic:
+# it misses names not listed and can drop a brand named like a person.
+james, john, robert, michael, william, david, richard, joseph, thomas, charles, christopher, daniel, matthew, anthony, mark, donald
+steven, paul, andrew, joshua, kenneth, kevin, brian, george, timothy, ronald, edward, jason, jeffrey, ryan, jacob, gary, nicholas, eric
+jonathan, stephen, larry, justin, scott, brandon, benjamin, samuel, gregory, alexander, frank, patrick, raymond, jack, dennis, jerry
+tyler, aaron, jose, adam, nathan, henry, douglas, zachary, peter, kyle, noah, ethan, jeremy, walter, christian, keith, roger, terry
+austin, sean, gerald, carl, harold, dylan, arthur, lawrence, jordan, jesse, bryan, billy, bruce, gabriel, joe, logan, alan, juan, albert
+willie, elijah, wayne, randy, vincent, mason, roy, ralph, bobby, russell, bradley, philip, eugene, liam, lucas, oliver, luke, owen
+mary, patricia, jennifer, linda, elizabeth, barbara, susan, jessica, sarah, karen, lisa, nancy, betty, sandra, margaret, ashley
+kimberly, emily, donna, michelle, carol, amanda, melissa, deborah, stephanie, dorothy, rebecca, sharon, laura, cynthia, amy, kathleen
+angela, shirley, brenda, emma, anna, pamela, nicole, samantha, katherine, christine, helen, debra, rachel, carolyn, janet, maria
+catherine, heather, diane, olivia, julie, joyce, victoria, ruth, virginia, lauren, kelly, christina, joan, evelyn, judith, andrea
+hannah, megan, cheryl, jacqueline, martha, madison, teresa, gloria, sara, janice, ann, kathryn, abigail, sophia, frances, jean, alice
+judy, isabella, julia, grace, amber, denise, danielle, marilyn, beverly, charlotte, natalie, theresa, diana, brittany, doris, kayla
+alexis, lori, marie, ava, mia, chloe, zoe, lily, ella, aria, priya, raj, amit, wei, li, mohammed, ahmed, fatima, ali, omar, yusuf
+jeff, jeffrey, neil, bill, elon, tim, tom, mike, chris, dave, steve, jim, bob, rob, ben, sam, alex, max, nick, matt, dan, greg, tony, gary, ray, ken, jon, josh, jake, zach, nate, ted, ed, al, sue, kate, liz, jen, beth, meg, amy, ann, jane, kim, pam, jo, sundar, satya, sergey, larry, sheryl, marissa, reed, jack, evan, drew, brian

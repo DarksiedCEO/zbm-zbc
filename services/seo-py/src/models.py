@@ -168,3 +168,52 @@ class CitationRunCreate(Strict):
     prompt_set_id: Annotated[StrictStr, Field(pattern=r"^seo-pst-[0-9a-f]{40}$")]
     engines: Optional[Annotated[list[Literal["openai", "anthropic", "google", "perplexity"]],
                                 Field(min_length=1, max_length=4)]] = None
+
+
+class CompetitorSpec(Strict):
+    """ADR 0048: one tracked competitor. ``terms`` default to the name; ``term_rules`` as for the client's brand terms
+    (agents/brand_mention.py: the common-word rule applies to competitor names too)."""
+    name: Annotated[StrictStr, Field(min_length=2, max_length=80)]
+    terms: Annotated[list[Annotated[StrictStr, Field(min_length=2, max_length=80)]], Field(max_length=5)] = []
+    term_rules: Annotated[list[BrandTermRule], Field(max_length=5)] = []
+    domains: Annotated[list[Annotated[StrictStr, Field(pattern=DOMAIN)]], Field(max_length=5)] = []
+
+
+class CompetitorSetCreate(Strict):
+    """ADR 0048: the tenant's competitor set (a new version each time). At most 20 competitors: the service refuses a
+    21st with COMPETITOR_LIMIT (the model accepts up to 40 so the refusal names the rule)."""
+    request_id: RequestId
+    competitors: Annotated[list[CompetitorSpec], Field(max_length=40)] = []
+    exclude_terms: Annotated[list[Annotated[StrictStr, Field(min_length=2, max_length=80)]], Field(max_length=50)] = []
+    emerging_detection: StrictBool = True
+
+
+class EmergingDismiss(Strict):
+    """ADR 0048: dismiss an emerging-competitor candidate (owner through the dashboard, or the tenant through the hub)."""
+    request_id: RequestId
+    key: Annotated[StrictStr, Field(min_length=2, max_length=60)]
+    reason: Literal["NOT_A_COMPETITOR", "PUBLISHER_OR_PLATFORM", "OWN_BRAND", "PRODUCT_OR_PLACE", "OTHER"]
+
+
+class VisibilityRunCreate(Strict):
+    """ADR 0048: Idris's competitor-visibility run. Reuses a citation run completed within ``max_age_minutes`` (0 =
+    always fresh; at most Callum's refresh interval, 60) with the same domain, prompt set version and competitor set,
+    else requests a fresh citation run (Callum's rules)."""
+    request_id: RequestId
+    domain: Annotated[StrictStr, Field(pattern=DOMAIN)]
+    prompt_set_id: Annotated[StrictStr, Field(pattern=r"^seo-pst-[0-9a-f]{40}$")]
+    engines: Optional[Annotated[list[Literal["openai", "anthropic", "google", "perplexity"]],
+                                Field(min_length=1, max_length=4)]] = None
+    max_age_minutes: Annotated[StrictInt, Field(ge=0, le=60)] = 60
+
+
+class EmergingUndismiss(Strict):
+    """ADR 0048 review round 1: the owner withdraws a dismissal."""
+    request_id: RequestId
+    key: Annotated[StrictStr, Field(min_length=2, max_length=60)]
+
+
+class EmergingConfirm(Strict):
+    """ADR 0048 review round 2: the owner or the tenant confirms an emerging candidate (promoted into the shares)."""
+    request_id: RequestId
+    key: Annotated[StrictStr, Field(min_length=2, max_length=60)]

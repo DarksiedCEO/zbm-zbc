@@ -15,7 +15,7 @@ own registered domains, or a provider answer. The ledger itself only ever receiv
 
 The department's work is in mixins: svc_tenants.py (tenants, tenant tokens, kill switches), svc_entity.py (the
 canonical entity record — the propagation spine's read side), svc_audits.py (the audit product), svc_citations.py
-(Callum's citation-source runs, ADR 0046). The agents are in
+(Callum's citation-source runs, ADR 0046), svc_competitors.py (Idris's competitor visibility, ADR 0048). The agents are in
 agents/ and the shared primitives in primitives/ (single task each). No network call is ever made with the lock held.
 """
 
@@ -38,6 +38,7 @@ from reasons import R
 from store import DISCARDED_NAME, PENDING_NAME, DataDirBusy, RecordLog, StoreCorrupt, StoreWriteError, verify_lines
 from svc_audits import AuditsMixin
 from svc_citations import CitationsMixin
+from svc_competitors import CompetitorsMixin
 from svc_engines import EnginesMixin
 from svc_entity import EntityMixin, ZBM_ENTITY
 from svc_gsc import GscMixin
@@ -74,7 +75,7 @@ def request_sha(body: dict) -> str:
 
 
 class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixin, SchedulesMixin, ManagerMixin,
-                 GscMixin, EnginesMixin, ReportsMixin, CitationsMixin):
+                 GscMixin, EnginesMixin, ReportsMixin, CitationsMixin, CompetitorsMixin):
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, ports=None,
                  clock: Optional[Clock] = None, lock_token: Optional[str] = None, *,
                  observe_existing_on_start: bool = False):
@@ -102,6 +103,11 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
         self.engine_runs: dict[str, dict] = {}          # Wave 4: metered answer-engine runs (svc_engines.py)
         self.client_reports: dict[str, dict] = {}       # recorded client-report renders (svc_reports.py)
         self.citation_runs: dict[str, dict] = {}        # Callum's citation-source runs (svc_citations.py, ADR 0046)
+        self.competitor_sets: dict[str, dict] = {}      # Idris (svc_competitors.py, ADR 0048): tenant -> versions
+        self.competitor_observations: dict[str, dict] = {}   # citation run -> Idris's observations of its answers
+        self.emerging_dismissals: dict[str, dict] = {}  # tenant -> candidate key -> dismissal
+        self.emerging_confirmations: dict[str, dict] = {}   # tenant -> candidate key -> confirmation (round 2)
+        self.visibility_runs: dict[str, dict] = {}      # Idris's competitor-visibility runs
         self.requests: dict[tuple, tuple] = {}
         # memory only
         self.running_audits: set = set()               # audits this process is running now
