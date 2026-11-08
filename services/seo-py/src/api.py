@@ -536,6 +536,12 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
         """The owner (dashboard) or the tenant itself (hub, its own tenant only) dismisses an emerging candidate."""
         return svc.dismiss_candidate(scope[0], scope[1], req)
 
+    @app.post(P + "/tenants/{tid}/competitor-set/confirmations", dependencies=auth, status_code=201)
+    def confirm_candidate(req: dict = Depends(body(m.EmergingConfirm)),
+                          scope: tuple = Depends(scoped("dashboard", "seo_agent", "hub"))) -> dict:
+        """The owner (dashboard) or the tenant (hub, own tenant) confirms an emerging candidate."""
+        return svc.confirm_candidate(scope[0], scope[1], req)
+
     @app.post(P + "/tenants/{tid}/competitor-set/undismissals", dependencies=auth)
     def undismiss_candidate(req: dict = Depends(body(m.EmergingUndismiss)),
                             scope: tuple = Depends(scoped("dashboard"))) -> dict:

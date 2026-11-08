@@ -106,6 +106,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
         self.competitor_sets: dict[str, dict] = {}      # Idris (svc_competitors.py, ADR 0048): tenant -> versions
         self.competitor_observations: dict[str, dict] = {}   # citation run -> Idris's observations of its answers
         self.emerging_dismissals: dict[str, dict] = {}  # tenant -> candidate key -> dismissal
+        self.emerging_confirmations: dict[str, dict] = {}   # tenant -> candidate key -> confirmation (round 2)
         self.visibility_runs: dict[str, dict] = {}      # Idris's competitor-visibility runs
         self.requests: dict[tuple, tuple] = {}
         # memory only

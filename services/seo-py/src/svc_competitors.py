@@ -146,7 +146,9 @@ class CompetitorsMixin:
             out = {"tenant_id": tid, "current": cs["current"], "versions": {k: dict(v) for k, v in
                                                                             cs["versions"].items()},
                    "limits": {"tracked_max": idris.MAX_TRACKED, "emerging_folded_max": idris.MAX_EMERGING_FOLDED},
-                   "dismissals": [{"key": k, **v} for k, v in sorted(self.emerging_dismissals.get(tid, {}).items())]}
+                   "dismissals": [{"key": k, **v} for k, v in sorted(self.emerging_dismissals.get(tid, {}).items())],
+                   "confirmations": [{"key": k, **v} for k, v in
+                                     sorted(self.emerging_confirmations.get(tid, {}).items())]}
             warns = idris.set_warnings(cur)
             if warns:
                 out["warnings"] = warns
@@ -216,7 +218,8 @@ class CompetitorsMixin:
                 raise NotFound(R("CANDIDATE_NOT_FOUND"))
             if key in self.emerging_dismissals.get(tid, {}):
                 raise Conflict(R("CANDIDATE_ALREADY_DISMISSED"))
-            data = {"tenant_id": tid, "key": key, "reason": body["reason"], "by": actor}
+            data = {"tenant_id": tid, "key": key, "reason": body["reason"], "by": actor,
+                    "name": self._candidate_name(tid, key)}
             self._commit("emerging_competitor_dismissed", self._req(data, actor, rk, body, key), actor,
                          evidence=("emerging_competitor_dismissed", f"competitor_set:{tid}",
                                    {"tenant_id": tid, "key_sha256": sha(key), "reason": body["reason"], "by": actor},
@@ -243,6 +246,49 @@ class CompetitorsMixin:
     def _a_emerging_competitor_undismissed(self, d, at):
         self.emerging_dismissals.get(d["tenant_id"], {}).pop(d["key"], None)
 
+    def confirm_candidate(self, actor: str, tid: str, body: dict) -> dict:
+        """The owner (dashboard, seo_agent) or the tenant (hub) confirms an emerging candidate: it is promoted into the
+        shares (review round 2, spec clarification: auto-listing stays presence-only until confirmed)."""
+        with self.lock:
+            self._gate()
+            self._get(self.tenants, tid, "TENANT_NOT_FOUND")
+            self.check_kill(tenant=tid, write=True)
+            rk = self.rk("confirm", tid, body)
+            if self._idem(actor, rk, body):
+                return self._confirmation_view(tid, body["key"])
+            key = body["key"]
+            if not idris.candidate_key_valid(key) or not self._seen(tid, key):
+                raise NotFound(R("CANDIDATE_NOT_FOUND"))
+            if idris.DismissalIndex(self.emerging_dismissals.get(tid, {})).covers(key, self._candidate_name(tid, key)):
+                raise Conflict(R("CANDIDATE_ALREADY_DISMISSED"))
+            if key in self.emerging_confirmations.get(tid, {}):
+                raise Conflict(R("CANDIDATE_ALREADY_CONFIRMED"))
+            data = {"tenant_id": tid, "key": key, "by": actor, "name": self._candidate_name(tid, key)}
+            self._commit("emerging_competitor_confirmed", self._req(data, actor, rk, body, key), actor,
+                         evidence=("emerging_competitor_confirmed", f"competitor_set:{tid}",
+                                   {"tenant_id": tid, "key_sha256": sha(key), "by": actor}, (actor, rk)))
+            return self._confirmation_view(tid, key)
+
+    def _a_emerging_competitor_confirmed(self, d, at):
+        self.emerging_confirmations.setdefault(d["tenant_id"], {})[d["key"]] = {"by": d["by"], "at": at,
+                                                                               "name": d.get("name")}
+
+    def _confirmation_view(self, tid: str, key: str) -> dict:
+        return {"tenant_id": tid, "key": key,
+                "confirmed": dict(self.emerging_confirmations.get(tid, {}).get(key) or {})}
+
+    def _candidate_name(self, tid: str, key: str) -> Optional[str]:
+        """The most frequent display form of a candidate key in the tenant's observations."""
+        counts: dict = {}
+        for o in self.competitor_observations.values():
+            if o["tenant_id"] != tid:
+                continue
+            for c in (o["observations"] or {}).get("candidates") or []:
+                if c["key"] == key:
+                    for d, n in c["display"].items():
+                        counts[d] = counts.get(d, 0) + n
+        return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[0][0][:80] if counts else None
+
     def _seen(self, tid: str, key: str) -> bool:
         for o in self.competitor_observations.values():
             if o["tenant_id"] == tid and any(c["key"] == key for c in (o["observations"] or {}).get("candidates")
@@ -255,7 +301,8 @@ class CompetitorsMixin:
 
     def _a_emerging_competitor_dismissed(self, d, at):
         self.emerging_dismissals.setdefault(d["tenant_id"], {})[d["key"]] = {"reason": d["reason"], "by": d["by"],
-                                                                            "at": at}
+                                                                            "at": at, "name": d.get("name")}
+        self.emerging_confirmations.get(d["tenant_id"], {}).pop(d["key"], None)   # a dismissal ends a confirmation
 
     # ------------------------------------------------------------------ competitor-visibility runs
 
@@ -271,13 +318,15 @@ class CompetitorsMixin:
             if prev:
                 return self.visibility_run_view(tid, prev[1])
             self._visibility_rules(t, tid, body)
-            reuse = self._reusable(tid, body)
-            if reuse is not None:
-                return self._record_visibility(eff, rk, body, tid, reuse, "reused", andre)
-        cbody = {"request_id": body["request_id"], "domain": body["domain"], "prompt_set_id": body["prompt_set_id"]}
-        if body.get("engines"):
-            cbody["engines"] = body["engines"]
-        cv = self.request_citation_run(actor, tid, cbody, andre)       # every one of Callum's rules applies
+            cid = self._reusable(tid, body)
+        source = "reused" if cid is not None else "fresh"
+        if cid is None:
+            cbody = {"request_id": body["request_id"], "domain": body["domain"],
+                     "prompt_set_id": body["prompt_set_id"]}
+            if body.get("engines"):
+                cbody["engines"] = body["engines"]
+            cid = self.request_citation_run(actor, tid, cbody, andre)["citation_run_id"]   # Callum's rules apply
+        classifier = self._idris_classify(tid, cid, derived_id("vis", tid, eff, rk), body)    # optional, outside lock
         with self.lock:
             self._gate()
             t = self._get(self.tenants, tid, "TENANT_NOT_FOUND")
@@ -285,7 +334,70 @@ class CompetitorsMixin:
             if prev:
                 return self.visibility_run_view(tid, prev[1])
             self._visibility_rules(t, tid, body)
-            return self._record_visibility(eff, rk, body, tid, cv["citation_run_id"], "fresh", andre)
+            return self._record_visibility(eff, rk, body, tid, cid, source, andre, classifier)
+
+    def _idris_classify(self, tid: str, cid: str, vid: str, body: dict) -> dict:
+        """The optional classifier (ADR 0048 round 2): OFF unless SEO_IDRIS_CLASSIFIER_ENGINE names an engine; one
+        question per visibility run through the adapter, inside a recorded reservation (``visibility_run:<vid>``),
+        the engine's budgets binding; its answer can only REMOVE candidates; any failure removes nothing."""
+        eng = getattr(self.settings, "idris_classifier_engine", None)
+        if not eng:
+            return {"state": "OFF"}
+        from agents.prompt_guard import personal_data
+        from answer_adapter import EngineError
+        from primitives import Killed
+        with self.lock:
+            o = self.competitor_observations.get(cid)
+            p = self.prompt_sets.get(body["prompt_set_id"])
+            ps = None if p is None else p["versions"][str(p["current"])]
+            obs = None if o is None or o["observations"] is None else o["observations"]
+        if obs is None:
+            return {"state": "NOT_RUN", "engine": eng, "reason": "NO_OBSERVATIONS"}
+        cands = sorted(obs.get("candidates") or [], key=lambda c: (-c["answers"], c["key"]))
+        cands = cands[:idris.CLASSIFIER_MAX_NAMES]
+        if not cands:
+            return {"state": "NOT_RUN", "engine": eng, "reason": "NO_CANDIDATES"}
+        port = self.ports.engines.get(eng)
+        if port is None or not getattr(port, "connected", False):
+            return {"state": "NOT_CONNECTED", "engine": eng}
+        names = [(i, idris._best(c["display"])) for i, c in enumerate(cands)]
+        prompt = idris.classifier_prompt(names)
+        if personal_data(prompt) is not None:
+            return {"state": "NOT_RUN", "engine": eng, "reason": "PERSONAL_DATA"}
+        guard = self.guard(tid)
+        run = meter = None
+        answers, stop = 0, None
+        try:
+            guard(capability="ai_probe", provider=eng, agent="idris")
+            if getattr(port, "metered", False):
+                run = self.engine_budget(tid, vid, ps, subject="visibility_run").open(eng, getattr(port, "model", None))
+                meter = run.reserve(0, int(getattr(port, "attempts", 1) or 1))
+            a = port.ask(prompt, guard=guard, meter=meter) if getattr(port, "accepts_guard", False) else port.ask(prompt)
+            if getattr(a, "status", None) != "ANSWER":
+                stop = "ENGINE_UNAVAILABLE"
+                return {"state": "FAILED", "engine": eng, "reason": "NO_ANSWER"}
+            answers = 1
+            got = idris.parse_classifier(a.text, {i for i, _n in names})
+            if got is None:
+                return {"state": "FAILED", "engine": eng, "reason": "REPLY_NOT_UNDERSTOOD",
+                        "model": getattr(a, "model", None)}
+            return {"state": "OK", "engine": eng, "model": getattr(a, "model", None),
+                    "model_version": getattr(a, "model_version", None), "asked": len(names),
+                    "not_brand_keys": sorted(cands[i]["key"] for i in got), "filtered": len(got),
+                    "note": "the classifier can only remove candidates; it never adds or promotes one"}
+        except Killed as k:
+            stop = "ENGINE_KILLED"
+            return {"state": "KILLED", "engine": eng, "reason": k.code}
+        except EngineError as e:
+            stop = e.code
+            return {"state": "BLOCKED" if e.code == "ENGINE_BUDGET_EXHAUSTED" else "FAILED", "engine": eng,
+                    "reason": e.code, "reason_detail": e.detail}
+        except Exception as exc:  # noqa: BLE001 - fail closed: nothing filtered
+            stop = "ENGINE_UNAVAILABLE"
+            return {"state": "FAILED", "engine": eng, "reason": "ADAPTER_FAILED", "error_type": type(exc).__name__}
+        finally:
+            if run is not None:
+                run.settle(answers, stop)
 
     def _visibility_rules(self, t: dict, tid: str, body: dict) -> None:
         self.check_kill(tenant=tid, capability="ai_probe", write=True)
@@ -334,7 +446,7 @@ class CompetitorsMixin:
         return None if best is None else best[1]
 
     def _record_visibility(self, actor: str, rk: str, body: dict, tid: str, cid: str, source: str,
-                           andre: bool = False) -> dict:
+                           andre: bool = False, classifier: Optional[dict] = None) -> dict:
         """Under the lock: compute Idris's envelope from the citation run's observations and record it."""
         vid = derived_id("vis", tid, actor, rk)
         r = self.citation_runs[cid]
@@ -358,7 +470,8 @@ class CompetitorsMixin:
                        and x["observations"]["domain"] == obs["domain"]
                        and at - LOOKBACK <= parse_iso(x["observations"]["observed_at"]) <= at]
             env = idris.compute(obs, history, self.emerging_dismissals.get(tid, {}), self._previous(tid, obs, cid),
-                                {"outcome": (r["result"] or {}).get("outcome")}, vid, now, source)
+                                {"outcome": (r["result"] or {}).get("outcome")}, vid, now, source,
+                                self.emerging_confirmations.get(tid, {}), classifier)
         rsha = sha(env)
         facts = env.get("facts") or {}
         data = {"visibility_run_id": vid, "tenant_id": tid, "domain": body["domain"],

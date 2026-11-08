@@ -22,7 +22,7 @@ provenance and confidence, never 0% for unknown); no paid data.
 ### D1. One job, and what is not Idris's
 
 Idris measures the client's AI share of voice against competitors and detects emerging competitors (`agents/idris.py`,
-rules `idris-rules/2026-11-08.2`, contract `idris.share_of_voice/1`). Registry entry in `svc_manager.REGISTRY`
+rules `idris-rules/2026-11-08.3`, contract `idris.share_of_voice/1`). Registry entry in `svc_manager.REGISTRY`
 (assignment, inputs, outputs; `GET /seo/v1/department`); Idris leaves `NOT_BUILT_AGENTS`; it has its own lifecycle
 state (a restricted Idris is refused 403 `AGENT_RESTRICTED`, and citation runs then record no observations — Callum
 is unaffected). NOT Idris's: asking engines (the adapter and Callum's collection), classifying the client's citations
@@ -166,7 +166,8 @@ a fresh run adds Callum's), `GET` list / one (+ hub own tenant, compliance_38). 
   instructions, prompt, system, override, ... — or an underscore artefact), `PLACE` (the bundled gazetteer
   `agents/idris_places.txt`: ~150 countries and regions, the 50 US states, ~100 major cities; self-authored, place names
   are facts, no licence), `PERSON_NAME` (a 1-3 word name starting with a first name from `agents/idris_first_names.txt`,
-  ~250 common first names, self-authored, no licence; a disclosed heuristic that can drop a brand named like a
+  common US first names — provenance corrected in round 2: the US Social Security Administration's popular-names data,
+  a US government work, public domain, no licence obligation; a disclosed heuristic that can drop a brand named like a
   person). Publisher and engine names now match as a word or prefix of a name ("Forbes Advisor", "Gemini Advanced",
   "ChatGPT Plus"). `GENERIC` covers names made only of generic business nouns (`GENERIC_NOUNS`: "Revenue Recovery
   Software"), and `CORPORATE_SUFFIX` is a legal form only (Software, Solutions, Media, ... are no longer a signal).
@@ -183,9 +184,52 @@ a fresh run adds Callum's), `GET` list / one (+ hub own tenant, compliance_38). 
   "andre" because the header was present, and notes `andre_presented`; the README, the registry and this ADR state the
   kept excerpts exactly.
 
+## Review round 2 (independent review of 16d34b41: CONDITIONAL) — changes
+
+- **HIGH, partial overlap.** `idris.overlapping` now refuses any token-sequence overlap: equal, containment, or the end
+  of one term equal to the start of another (`Jungle Scout` / `Scout Pro`; `Media Pros` against the client's `Z Best
+  Media`), across competitors and against client terms (422 `COMPETITOR_TERMS_OVERLAP`). At run time
+  `idris.assign_spans` collects every brand term's matches and selects NON-OVERLAPPING spans, longest first then
+  leftmost; each brand is matched on the answer with the spans selected for other brands overwritten, so any overlap
+  names one brand (`Jungle Scout Pro` names Jungle Scout only). With no overlap the text is unchanged.
+- **Dismissals, word-aligned** (`idris.DismissalIndex`, built once per run — no sort per call): the key; the same
+  tokens after the fold (invisible characters removed) with legal suffixes dropped and plurals singular; a name
+  containing the dismissed tokens as a contiguous token sequence; or one edit apart for 6+ characters. Never a
+  substring inside a word (`acme` does not cover `Pacmed Labs`, `ring` does not cover `Springbot`). A dismissal now
+  stores the candidate's display name for token matching.
+- **Recall restored, precision kept.** Exclusions match WHOLE names: `GENERIC` only for a single dictionary word or a
+  name made only of business-generic words, without a FORM signal (legal suffix, mixed case, digit, host name);
+  `INSTRUCTION_LIKE` only for injection PHRASES (`INJECTION_PHRASES`), never ordinary words (Buy, Contact, Run, Mode,
+  Output); publisher / engine names only standing alone (NerdWallet, G2, Gemini); `KNOWN_NON_BRANDS` (self-authored:
+  Seller Central, Meta AI, Le Chat, DeepSeek, Black Friday, Customer Service, Forbes Advisor, Gemini Advanced, ...);
+  `PLACE` only when the whole name is a place, `PERSON_NAME` only for "First Last" with no form signal; a sentence-
+  initial verb glued to a name is stripped ("Contact Victoria"); digits and host names stay in names ("Helium 10",
+  "eva.guru"). The gazetteer gained Lyon, Leeds, Guadalajara, Kraków and ~40 more cities.
+- **Labelled corpus** (`tests/fixtures/idris_candidates_corpus.json`, 291 answers, synthetic and self-authored from
+  labelled lists of 60 brands and 60 non-brands including every example of both reviews; IN-SAMPLE, so the numbers are
+  optimistic): extractor precision 1.000, recall 0.965; strong-signal-gated precision 1.000, recall 0.705. The test
+  prints them and asserts floors of 0.95 / 0.90 (extractor) and 0.95 / 0.60 (gated). The reviewer's own 82-answer set
+  is not in the repository; precision on unseen answers is not known.
+- **EMERGING needs a STRONG brand signal** (`STRONG_SIGNALS`: its domain cited (`DOMAIN_HINT`) or written as a host
+  name, a legal suffix, mixed case, a digit, product / pricing context, or a distinctive multi-word name); a list
+  head or bold alone is layout and never enough.
+- **Optional classifier** (`SEO_IDRIS_CLASSIFIER_ENGINE`, unset = OFF): one question per visibility run through the
+  multi-engine adapter, inside a recorded reservation (`visibility_run:<vid>`) with that engine's budgets (default 0
+  = OFF: `BLOCKED`, nothing asked). Injection-safe: at most 30 candidate names go as a JSON array of DATA under a fixed
+  instruction; the reply must be exactly `{"not_brand": [ids]}` with ids from that array, or it is `FAILED` and
+  filters nothing. It can only REMOVE candidates (`classifier_filtered`), never add, promote or rename one.
+- **"Candidate — needs confirmation"** on every emerging and watch item, every emerging presence entry and the
+  finding. `POST .../competitor-set/confirmations` (owner: dashboard, seo_agent; tenant: hub, own tenant) confirms a
+  candidate: it is promoted INTO the shares (`brand_id: cnf:<key>`, presence and mention share from the run's answers,
+  citation share UNKNOWN) and may lead an opportunity headline. A dismissal ends a confirmation; a dismissed candidate
+  cannot be confirmed (409). **Spec clarification for the owner:** the spec says emerging competitors are "folded into
+  the benchmark automatically"; as built they are listed automatically with their presence only, and enter the shares
+  and headlines only once a human confirms them — because an unconfirmed lexical candidate in a share denominator
+  would move every brand's number on a guess.
+
 ## What is NOT built (deliberately)
 
-- No LLM-based candidate extraction (owner rule: only through the adapter and default OFF; not needed for v1).
+- No LLM-based candidate EXTRACTION (the optional classifier only filters; see review round 2).
 - No sentiment measure; the negative cue is lexical and reported only.
 - No verification of an emerging competitor's domain (domain hints are unverified; citation share stays UNKNOWN);
   no "promote to tracked" action (the tenant adds it to the set, within the 20).

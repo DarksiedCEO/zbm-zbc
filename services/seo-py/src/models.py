@@ -211,3 +211,9 @@ class EmergingUndismiss(Strict):
     """ADR 0048 review round 1: the owner withdraws a dismissal."""
     request_id: RequestId
     key: Annotated[StrictStr, Field(min_length=2, max_length=60)]
+
+
+class EmergingConfirm(Strict):
+    """ADR 0048 review round 2: the owner or the tenant confirms an emerging candidate (promoted into the shares)."""
+    request_id: RequestId
+    key: Annotated[StrictStr, Field(min_length=2, max_length=60)]

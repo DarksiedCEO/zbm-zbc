@@ -20,10 +20,11 @@ new hampshire, new jersey, new mexico, new york, north carolina, north dakota, r
 west virginia
 # major cities
 london, paris, berlin, madrid, rome, tokyo, osaka, beijing, shanghai, shenzhen, mumbai, delhi, bangalore, dubai, toronto, vancouver
-montreal, sydney, melbourne, brisbane, chicago, boston, seattle, houston, dallas, austin, denver, phoenix, atlanta, miami, orlando
+montreal, sydney, melbourne, brisbane, chicago, boston, seattle, houston, dallas, austin, denver, phoenix, atlanta, victoria, miami, orlando
 philadelphia, detroit, portland, nashville, baltimore, pittsburgh, cleveland, sacramento, oakland, pasadena, anaheim, irvine
 amsterdam, brussels, vienna, zurich, geneva, munich, hamburg, frankfurt, milan, barcelona, lisbon, dublin, edinburgh, manchester
 stockholm, oslo, copenhagen, helsinki, warsaw, prague, budapest, istanbul, cairo, lagos, nairobi, johannesburg, seoul, bangkok
 jakarta, manila, hanoi, taipei
 los angeles, san francisco, san diego, san jose, las vegas, long beach, new orleans, salt lake city, kansas city, st louis
 mexico city, sao paulo, rio de janeiro, buenos aires, tel aviv, kuala lumpur, cape town, abu dhabi, silicon valley, bay area
+leeds, lyon, marseille, guadalajara, monterrey, krakow, kraków, wroclaw, lagos, porto, valencia, seville, naples, turin, rotterdam, antwerp, glasgow, liverpool, birmingham, bristol, cardiff, belfast, ottawa, calgary, perth, adelaide, auckland, osaka, kyoto, nagoya, chennai, hyderabad, pune, kolkata, karachi, lahore, dhaka, riyadh, doha, tehran, baghdad
