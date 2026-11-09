@@ -144,6 +144,51 @@ def request_body(model: str, prompt: str, max_uses: int = 3) -> bytes:
                        "tools": [{"type": TOOL_TYPE, "name": "web_search", "max_uses": max_uses}]}).encode("utf-8")
 
 
+# ADR 0049: the Messages API is stateless; earlier turns are sent as alternating user / assistant messages, and
+# (review round 2) an assistant turn that used the web search tool goes back as the content blocks it was RECEIVED
+# as — server_tool_use, web_search_tool_result (with each result's encrypted_content) and text blocks with their
+# citations (encrypted_index): "To continue a conversation that contains search results, send the assistant's content
+# blocks back exactly as you received them, including each result's encrypted_content ... If encrypted_content is
+# missing or modified, the request fails with a 400 validation error" (the web search tool page, read Nov 8 2026,
+# for tool web_search_20250305)
+MULTI_TURN_DOCS = {"url": "https://platform.claude.com/docs/en/build-with-claude/working-with-messages",
+                   "tool_url": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool",
+                   "read": "2026-11-08", "tool_version": TOOL_TYPE,
+                   "shape": "messages: [{role: user, content}, {role: assistant, content: <blocks as received>}, ...]"}
+
+
+# review round 3: the only blocks an assistant turn may carry back — what this adapter's own requests can produce (text
+# with web-search citations, the server tool call and its result); never tool_use, tool_result, thinking or anything
+# else. Provenance (the block was received in this conversation) is checked by answer_adapter.
+ALLOWED_BLOCKS = frozenset({"text", "server_tool_use", "web_search_tool_result"})
+ALLOWED_CITATIONS = frozenset({"web_search_result_location"})
+
+
+def allowed_block(block) -> bool:
+    if not isinstance(block, dict) or block.get("type") not in ALLOWED_BLOCKS:
+        return False
+    if block["type"] == "server_tool_use":
+        return block.get("name") == "web_search"
+    if block["type"] == "text":
+        cites = block.get("citations") or []
+        return isinstance(cites, list) and all(isinstance(c, dict) and c.get("type") in ALLOWED_CITATIONS
+                                               for c in cites)
+    content = block.get("content")                     # web_search_tool_result: results, or the tool's error
+    if isinstance(content, dict):
+        return content.get("type") == "web_search_tool_result_error"
+    return isinstance(content, list) and all(isinstance(r, dict) and r.get("type") == "web_search_result"
+                                             for r in content)
+
+
+def request_body_turns(model: str, history: list, prompt: str, max_uses: int = 3) -> bytes:
+    """``request_body`` with the earlier turns before the new user message. An assistant turn carries its content
+    blocks exactly as received (``content``); only a turn without them (none from this adapter) is sent as text."""
+    msgs = [{"role": h["role"], "content": h["content"] if "content" in h else h["text"]} for h in history] + \
+        [{"role": "user", "content": prompt}]
+    return json.dumps({"model": model, "max_tokens": MAX_TOKENS, "system": SYSTEM_PROMPT, "messages": msgs,
+                       "tools": [{"type": TOOL_TYPE, "name": "web_search", "max_uses": max_uses}]}).encode("utf-8")
+
+
 def parse_response(body: bytes, allowed_models: tuple = MODELS) -> ProviderAnswer:
     try:
         obj = strict_json(body)
@@ -208,6 +253,7 @@ def parse_response(body: bytes, allowed_models: tuple = MODELS) -> ProviderAnswe
                          finish_reason=reason)
     ans.citation_basis = "text_citations_in_search_results"
     ans.unverified_citations = unverified
+    ans.turn_content = obj["content"]               # ADR 0049: the blocks as received, to send back (memory only)
     ans.unmodelled_keys = drift_names(list(obj.keys()) + ["content." + t for t in types],
                                       set(_Response.model_fields) | _KNOWN_UNREAD
                                       | {"content.text", "content.server_tool_use", "content.web_search_tool_result"})
@@ -256,6 +302,15 @@ class AnthropicEngine(HttpAnswerEngine):
 
     def _body(self, model: str, prompt: str) -> bytes:
         return request_body(model, prompt, self.max_searches)
+
+    MULTI_TURN = True
+    MULTI_TURN_DOCS = MULTI_TURN_DOCS
+
+    def _body_turns(self, model: str, history: list, prompt: str) -> bytes:
+        return request_body_turns(model, history, prompt, self.max_searches)
+
+    def _allowed_block(self, block: dict) -> bool:
+        return allowed_block(block)
 
     def _parse(self, raw: bytes, model: str) -> ProviderAnswer:
         return parse_response(raw, (model,))

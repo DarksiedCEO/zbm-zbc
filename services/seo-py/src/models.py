@@ -168,3 +168,22 @@ class CitationRunCreate(Strict):
     prompt_set_id: Annotated[StrictStr, Field(pattern=r"^seo-pst-[0-9a-f]{40}$")]
     engines: Optional[Annotated[list[Literal["openai", "anthropic", "google", "perplexity"]],
                                 Field(min_length=1, max_length=4)]] = None
+
+
+class ConversationRunCreate(Strict):
+    """ADR 0049: one conversation-mining + prompt-volume fireteam run (Theo, Naomi, Zara) for one of the tenant's
+    domains and prompt sets. ``competitor_terms``: competitor brand names Theo looks for in answer text (the prompt
+    set's competitor domains are matched in citations). ``priya_handoff``: Priya's ``priya-emerging-handoff/1``
+    document as she returned it (validated by agents/priya_handoff.py; its tenant must be this tenant)."""
+    request_id: RequestId
+    domain: Annotated[StrictStr, Field(pattern=DOMAIN)]
+    prompt_set_id: Annotated[StrictStr, Field(pattern=r"^seo-pst-[0-9a-f]{40}$")]
+    engines: Optional[Annotated[list[Literal["openai", "anthropic", "google", "perplexity"]],
+                                Field(min_length=1, max_length=4)]] = None
+    competitor_terms: Annotated[list[Annotated[StrictStr, Field(min_length=2, max_length=80)]],
+                                Field(max_length=10)] = []
+    priya_handoff: Optional[dict] = None
+    # review round 1 HIGH 1b: the run that produced the hand-off and the SHA-256 of its canonical form, checked against
+    # Priya's stored run record (agents/priya_handoff.py); without them the hand-off is NOT_VERIFIED (capped THIN)
+    priya_run_id: Optional[Annotated[StrictStr, Field(pattern=r"^seo-[a-z]{3}-[0-9a-f]{40}$")]] = None
+    priya_handoff_sha256: Optional[Annotated[StrictStr, Field(pattern=r"^[0-9a-f]{64}$")]] = None

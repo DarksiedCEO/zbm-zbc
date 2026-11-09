@@ -152,6 +152,46 @@ def request_body(model: str, prompt: str) -> bytes:
                        "tools": [{"google_search": {}}]}).encode("utf-8")
 
 
+# ADR 0049: generateContent's ``contents`` "for multi-turn queries like chat ... contains the conversation history
+# and the latest request" (the API reference's Chat example alternates role user / model). Review round 2: a model
+# turn goes back as the candidate's parts EXACTLY as received (any thoughtSignature or thought part included). The
+# pages read on Nov 8 2026 (the API reference's first 100,000 characters, the Google Search grounding page) do not
+# state the thought-signature rule (the grounding page only links a "Thought signatures" page, not read), so Gemini
+# native multi-turn is PROVISIONAL until a first live call confirms the shape.
+MULTI_TURN_DOCS = {"url": "https://ai.google.dev/api/generate-content", "read": "2026-11-08",
+                   "shape": "contents: [{role: user, parts}, {role: model, parts: <parts as received>}, ...]",
+                   "status": "provisional_until_first_live_call",
+                   "unverified": "whether thought signatures must be returned, and in which parts"}
+
+
+# review round 3: a model turn may carry back only text and thought parts (with their thoughtSignature); never a
+# functionCall, functionResponse, executableCode, inlineData or any other part kind
+ALLOWED_PART_KEYS = frozenset({"text", "thought", "thoughtSignature"})
+
+
+def allowed_part(part) -> bool:
+    return isinstance(part, dict) and bool(part) and set(part) <= ALLOWED_PART_KEYS and \
+        (isinstance(part.get("text"), str) or part.get("thought") is True)
+
+
+def request_body_turns(model: str, history: list, prompt: str) -> bytes:
+    """``request_body`` with the earlier turns (assistant = role ``model``, its parts as received) before the new
+    user content."""
+    contents = [{"role": "user", "parts": [{"text": h["text"]}]} if h["role"] == "user" else
+                {"role": "model", "parts": h["content"] if "content" in h else [{"text": h["text"]}]}
+                for h in history] + [{"role": "user", "parts": [{"text": prompt}]}]
+    return json.dumps({"systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]}, "contents": contents,
+                       "tools": [{"google_search": {}}]}).encode("utf-8")
+
+
+def _raw_parts(obj: dict, idx: int) -> Optional[list]:
+    try:
+        parts = obj["candidates"][idx]["content"]["parts"]
+    except (KeyError, IndexError, TypeError):
+        return None
+    return parts if isinstance(parts, list) and parts else None
+
+
 def parse_response(body: bytes, allowed_models: tuple = MODELS) -> ProviderAnswer:
     try:
         obj = strict_json(body)
@@ -202,6 +242,7 @@ def parse_response(body: bytes, allowed_models: tuple = MODELS) -> ProviderAnswe
                          answer_sha256=hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(),
                          finish_reason=reason)
     ans.citation_basis = "grounding_chunks"
+    ans.turn_content = _raw_parts(obj, r.candidates.index(first)) # ADR 0049: the parts as received (memory only)
     ans.citation_hints = hints                      # the chunk titles (a domain, per the docs): unverified hints only
     ans.unmodelled_keys = drift_names(obj.keys(), set(_Response.model_fields) | _KNOWN_UNREAD)
     return ans
@@ -249,6 +290,15 @@ class GoogleEngine(HttpAnswerEngine):
 
     def _body(self, model: str, prompt: str) -> bytes:
         return request_body(model, prompt)
+
+    MULTI_TURN = True
+    MULTI_TURN_DOCS = MULTI_TURN_DOCS
+
+    def _body_turns(self, model: str, history: list, prompt: str) -> bytes:
+        return request_body_turns(model, history, prompt)
+
+    def _allowed_block(self, block: dict) -> bool:
+        return allowed_part(block)
 
     def _parse(self, raw: bytes, model: str) -> ProviderAnswer:
         return parse_response(raw, (model,))

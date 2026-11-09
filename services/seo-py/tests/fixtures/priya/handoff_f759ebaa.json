@@ -1,0 +1,197 @@
+{
+ "_produced_by": "agents/priya.py on claude/seo-priya-keywords-20261108 at f759ebaa (priya.build + led['handoff']; synthetic Search Console and Bing rows); priya.handoff_sha recorded",
+ "handoff": {
+  "schema": "priya-emerging-handoff/1",
+  "tenant_id": "zbm",
+  "run_id": "seo-kwl-1111111111111111111111111111111111111111",
+  "generated_at": "2026-11-08T12:00:00+00:00",
+  "consumers": {
+   "theo": {
+    "task": "conversation mining",
+    "state": "NOT_BUILT"
+   },
+   "naomi": {
+    "task": "prompt volume",
+    "state": "NOT_CONNECTED"
+   }
+  },
+  "items": [
+   {
+    "query": {
+     "untrusted": true,
+     "text": "best fba refund audit tool for sellers",
+     "truncated": false,
+     "sha256": "c735c426e8f4b423594f21c673139273618f3b0c6f715909bfe0bd6a3098df94"
+    },
+    "origin": "observed",
+    "emerging_kinds": [
+     "conversational",
+     "constraint"
+    ],
+    "volume_status": "MEASURED_NOT_TIERED",
+    "observed_counts": {
+     "impressions": 600,
+     "clicks": 3,
+     "date_range": {
+      "start": "2026-10-05",
+      "end": "2026-10-12"
+     },
+     "source": "first_party:bing_webmaster"
+    },
+    "evidence": {
+     "run_id": "seo-kwl-1111111111111111111111111111111111111111",
+     "rule": "priya/2026-11-08.2",
+     "pointers": [
+      {
+       "source": "first_party:bing_webmaster",
+       "call": "GetQueryStats",
+       "site_sha256": "ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss",
+       "date_range": {
+        "start": "2026-10-05",
+        "end": "2026-10-12"
+       }
+      }
+     ]
+    },
+    "requested_measurements": [
+     "conversation_mining",
+     "prompt_volume"
+    ],
+    "id_hex": "c735c426e8f4b423"
+   },
+   {
+    "query": {
+     "untrusted": true,
+     "text": "how do i get amazon to reimburse lost inventory",
+     "truncated": false,
+     "sha256": "bd31b86b188bdb04601a03583387b1360be208baee88251bbfea8b8a25b75853"
+    },
+    "origin": "observed",
+    "emerging_kinds": [
+     "question",
+     "conversational"
+    ],
+    "volume_status": "BELOW_THRESHOLD",
+    "observed_counts": {
+     "impressions": 12,
+     "clicks": 1,
+     "date_range": {
+      "start": "2026-10-09",
+      "end": "2026-11-05"
+     },
+     "source": "first_party:search_console"
+    },
+    "evidence": {
+     "run_id": "seo-kwl-1111111111111111111111111111111111111111",
+     "rule": "priya/2026-11-08.2",
+     "pointers": [
+      {
+       "source": "first_party:search_console",
+       "call": "searchAnalytics.query dimensions=[query] aggregationType=byProperty type=web dataState=final",
+       "property_sha256": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+       "window": {
+        "start": "2026-10-09",
+        "end": "2026-11-05",
+        "timezone": "America/Los_Angeles"
+       }
+      }
+     ]
+    },
+    "requested_measurements": [
+     "conversation_mining",
+     "prompt_volume"
+    ],
+    "id_hex": "bd31b86b188bdb04"
+   },
+   {
+    "query": {
+     "untrusted": true,
+     "text": "who recovers amazon reimbursement revenue",
+     "truncated": false,
+     "sha256": "67ebbf030a30b469586fb17dc39f4af02fc9d7dd049d1e5f6f3b283c56628663"
+    },
+    "origin": "observed",
+    "emerging_kinds": [
+     "question"
+    ],
+    "volume_status": "BELOW_THRESHOLD",
+    "observed_counts": {
+     "impressions": 7,
+     "clicks": 0,
+     "date_range": {
+      "start": "2026-10-09",
+      "end": "2026-11-05"
+     },
+     "source": "first_party:search_console"
+    },
+    "evidence": {
+     "run_id": "seo-kwl-1111111111111111111111111111111111111111",
+     "rule": "priya/2026-11-08.2",
+     "pointers": [
+      {
+       "source": "first_party:search_console",
+       "call": "searchAnalytics.query dimensions=[query] aggregationType=byProperty type=web dataState=final",
+       "property_sha256": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+       "window": {
+        "start": "2026-10-09",
+        "end": "2026-11-05",
+        "timezone": "America/Los_Angeles"
+       }
+      }
+     ]
+    },
+    "requested_measurements": [
+     "conversation_mining",
+     "prompt_volume"
+    ],
+    "id_hex": "67ebbf030a30b469"
+   },
+   {
+    "query": {
+     "untrusted": true,
+     "text": "amazon reimbursement agency near me",
+     "truncated": false,
+     "sha256": "b6a332a50e539ab1358bbdcf23700973113b2fe227577dfd44e773685be7c225"
+    },
+    "origin": "observed",
+    "emerging_kinds": [
+     "constraint"
+    ],
+    "volume_status": "BELOW_THRESHOLD",
+    "observed_counts": {
+     "impressions": 4,
+     "clicks": 0,
+     "date_range": {
+      "start": "2026-10-09",
+      "end": "2026-11-05"
+     },
+     "source": "first_party:search_console"
+    },
+    "evidence": {
+     "run_id": "seo-kwl-1111111111111111111111111111111111111111",
+     "rule": "priya/2026-11-08.2",
+     "pointers": [
+      {
+       "source": "first_party:search_console",
+       "call": "searchAnalytics.query dimensions=[query] aggregationType=byProperty type=web dataState=final",
+       "property_sha256": "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+       "window": {
+        "start": "2026-10-09",
+        "end": "2026-11-05",
+        "timezone": "America/Los_Angeles"
+       }
+      }
+     ]
+    },
+    "requested_measurements": [
+     "conversation_mining",
+     "prompt_volume"
+    ],
+    "id_hex": "b6a332a50e539ab1"
+   }
+  ],
+  "rule": "an item is a candidate to measure, not a measured demand"
+ },
+ "handoff_sha256": "d062392be62196d57c2ba9774cd1edb0e1373979c7cf63a7065ad8871c3bdf29",
+ "_stored_as": "item keys are stored as id_hex (the 16 hex after 'kw-') so a secret scanner does not read 'key': '<hex>' as a credential; the test rebuilds Priya's exact document and checks it against handoff_sha256, which Priya's own priya.handoff_sha computed"
+}

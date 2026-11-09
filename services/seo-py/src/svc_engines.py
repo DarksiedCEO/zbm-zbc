@@ -49,10 +49,17 @@ class _Meter:
         self.reserved_calls, self.per_call, self.day = calls, per_call, day
         self.reserved_spend = per_call * calls
         self.calls, self.known, self.unknown = 0, ZERO, 0
+        self.context = 0                 # ADR 0049: extra reserve units charged for a multi-turn request's history
         self.over_reserve = False
 
     def spent(self) -> Decimal:
-        return self.known + self.per_call * self.unknown
+        return self.known + self.per_call * (self.unknown + self.context)
+
+    def charge_context(self, units: int) -> None:
+        """A request of unknown cost that carried earlier turns is charged ``units`` more reserves (its context
+        grew); fail closed: the charge is booked, never refunded."""
+        if units > 0:
+            self.context += units
 
     def before(self) -> None:
         if self.calls >= self.reserved_calls:

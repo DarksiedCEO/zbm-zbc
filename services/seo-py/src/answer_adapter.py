@@ -39,6 +39,7 @@ W4-2, so every engine has the controls Perplexity was certified with):
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -212,6 +213,51 @@ def dedupe(urls) -> list:
     return out[:MAX_SOURCES]
 
 
+class Conversation:
+    """One multi-turn conversation's provenance record (review rounds 3-4): for every answer THIS engine returned in
+    THIS conversation, in order, the SHA-256 of its whole ordered content list (``None`` for an answer that carried no
+    content). The k-th assistant turn of a history must carry exactly the k-th recorded list: re-ordered, duplicated,
+    partly dropped, edited or cross-turn swapped blocks, blocks from another chain, a dropped or extra assistant turn,
+    and text-only (contentless) assistant turns where content was recorded are all refused before a request is
+    built."""
+
+    __slots__ = ("engine", "turns")
+
+    def __init__(self, engine: str):
+        self.engine, self.turns = engine, []
+
+    def record(self, blocks) -> None:
+        self.turns.append(block_sha(list(blocks)) if isinstance(blocks, list) and blocks else None)
+
+    def check(self, history: list) -> Optional[str]:
+        """None when every assistant turn of ``history`` is the recorded one at its index; else the refusal."""
+        assistants = [h for h in history if h.get("role") == "assistant"]
+        if len(assistants) != len(self.turns):           # every recorded turn, none dropped, none added
+            return "HISTORY_TURNS_MISMATCH"
+        for k, h in enumerate(assistants):
+            want = self.turns[k]
+            got = h.get("content")
+            if want is None:
+                if got is not None:
+                    return "HISTORY_BLOCK_NOT_RECEIVED"
+                continue
+            if got is None:
+                return "HISTORY_TURN_CONTENTLESS"
+            if block_sha(list(got)) != want:
+                return "HISTORY_BLOCK_NOT_RECEIVED"
+        return None
+
+
+def block_sha(block) -> str:
+    return hashlib.sha256(json.dumps(block, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+                          .encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def history_bytes(history: list) -> int:
+    """The size of a multi-turn history as it is sent (JSON, UTF-8)."""
+    return len(json.dumps(history, separators=(",", ":"), ensure_ascii=False).encode("utf-8", "surrogatepass"))
+
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -350,6 +396,16 @@ class HttpAnswerEngine:
     ALLOWED_HOSTS: frozenset = frozenset()
     MAX_RESPONSE_BYTES = MAX_RESPONSE_BYTES
     MAX_PROMPT_CHARS = 2000
+    # ADR 0049: native multi-turn (earlier turns sent as the provider's own user / assistant messages). Only an
+    # engine whose documented multi-turn request shape was read sets MULTI_TURN (its MULTI_TURN_DOCS say where);
+    # ``ask(..., history=...)`` on any other engine is refused, never approximated
+    MULTI_TURN = False
+    MULTI_TURN_DOCS: Optional[dict] = None
+    MAX_HISTORY_TURNS = 8
+    # the whole history as JSON (texts and the provider-native content blocks sent back as received): a bigger
+    # history is refused, never truncated (review round 2: a cut content block would change what the engine saw)
+    MAX_HISTORY_BYTES = 256 * 1024
+    MAX_CONTENT_BLOCKS = 128
 
     def _init_http(self, key: ApiKey, timeout_s: float, attempts: int, backoff_s: tuple,
                    transport: Optional[httpx.BaseTransport], network_backend, monotonic: Callable[[], float],
@@ -383,6 +439,58 @@ class HttpAnswerEngine:
     def _body(self, model: str, prompt: str) -> bytes:
         raise NotImplementedError
 
+    def conversation(self) -> Conversation:
+        """A new provenance record for one multi-turn chain (pass it to every ``ask`` of that chain)."""
+        return Conversation(self.name)
+
+    def _allowed_block(self, block: dict) -> bool:
+        """The block types this engine may send back (MULTI_TURN engines override); default: none."""
+        return False
+
+    def _body_turns(self, model: str, history: list, prompt: str) -> bytes:
+        """The request carrying earlier turns (``history``: [{"role": "user"|"assistant", "text"}], oldest first)
+        and the new user prompt. Only engines with MULTI_TURN implement it."""
+        raise NotImplementedError
+
+    @property
+    def multi_turn(self) -> bool:
+        return bool(self.MULTI_TURN)
+
+    def _check_history(self, history, conversation=None) -> None:
+        """Alternating user / assistant turns starting with user, bounded: anything else is refused before a
+        request is built (ADR 0049). An assistant turn may carry ``content``: the provider's own content blocks of
+        that answer exactly as received (``ProviderAnswer.turn_content``), which a MULTI_TURN engine sends back
+        unchanged instead of the text."""
+        if not self.MULTI_TURN:
+            raise EngineError("ENGINE_PROTOCOL_ERROR", "MULTI_TURN_NOT_SUPPORTED")
+        if not isinstance(history, list) or not history or len(history) > 2 * self.MAX_HISTORY_TURNS \
+                or len(history) % 2:
+            raise EngineError("ENGINE_PROTOCOL_ERROR", "REQUEST_REFUSED")
+        for i, h in enumerate(history):
+            role = "user" if i % 2 == 0 else "assistant"
+            keys = {"role", "text"} if role == "user" else ({"role", "text"}, {"role", "text", "content"})
+            if not isinstance(h, dict) or (set(h) != keys if role == "user" else set(h) not in keys) \
+                    or h["role"] != role or not isinstance(h["text"], str) or not h["text"]:
+                raise EngineError("ENGINE_PROTOCOL_ERROR", "REQUEST_REFUSED")
+            if "content" in h and (not isinstance(h["content"], list) or not h["content"]
+                                   or len(h["content"]) > self.MAX_CONTENT_BLOCKS
+                                   or not all(isinstance(b, dict) for b in h["content"])):
+                raise EngineError("ENGINE_PROTOCOL_ERROR", "REQUEST_REFUSED")
+        if history_bytes(history) > self.MAX_HISTORY_BYTES:
+            raise EngineError("ENGINE_PROTOCOL_ERROR", "HISTORY_TOO_LARGE")
+        # review rounds 3-4: every block sent back must be of an allowed type, and every assistant turn must be,
+        # in order and whole, the content this engine returned at that turn of this conversation (fail closed)
+        for h in history:
+            for b in h.get("content") or ():
+                if not self._allowed_block(b):
+                    raise EngineError("ENGINE_PROTOCOL_ERROR", "HISTORY_BLOCK_NOT_ALLOWED")
+        # review round 5: no history at all without this conversation's record (text-only included)
+        if not isinstance(conversation, Conversation) or conversation.engine != self.name:
+            raise EngineError("ENGINE_PROTOCOL_ERROR", "HISTORY_NO_RECORD")
+        why = conversation.check(history)
+        if why is not None:
+            raise EngineError("ENGINE_PROTOCOL_ERROR", why)
+
     def _parse(self, raw: bytes, model: str) -> ProviderAnswer:
         raise NotImplementedError
 
@@ -398,14 +506,20 @@ class HttpAnswerEngine:
     # ------------------------------------------------------------------ public
 
     def ask(self, prompt: str, model: Optional[str] = None, guard: Optional[Callable] = None,
-            meter=None) -> ProviderAnswer:
+            meter=None, history: Optional[list] = None, conversation: Optional[Conversation] = None) -> ProviderAnswer:
         """One question, at most ``attempts`` requests, all within one hard deadline. ``guard`` is the kill-switch
         check (raises to stop); ``meter`` charges every request against the run's budget reservation
-        (``before()`` raises ENGINE_BUDGET_EXHAUSTED; ``after(cost)``)."""
+        (``before()`` raises ENGINE_BUDGET_EXHAUSTED; ``after(cost)``). ``history`` (ADR 0049, MULTI_TURN engines
+        only): earlier turns, sent as the provider's own user / assistant messages; None = one question, the
+        request exactly as before."""
         model = model or self.model
         if model not in self.models or not isinstance(prompt, str) or not 1 <= len(prompt) <= self.MAX_PROMPT_CHARS:
             raise EngineError("ENGINE_PROTOCOL_ERROR", "REQUEST_REFUSED")
-        body = self._body(model, prompt)
+        if history is None:
+            body = self._body(model, prompt)
+        else:
+            self._check_history(history, conversation)
+            body = self._body_turns(model, history, prompt)
         end = self._mono() + self.timeout_s
         last = "ENGINE_UNAVAILABLE"
         for attempt in range(self.attempts):
@@ -423,6 +537,8 @@ class HttpAnswerEngine:
                     if meter is not None:
                         meter.after((ans.usage or {}).get("total_cost_usd"))
                         charged = True
+                    if isinstance(conversation, Conversation) and conversation.engine == self.name:
+                        conversation.record(getattr(ans, "turn_content", None))
                     return self._stamp(ans)
                 if status in (401, 402, 403):
                     raise EngineError("ENGINE_AUTH_REFUSED")

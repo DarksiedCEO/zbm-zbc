@@ -120,6 +120,9 @@ MUST failure or ERROR.
 | `SEO_ANTHROPIC_MAX_SEARCHES` | `3` | the web search tool's `max_uses` per question (1..10) |
 | `SEO_CALLUM_RESOLVE_URLS` | `0` | ADR 0046: `1` lets Callum follow each cited URL's redirects and read its canonical through the SSRF-safe fetcher (robots.txt honoured, kill switches `capability:fetch` / `provider:web`); `0` = a redirector URL (Gemini grounding) is `INCONCLUSIVE` and every other URL is classified by its own host. A URL carrying a secret-shaped segment is never fetched and is stored with `{secret}` in its place; a client URL whose redirect chain stops, is refused or lands on an error page is never a STRENGTH_URL (ADR 0046 B9) |
 | `SEO_CALLUM_RESOLVE_MAX` | `40` | distinct cited URLs fetched per citation run (1..200) |
+| `SEO_THEO_RUN_MAX_CALLS` | `0` | ADR 0049: the calls ONE conversation-fireteam run may reserve across every engine for Theo's chains (0..2000; a whole chain is reserved before its first turn, so the cap never cuts a chain in half; a native multi-turn turn k counts k units). **0 = OFF: Theo asks nothing** (Naomi and Zara still run). The engines' own budgets and per-run caps bind as well |
+| `SEO_THEO_STACKED_CHECK` | `0` | ADR 0049 review rounds 4-5: `1` re-asks the final question of every complete native multi-turn chain once WITHOUT the earlier answers and flags `DIVERGENT_UNDER_HISTORY` when the lexical pick differs (one extra reserved request per chain). It is the BASIS of the native "invisible at turn one, recommended later" pattern: with it `0`, native chains never report that pattern |
+| `SEO_FIRETEAM_MEMBER_TIMEOUT_SECONDS` | `600` | ADR 0049 review round 1: the overall wait for Theo and Naomi in one conversation run (1..3600); a member still running then is `TIMED_OUT` (Zara reports PARTIAL, its half never filled in) and stops at its next step |
 | `SEO_REPORT_BRAND_NAME`, `SEO_REPORT_BRAND_ACCENT` | `Z Best Media` / `#1f4e79` | white label of the client report: the preparer's name (1-60 letters, digits, spaces, `. , & ' ( ) -`) and accent colour (`#RRGGBB`); anything else refuses start |
 | `SEO_BIND_ADDR` / `SEO_PORT` | `127.0.0.1` / `8500` | where the API listens |
 | `SEO_REQUEST_HEAD_TIMEOUT_SECONDS`, `SEO_KEEP_ALIVE_TIMEOUT_SECONDS`, `SEO_LIMIT_CONCURRENCY`, `SEO_SWITCH_INTERVAL_SECONDS`, `SEO_DRAINS_MAX` | 10 / 5 / 128 / 0.001 / 512 | the hardened launcher (`src/serve.py`, shared with every Python service) |
@@ -168,7 +171,7 @@ names it.
 
 **Not built — setting any of these refuses start:** `SEO_RENDERER`,
 `SEO_SEARCH_CONSOLE_CREDENTIALS_FILE` (renamed: use `SEO_GSC_SERVICE_ACCOUNT_FILE`), `SEO_BING_WEBMASTER_KEY_FILE`, `SEO_PROMPT_VOLUME_PROVIDER`, `SEO_ZERO_DAY_URL`,
-`SEO_ORCA_PUBLISH_URL`, `SEO_CLIENTFIX_URL`.
+`SEO_ORCA_PUBLISH_URL`, `SEO_CLIENTFIX_URL`, `SEO_THEO_LLM_FOLLOWUPS` (ADR 0049: Theo's follow-ups are deterministic templates only).
 
 ## Routes (`/seo/v1`)
 
@@ -193,6 +196,8 @@ names it.
 | `GET /tenants/{tid}/audits/{aid}/client-reports` | dashboard, compliance_38 | the recorded renders of one audit (ids and hashes, never the document) |
 | `POST /tenants/{tid}/citation-runs` | dashboard, seo_agent (+ Andre, a bound Finance client and Compliance's ALLOW for clients) | ADR 0046: Callum's citation-source run (`{"request_id", "domain", "prompt_set_id", "engines"?}`): every cited URL classified STRENGTH_URL / CANONICAL_TO_CLIENT / OPPORTUNITY_URL / LOOKALIKE_URL / INCONCLUSIVE, Mentioned-Not-Cited per answer (LOW_CONFIDENCE apart); recorded first |
 | `GET /tenants/{tid}/citation-runs[/{cid}]`, `GET .../{cid}/mnc-priority` | dashboard, seo_agent, hub (own tenant), compliance_38 | the runs; one run's rows (dashboard drill-down) and metrics; the `callum.mnc_priority/2` list for Roman and Adaeze |
+| `POST /tenants/{tid}/conversation-runs` | dashboard, seo_agent (+ Andre, a bound Finance client and Compliance's ALLOW for clients) | ADR 0049: the Theo / Naomi / Zara fireteam (`{"request_id", "domain", "prompt_set_id", "engines"?, "competitor_terms"?, "priya_handoff"?, "priya_run_id"?, "priya_handoff_sha256"?}`; a hand-off not verified against Priya's run record is capped THIN): Theo's multi-turn chains and Naomi's volume bands in parallel, Zara's real-time cross-check; recorded first |
+| `GET /tenants/{tid}/conversation-runs[/{rid}]`, `GET .../{rid}/crosscheck` | dashboard, seo_agent, hub (own tenant), compliance_38 | the runs; one run's three envelopes (drill-down); Zara's `zara.conversation_volume/1`, the only fireteam output that moves downstream |
 | `POST /tenants/{tid}/log-ingests`, `.../{iid}/chunks`, `.../{iid}/finish`; `GET` both | dashboard, seo_agent, hub (own tenant) | first-party log upload in line-aligned base64 chunks; Selene's `log_access` report (Wave 2) |
 | `GET /tenants/{tid}/audits/{aid}/drift?against={aid}` | scoped | search-truth drift between two completed audits (Wave 2) |
 | `POST /tenants/{tid}/schedules`, `.../{sid}/status`; `GET` both | dashboard, seo_agent (+ Andre for clients) | scheduled re-audits; drift report per consecutive pair (Wave 2) |
@@ -204,7 +209,8 @@ names it.
 
 `src/primitives/` the seven shared primitives (fetch, render, parse, diff / access-diff / link-diff / change-detect)
 and robots.txt; `src/agents/` Selene, Delia, Roman, the probe framework (Naomi, Callum), Callum's citation
-classifier (`agents/callum.py`, ADR 0046), the entity check, Osei-lite,
+classifier (`agents/callum.py`, ADR 0046), the conversation fireteam (`agents/theo.py`, `agents/naomi.py`,
+`agents/zara.py`, ADR 0049), the entity check, Osei-lite,
 and the versioned bot family list; `src/svc_*.py` tenants and kill switches, the entity record, audits; the record-first
 plumbing in `src/service.py` and `src/store.py` is bizdev-py's.
 

@@ -38,6 +38,7 @@ from reasons import R
 from store import DISCARDED_NAME, PENDING_NAME, DataDirBusy, RecordLog, StoreCorrupt, StoreWriteError, verify_lines
 from svc_audits import AuditsMixin
 from svc_citations import CitationsMixin
+from svc_conversations import ConversationsMixin
 from svc_engines import EnginesMixin
 from svc_entity import EntityMixin, ZBM_ENTITY
 from svc_gsc import GscMixin
@@ -74,7 +75,7 @@ def request_sha(body: dict) -> str:
 
 
 class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixin, SchedulesMixin, ManagerMixin,
-                 GscMixin, EnginesMixin, ReportsMixin, CitationsMixin):
+                 GscMixin, EnginesMixin, ReportsMixin, CitationsMixin, ConversationsMixin):
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, ports=None,
                  clock: Optional[Clock] = None, lock_token: Optional[str] = None, *,
                  observe_existing_on_start: bool = False):
@@ -102,10 +103,12 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
         self.engine_runs: dict[str, dict] = {}          # Wave 4: metered answer-engine runs (svc_engines.py)
         self.client_reports: dict[str, dict] = {}       # recorded client-report renders (svc_reports.py)
         self.citation_runs: dict[str, dict] = {}        # Callum's citation-source runs (svc_citations.py, ADR 0046)
+        self.conversation_runs: dict[str, dict] = {}    # Theo / Naomi / Zara runs (svc_conversations.py, ADR 0049)
         self.requests: dict[tuple, tuple] = {}
         # memory only
         self.running_audits: set = set()               # audits this process is running now
         self.running_citation_runs: set = set()        # citation runs this process is running now (ADR 0046)
+        self.running_conversation_runs: set = set()    # fireteam runs this process is running now (ADR 0049)
         self._log_verify_cache: dict = {}                # ingest -> {family|ip hash: verdict} (memory only)
         self._log_budget: dict = {}
         self._log_robots: dict = {}                      # open ingests' parsed robots.txt (memory only)
@@ -598,7 +601,8 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
             else:
                 # ADR 0046: citation runs left running by a process that is gone are closed by the same job
                 summary = {**self.mark_interrupted_audits(),
-                           "citation_runs_interrupted": self.mark_interrupted_citation_runs()}
+                           "citation_runs_interrupted": self.mark_interrupted_citation_runs(),
+                           "conversation_runs_interrupted": self.mark_interrupted_conversation_runs()}
             with self.lock:
                 self._gate()
                 self._commit("job_ran", self._req({"job": name}, "scheduler", rk, body, summary), "scheduler")
