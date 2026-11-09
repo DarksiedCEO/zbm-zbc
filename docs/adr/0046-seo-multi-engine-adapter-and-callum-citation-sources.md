@@ -264,8 +264,40 @@ B9. **War room fixes (PR #55 findings WR-F011..WR-F014; replays `seo-py-callum/R
       StackOverflow question ids, news date paths, status ids) is not personal data unless it is shaped like a phone
       number, an SSN or a payment card (13-19 digits passing Luhn; a bare digit run only at 15 or 16 digits); an
       e-mail or IP address still withholds its segment. A phone number split across segments is not detected.
-      `cited_instead` is keyed on a hash of the original URL (query and fragment dropped) and shows the redacted URL,
-      so two different articles whose stored forms look alike never merge.
+      `cited_instead` is keyed on a hash of the original URL's identity — scheme, canonical host (lower case, no
+      trailing dot, no `www.`, no `:80` / `:443`), path and every non-tracking query parameter (`utm_*`, `gclid`,
+      `fbclid` and the other tracking parameters dropped; the fragment dropped) — and shows the stored (redacted) URL,
+      so two different pages never merge (two articles whose stored forms look alike, `watch?v=A` and `watch?v=B`).
+    - **Final-2 review.** One rule table (`secret_guard.PROVIDERS`, from documented formats: AWS `AKIA` / `ASIA` /
+      `AGPA` / `AIDA` / `AROA` / `AIPA` / `ANPA` / `ANVA` / `APKA` / `ABIA` / `ACCA`, OpenAI / Anthropic `sk-`,
+      `sk-proj-`, `sk-svcacct-`, `sk-admin-`, `sk-ant-api03-`, GitHub `ghp_` / `gho_` / `ghu_` / `ghs_` / `ghr_` /
+      `github_pat_`, Stripe `sk_live_` / `sk_test_` / `rk_live_` / `rk_test_` / `pk_live_` / `whsec_`, Slack
+      `xox[abposre]-` and `xoxe.xox?-` / `xoxe-` refresh tokens, Google `AIza`, Perplexity `pplx-`, GitLab `glpat-`,
+      npm `npm_`, Hugging Face `hf_`, SendGrid `SG.`, JWTs `eyJ...`), matched glued after any non-alphanumeric
+      character (`tok-eyJ...`), plus labelled credentials and the AWS secret format: any 40-character run of
+      `[A-Za-z0-9/+]` bounded by characters outside that class with a digit, an upper- and a lower-case letter, in
+      text and in every URL part; in a path, every 40-character window of the decoded path aligned to boundaries,
+      crossing `/`, except a window that contains a whole path word (a lower-case 3+ letter or Title-case 4+ letter
+      segment from `PATH_WORDS` or the common-word list: `file/d/<Drive id>` is a path, and a random key holds such a
+      segment with negligible probability). Two entry points over that table: `url_secret_segments` (URLs) and
+      `redact_text(text) -> (redacted, findings)` (`findings`: the number of spans redacted, an int; free text:
+      excerpts, titles, hints; it also redacts any URL in the text that `url_has_secret` flags) — a STABLE public
+      signature that TNZ (PR #53) calls; `_strong_spans(text)` is kept under that name until TNZ switches. Upstreamed
+      from TNZ into the same table: AWS key ids written with spaces (`A K I A ...`), the general labelled-credential
+      rule (`access_token`, `refresh_token`, `auth`, `key`, `api-key` / `api_key` / `apikey`, `x-api-key`,
+      `bearer`, `authorization`, `password`, `client_secret`, `secret`, `token`, each needing `:` / `=` / whitespace
+      and a token-shaped value), PEM private-key blocks (terminated or not), `whsec_` and `glpat-`. Every input is checked as written
+      and after each round of percent-decoding (until stable, at most 4 rounds) and HTML-entity decoding, segment by
+      segment and as a whole URL; a key found after any round is redacted and the URL never fetched. Measured: 5,000
+      random AWS-format secrets caught in docs.google.com / t.co / plain paths, queries, fragments, double-encoded
+      queries and text (0 missed); over-redaction on a self-built corpus of 1,180 ordinary URLs from 59 URL formats
+      (AP News, Facebook pfbid, Wix, Squarespace, Contentful, gists, Hugging Face blobs, Loom, Google Maps `data=`,
+      jsDelivr / unpkg versions, Next.js build ids, Canva, Zoom, Drive, Docs, YouTube, news date paths, item ids and
+      more) 0.59-0.85% across six seeds, ALL from the strong AWS-format rule (40-character font file names on
+      fonts.gstatic.com, Docs ids whose `d/` plus first 38 characters fit the format) — the price of never exempting
+      a strong rule. Personal data in paths: an E.164 number with any country code (`+44 20 ...`, `%2B44...`) is
+      withheld segment-only; an e-mail needs an alphabetic top-level domain (`acme-widget@1.2.3` on jsDelivr is a
+      package version).
     - The war room's fake web now encodes chains without hex digits (the reviewer's path fix for PR #55), so its
       redirect cases are fetched and exercise the resolution logic.
 

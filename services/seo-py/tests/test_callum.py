@@ -8,18 +8,18 @@ from __future__ import annotations
 
 import copy
 import json
-import urllib.parse
 import os
+import urllib.parse
 
 import httpx
 import pytest
+import test_answer_engines as te
+import test_perplexity as base
+from helpers import Harness, rid
 
 import answer_adapter as aa
 import config as config_mod
-import test_answer_engines as te
-import test_perplexity as base
 from agents import callum
-from helpers import Harness, rid
 from ports import ProviderAnswer
 from primitives import Killed
 from primitives.fetch import FetchResult
@@ -457,7 +457,7 @@ class Scripted:
 
 
 def test_collection_stops_on_the_stop_codes_and_on_repeated_protocol_errors():
-    g = lambda **k: None  # noqa: E731
+    g = lambda **k: None
     r = callum.collect("openai", Scripted(aa.EngineError("ENGINE_AUTH_REFUSED")), PS, 3, g)
     assert r["outcome"] == "FAILED" and r["reason"] == "ENGINE_AUTH_REFUSED" and len(r["samples"]) == 1
     r = callum.collect("openai", Scripted(aa.EngineError("ENGINE_PROTOCOL_ERROR")), PS, 3, g)
@@ -601,7 +601,8 @@ def test_no_key_and_no_answer_text_reach_the_ledger_the_log_or_the_data_director
     blob = json.dumps([e["_payload"] for e in h.ledger.events]) + repr(h.settings) + repr(h.svc.ports.engines)
     for root, _d, files in os.walk(tmp_path / "data"):
         for f in files:
-            blob += open(os.path.join(root, f), "rb").read().decode("utf-8", "replace")
+            with open(os.path.join(root, f), "rb") as fh:
+                blob += fh.read().decode("utf-8", "replace")
     for k in te.KEYS.values():
         assert k not in blob
     assert "TAILMARKER" not in blob                                        # whole answers are never stored
@@ -624,7 +625,7 @@ def test_the_per_run_call_cap_and_spend_cap_bind(tmp_path):
 
 
 def test_timeouts_rate_limits_and_server_errors_are_inconclusive_rows(tmp_path):
-    h, fakes = service(tmp_path, scripts={"openai": [httpx.Response(503), httpx.ConnectError("x"),
+    h, _fakes = service(tmp_path, scripts={"openai": [httpx.Response(503), httpx.ConnectError("x"),
                                                      base.ok(te.fixture("openai"))],
                                           "anthropic": [httpx.Response(429)]})
     v = h.ok(run(h, prompt_set(h, engines=("openai", "anthropic"))), 201)
@@ -771,7 +772,7 @@ def test_status_shows_every_engine_with_its_docs_and_budget_state_never_a_key(tm
 
 def test_the_audit_path_is_unchanged_for_the_new_engines(tmp_path):
     """The audit's Callum (agents/probes.py) asks a new engine through the same budget hook."""
-    h, fakes = service(tmp_path, scripts={"openai": [base.ok(te.fixture("openai"))]})
+    h, _fakes = service(tmp_path, scripts={"openai": [base.ok(te.fixture("openai"))]})
     psid = prompt_set(h, engines=("openai",))
     h.ok(h.switch("provider:web"))
     rep = h.ok(h.post("/tenants/zbm/audits", {"request_id": rid(), "domain": DOMAIN, "prompt_set_id": psid}),
@@ -789,7 +790,7 @@ def test_narrowing_the_engines_to_none_of_the_sets_is_refused(tmp_path):
 
 
 def test_resolution_on_with_the_web_switch_engaged_fetches_nothing_and_the_run_still_records(tmp_path):
-    h, fakes = service(tmp_path, scripts={"google": [base.ok(te.fixture("google"))]}, SEO_CALLUM_RESOLVE_URLS="1")
+    h, _fakes = service(tmp_path, scripts={"google": [base.ok(te.fixture("google"))]}, SEO_CALLUM_RESOLVE_URLS="1")
     seen = []
 
     class Gated:
@@ -873,11 +874,11 @@ def test_the_audit_never_turns_a_common_word_mention_into_a_client_page_recommen
 
 # ---------------------------------------------------------------------------------------------- round 3: real runs
 
-from pathlib import Path  # noqa: E402
+from pathlib import Path
 
-from agents import osei as osei_mod  # noqa: E402
-from agents import probes  # noqa: E402
-from clock import FixedClock  # noqa: E402
+from agents import osei as osei_mod
+from agents import probes
+from clock import FixedClock
 
 GOLDEN_CALLUM = Path(__file__).resolve().parent / "golden" / "callum"
 
@@ -924,15 +925,16 @@ def test_a_common_word_brand_and_a_lowercase_only_match_are_unconfirmed_with_an_
 
 def test_a_partly_cited_prompt_never_shows_a_zero_mention_rate_from_unconfirmed_mentions():
     # an answer that cites the client confirms its own mention; the others stay unconfirmed
-    env, p = audit_prompt("Apple", ["apple pie"] * 3,
+    _env, p = audit_prompt("Apple", ["apple pie"] * 3,
                           cites=[["https://acme.com/pie"], ["https://acme.com/pie"], ["https://competitor.test/a"]])
     assert p["cited"] == 2 and p["mentioned"] == 2 and p["mention_rate"] == round(2 / 3, 4) and p["class"] == "STRENGTH"
     assert p["mentioned_unconfirmed"] == 1 and "mention_rate_unknown" not in p
 
 
 def _report_md(env) -> str:
-    import client_report as cr
     import report_fixtures as fx
+
+    import client_report as cr
     view = fx._view("acme.com", ["/"], [env], outcome="OK")
     data, _ = cr.render(view, "acme", "markdown")
     return data.decode("utf-8")
@@ -940,7 +942,7 @@ def _report_md(env) -> str:
 
 def test_golden_a_real_classification_renders_the_mentioned_but_not_cited_item():
     # round 3 item 4: classification through to the client report, compared byte for byte
-    env, p = audit_prompt("Acme", ["Acme cleans rugs well."] * 3)
+    env, _p = audit_prompt("Acme", ["Acme cleans rugs well."] * 3)
     md = _report_md(env)
     path = GOLDEN_CALLUM / "classified_mnc.md"
     if os.environ.get("UPDATE_GOLDEN") == "1":
@@ -1011,7 +1013,7 @@ def test_a_prompt_set_with_a_common_word_brand_warns_on_create_and_on_read(h):
 def test_non_dictionary_brands_match_case_insensitively_as_at_a4af277(brand, text):
     # round 4 item 1: the lowercase downgrade applies only to common words; a URL / host written in the text is a
     # mention (text), never a citation of the client
-    env, p = audit_prompt(brand, [text] * 3)
+    _env, p = audit_prompt(brand, [text] * 3)
     assert p["class"] == "MENTIONED_NOT_CITED" and p["mentioned"] == 3 and p["mention_rate"] == 1.0, (text, p)
     assert p["cited"] == 0 and "mentioned_unconfirmed" not in p
 
@@ -1140,7 +1142,7 @@ def test_wr_f011_block_boundaries_are_line_starts_in_every_adapter():
 def _synthetic_jwt() -> str:
     """A JWT-SHAPED string built at run time (no token literal in the source): three base64url parts."""
     import base64
-    part = lambda b: base64.urlsafe_b64encode(b).decode().rstrip("=")  # noqa: E731
+    part = lambda b: base64.urlsafe_b64encode(b).decode().rstrip("=")
     return ".".join(part(x) for x in (b'{"alg":"none","typ":"JWT"}', b'{"sub":"synthetic-test"}', b"not-a-signature"))
 
 
@@ -1318,12 +1320,20 @@ def _fake_keys():
     return {"aws_id": "AKIA" + "IOSFODNN7" + ex, "aws_secret": "wJalrXUtnFEMI" + "/K7MDENG/" + "bPxRfiCY" + ex + "KEY",
             "openai": "sk-proj-" + ex + "Ab3dE5gH7jK9mN1p", "anthropic": "sk-ant-api03-" + ex + "Ab3dE5gH7jK9mN1p",
             "github": "ghp_" + ex + "Ab3dE5gH7jK9mN1pQ3sT5", "perplexity": "pplx-" + ex + "Ab3dE5gH7jK9mN",
-            "stripe": "sk_test_" + ex + "Ab3dE5gH7j", "jwt": _synthetic_jwt(), "test_key": te.KEYS["openai"]}
+            "stripe": "sk_test_" + ex + "Ab3dE5gH7j", "jwt": _synthetic_jwt(), "test_key": te.KEYS["openai"],
+            "aws_role": "AROA" + "IOSFODNN7" + ex, "aws_group": "AGPA" + "IOSFODNN7" + ex,
+            "openai_svc": "sk-svcacct-" + ex + "Ab3dE5gH7jK9mN1p", "github_pat": "github_pat_" + "11" + ex + "Ab3dE5gH7jK9mN1p",
+            "stripe_rk": "rk_test_" + ex + "Ab3dE5gH7j", "stripe_whsec": "whsec_" + ex + "Ab3dE5gH7jK9mN1p",
+            "slack_bot": "xoxb-" + "1234-5678-" + ex + "Ab3d", "slack_refresh": "xoxe.xoxp-" + "1-" + ex + "Ab3dE5gH7j",
+            "slack_xoxe": "xoxe-" + "1-" + ex + "Ab3dE5gH7jK9", "slack_app": "xoxa-" + "2-" + ex + "Ab3dE5",
+            "google": "AIza" + "Sy" + ex + "Ab3dE5gH7jK9mN1pQ3sT5vX", "gitlab": "glpat-" + ex + "Ab3dE5gH7jK9m",
+            "npm": "npm_" + ex + "Ab3dE5gH7jK9mN1pQ3sT5vX7z9", "huggingface": "hf_" + ex + "Ab3dE5gH7jK9mN1pQ3sT5vX7",
+            "sendgrid": "SG." + ex + "Ab3dE5gH7jK9." + ex + "Ab3dE5gH7jK9mN1p"}
 
 
-PROPERTY_HOSTS = sorted(callum.secret_guard.ID_HOSTS | callum.secret_guard.CODE_HOSTS
-                        | callum.secret_guard.ID_PATH_HOSTS) + ["x.notion.site", "site.test", "evil.test",
-                                                                "sіte.test", "competitor.test", "indeed.com"]
+PROPERTY_HOSTS = sorted(callum.secret_guard.ID_HOSTS | callum.secret_guard.CODE_HOSTS) + [
+    "www.google.com", "x.notion.site", "site.test", "evil.test", "sіte.test", "competitor.test", "indeed.com",
+    "www.youtube.com", "cdn.jsdelivr.net", "images.ctfassets.net"]
 
 
 def _placements(host, v):
@@ -1331,7 +1341,10 @@ def _placements(host, v):
     return [f"https://{host}/{v}", f"https://{host}/d/{v}/edit", f"https://{host}/org/repo/commit/{v}",
             f"https://{host}/p?key={q}", f"https://{host}/p?gclid={q}", f"https://{host}/p?jk={q}",
             f"https://{host}/p?v={q}", f"https://{host}/p#{v}", f"https://{host}/p?auth=Bearer%20{q}",
-            f"https://{host}/p?x=1#token={q}"]
+            f"https://{host}/p?x=1#token={q}",
+            # round 10: double-encoded, glued after a non-alphanumeric, HTML entities
+            f"https://{host}/p?k={urllib.parse.quote(q, safe='')}", f"https://{host}/tok-{v}", f"https://{host}/p?a=x_{q}",
+            f"https://{host}/p.{v}", f"https://{host}/p?h={q.replace('%2F', '&#47;')}"]
 
 
 def test_property_every_fake_key_on_every_host_in_every_url_part_is_redacted_and_never_fetched():
@@ -1345,7 +1358,7 @@ def test_property_every_fake_key_on_every_host_in_every_url_part_is_redacted_and
                 stored = json.dumps(callum.stored_url(u))
                 assert v not in stored and urllib.parse.quote(v, safe="") not in stored, (name, u, stored)
                 checked += 1
-    assert checked == len(keys) * len(PROPERTY_HOSTS) * 10
+    assert checked == len(keys) * len(PROPERTY_HOSTS) * 15
     # and through a real classification: never fetched, never stored, with resolution on
     res = resolver({}, enabled=True)
     urls = [_placements(h, v)[0] for h in ("docs.google.com", "t.co", "github.com") for v in keys.values()]
@@ -1394,3 +1407,111 @@ def test_cited_instead_never_merges_different_articles_on_one_host():
     assert len(items) == 1 and len(items[0]["cited_instead"]) == 2
     assert {x["url"] for x in items[0]["cited_instead"]} == {"https://news.test/contact/{withheld}/one",
                                                             "https://news.test/contact/{withheld}/two"}
+
+
+
+# ---------------------------------------------------------------------------------------------- round 10
+
+import url_corpus
+
+
+def test_random_aws_format_secrets_are_caught_in_every_position_and_in_text():
+    keys = url_corpus.random_aws_secrets(5000)
+    assert len(keys) == 5000
+    for k in keys:
+        q = urllib.parse.quote(k, safe="")
+        for u in (f"https://docs.google.com/document/d/{k}/edit", f"https://t.co/{k}", f"https://site.test/{k}",
+                  f"https://site.test/p?x={q}", f"https://site.test/p#{k}",
+                  f"https://site.test/p?x={urllib.parse.quote(q, safe='')}"):
+            assert callum.url_has_secret(u), u
+        red, _ = callum.secret_guard.redact_text(f"The key is {k} in the text.")
+        assert k not in red, k
+
+
+def test_over_redaction_on_a_corpus_of_ordinary_urls_stays_under_one_percent():
+    urls = url_corpus.corpus()
+    assert len(urls) >= 1000
+    flagged = [u for u in urls if callum.url_has_secret(u)]
+    # measured: 7 / 1180 (0.59%), all from the strong AWS-format rule (40-character font file names on
+    # fonts.gstatic.com, Docs ids whose "d/" + first 38 characters fit the format); strong rules are never exempted
+    assert len(flagged) / len(urls) < 0.01, flagged[:20]
+
+
+def test_keys_inside_answer_text_and_urls_in_text_are_redacted_in_the_excerpt():
+    keys = _fake_keys()
+    for name, v in keys.items():
+        for text in (f"Z Best Media. The key {v} is here.", f"Z Best Media: see https://docs.google.com/d/{v}/edit now",
+                     f"Z Best Media token=tok-{v} ok", "Z Best Media " + urllib.parse.quote(urllib.parse.quote(v, safe=""), safe="")):
+            r = classify(collected((0, answer(text=text, cites=["https://competitor.test/a"]))))
+            dumped = json.dumps(r)
+            assert v not in dumped and urllib.parse.quote(v, safe="") not in dumped, (name, text)
+
+
+def test_redact_text_is_the_stable_entry_point():
+    sg = callum.secret_guard
+    assert sg.redact is sg.redact_text
+    assert sg.redact_text("") == ("", 0) and sg.redact_text("plain words") == ("plain words", 0)
+    red, n = sg.redact_text("AWS " + "wJalrXUtnFEMI" + "/K7MDENG/" + "bPxRfiCY" + "EXAMPLEKEY" + " done")
+    assert n == 1 and red == "AWS [redacted] done"
+
+
+def test_cited_instead_identity_keeps_query_ids_and_canonicalises_the_host():
+    a, b = "https://www.youtube.com/watch?v=AAAAAAAAAAA", "https://www.youtube.com/watch?v=BBBBBBBBBBB"
+    r = classify(collected((0, answer(cites=[a])), (0, answer(cites=[b]))))
+    assert sum(x["answers"] for x in r["mnc_priority"]["items"][0]["cited_instead"]) == 2
+    assert len(r["mnc_priority"]["items"][0]["cited_instead"]) == 2
+    key = callum.secret_guard.canonical_key
+    assert key("https://WWW.Site.Test.:443/p?utm_source=x&id=7&fbclid=y") == key("https://site.test/p?id=7")
+    assert key("https://site.test/p?id=7") != key("https://site.test/p?id=8")
+
+
+@pytest.mark.parametrize("seg", ["call-+44-20-7946-0958", "%2B442079460958", "+33 1 23 45 67 89", "+81-3-1234-5678"])
+def test_international_phone_numbers_in_a_path_are_withheld_segment_only(seg):
+    s = callum.stored_url(f"https://site.test/contact/{seg}/info")
+    assert s["url"] == "https://site.test/contact/{withheld}/info" and s["withheld"] == "PERSONAL_DATA", s
+
+
+def test_a_jsdelivr_package_version_is_not_an_email():
+    s = callum.stored_url("https://cdn.jsdelivr.net/npm/acme-widget@1.2.3/dist/acme.min.js")
+    assert s["withheld"] is None and "{withheld}" not in s["url"], s
+
+
+def _tnz_text_secrets():
+    """Forms TNZ (PR #53) needed, upstreamed into the one table: fake values assembled at run time."""
+    ex = "EXAMPLE"
+    pem_body = "MIIEow" + "IBAAKCAQEA" + ex + "x9Yw8Vu7Ts6Rq5Po4Nm3Lk2Ji1Hg0Fe"
+    dashes, pk = "-" * 5, "PRIVATE" + " KEY"
+    return {
+        "aws_spaced": " ".join("AKIA" + "IOSFODNN7" + ex),
+        "labelled_access_token": "access_token: " + ex + "Ab3dE5gH7jK9",
+        "labelled_auth": "auth=" + ex + "Ab3dE5gH7jK9",
+        "labelled_key": "key " + ex + "Ab3dE5gH7jK9",
+        "labelled_apikey": "apikey: " + ex + "Ab3dE5gH7jK9",
+        "labelled_api_key": "api-key=" + ex + "Ab3dE5gH7jK9",
+        "labelled_x_api_key": "x-api-key: " + ex + "Ab3dE5gH7jK9",
+        "labelled_bearer": "Bearer " + ex + "Ab3dE5gH7jK9",
+        "labelled_password": "password=" + ex + "Ab3dE5gH7jK9",
+        "labelled_client_secret": "client_secret: " + ex + "Ab3dE5gH7jK9",
+        # the PEM markers are assembled too (a marker literal in the source is itself flagged by secret scanners)
+        "pem": dashes + "BEGIN RSA " + pk + dashes + "\n" + pem_body + "\n" + dashes + "END RSA " + pk + dashes,
+        "pem_unterminated": dashes + "BEGIN " + pk + dashes + "\n" + pem_body,
+        "whsec": "whsec_" + ex + "Ab3dE5gH7jK9mN1p", "glpat": "glpat-" + ex + "Ab3dE5gH7jK9m",
+    }
+
+
+def test_the_one_table_covers_the_forms_tnz_needed_in_text_and_urls():
+    sg = callum.secret_guard
+    for name, s in _tnz_text_secrets().items():
+        value = s.split()[-1] if name.startswith(("labelled_", "aws_spaced")) else s
+        if name == "aws_spaced":
+            value = s
+        red, n = sg.redact_text(f"Z Best Media note: {s} end.")
+        secret_part = value.split("\n")[1] if name.startswith("pem") else value.split("=")[-1].split(": ")[-1]
+        assert n >= 1 and secret_part not in red, (name, red)
+        if not name.startswith("pem"):
+            u = "https://docs.google.com/d/x?q=" + urllib.parse.quote(s, safe="")
+            assert sg.url_has_secret(u), (name, u)
+    assert sg._strong_spans("x " + _fake_keys()["github"]) != []          # kept for TNZ until it switches
+    for prose in ("the key takeaway is growth", "password protection matters", "Our key product SKU12345678 sells",
+                  "Bearer of good news", "auth flow explained"):
+        assert sg.redact_text(prose) == (prose, 0), prose

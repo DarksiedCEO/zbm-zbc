@@ -43,13 +43,20 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Callable
 from datetime import timedelta
-from typing import Callable, Optional
-from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
+from urllib.parse import unquote, urljoin, urlunsplit
 
 from agents import brand_mention, domain_match, secret_guard, split_url
+from agents.probes import (
+    MIN_USABLE,
+    REDIRECTOR_HOSTS,
+    WARN_COMMON,
+    _switch_code,
+    extract_citations,
+    wilson,
+)
 from agents.prompt_guard import personal_data
-from agents.probes import MIN_USABLE, REDIRECTOR_HOSTS, WARN_COMMON, _switch_code, extract_citations, wilson
 from answer_adapter import PROTOCOL_ERROR_STOP_AFTER, STOP_CODES, EngineError
 from clock import iso
 from envelope import envelope, finding, observed
@@ -72,21 +79,23 @@ MAX_EVIDENCE_PER_ITEM = 3
 # Gemini's grounding URIs is UNVERIFIED until a first live call (the docs show truncated examples only), so no path
 # is trusted to be the page. A citation on one is INCONCLUSIVE until resolved, never OPPORTUNITY. The host list is
 # REDIRECTOR_HOSTS in agents/probes.py (one list for the audit and the citation runs).
-LIMITS = ["One sample of N answers per prompt and engine, at one time, from one account: answer engines vary by user, "
-          "location, time and model version. Observations, not search truth.",
-          "Cited means attributed by the engine's own structured citations (each engine's rule is in its adapter); "
-          "whether a reader clicks it is not measured.",
-          "A cited URL's redirects and canonical are followed only when SEO_CALLUM_RESOLVE_URLS=1 (one fetch per "
-          "distinct URL, robots.txt honoured, bounded); otherwise a redirector URL is INCONCLUSIVE and every other "
-          "URL is classified by its own host.",
-          "Gemini's grounding URI format is unverified until a first live call: every URL on the redirector host "
-          "(any path) is treated as a redirect whose target is unknown until resolved.",
-          "A brand mention is a whole-word match (possessives yes, plurals no); a single-word term may be an ordinary "
-          "word, so without the tenant's disambiguation its mentions are LOW_CONFIDENCE and kept out of the headline "
-          "rate. Matching is lexical: it does not understand the answer.",
-          "Query strings and fragments of cited URLs are not kept; two URLs that differ only there count as one page.",
-          "No prompt-volume source is connected: how often real users ask these prompts is unknown.",
-          "Nothing here is calibrated against traffic or revenue; no single visibility score is produced."]
+LIMITS = [
+    ("One sample of N answers per prompt and engine, at one time, from one account: answer engines vary by user, "
+     "location, time and model version. Observations, not search truth."),
+    ("Cited means attributed by the engine's own structured citations (each engine's rule is in its adapter); "
+     "whether a reader clicks it is not measured."),
+    ("A cited URL's redirects and canonical are followed only when SEO_CALLUM_RESOLVE_URLS=1 (one fetch per "
+     "distinct URL, robots.txt honoured, bounded); otherwise a redirector URL is INCONCLUSIVE and every other "
+     "URL is classified by its own host."),
+    ("Gemini's grounding URI format is unverified until a first live call: every URL on the redirector host "
+     "(any path) is treated as a redirect whose target is unknown until resolved."),
+    ("A brand mention is a whole-word match (possessives yes, plurals no); a single-word term may be an ordinary "
+     "word, so without the tenant's disambiguation its mentions are LOW_CONFIDENCE and kept out of the headline "
+     "rate. Matching is lexical: it does not understand the answer."),
+    "Query strings and fragments of cited URLs are not kept; two URLs that differ only there count as one page.",
+    "No prompt-volume source is connected: how often real users ask these prompts is unknown.",
+    "Nothing here is calibrated against traffic or revenue; no single visibility score is produced.",
+]
 
 
 # ---------------------------------------------------------------------------------------------- collection
@@ -154,7 +163,7 @@ def collect(engine: str, port, prompt_set: dict, n: int, guard: Callable, budget
                         stop, stop_detail = e.code, e.detail
                         break
                     continue
-                except Exception:                            # a provider failure is counted, never raised
+                except Exception:  # noqa: BLE001 - a provider failure is counted, never raised
                     errors += 1
                     samples.append(_failed(pi, si, "ENGINE_UNAVAILABLE", "ADAPTER_FAILED"))
                     continue
@@ -184,7 +193,7 @@ def collect(engine: str, port, prompt_set: dict, n: int, guard: Callable, budget
             for s in samples:
                 if s["status"] == "FAILED":
                     codes[s["error_code"]] = codes.get(s["error_code"], 0) + 1
-            stop = sorted(codes.items(), key=lambda kv: (-kv[1], kv[0]))[0][0] if codes else "ENGINE_UNAVAILABLE"
+            stop = min(codes.items(), key=lambda kv: (-kv[1], kv[0]))[0] if codes else "ENGINE_UNAVAILABLE"
             stop_detail = "NO_ANSWERS"
     finally:
         usage = run.settle(answers, stop) if run is not None else None
@@ -200,7 +209,7 @@ def collect(engine: str, port, prompt_set: dict, n: int, guard: Callable, budget
             "usage": usage, "prompts_not_asked": len(prompt_set["prompts"]) - asked}
 
 
-def _failed(pi: int, si: int, code: str, detail: Optional[str], a: Optional[ProviderAnswer] = None) -> dict:
+def _failed(pi: int, si: int, code: str, detail: str | None, a: ProviderAnswer | None = None) -> dict:
     return {"prompt_index": pi, "sample": si, "status": "FAILED", "error_code": code, "error_detail": detail,
             "text": "", "answer": a}
 
@@ -285,7 +294,7 @@ def is_redirector(url: str) -> bool:
     return p.hostname.lower().rstrip(".") in REDIRECTOR_HOSTS
 
 
-def url_has_secret(url: Optional[str]) -> bool:
+def url_has_secret(url: str | None) -> bool:
     """A URL whose path, query, fragment or user part looks like it carries a credential: never fetched (WR-F013)."""
     p = split_url(url) if url else None
     if p is None:
@@ -295,6 +304,10 @@ def url_has_secret(url: Optional[str]) -> bool:
 
 _SSN = re.compile(r"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)")
 _PHONE = re.compile(r"(?<!\d)(?:\+?\d{1,3}[\s.\-]?)?\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4}(?!\d)|\+\d{10,15}(?!\d)")
+# E.164, any country code: "+" then 7-15 digits, single spaces / dots / dashes / brackets allowed between digits
+_E164 = re.compile(r"(?<![\d+])\+[1-9](?:[\s.\-()]{0,2}\d){6,14}(?!\d)")
+# an e-mail address needs an alphabetic top-level domain (jsDelivr's ``pkg@1.2.3`` is a package version, not one)
+_EMAIL_SEG = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,24}(?![A-Za-z0-9-])")
 _CARD = re.compile(r"(?<!\d)(?:\d[ \-]?){12,18}\d(?!\d)")
 
 
@@ -308,12 +321,17 @@ def _luhn(digits: str) -> bool:
     return total % 10 == 0
 
 
-def _segment_personal(seg: str) -> Optional[str]:
+def _segment_personal(seg: str) -> str | None:
     """One path segment's personal data: an e-mail or IP (the prompt guard), or a number only when it is shaped like
     a phone number, an SSN or a payment card (13-19 digits passing Luhn); a date or an id is not."""
-    x = unquote(seg)
+    forms = secret_guard.decodings(seg)
+    x = forms[-1]
+    if any(_E164.search(f) for f in forms):
+        return "number"                                   # an international phone number, any country code
     kind = personal_data(x)
-    if kind in ("email", "ip"):
+    if kind == "email":
+        return "email" if _EMAIL_SEG.search(x) else None
+    if kind == "ip":
         return kind
     if kind is None:
         return None
@@ -326,7 +344,7 @@ def _segment_personal(seg: str) -> Optional[str]:
     return None
 
 
-def stored_url(url: Optional[str]) -> Optional[dict]:
+def stored_url(url: str | None) -> dict | None:
     """What a row keeps of a URL: scheme, host and path (query and fragment dropped), bounded; a path that looks like
     personal data is withheld."""
     if not url:
@@ -350,7 +368,8 @@ def stored_url(url: Optional[str]) -> Optional[dict]:
     if pii:
         path = "/".join("{withheld}" if i in pii else x for i, x in enumerate(segs))
         withheld = withheld or "PERSONAL_DATA"
-    if personal_data(unquote(path)) in ("email", "ip"):
+    whole = personal_data(unquote(path))
+    if whole == "ip" or (whole == "email" and _EMAIL_SEG.search(unquote(path))):
         path, withheld = "/{withheld}", "PERSONAL_DATA"
     host = p.hostname.lower()[:253]
     netloc = host if p.port in (None, 80, 443) else f"{host}:{p.port}"
@@ -377,7 +396,7 @@ def _target_host(url: str) -> str:
     return h[:253]
 
 
-def _host(url: Optional[str]) -> str:
+def _host(url: str | None) -> str:
     p = split_url(url) if url else None
     return (p.hostname or "").lower() if p is not None else ""
 
@@ -479,7 +498,7 @@ def excerpt(text: str, terms: list) -> dict:
     """A short span of the answer for the drill-down: around the first brand mention, else the answer's opening.
     Bounded, marked untrusted (envelope.observed), and withheld when it looks like personal data."""
     # WR-F012: secrets are redacted from the whole answer BEFORE a span is chosen, so a cut key never survives
-    t, redacted = secret_guard.redact(" ".join((text or "").split()))
+    t, redacted = secret_guard.redact_text(" ".join((text or "").split()))
     basis, start = "answer_opening", 0
     for term in terms:
         m = re.search(r"(?<!\w)" + re.escape(term) + r"(?!\w)", t, re.IGNORECASE)
@@ -528,7 +547,7 @@ def classify(engines: dict, prompt_set: dict, domain: str, resolver: Resolver, r
                                           "zero_citation_answers": 0, "versions": set(), "cited_instead": {},
                                           "evidence": []})
             k["samples"] += 1
-            a: Optional[ProviderAnswer] = s.get("answer")
+            a: ProviderAnswer | None = s.get("answer")
             base = {"engine": eng, "model": getattr(a, "model", None), "model_version": getattr(a, "model_version",
                                                                                                 None),
                     "provider": getattr(a, "provider", None) or eng, "prompt_id": prompt_id(prompt_set, pi),
@@ -572,10 +591,11 @@ def classify(engines: dict, prompt_set: dict, domain: str, resolver: Resolver, r
                     k["lookalike_onto_client"] += 1
                 if cl["class"] in ("OPPORTUNITY_URL", "CANONICAL_TO_CLIENT"):
                     dec = (cl["chain"]["final"] or cl["chain"]["cited"]) or {}
-                    # keyed on a hash of the ORIGINAL URL that decided it (query/fragment dropped as stored), so two
-                    # different articles whose stored forms are both shortened ({withheld}) never merge
+                    # keyed on a hash of the ORIGINAL URL's identity (canonical host, path and identity-bearing query:
+                    # every non-tracking parameter), so two different pages — two articles whose stored forms are both
+                    # shortened, or watch?v=A and watch?v=B — never merge; the stored (redacted) URL is what is shown
                     orig = res.get("final_url") if res.get("state") == "RESOLVED" else c["url"]
-                    okey = hashlib.sha256(str(orig).split("#")[0].split("?")[0].encode("utf-8", "surrogatepass")
+                    okey = hashlib.sha256(secret_guard.canonical_key(str(orig)).encode("utf-8", "surrogatepass")
                                           ).hexdigest()
                     ci = k["cited_instead"].setdefault(okey, {
                         "url": dec.get("url"), "host": dec.get("host"), "answers": 0, "competitor": cl["competitor"],
@@ -586,7 +606,7 @@ def classify(engines: dict, prompt_set: dict, domain: str, resolver: Resolver, r
                      if cl["chain"]["cited"] else None, "position": c["position"], "via": cl["via"],
                      "chain": cl["chain"], "flags": cl["flags"], "competitor": cl["competitor"],
                      "citation_basis": basis,
-                     "engine_hint_unverified": secret_guard.redact(hint[:253])[0] if isinstance(hint, str) else None,
+                     "engine_hint_unverified": secret_guard.redact_text(hint[:253])[0] if isinstance(hint, str) else None,
                      "evidence": {"url": cl["chain"]["cited"]["url"] if cl["chain"]["cited"] else None, **ev}})
             strength = "STRENGTH_URL" in classes
             if strength:
@@ -737,7 +757,7 @@ def mnc_priority(per: dict, ps: dict, run_id: str, domain: str, generated_at: st
 
 # ---------------------------------------------------------------------------------------------- the envelope
 
-def run(engines: dict, prompt_set: Optional[dict], domain: str, n: int, guard: Callable, budget, resolver: Resolver,
+def run(engines: dict, prompt_set: dict | None, domain: str, n: int, guard: Callable, budget, resolver: Resolver,
         run_id: str, clock) -> dict:
     """Callum's citation-source run: collect every engine of the prompt set, classify, return the envelope."""
     method = (f"Each prompt of prompt set {{ps}} v{{ver}} asked {n} times per engine through the multi-engine adapter; "
@@ -781,7 +801,7 @@ def run(engines: dict, prompt_set: Optional[dict], domain: str, n: int, guard: C
              **result}
     findings = _findings(result, stopped)
     if not observed_ and stopped:
-        e, r = sorted(stopped.items())[0]
+        _, r = min(stopped.items())
         return envelope(AGENT, TASK, r["outcome"], findings, methodology=methodology, limitations=LIMITS,
                         not_connected=not_connected, reason=r["reason"], facts=facts)
     if not observed_:
