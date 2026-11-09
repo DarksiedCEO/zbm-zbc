@@ -317,6 +317,10 @@ def stored_url(url: str | None) -> dict | None:
     if u["host_kind"] is not None:
         return {"url": None, "host": None, "query_dropped": dropped,
                 "withheld": "SECRET_REDACTED" if u["host_kind"] == secret_guard.CREDENTIAL else "PERSONAL_DATA"}
+    redirect = secret_guard.redirect_withheld(url)
+    if redirect is not None:                            # a grounding redirect id is never stored (r2 part 3a)
+        return {"url": redirect, "host": secret_guard.REDIRECT_HOST, "query_dropped": dropped,
+                "withheld": "REDIRECT_ID"}
     segs = []
     kinds = set()
     for seg, kind in u["segments"]:
@@ -602,12 +606,16 @@ def classify(engines: dict, prompt_set: dict, domain: str, resolver: Resolver, r
                         "canonical_to_client": cl["class"] == "CANONICAL_TO_CLIENT"})
                     ci["answers"] += 1
                 hint = hints.get(c["url"])
-                add({**base, "class": cl["class"], "reason": cl["reason"], "url": cl["chain"]["cited"]["url"]
-                     if cl["chain"]["cited"] else None, "position": c["position"], "via": cl["via"],
+                # r2 part 3a: a grounding redirect's id is never emitted: its row shows the resolved target (stored
+                # form) or, unresolved, the withheld redirect form
+                shown = (cl["chain"]["final"] if is_redirector(c["url"]) and cl["chain"]["final"]
+                         else cl["chain"]["cited"]) or {}
+                add({**base, "class": cl["class"], "reason": cl["reason"], "url": shown.get("url"),
+                     "position": c["position"], "via": cl["via"],
                      "chain": cl["chain"], "flags": cl["flags"], "competitor": cl["competitor"],
                      "citation_basis": basis,
                      "engine_hint_unverified": _safe_hint(hint),
-                     "evidence": {"url": cl["chain"]["cited"]["url"] if cl["chain"]["cited"] else None, **ev}})
+                     "evidence": {"url": shown.get("url"), **ev}})
             strength = "STRENGTH_URL" in classes
             if strength:
                 k["strength"] += 1

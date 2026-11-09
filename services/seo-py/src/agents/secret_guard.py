@@ -861,7 +861,7 @@ def _email_hit(v: str) -> bool:
 
 # (check, function name): looked up at call time, so a test can disable one check and show another test fails
 _CHECK_FUNCS = (("a_label", "_label_hit"), ("b_userinfo", "_userinfo_hit"), ("c_prefix", "_prefix_hit"))
-WAIVABLE = frozenset(("d_token", "e_digits"))           # the only checks a disclosed URL position may waive
+WAIVABLE = frozenset(("d_token", "e_digits"))  # the only checks ever waived: (d) in a disclosed path position, (e) for a commerce query id
 _URL_IN_TEXT = re.compile(r"(?i)(?:https?://|www\.)[^\s<>\"'`]{1,4096}")
 URL_TEXT_MAX = 64                        # URLs written in one field that are inspected; more: the field is withheld
 URL_PARTS_MAX = 1024                     # URL parts (host labels, segments, query pairs, fragment) inspected per field
@@ -869,8 +869,9 @@ URL_PARTS_MAX = 1024                     # URL parts (host labels, segments, que
 
 def _mask_clean_urls(m: str) -> tuple:
     """A URL written in the text is judged by the URL rules: one that passes every per-part check (with the disclosed
-    URL positions) is masked out before checks (d) and (e), so a cited AP News or Drive link does not withhold the
-    prose around it; one that FAILS any part fails the whole text (``url_credential`` / ``url_personal``), since a
+    URL positions) is masked out before checks (d) and (e), so a cited link does not withhold the prose around it,
+    unless it passes ONLY through an exemption (a disclosed position, a commerce query id): that URL stays in the text
+    and checks (d) / (e) read it; one that FAILS any part fails the whole text (``url_credential`` / ``url_personal``), since a
     URL rule (a host label, a split path) may see what the text checks do not. Checks (a)-(c) and (f) already ran on
     the unmasked text. More than ``URL_TEXT_MAX`` URLs or ``URL_PARTS_MAX`` URL parts in one field: ``"cap"`` (the
     field is withheld; fail closed, so a URL-dense text stays fast). Returns (masked text, failing check or None)."""
@@ -893,9 +894,10 @@ def _mask_clean_urls(m: str) -> tuple:
         budget[0] -= _url_parts(url)
         if budget[0] < 0:
             return x.group(0)
-        v = _url_verdict(url)
+        v, dependent = globals()["_url_judge"](url)
         if v is None:
-            return _MASK + x.group(0)[len(u):]
+            # a URL that passes only through an exemption stays in the text, so checks (d) / (e) still read it
+            return x.group(0) if dependent else _MASK + x.group(0)[len(u):]
         worst.append(v)
         return x.group(0)
     out = _URL_IN_TEXT.sub(repl, m)
@@ -1006,69 +1008,39 @@ ID_HOSTS = frozenset({
     "apnews.com", "facebook.com", "fb.com", "wixstatic.com", "wix.com", "squarespace-cdn.com", "squarespace.com",
     "ctfassets.net", "contentful.com", "gist.github.com", "huggingface.co", "loom.com", "canva.com", "zoom.us",
     "jsdelivr.net", "unpkg.com", "cloudfront.net", "googleusercontent.com", "ytimg.com", "maps.app.goo.gl"})
-DOC_HOSTS = frozenset({"docs.google.com", "drive.google.com", "sheets.google.com", "slides.google.com"})
-_CODE_REF = frozenset({"commit", "commits", "tree", "blob", "raw", "compare", "blame"})
-_NUM = r"(?:A-)?\d{4,20}(?:\.\d{1,12})?(?:v\d{1,2})?(?:\.html?)?"
-_ANY = None
-# THE DISCLOSED URL POSITIONS (ADR 0050 v2 section 3). A segment that fullmatches the shape, on that host (or a
-# subdomain), right after one of the listed path words (``_ANY``: any position), has checks (d) and (e) waived; checks
-# (a), (b), (c) and (f) still run on it. A numeric id never waives a 13-16 digit Luhn-valid number (a payment card).
+# THE DISCLOSED URL POSITIONS (ADR 0050 v2 section 3, r2 part 3a). A segment that fullmatches the shape, on one of the
+# EXACT hosts listed (``canon_host``: ``www.`` dropped; no other subdomain counts), right after one of the listed path
+# words, has check (d) waived. Checks (a), (b), (c), (e) and (f) still run on it: a prefix-shaped key or a card /
+# long digit run in an exempt position is withheld as anywhere else. No position is valid on any host.
+POSITION_WAIVE = frozenset(("d_token",))
 POSITIONS = (
-    # an abbreviated (7-12) or full SHA-1 (40) commit id holding a letter; a compare range of two
-    ("commit_sha", CODE_HOSTS, _CODE_REF, (r"(?=[0-9]*[a-f])(?:[0-9a-f]{7,12}|[0-9a-f]{40})"
-                                           r"(?:\.\.\.?(?=[0-9]*[a-f])(?:[0-9a-f]{7,12}|[0-9a-f]{40}))?")),
-    ("gist_id", ("gist.github.com",), _ANY, r"[0-9a-f]{20,32}"),
-    # Google's own id shapes: Drive file / folder ids (33 chars from "1", 28 from "0B"), Docs / Sheets / Slides ids
-    # (44 chars from "1"); never 40 characters (the AWS secret length) and never all hex
-    ("google_doc_id", DOC_HOSTS, ("d", "folders", "e"), (r"(?![0-9a-fA-F]+$)(?:1[A-Za-z0-9_\-]{32}"
-                                                          r"|0B[A-Za-z0-9_\-]{26}|1[A-Za-z0-9_\-]{43})")),
-    ("figma_file", ("figma.com",), ("file", "design", "proto", "board"), r"[A-Za-z0-9]{22}"),
+    # Google Drive / Docs file ids: Drive file / folder ids (33 chars from "1", 28 from "0B"), Docs ids (44 chars
+    # from "1"); never 40 characters (the AWS secret length) and never all hex
+    ("google_doc_id", ("drive.google.com", "docs.google.com"), ("d", "folders"),
+     r"(?![0-9a-fA-F]+$)(?:1[A-Za-z0-9_\-]{32}|0B[A-Za-z0-9_\-]{26}|1[A-Za-z0-9_\-]{43})"),
+    # a commit SHA (40 hex, or an abbreviated 7-12 hex, holding a letter) directly after ``/commit/``
+    ("commit_sha", ("github.com", "gitlab.com", "bitbucket.org"), ("commit",),
+     r"(?=[0-9]*[a-f])(?:[0-9a-f]{7,12}|[0-9a-f]{40})"),
+    # a Canva design id: ``/design/<DA...>`` (the share-token segment after it is NOT exempt)
+    ("canva_design", ("canva.com",), ("design",), r"DA[A-Za-z0-9_\-]{9}"),
     ("spotify_id", ("open.spotify.com",), ("episode", "track", "show", "playlist", "album", "artist"),
      r"[A-Za-z0-9]{22}"),
-    ("ap_article", ("apnews.com",), ("article",), r"(?:[a-z0-9]{1,40}-){0,24}[0-9a-f]{32}"),
-    ("notion_page", ("notion.so", "notion.site"), _ANY, r"(?:[A-Za-z0-9]{1,40}-){0,24}[0-9a-f]{32}"),
-    ("loom_id", ("loom.com",), ("share", "embed"), r"[0-9a-f]{32}"),
-    ("facebook_pfbid", ("facebook.com",), ("posts",), r"pfbid[A-Za-z0-9]{30,120}"),
-    ("linkedin_activity", ("linkedin.com",), ("posts",), r"[A-Za-z0-9_\-]{1,200}-activity-\d{19}-[A-Za-z0-9_\-]{4}"),
-    ("wix_media", ("wixstatic.com",), ("media",), r"[0-9a-f]{6}_[0-9a-f]{32}~mv2\.[a-z]{3,4}"),
-    ("contentful_space", ("ctfassets.net",), _ANY, r"[a-z0-9]{12}"),
-    ("contentful_asset", ("ctfassets.net",), _ANY, r"[A-Za-z0-9]{20,24}"),
-    ("contentful_hash", ("ctfassets.net",), _ANY, r"[0-9a-f]{32}"),
-    ("canva_share", ("canva.com",), _ANY, r"DA[A-Za-z0-9_\-]{9}|[A-Za-z0-9_\-]{22}"),
-    ("chewy_item", ("chewy.com",), ("dp",), _NUM),
-    ("canva_template", ("canva.com",), ("templates",), r"EA[A-Za-z0-9_\-]{9}(?:-[a-z0-9\-]{1,200})?"),
-    ("squarespace_asset", ("squarespace-cdn.com",), _ANY, r"[0-9a-f]{24}|\d{13}-[A-Z0-9]{20}"),
-    ("font_file", ("fonts.gstatic.com",), _ANY, r"[A-Za-z0-9_\-]{20,120}\.(?:woff2?|ttf|otf)"),
-    ("next_build_id", _ANY, ("static",), r"[A-Za-z0-9_\-]{16,40}"),
-    ("google_maps", ("google.com",), _ANY, r"[^/]{1,2048}"),
-    # Gemini grounding redirects (agents/probes.py REDIRECTOR_HOSTS): an opaque redirect id Google issues; it must be
-    # fetchable to be resolved
-    ("gemini_redirect", ("vertexaisearch.cloud.google.com",), ("grounding-api-redirect",), r"[A-Za-z0-9_\-]{1,2048}"),
-    ("hashed_asset", _ANY, _ANY, (r"[A-Za-z0-9_\-]{1,80}[.\-][0-9a-f]{8,64}(?:\.[A-Za-z0-9_\-]{1,20}){0,3}"
-                                  r"\.(?:css|js|mjs|map|png|jpe?g|gif|svg|webp|avif|woff2?|ttf|otf|ico|json|wasm)")),
-    ("medium_post", ("medium.com",), _ANY, r"(?:[a-z0-9]{1,40}-){0,24}[0-9a-f]{12}"),
-    ("bbb_profile", ("bbb.org",), _ANY, r"(?:[a-z0-9]{1,40}-){0,24}\d{1,6}-\d{4,12}"),
-    ("amazon_help", ("sellercentral.amazon.com", "amazon.com"), ("external", "help", "node"), r"G\d{6,12}"),
-    ("x_status", ("x.com", "twitter.com"), ("status",), _NUM),
-    ("tiktok_id", ("tiktok.com",), ("video", "photo"), _NUM),
-    ("pinterest_pin", ("pinterest.com",), ("pin",), _NUM),
-    ("ebay_item", ("ebay.com",), ("itm",), _NUM),
-    ("walmart_item", ("walmart.com",), _ANY, _NUM),
-    ("etsy_listing", ("etsy.com",), ("listing",), _NUM),
-    ("vimeo_id", ("vimeo.com",), ("", "video", "videos"), _NUM),
-    ("aliexpress_item", ("aliexpress.com", "aliexpress.us"), ("item",), _NUM),
-    ("stackoverflow_q", ("stackoverflow.com", "stackexchange.com"), ("questions", "q", "a"), _NUM),
-    ("facebook_id", ("facebook.com",), ("posts", "videos", "permalink"), _NUM),
-    ("doi", ("doi.org",), _ANY, r"10\.\d{4,9}|[A-Za-z0-9.\-]{1,64}"),
-    ("arxiv", ("arxiv.org",), ("abs", "pdf", "html"), _NUM),
-    ("hn_item", ("news.ycombinator.com",), _ANY, _NUM),
-    ("retail_sku", ("target.com", "bestbuy.com", "homedepot.com", "lowes.com", "costco.com"), _ANY, _NUM),
 )
-_POSITIONS = tuple((name, hosts, words, re.compile(rx)) for name, hosts, words, rx in POSITIONS)
-# query keys whose all-digit value is a public numeric id (a product variant, a page): check (e) is waived for it,
-# never for a 13-16 digit Luhn-valid number
-QUERY_ID_KEYS = frozenset({"variant", "variant_id", "product_id", "pid", "item", "itemid", "id", "page", "p", "t",
-                           "start", "index", "story_fbid", "fbid", "post", "topic", "thread", "comment"})
+_POSITIONS = tuple((name, frozenset(hosts), frozenset(words), re.compile(rx)) for name, hosts, words, rx in POSITIONS)
+# Gemini grounding redirects (agents/probes.py REDIRECTOR_HOSTS): the redirect id is NEVER stored or emitted (a
+# stored form is ``<scheme>://<host>/grounding-api-redirect/[withheld]``); the raw URL may only be FETCHED, on this
+# exact host, to resolve it (``url_has_secret`` waives check (d) on the id for that, and nothing else)
+REDIRECT_HOST = "vertexaisearch.cloud.google.com"
+REDIRECT_WORD = "grounding-api-redirect"
+_REDIRECT_ID = re.compile(r"[A-Za-z0-9_\-]{1,2048}")
+# query keys whose all-digit value (at most 20 digits) is a public commerce id, on the exact commerce hosts only:
+# check (e) is waived for it, never for a Luhn-valid 12-19 digit number (a payment card) or a 9-digit run (an SSN)
+QUERY_ID_KEYS = frozenset({"id", "variant", "item", "product"})
+_AMAZON_TLDS = ("com", "ca", "com.mx", "com.br", "co.uk", "de", "fr", "it", "es", "nl", "se", "pl", "com.be",
+                "com.tr", "ae", "sa", "eg", "in", "co.jp", "sg", "com.au", "cn")
+COMMERCE_HOSTS = frozenset({"ebay.com", "etsy.com", "walmart.com", "target.com"}
+                           | {"amazon." + t for t in _AMAZON_TLDS})
+COMMERCE_SUFFIXES = (".myshopify.com",)
 _QUERY_NUM = re.compile(r"\d{1,20}")
 # exact path words that are a site's own structure (a constant cannot carry a value), kept although they are on the
 # label list
@@ -1111,33 +1083,71 @@ def _luhn(d: str) -> bool:
 
 
 def position(host: str, segs: list, i: int) -> str | None:
-    """The name of the disclosed URL position segment ``i`` of ``segs`` sits in on ``host`` (checks (d) and (e) are
-    waived there), or None."""
+    """The name of the disclosed URL position segment ``i`` of ``segs`` sits in on ``host`` (a ``canon_host``: only
+    check (d) is waived there), or None. Exact hosts only."""
     seg = segs[i]
     prev = segs[i - 1] if i else ""
+    g = globals()
     for name, hosts, words, rx in _POSITIONS:
-        if hosts is not _ANY and not _host_in(host, hosts):
+        if not g["_position_host"](host, hosts) or prev not in words:
             continue
-        if words is not _ANY and prev not in words:
-            continue
-        if name == "next_build_id" and (i < 2 or segs[i - 2] != "_next"):
-            continue
-        if name == "google_maps" and (len(segs) < 2 or segs[1] != "maps"):
-            continue
-        if name.startswith("contentful_") and i != {"contentful_space": 1, "contentful_asset": 2,
-                                                    "contentful_hash": 3}[name]:
-            continue
-        if name == "canva_share" and not (i >= 2 and segs[1] == "design" and (
-                (i == 2 and len(segs) > 3) or (i == 3 and len(segs) > 4 and segs[4] in ("view", "edit", "watch")))):
-            continue
-        if not rx.fullmatch(seg):
-            continue
-        if rx.pattern == _NUM:
-            d = "".join(c for c in seg.split(".")[0] if c.isdigit())
-            if 13 <= len(d) <= 16 and _luhn(d):
-                return None                                # a payment-card-shaped number is never waived
-        return name
+        if name == "canva_design" and not g["_canva_index_ok"](i):
+            continue                                       # /design/<id>: the id is the second segment
+        if rx.fullmatch(seg):
+            return name
     return None
+
+
+def _position_host(host: str, hosts) -> bool:
+    return host in hosts                                   # exact (``canon_host``): no other subdomain
+
+
+def _canva_index_ok(i: int) -> bool:
+    return i == 2
+
+
+def _commerce_host(host: str) -> bool:
+    return host in COMMERCE_HOSTS or (host.endswith(COMMERCE_SUFFIXES) and host.count(".") >= 2)
+
+
+def _query_waive(host: str, k: str, v: str) -> frozenset:
+    """Check (e) is waived for a public numeric commerce id: an exact key, an exact commerce host, at most 20 digits,
+    never a payment-card (Luhn 12-19 digits) or SSN (9 digits) shape."""
+    g = globals()
+    if k.lower() not in QUERY_ID_KEYS or not g["_commerce_host"](host) or not _QUERY_NUM.fullmatch(v):
+        return frozenset()
+    if g["_card_or_ssn"](v):
+        return frozenset()
+    return frozenset(("e_digits",))
+
+
+def _card_or_ssn(v: str) -> bool:
+    """An all-digit value shaped like a payment card (Luhn-valid, 12-19 digits) or an SSN (9 digits)."""
+    return len(v) == 9 or (12 <= len(v) <= 19 and _luhn(v))
+
+
+def _redirect_host(host: str) -> bool:
+    """The exact grounding redirector host (no subdomain, no lookalike)."""
+    return host.rstrip(".") == REDIRECT_HOST
+
+
+def is_grounding_redirect(url) -> bool:
+    """``url`` is a Gemini grounding redirect on the exact redirector host (its id is never stored)."""
+    try:
+        p = urlsplit(url) if isinstance(url, str) else None
+        host = (p.hostname or "").rstrip(".") if p is not None else ""
+    except ValueError:
+        return False
+    return globals()["_redirect_host"](host) and (p.path or "").split("/")[1:2] == [REDIRECT_WORD]
+
+
+def redirect_withheld(url) -> str | None:
+    """The only stored / emitted form of a grounding redirect: scheme + host + ``/grounding-api-redirect/[withheld]``
+    (None when ``url`` is not one)."""
+    if not is_grounding_redirect(url):
+        return None
+    scheme = (urlsplit(url).scheme or "").lower()
+    return f"{scheme if scheme in ('http', 'https') else 'https'}://{REDIRECT_HOST}/{REDIRECT_WORD}/{WITHHELD}"
 
 
 def _host_label_key(label: str) -> bool:
@@ -1168,7 +1178,9 @@ def _url_parts(url: str) -> int:
             + ((q.count("&") + q.count(";") + 1) if q else 0) + (1 if p.fragment else 0))
 
 
-def _inspect(url, urls: bool) -> dict | None:
+def _inspect(url, urls: bool, fetch: bool = False) -> dict | None:
+    """``fetch``: judge ``url`` for FETCHING (a grounding redirect id is checked with (d) waived, so the redirect can
+    be resolved); otherwise for keeping (a grounding redirect id is never kept)."""
     if not isinstance(url, str) or len(url) > URL_MAX_INPUT:
         return None
     try:
@@ -1197,13 +1209,22 @@ def _inspect(url, urls: bool) -> dict | None:
             break
     ch = canon_host(host)
     segs = (p.path or "").split("/")
-    waived = [position(ch, segs, i) if s else None for i, s in enumerate(segs)]
+    waived = [globals()["position"](ch, segs, i) if s else None for i, s in enumerate(segs)]
+    redirect = globals()["_redirect_host"](host) and segs[1:2] == [REDIRECT_WORD]
+    if redirect and fetch and len(segs) == 3 and _REDIRECT_ID.fullmatch(segs[2]):
+        waived[2] = "grounding_redirect"                   # fetch only: the id is never kept (see below)
     verdicts = []
+    dependent = False                                      # a part that passes ONLY because of an exemption
     for i, seg in enumerate(segs):
         if seg and any(_host_in(ch, (h,)) and seg in w for h, w in STRUCTURAL_SEGMENTS.items()):
             verdicts.append((seg, None))
-        else:
-            verdicts.append((seg, _kind(chk(seg, WAIVABLE if waived[i] else frozenset()))))
+            continue
+        k = _kind(chk(seg, POSITION_WAIVE if waived[i] else frozenset()))
+        if k is None and waived[i] and chk(seg) is not None:
+            dependent = True
+        if redirect and not fetch and i >= 2 and seg:
+            k = k or PERSONAL                              # a grounding redirect id is never kept
+        verdicts.append((seg, k))
     # a key or a number split across segments: the segments that passed alone (outside a disclosed position) read
     # together as one text; if that fails, every one of them holding a digit or an upper-case letter is withheld
     kept = [unquote(s) for i, (s, k) in enumerate(verdicts) if s and k is None and not waived[i]]
@@ -1214,21 +1235,25 @@ def _inspect(url, urls: bool) -> dict | None:
             verdicts = [(s, kk if (s and k is None and not waived[i] and any(c.isdigit() or c.isupper() for c in s))
                          else k) for i, (s, k) in enumerate(verdicts)]
     # checks (a)-(c) on the WHOLE path glued (a URI or prefix key spread over segments; a segment already withheld
-    # for a credential is left out, one withheld for personal data is kept in): if that fails, every segment outside
-    # a disclosed position is withheld
+    # for a credential is left out, one withheld for personal data is kept in): if that fails, every segment is
+    # withheld, a disclosed position too
     glued = "".join(s if k != CREDENTIAL else " " for s, k in verdicts if s)
     if glued.strip() and _abc(unquote(glued)):
-        verdicts = [(s, CREDENTIAL if (s and not waived[i]) else k) for i, (s, k) in enumerate(verdicts)]
+        verdicts = [(s, CREDENTIAL if s else k) for s, k in verdicts]   # exempt positions included (rule (c))
     query = []
     for k, v in parse_qsl(p.query or "", keep_blank_values=True):
-        waive = WAIVABLE if (k.lower() in QUERY_ID_KEYS and _QUERY_NUM.fullmatch(v) and not (
-            13 <= len(v) <= 16 and _luhn(v))) else frozenset()
-        query.append((k, v, _kind(chk(k) or chk(v, waive) or chk(f"{k}={v}", waive)), _tracking(k)))
+        waive = _query_waive(ch, k, v)
+        kind = _kind(chk(k) or chk(v, waive) or chk(f"{k}={v}", waive))
+        if kind is None and k.lower() in QUERY_ID_KEYS and _QUERY_NUM.fullmatch(v) and globals()["_card_or_ssn"](v):
+            kind = PERSONAL                                # a card / SSN shape under an id key always fails
+        if kind is None and waive and (chk(v) or chk(f"{k}={v}")):
+            dependent = True
+        query.append((k, v, kind, _tracking(k)))
     if p.query and not query:
         query.append(("", p.query, _kind(chk(p.query)), False))
     return {"scheme": (p.scheme or "").lower(), "host": host, "port": port, "host_kind": host_kind,
             "userinfo": "@" in (p.netloc or ""), "segments": verdicts, "positions": waived, "query": query,
-            "fragment_kind": _kind(chk(p.fragment)) if p.fragment else None}
+            "fragment_kind": _kind(chk(p.fragment)) if p.fragment else None, "exempt_dependent": dependent}
 
 
 def inspect_url(url) -> dict | None:
@@ -1240,15 +1265,26 @@ def inspect_url(url) -> dict | None:
     return _inspect(url, True)
 
 
-def _url_verdict(url: str) -> str | None:
-    """None when every part of ``url`` passes; else ``credential`` or ``personal`` (the worst part). A URL that
-    cannot be read counts as ``credential``."""
-    u = _inspect(url, False)
+def _worst(u: dict | None) -> str | None:
     if u is None or not u["host"]:
         return CREDENTIAL
     kinds = {u["host_kind"], u["fragment_kind"], CREDENTIAL if u["userinfo"] else None}
     kinds |= {k for _, k in u["segments"]} | {kind for _, _, kind, _ in u["query"]}
     return CREDENTIAL if CREDENTIAL in kinds else (PERSONAL if PERSONAL in kinds else None)
+
+
+def _url_judge(url: str) -> tuple:
+    """(verdict, exempt_dependent): the verdict is None when every part of ``url`` passes, else ``credential`` or
+    ``personal`` (the worst part; a URL that cannot be read counts as ``credential``); ``exempt_dependent`` is True
+    when some part passes only because of a disclosed position or a commerce query id."""
+    u = _inspect(url, False)
+    return _worst(u), bool(u and u["exempt_dependent"])
+
+
+def _url_verdict(url: str) -> str | None:
+    """None when every part of ``url`` passes; else ``credential`` or ``personal`` (the worst part). A URL that
+    cannot be read counts as ``credential``."""
+    return _url_judge(url)[0]
 
 
 def safe_url(url) -> str:
@@ -1259,6 +1295,9 @@ def safe_url(url) -> str:
     u = inspect_url(url)
     if u is None or not u["host"] or u["host_kind"] is not None or check(u["scheme"]) is not None:
         return WITHHELD
+    r = redirect_withheld(url)
+    if r is not None:
+        return r                                           # a grounding redirect id is never kept
     h = f"[{u['host']}]" if ":" in u["host"] else u["host"]
     netloc = h if u["port"] in (None, 80, 443) else f"{h}:{u['port']}"
     path = "/".join(URL_PLACEHOLDER[k] if k else s for s, k in u["segments"])
@@ -1280,11 +1319,14 @@ def url_secret_segments(url) -> tuple:
     return bad, bool(other)
 
 
+FETCH_BLOCKS = frozenset((CREDENTIAL, PERSONAL))         # r2 part 3a: personal data is never fetched either
+
+
 def url_has_secret(url) -> bool:
-    """A URL with any credential-check failure in any part (tracking parameters included, for checks (a)-(c)): never
-    fetched."""
-    bad, other = url_secret_segments(url)
-    return bool(bad) or other
+    """A URL with any credential OR personal-data failure in any part (tracking parameters included): never fetched
+    (fail closed; a URL that cannot be read counts as failing). A grounding redirect on the exact redirector host is
+    judged with check (d) waived on its id only, so it can be resolved; its id is still never kept."""
+    return _worst(_inspect(url, True, fetch=True)) in FETCH_BLOCKS
 
 
 def identity_query(url: str) -> list:
