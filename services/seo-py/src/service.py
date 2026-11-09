@@ -36,6 +36,7 @@ from ledger import DEPARTMENT, LedgerConflict, LedgerQueryFailed, LedgerRecordEr
 from reasons import R
 from store import DISCARDED_NAME, PENDING_NAME, DataDirBusy, RecordLog, StoreCorrupt, StoreWriteError, verify_lines
 from svc_audits import AuditsMixin
+from svc_crux import CruxMixin
 from svc_engines import EnginesMixin
 from svc_entity import EntityMixin, ZBM_ENTITY
 from svc_gsc import GscMixin
@@ -72,7 +73,7 @@ def request_sha(body: dict) -> str:
 
 
 class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixin, SchedulesMixin, ManagerMixin,
-                 GscMixin, EnginesMixin, ReportsMixin):
+                 GscMixin, EnginesMixin, ReportsMixin, CruxMixin):
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, ports=None,
                  clock: Optional[Clock] = None, lock_token: Optional[str] = None, *,
                  observe_existing_on_start: bool = False):
@@ -97,6 +98,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
         self.schedules: dict[str, dict] = {}
         self.agent_states: dict[str, dict] = {}
         self.gsc_reads: dict[str, list] = {}             # tenant -> times of recorded Search Console reads (budget)
+        self.crux_reads: list = []                       # Lena's recorded CrUX reservations (svc_crux.py, budget)
         self.engine_runs: dict[str, dict] = {}          # Wave 4: metered answer-engine runs (svc_engines.py)
         self.client_reports: dict[str, dict] = {}       # recorded client-report renders (svc_reports.py)
         self.requests: dict[tuple, tuple] = {}
@@ -566,6 +568,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
                 "answer_engines": self.engine_status(),
                 "invoice_verification": self.invoice_verification_status(),
                 "search_console": self.gsc_status(),
+                "page_experience": self.crux_status(),
                 "tenants": len(self.tenants),
                 "audits_running": len(self.running_audits),
                 "audits_total": len(self.audits),

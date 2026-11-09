@@ -10,6 +10,7 @@ Wave-1 agents, one task each, each returning the outcome envelope (envelope.py):
                 Strength / Opportunity / Mentioned-Not-Cited from repeated samples)
   entity_check  the site's structured data / NAP against the canonical entity record (stage D)
   osei          quarantine, freshness, refresh tiers (Osei-lite)
+  lena          real-user page experience: Chrome UX Report field data (ADR 0050; reports data, no findings)
 
 The run context is passed in; no agent touches service state, the ledger or the log.
 """
