@@ -10,16 +10,21 @@ import copy
 import json
 import os
 import urllib.parse
+from pathlib import Path
 
 import httpx
 import pytest
 import test_answer_engines as te
 import test_perplexity as base
+import url_corpus
 from helpers import Harness, rid
 
 import answer_adapter as aa
 import config as config_mod
 from agents import callum
+from agents import osei as osei_mod
+from agents import probes
+from clock import FixedClock
 from ports import ProviderAnswer
 from primitives import Killed
 from primitives.fetch import FetchResult
@@ -457,7 +462,8 @@ class Scripted:
 
 
 def test_collection_stops_on_the_stop_codes_and_on_repeated_protocol_errors():
-    g = lambda **k: None
+    def g(**k):
+        return None
     r = callum.collect("openai", Scripted(aa.EngineError("ENGINE_AUTH_REFUSED")), PS, 3, g)
     assert r["outcome"] == "FAILED" and r["reason"] == "ENGINE_AUTH_REFUSED" and len(r["samples"]) == 1
     r = callum.collect("openai", Scripted(aa.EngineError("ENGINE_PROTOCOL_ERROR")), PS, 3, g)
@@ -558,6 +564,25 @@ def test_enabled_engines_with_budgets_off_are_blocked_and_send_nothing(tmp_path)
     v = h.ok(run(h, prompt_set(h, engines=("openai",))), 201)
     assert v["result"]["outcome"] == "BLOCKED" and fakes["openai"].requests == []
     assert v["result"]["facts"]["engines"]["openai"]["reason_detail"] == "BUDGET_OFF"
+
+
+def test_guard_record_sweeps_the_stored_citation_run_before_commit(tmp_path, monkeypatch):
+    # ADR 0050 M4: even if a field bypassed per-field redaction, guard_record on the whole result before _commit
+    # keeps any credential out of the stored run. Simulate a bypass by injecting a key into the excerpt after
+    # callum.excerpt has run; the stored result must still carry no key (the wiring line is what makes this pass).
+    h, _ = service(tmp_path, scripts={"openai": [base.ok(te.fixture("openai"))]})
+    secret = "AKIA" + "IOSFODNN7" + "EXAMPLE"
+    real_excerpt = callum.excerpt
+
+    def leaky(text, terms):
+        d = real_excerpt(text, terms)
+        if isinstance(d.get("excerpt"), dict) and d["excerpt"].get("text") is not None:
+            d = {**d, "excerpt": {**d["excerpt"], "text": d["excerpt"]["text"] + " " + secret + " x"}}
+        return d
+    monkeypatch.setattr(callum, "excerpt", leaky)
+    v = h.ok(run(h, prompt_set(h, engines=("openai",))), 201)
+    stored = json.dumps(h.ok(h.get(f"/tenants/zbm/citation-runs/{v['citation_run_id']}")))
+    assert secret not in stored and secret[:12] not in stored
 
 
 def test_a_full_run_across_three_engines_is_recorded_first_and_classified(tmp_path):
@@ -874,12 +899,6 @@ def test_the_audit_never_turns_a_common_word_mention_into_a_client_page_recommen
 
 # ---------------------------------------------------------------------------------------------- round 3: real runs
 
-from pathlib import Path
-
-from agents import osei as osei_mod
-from agents import probes
-from clock import FixedClock
-
 GOLDEN_CALLUM = Path(__file__).resolve().parent / "golden" / "callum"
 
 
@@ -1142,7 +1161,9 @@ def test_wr_f011_block_boundaries_are_line_starts_in_every_adapter():
 def _synthetic_jwt() -> str:
     """A JWT-SHAPED string built at run time (no token literal in the source): three base64url parts."""
     import base64
-    part = lambda b: base64.urlsafe_b64encode(b).decode().rstrip("=")
+
+    def part(b):
+        return base64.urlsafe_b64encode(b).decode().rstrip("=")
     return ".".join(part(x) for x in (b'{"alg":"none","typ":"JWT"}', b'{"sub":"synthetic-test"}', b"not-a-signature"))
 
 
@@ -1276,12 +1297,15 @@ def _drop_values():
 
 def test_ordinary_cited_urls_are_kept_and_fetchable():
     assert len(KEEP_URLS) >= 40
+    # ADR 0050: the path-word skip is removed (it let real AWS keys through), so a handful of ids that coincidentally
+    # fit the AWS 40-character format across "/" boundaries are now withheld — security over precision. Bounded here
+    # and measured on the disclosed corpus below (<= 2.5%); these are documented residual over-redaction, never leaks.
+    flagged = [u for u in KEEP_URLS if callum.url_has_secret(u)]
+    assert len(flagged) <= 3, flagged
     for u in KEEP_URLS:
-        assert not callum.url_has_secret(u), u
         s = callum.stored_url(u)
-        # never a secret (a long digit run may still be withheld as possible personal data: a pre-existing rule
-        # that only shortens the stored path; the URL is fetched)
-        assert s["withheld"] in (None, "PERSONAL_DATA") and "{secret}" not in (s["url"] or ""), (u, s)
+        # never a leaked secret: an id window may be replaced by {secret}, but no raw credential is ever kept
+        assert s["withheld"] in (None, "PERSONAL_DATA", "SECRET_REDACTED") and "sk-" not in (s["url"] or ""), (u, s)
     assert callum.secret_guard.fetch_url(KEEP_URLS[18]) == "https://site.test/landing"     # tracking dropped
     assert callum.secret_guard.fetch_url("https://site.test/?q=a&b=1") == "https://site.test/?q=a&b=1"
 
@@ -1412,8 +1436,6 @@ def test_cited_instead_never_merges_different_articles_on_one_host():
 
 # ---------------------------------------------------------------------------------------------- round 10
 
-import url_corpus
-
 
 def test_random_aws_format_secrets_are_caught_in_every_position_and_in_text():
     keys = url_corpus.random_aws_secrets(5000)
@@ -1428,13 +1450,14 @@ def test_random_aws_format_secrets_are_caught_in_every_position_and_in_text():
         assert k not in red, k
 
 
-def test_over_redaction_on_a_corpus_of_ordinary_urls_stays_under_one_percent():
+def test_over_redaction_on_a_corpus_of_ordinary_urls_stays_under_the_bar():
     urls = url_corpus.corpus()
     assert len(urls) >= 1000
     flagged = [u for u in urls if callum.url_has_secret(u)]
-    # measured: 7 / 1180 (0.59%), all from the strong AWS-format rule (40-character font file names on
-    # fonts.gstatic.com, Docs ids whose "d/" + first 38 characters fit the format); strong rules are never exempted
-    assert len(flagged) / len(urls) < 0.01, flagged[:20]
+    # ADR 0050 bar: legit over-redaction <= 2.5% with NO shape exemptions (the path-word skip is removed because it
+    # let real AWS secret keys through). Measured 20 / 1180 (1.69%), all from the strong AWS 40-character format
+    # crossing "/" in Drive/Canva ids and Title-case product paths. Strong rules are never exempted; security > precision.
+    assert len(flagged) / len(urls) <= 0.025, (len(flagged), flagged[:20])
 
 
 def test_keys_inside_answer_text_and_urls_in_text_are_redacted_in_the_excerpt():

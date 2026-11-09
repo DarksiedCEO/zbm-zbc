@@ -367,7 +367,6 @@ def parse_agent_response(body: bytes, allowed_models: tuple = MODELS) -> Provide
         raise EngineError("ENGINE_PROTOCOL_ERROR", "RESPONSE_" + r.status.upper(), cost)
     if r.model not in allowed_models:
         raise EngineError("ENGINE_PROTOCOL_ERROR", "MODEL_NOT_ALLOWED", cost)
-    parts = [p for m in messages for p in m.content]
     text = join_text([[p.text for p in m.content] for m in messages])     # WR-F011: one group per message item
     if not text.strip():
         raise EngineError("ENGINE_PROTOCOL_ERROR", "NO_ANSWER_TEXT", cost)

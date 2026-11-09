@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import unicodedata
 from collections.abc import Callable
 from datetime import timedelta
 from urllib.parse import unquote, urljoin, urlunsplit
@@ -328,19 +329,21 @@ def _segment_personal(seg: str) -> str | None:
     x = forms[-1]
     if any(_E164.search(f) for f in forms):
         return "number"                                   # an international phone number, any country code
-    kind = personal_data(x)
+    xr = _separator_reading(x)
+    kind = personal_data(x) or personal_data(xr)
     if kind == "email":
         return "email" if _EMAIL_SEG.search(x) else None
     if kind == "ip":
         return kind
     if kind is None:
         return None
-    if _SSN.search(x) or _PHONE.search(x):
-        return "number"
-    for m in _CARD.finditer(x):
-        d = re.sub(r"\D", "", m.group(0))
-        if 13 <= len(d) <= 19 and _luhn(d) and (len(d) in (15, 16) or m.group(0) != d):
+    for form in (x, xr):
+        if _SSN.search(form) or _PHONE.search(form):
             return "number"
+        for m in _CARD.finditer(form):
+            d = re.sub(r"\D", "", m.group(0))
+            if 13 <= len(d) <= 19 and _luhn(d) and (len(d) in (15, 16) or m.group(0) != d):
+                return "number"
     return None
 
 
@@ -494,6 +497,40 @@ def classify_citation(url: str, domain: str, competitors: list, res: dict) -> di
             "competitor": comp}
 
 
+_BASE_SEPARATORS = frozenset("().+/,_-")
+_X_BETWEEN = re.compile(r"(?<=\d)[xX](?=\d)")
+
+
+def _separator_reading(text: str) -> str:
+    """The text with every Unicode punctuation / symbol / separator the base personal-data screen does not already
+    read as a separator (``•`` ``·`` ``|`` ``:`` ``*`` ``#`` …) read as a space, and ``x``/``X`` between two digits as
+    a space, so a phone / card / SSN written with an unusual separator is still seen (TNZ separator screen, upstreamed)."""
+    out = []
+    for c in text or "":
+        cat = unicodedata.category(c)
+        if c not in _BASE_SEPARATORS and not c.isspace() and cat[0] in "PSZ" and cat not in ("Pd", "Pc"):
+            out.append(" ")
+        else:
+            out.append(c)
+    return _X_BETWEEN.sub(" ", "".join(out))
+
+
+def personal_or_separator(text: str) -> str | None:
+    """Personal data on the text as written, else on its Unicode-separator reading."""
+    if not text:
+        return None
+    return personal_data(text) or personal_data(_separator_reading(text))
+
+
+def _safe_hint(hint) -> str | None:
+    """A cited engine's unverified hint/title: credentials redacted, then withheld entirely if it reads as personal
+    data (by the base screen or the Unicode-separator reading)."""
+    if not isinstance(hint, str):
+        return None
+    red = secret_guard.redact_text(hint[:253])[0]
+    return None if personal_or_separator(red) is not None else red
+
+
 def excerpt(text: str, terms: list) -> dict:
     """A short span of the answer for the drill-down: around the first brand mention, else the answer's opening.
     Bounded, marked untrusted (envelope.observed), and withheld when it looks like personal data."""
@@ -506,7 +543,7 @@ def excerpt(text: str, terms: list) -> dict:
             basis, start = "brand_mention", m.start()
     lo = max(0, start - 60) if basis == "brand_mention" else 0
     span = t[lo:lo + EXCERPT_MAX]
-    kind = personal_data(span)
+    kind = personal_or_separator(span)
     if kind is not None:
         return {"basis": basis, "excerpt": None, "withheld": f"personal_data:{kind}"}
     out = {"basis": basis, "excerpt": observed(span, EXCERPT_MAX), "withheld": None}
@@ -606,7 +643,7 @@ def classify(engines: dict, prompt_set: dict, domain: str, resolver: Resolver, r
                      if cl["chain"]["cited"] else None, "position": c["position"], "via": cl["via"],
                      "chain": cl["chain"], "flags": cl["flags"], "competitor": cl["competitor"],
                      "citation_basis": basis,
-                     "engine_hint_unverified": secret_guard.redact_text(hint[:253])[0] if isinstance(hint, str) else None,
+                     "engine_hint_unverified": _safe_hint(hint),
                      "evidence": {"url": cl["chain"]["cited"]["url"] if cl["chain"]["cited"] else None, **ev}})
             strength = "STRENGTH_URL" in classes
             if strength:

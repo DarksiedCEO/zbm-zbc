@@ -129,6 +129,9 @@ class CitationsMixin:
                     capability="audit")
                 if stop is not None:
                     return self._interrupt_citation_run(tid, cid, stop)
+                # ADR 0050 M4: fail-closed sweep of the whole result before it is stored/logged, so no excerpt, URL or
+                # engine hint can carry a credential into data/seo_log.jsonl even if an upstream redaction was missed
+                env = callum.secret_guard.guard_record(env)
                 rsha = sha(env)
                 facts = env.get("facts") or {}
                 totals = (facts.get("metrics") or {}).get("totals") or {}

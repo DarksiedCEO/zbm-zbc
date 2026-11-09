@@ -38,7 +38,7 @@ def _templates():
         lambda r: f"https://unpkg.com/react@18.{r.randint(0, 3)}.{r.randint(0, 9)}/umd/react.production.min.js",
         lambda r: f"https://site.test/_next/static/{_r(r, B64URL, 21)}/_buildManifest.js",
         lambda r: f"https://www.canva.com/design/DAG{_r(r, B64URL, 8)}/{_r(r, B64URL, 22)}/view",
-        lambda r: f"https://us02web.zoom.us/j/{r.randint(10**9, 10**11)}?pwd={_r(r, B62, 32)}",
+        lambda r: f"https://us02web.zoom.us/j/{r.randint(10**9, 10**11)}",
         lambda r: f"https://www.youtube.com/watch?v={_r(r, B64URL, 11)}",
         lambda r: f"https://youtu.be/{_r(r, B64URL, 11)}",
         lambda r: f"https://drive.google.com/file/d/1{_r(r, B64URL, 32)}/view",

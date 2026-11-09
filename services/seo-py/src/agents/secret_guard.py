@@ -33,11 +33,28 @@ from __future__ import annotations
 import html
 import math
 import re
+import unicodedata
 from collections import Counter
 from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
 
 REDACTED = "[redacted]"
 DECODE_ROUNDS = 4
+GUARD_MAX_DEPTH = 8
+
+# Zero-width, bidi-control, word-joiner, BOM, soft hyphen, Mongolian vowel separator: stripped before matching so a key
+# split by an invisible character (``AK​IA…``) or wrapped in bidi overrides is matched as written (threat list:
+# obfuscations / invisible-char splits).
+_INVISIBLE = re.compile("[​-‏‪-‮⁠-⁤⁦-⁯﻿­᠎]")
+
+
+def _strip_invisible(s: str) -> str:
+    return _INVISIBLE.sub("", s or "")
+
+
+def normalise(text: str) -> str:
+    """NFKC fold (fullwidth / compatibility forms become ASCII) after invisible / bidi characters are stripped, so a
+    fullwidth or invisible-split key is matched by the same ASCII rules (threat list: NFKC, invisible-char splits)."""
+    return unicodedata.normalize("NFKC", _strip_invisible(text))
 
 # --------------------------------------------------------------------------------------------- the strong rule table
 # (provider, documented key shape). Glued after any non-alphanumeric character: the lookbehind is "not a letter or
@@ -49,7 +66,9 @@ PROVIDERS = (
     ("openai_anthropic", r"sk-(?:proj-|svcacct-|admin-|ant-(?:api|admin)\d\d-)?[A-Za-z0-9_\-]{20,}"),
     ("github", r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})"),
     ("stripe", r"(?:(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{10,}|whsec_[A-Za-z0-9]{20,})"),
-    ("slack", r"(?:xoxe\.xox[a-z]-[A-Za-z0-9\-]{10,}|xox[abposre]-[A-Za-z0-9\-]{10,})"),
+    # Slack: bot/user/app/legacy/config tokens (``xox[a-z]-``, any letter), plus the refresh forms ``xoxe.xox[a-z]-``
+    # and ``xoxe-<digits>-`` (threat list: xox[a-z]- and refresh form)
+    ("slack", r"(?:xoxe\.xox[a-z]-[A-Za-z0-9\-]{10,}|xoxe-\d+-[A-Za-z0-9\-]{10,}|xox[a-z]-[A-Za-z0-9\-]{10,})"),
     ("google_api", r"AIza[0-9A-Za-z_\-]{30,}"),
     ("perplexity", r"pplx-[A-Za-z0-9]{16,}"),
     ("gitlab", r"glpat-[A-Za-z0-9_\-]{20,}"),
@@ -59,19 +78,39 @@ PROVIDERS = (
     ("jwt", r"eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}"),
 )
 _PREFIX = re.compile(r"(?<![A-Za-z0-9])(?:" + "|".join(f"(?P<{n}>{rx})" for n, rx in PROVIDERS) + ")")
-# labelled credentials (upstreamed from TNZ, PR #53): the label, then ":" / "=" or whitespace, then a token-shaped
-# value (8+ token characters with letters AND digits), so prose ("the key takeaway", "password protection") stays
-_LABEL = (r"(?i)(?<![A-Za-z0-9])(?:bearer|authorization|auth|x-api-key|x-goog-api-key|api[_-]?key|apikey|key"
-          r"|access[_-]?token|refresh[_-]?token|token|client[_-]?secret|secret|password|passwd)")
-# the label, then ":" / "=" (optionally spaced) or whitespace, then a token-shaped value (a second "Bearer" allowed)
-_NAMED = re.compile(_LABEL + r"(?:\s*[:=]\s*|\s+)[\"']?(?:bearer\s+)?([A-Za-z0-9_\-+/=.~]{8,})")
+# GLUE forms: the same fixed-prefix shapes with NO leading boundary, so a key glued to a word or to capital letters
+# (``internalAKIAIOSFODNN7EXAMPLE``, ``tokenAIza…``, ``configsk-ant-…``) is still caught (threat list: glued to
+# words/capitals). The ``sk-`` family keeps its ``_prefix_ok`` gate even when glued, so a lower-case slug is not a key.
+_GLUE = re.compile("(?:" + "|".join(f"(?P<{n}>{rx})" for n, rx in PROVIDERS) + ")")
+# labelled credentials: ANY value >=6 characters after a credential label and a separator (threat list: labelled
+# credentials). The label word (two-word labels with a space/underscore/dash allowed: ``api key``, ``access code``),
+# optionally wrapped in a dotted/dashed identifier (``X_API_KEY``, ``db.password``), including common non-English
+# labels. No "tokenish" gate when the separator is explicit (``:`` ``=`` ``->`` ``→`` ``—`` `` is `` `` - ``); prose
+# ("the key takeaway", "password protection") has no such separator so it stays.
+_CRED_WORD = (
+    r"api[ _\-]?keys?|apikey|secret[ _\-]?keys?|client[ _\-]?secret|access[ _\-]?(?:tokens?|codes?|keys?)"
+    r"|refresh[ _\-]?tokens?|authorization|authorisation|x[ _\-]?api[ _\-]?key|x[ _\-]?goog[ _\-]?api[ _\-]?key"
+    r"|bearer|auth|passphrase|passcode|passwords?|passwd|pwd|pin|secrets?|tokens?|credentials?"
+    r"|session[ _\-]?id|cookie|keys?|contrase[nñ]a|mot[ _]de[ _]passe|cl[eé]|schl[uü]ssel|senha|clave|chiave"
+    r"|пароль|ключ|密码|密碼|金鑰|秘钥|パスワード|비밀번호")
+_LABEL = (r"(?i)(?<![A-Za-z0-9])(?:[A-Za-z0-9]{1,16}[_\-.]){0,3}(?:" + _CRED_WORD
+          + r")(?:[_\-.][A-Za-z0-9]{1,16}){0,2}(?![A-Za-z0-9])")
+_VALUE = r"([^\s\"'<>&,;\]\}]{6,512})"
+_SCHEME = r"(?:(?i:basic|bearer|token|digest)\s+)?"
+# explicit separator -> no shape gate (``password: consistency`` is treated as a credential)
+_NAMED = re.compile(_LABEL + r"[\"']?\s{0,4}(?:[:=]|->|→|—|\sis\s|\s-\s|：|＝)\s{0,4}[\"']?" + _SCHEME + _VALUE)
+# bare whitespace -> a token-shaped value only (``key product`` stays prose; ``key <token>`` is a credential)
+_NAMED_SPACE = re.compile(_LABEL + r"\s+" + _SCHEME + r"([A-Za-z0-9_\-+/=.~]{8,512})")
 _AWS_SECRET = re.compile(r"(?<![A-Za-z0-9/+])[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+])")
-# an AWS access key id written with a space or tab between every character (``A K I A I O S F ...``; from TNZ)
-_AWS_SPACED = re.compile(r"(?<![A-Za-z0-9])(?:A[ \t]K[ \t]I[ \t]A|A[ \t]S[ \t]I[ \t]A|A[ \t]G[ \t]P[ \t]A|A[ \t]I[ \t]D[ \t]A"
-                         r"|A[ \t]R[ \t]O[ \t]A)(?:[ \t][A-Z0-9]){16}(?![A-Za-z0-9])")
-# a PEM private-key block (any key type); an unterminated block is redacted to the end of its base64 body
-_PEM = re.compile(r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----(?:[\s\S]*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY-----"
-                  r"|[A-Za-z0-9+/=\s]*)")
+# a 40-character ``[A-Za-z0-9/+]`` run (any shape, digits optional) when labelled with aws / secret / key within 40
+# characters before it: the no-digit AWS secret form (threat list: AWS secret keys incl. no-digit secrets)
+_AWS_SECRET_LABELLED = re.compile(r"(?i)(?:aws|secret|key|access)[^A-Za-z0-9/+]{0,40}?([A-Za-z0-9/+]{40})(?![A-Za-z0-9+])")
+# an AWS access key id written with one whitespace between every character (``A K I A I O S F ...``): must hold a digit
+_AWS_SPACED = re.compile(r"(?<![A-Za-z0-9])(?:A\sK\sI\sA|A\sS\sI\sA|A\sG\sP\sA|A\sI\sD\sA|A\sR\sO\sA|A\sI\sP\sA"
+                         r"|A\sN\sP\sA|A\sN\sV\sA|A\sB\sI\sA|A\sC\sC\sA)(?:\s[A-Z0-9]){16}(?![A-Za-z0-9])")
+# a PEM / PGP private-key block (any key type); an unterminated block is redacted to the end of its base64 body
+_PEM = re.compile(r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----"
+                  r"(?:[\s\S]*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----|[A-Za-z0-9+/=\s]*)")
 _HEX = re.compile(r"[0-9a-fA-F]{16,}")
 _TOKEN = re.compile(r"[A-Za-z0-9_\-+/=~]{20,}")
 _PIECE = re.compile(r"[A-Za-z0-9+=~]{20,}")          # "/" splits: a path is not one token (AWS keys: their rule)
@@ -91,33 +130,88 @@ def _aws_shape(tok: str) -> bool:
     return any(c.isdigit() for c in tok) and any(c.isupper() for c in tok) and any(c.islower() for c in tok)
 
 
+def _space_value_ok(v: str) -> bool:
+    """A value after a bare-whitespace label is a credential only when token-shaped (a digit, or long, or mixed case):
+    ``key product`` stays prose; ``key <token>`` does not. Explicit separators need no such gate."""
+    return (any(c.isdigit() for c in v) or len(v) >= 16
+            or (len(v) >= 10 and any(c.isupper() for c in v) and any(c.islower() for c in v)))
+
+
+_SK_SUBPREFIX = re.compile(r"sk-(?:proj|svcacct|admin|ant)-")
+
+
 def _prefix_ok(m: re.Match) -> bool:
     if m.lastgroup == "openai_anthropic":
         body = m.group(0)
-        return any(c.isdigit() for c in body) and any(c.isupper() for c in body)
+        # a recognised sub-prefix (``sk-proj-``, ``sk-ant-…``) is distinctive on its own; a bare ``sk-<body>`` still
+        # needs a digit and an upper-case letter so a lower-case slug (``sk-ii-facial-essence``) is not a key
+        return bool(_SK_SUBPREFIX.match(body)) or (any(c.isdigit() for c in body) and any(c.isupper() for c in body))
     return True
 
 
 def decodings(text: str) -> list:
-    """``text`` as written, then after each percent-decoding round (until stable, at most DECODE_ROUNDS) and HTML-entity
-    decoding: every distinct form, in order."""
-    out = [text]
-    cur = text
+    """``text`` as written, then its normalised form (NFKC + invisible/bidi strip), then after each percent-decoding
+    round (until stable, at most DECODE_ROUNDS) with HTML-entity decoding, re-normalised each round: every distinct
+    form, in order. The deepest-decoded form is last."""
+    raw = text or ""
+    out = [raw]
+    seen = {raw}
+    cur = normalise(raw)
+    if cur not in seen:
+        out.append(cur)
+        seen.add(cur)
     for _ in range(DECODE_ROUNDS):
-        nxt = html.unescape(unquote(cur)) if ("%" in cur or "&" in cur) else cur
+        nxt = normalise(html.unescape(unquote(cur))) if ("%" in cur or "&" in cur) else cur
         if nxt == cur:
             break
-        out.append(nxt)
+        if nxt not in seen:
+            out.append(nxt)
+            seen.add(nxt)
         cur = nxt
     return out
 
 
+# a line break (or form feed / vertical tab) sitting between two token characters: removed for a second strong pass so
+# a key split across lines is rejoined (threat list: line-break splits). A normal space/tab is NOT removed here, so
+# ordinary word spacing is never collapsed (that would glue a key to the next word and hide its boundary); single
+# spaces between every character are handled by ``_AWS_SPACED``. Bounded: one substitution pass.
+_SPLIT = re.compile(r"(?<=[A-Za-z0-9+/=_.~\-])[\r\n\f\v]+(?=[A-Za-z0-9+/=_.~\-])")
+
+
+def _deglued(text: str) -> str:
+    return _SPLIT.sub("", text)
+
+
+def _deglue_map(text: str):
+    """The text with split-point whitespace removed, plus a list mapping each kept-character index back to its index in
+    the original (so a strong span of the deglued form maps to an original span). ``(text, None)`` when nothing splits."""
+    cuts = list(_SPLIT.finditer(text))
+    if not cuts:
+        return text, None
+    drop = set()
+    for m in cuts:
+        drop.update(range(*m.span()))
+    out, mp = [], []
+    for i, ch in enumerate(text):
+        if i not in drop:
+            out.append(ch)
+            mp.append(i)
+    return "".join(out), mp
+
+
+def _aws_spaced_ok(s: str) -> bool:
+    return any(c.isdigit() for c in s)
+
+
 def _strong_spans_one(text: str) -> list:
     spans = [m.span() for m in _PREFIX.finditer(text) if _prefix_ok(m)]
-    spans += [m.span() for m in _AWS_SPACED.finditer(text)]
+    spans += [m.span() for m in _GLUE.finditer(text) if _prefix_ok(m)]
+    spans += [m.span() for m in _AWS_SPACED.finditer(text) if _aws_spaced_ok(m.group(0))]
     spans += [m.span() for m in _PEM.finditer(text)]
-    spans += [m.span(1) for m in _NAMED.finditer(text) if _mixed(m.group(1))]
+    spans += [m.span(1) for m in _NAMED.finditer(text)]
+    spans += [m.span(1) for m in _NAMED_SPACE.finditer(text) if _space_value_ok(m.group(1))]
     spans += [m.span() for m in _AWS_SECRET.finditer(text) if _aws_shape(m.group(0))]
+    spans += [m.span(1) for m in _AWS_SECRET_LABELLED.finditer(text)]
     return spans
 
 
@@ -136,8 +230,17 @@ def _strong_spans(text: str) -> list:
 
 
 def strong_secret(text: str) -> bool:
-    """A STRONG rule fires on ``text`` or any of its decodings. Never exempted."""
-    return bool(text) and any(_strong_spans_one(d) for d in decodings(text))
+    """A STRONG rule fires on ``text``, any of its decodings, or the deglued form of any (a key split by a line break
+    or spaces). Never exempted."""
+    if not text:
+        return False
+    for d in decodings(text):
+        if _strong_spans_one(d):
+            return True
+        g = _deglued(d)
+        if g != d and _strong_spans_one(g):
+            return True
+    return False
 
 
 def weak_secret(text: str) -> bool:
@@ -171,11 +274,18 @@ def redact_text(text: str) -> tuple:
     if not isinstance(text, str) or not text:
         return ("" if not isinstance(text, str) else text), 0
     spans = _strong_spans_one(text) + _weak_spans_one(text)
-    if "%" in text or "&" in text:
-        for m in re.finditer(r"\S+", text):
-            w = m.group(0)
-            if ("%" in w or "&" in w) and strong_secret(w):
+    # normalise (fullwidth / invisible) and decode a word in place, so an obfuscated single word is redacted whole
+    for m in re.finditer(r"\S+", text):
+        w = m.group(0)
+        if w != normalise(w) or "%" in w or "&" in w:
+            if strong_secret(w):
                 spans.append(m.span())
+    # a key split by a line break or spaces: strong spans of the deglued text mapped back to original coordinates (the
+    # whitespace inside the key is redacted with it)
+    deglued, mp = _deglue_map(text)
+    if mp is not None:
+        for a, b in _strong_spans_one(deglued):
+            spans.append((mp[a], mp[b - 1] + 1))
     for m in _URL_IN_TEXT.finditer(text):
         u = m.group(0).rstrip(".,;:!?)]}")
         url = u if "://" in u else "https://" + u
@@ -194,6 +304,23 @@ def redact_text(text: str) -> tuple:
 
 
 redact = redact_text                                   # the name callum.py used first; same function
+
+
+def guard_record(obj, _depth: int = 0):
+    """FAIL-CLOSED sweep of anything bound for storage, a log or output (a dict, list, tuple or str; ADR 0050 M4).
+    Every string is run through ``redact_text``; if a STRONG rule still fires on the result (a split / glued / decoded
+    form the span pass could not place), the whole string is replaced by ``[redacted]``. Structure, numbers, booleans
+    and ``None`` are returned unchanged. Bounded recursion depth; never raises."""
+    if _depth > GUARD_MAX_DEPTH:
+        return REDACTED
+    if isinstance(obj, str):
+        red = redact_text(obj)[0]
+        return REDACTED if strong_secret(red) else red
+    if isinstance(obj, dict):
+        return {k: guard_record(v, _depth + 1) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [guard_record(v, _depth + 1) for v in obj]
+    return obj
 
 
 # ------------------------------------------------------------------------------------------------ URLs
@@ -256,34 +383,15 @@ def _weak_exempt_path(host: str, path: str, segs: list, i: int) -> bool:
     return _host_in(host, ID_HOSTS) and not _LONG_HEX.search(unquote(seg))
 
 
-# Path words: a 40-character window that crosses "/" and contains one of these lower-case words as a whole segment
-# is a path ("file/d/<33-character Drive id>"), not a key. A random 40-character key holds such a segment with
-# negligible probability (two or more specific letters between slashes); single letters are NOT listed, so a key's
-# own short segments never excuse it. This is part of the AWS format's definition and applies on every host.
-PATH_WORDS = frozenset(["file", "files", "document", "documents", "edit", "view", "preview", "open", "spreadsheets", "presentation", "presentations", "forms", "folders", "folder", "drive", "share", "shared", "watch", "embed", "status", "statuses", "user", "users", "profile", "profiles", "post", "posts", "p2", "article", "articles", "news", "blog", "blogs", "item", "items", "itm", "product", "products", "dp", "gp", "ip", "listing", "listings", "pin", "video", "videos", "media", "images", "image", "img", "static", "assets", "asset", "js", "css", "cdn", "content", "wiki", "en", "us", "uk", "de", "fr", "es", "it", "nl", "jp", "www", "api", "v1", "v2", "v3", "app", "apps", "page", "pages", "tag", "tags", "category", "categories", "search", "results", "questions", "answers", "comments", "r", "s3", "public", "private", "raw", "blob", "tree", "commit", "commits", "main", "master", "download", "downloads", "uploads", "upload", "docs", "doc", "help", "support", "store", "shop", "maps", "place", "dir", "data", "book", "books", "music", "episode", "episodes", "show", "shows", "track", "tracks", "album", "albums", "playlist", "design", "designs", "pdf", "html", "home", "index", "default", "details", "detail", "overview", "about", "contact", "pricing", "services", "service", "solutions", "resources", "reviews", "review", "guide", "guides"])
-
-
-def _path_words(run: str) -> bool:
-    from agents.brand_mention import (
-        common_words,  # the bundled common-word list (lazy: no import cycle)
-    )
-    def word(x: str) -> bool:
-        # a whole lower-case word (3+ letters) or a Title-case one (4+ letters) from the lists; a random key's segment
-        # is such a word with negligible probability (two-letter and mixed-case segments never count)
-        low = x.lower()
-        listed = low in PATH_WORDS or low in common_words()
-        return listed and ((len(x) >= 3 and x.islower()) or (len(x) >= 4 and x[0].isupper() and x[1:].islower()))
-    parts = run.split("/")
-    return len(parts) > 1 and any(word(x) for x in parts if x)
-
-
 def _aws_in_path(path: str) -> set:
-    """Segment indexes covered by an AWS-format 40-character window of any decoding of ``path`` (strong)."""
+    """Segment indexes covered by an AWS-format 40-character window of any decoding of ``path`` (strong). The window
+    may cross ``/`` boundaries; there is no path-word skip (ADR 0050: it let real keys through, so it is removed —
+    security over precision)."""
     hits: set = set()
     for d in decodings(path):
         for m in _AWS_WINDOW.finditer(d):
             run = m.group(1)
-            if _aws_shape(run) and not _path_words(run):
+            if _aws_shape(run):
                 first = d[:m.start(1)].count("/")
                 hits |= set(range(first, first + run.count("/") + 1))
     return hits
@@ -316,6 +424,10 @@ def _url_secret_segments(url: str, depth: int) -> tuple:
         dbad, dother = _url_secret_segments(forms[-1], depth + 1)
         if dbad or dother:
             return encoded, True
+    # the host and every host label, at every decode level: a key hidden as a subdomain label is caught (ADR 0050:
+    # one scan over the whole URL, host labels included). Strong only; never exempted.
+    raw_host = re.sub(r":\d+$", "", (p.netloc or "").rsplit("@", 1)[-1])
+    other = bool(raw_host) and strong_secret(raw_host)
     segs = path.split("/")
     bad = set()
     for i, seg in enumerate(segs):
@@ -329,7 +441,7 @@ def _url_secret_segments(url: str, depth: int) -> tuple:
     pairs = parse_qsl(p.query or "", keep_blank_values=True)
     id_params = next((v for h, v in ID_PARAMS.items() if _host_in(host, (h,))), frozenset())
     weak_ok = _host_in(host, ID_HOSTS) or (_host_in(host, ("google.com",)) and _MAPS.match(path) is not None)
-    other = strong_secret(p.query or "") or strong_secret(p.fragment or "")
+    other = other or strong_secret(p.query or "") or strong_secret(p.fragment or "")
     for k, v in pairs:
         if strong_secret(k) or strong_secret(v) or strong_secret(f"{k}={v}"):
             other = True                                  # tracking or id parameters included: never exempted
