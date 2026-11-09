@@ -505,6 +505,60 @@ def test_stale_collection_period_is_flagged():
     assert cur["freshness_days"] == 42 and cur["stale"] is True
 
 
+# ---- collection periods on the run's clock (war-room finding: a future period was reported as fresh data)
+# the harness clock is 2026-10-09 (see ``run``); CLOCK_SKEW_DAYS is 1
+
+def _with_period(period, which="record"):
+    fake = FakeCrux()
+    if which == "record":
+        fake.answers[("record", "origin", O, "PHONE")] = (200, record_answer("origin", O, "PHONE", period=period))
+    else:
+        ans = history_answer("origin", O, "PHONE")
+        ans["record"]["collectionPeriods"][-1] = {"firstDate": {"year": period[0][0], "month": period[0][1],
+                                                                "day": period[0][2]},
+                                                  "lastDate": {"year": period[1][0], "month": period[1][1],
+                                                               "day": period[1][2]}}
+        fake.answers[("history", "origin", O, "PHONE")] = (200, ans)
+    sec = run(fake, paths=())
+    return sec, sec["targets"][0]["form_factors"]["PHONE"]["current" if which == "record" else "history"]
+
+
+@pytest.mark.parametrize("last, fresh", [((2026, 10, 9), 0), ((2026, 10, 10), 0)])
+def test_a_period_ending_today_or_within_the_one_day_skew_is_data_never_negative_freshness(last, fresh):
+    _sec, cur = _with_period(((2026, 9, 12), last))
+    assert cur["state"] == "OK" and cur["freshness_days"] == fresh and cur["stale"] is False
+
+
+@pytest.mark.parametrize("which", ["record", "history"])
+@pytest.mark.parametrize("period", [((2026, 9, 14), (2026, 10, 11)), ((2026, 9, 14), (2026, 12, 1)),
+                                    ((2026, 10, 11), (2026, 11, 7))])
+def test_a_period_past_the_skew_fails_closed_and_is_never_fresh(which, period):
+    """Fails if the guard is removed: +2 days (and the war room's 2026-12-01) must not be data."""
+    sec, ent = _with_period(period, which)
+    assert ent == {"state": "FAILED", "reason": "CRUX_FUTURE_COLLECTION_PERIOD",
+                   "detail": "collection_period_after_run_clock", "attempts_sent": 1}
+    assert "freshness_days" not in ent and "metrics" not in ent and sec["stopped"] is None
+    assert sec["counts"]["failed"] == 1 and lena.outcome(sec) == ("PARTIAL", "CRUX_PROTOCOL_ERROR")
+
+
+def test_check_period_boundaries_and_an_inverted_period():
+    lena.check_period({"first": "2026-09-12", "last": "2026-10-09"}, "2026-10-09")
+    lena.check_period({"first": "2026-09-13", "last": "2026-10-10"}, "2026-10-09")
+    e = err(lambda: lena.check_period({"first": "2026-09-14", "last": "2026-10-11"}, "2026-10-09"))
+    assert (e.code, e.detail) == ("CRUX_FUTURE_COLLECTION_PERIOD", "collection_period_after_run_clock")
+    e = err(lambda: lena.check_period({"first": "2026-10-11", "last": "2026-10-01"}, "2026-10-09"))
+    assert (e.code, e.detail) == ("CRUX_PROTOCOL_ERROR", "collection_period_inverted")
+    assert lena.CLOCK_SKEW_DAYS == 1
+
+
+def test_an_inverted_period_handed_to_the_shaper_is_never_data():
+    """Defence in depth: the adapter already refuses start > end; the shaper refuses it too."""
+    r = {"state": "OK", "collection_period": {"first": "2026-10-07", "last": "2026-09-10"}, "metrics": {}}
+    assert err(lambda: lena.shape_record(r, "2026-10-09", "t")).code == "CRUX_PROTOCOL_ERROR"
+    h = {"state": "OK", "collection_periods": [{"first": "2026-10-07", "last": "2026-09-10"}], "metrics": {}}
+    assert err(lambda: lena.shape_history(h, "2026-10-09", "t")).code == "CRUX_PROTOCOL_ERROR"
+
+
 def test_not_found_constant_is_googles_documented_body():
     assert cx.is_not_found(json.dumps(NOT_FOUND).encode())
 

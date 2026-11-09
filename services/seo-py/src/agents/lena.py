@@ -45,6 +45,11 @@ CORE = tuple(m for m, t in THRESHOLDS.items() if t["core_web_vital"])
 RATINGS = ("GOOD", "NEEDS_IMPROVEMENT", "POOR")
 # freshness: the daily dataset is ~2 days behind, the weekly history up to ~9; past these the data is called stale
 STALE_DAYS = {"record": 7, "history": 14}
+# a collection period may end at most CLOCK_SKEW_DAYS after the run's own UTC date (Google's dataset day can be a
+# calendar day ahead of a UTC clock near midnight; one day absorbs that and nothing more). Past that, or with a start
+# after its end, the answer is not data: the entry is FAILED CRUX_FUTURE_COLLECTION_PERIOD / CRUX_PROTOCOL_ERROR,
+# never rated, never "fresh", and freshness is never negative (within the skew it is 0)
+CLOCK_SKEW_DAYS = 1
 # trend: the medians of the earliest and the latest TREND_WINDOW periods with data; at least MIN_TREND_POINTS such
 # periods; a change smaller than both MIN_CHANGE (absolute) and TREND_MIN_RELATIVE is NO_CLEAR_CHANGE
 TREND_WINDOW = 6
@@ -97,6 +102,20 @@ def _days_between(a: str, b: str) -> int:
     return (date.fromisoformat(b) - date.fromisoformat(a)).days
 
 
+def check_period(period: dict, today: str) -> None:
+    """Fail closed on a collection period that cannot be true on the run's clock (WR finding, round 6): a start after
+    its end is CRUX_PROTOCOL_ERROR; a start or an end more than CLOCK_SKEW_DAYS after ``today`` is
+    CRUX_FUTURE_COLLECTION_PERIOD. Raises cx.CruxError, recorded by ``run`` as a FAILED query (not a stopping one)."""
+    if period["first"] > period["last"]:
+        raise cx.CruxError("CRUX_PROTOCOL_ERROR", "collection_period_inverted")
+    if max(_days_between(today, period["first"]), _days_between(today, period["last"])) > CLOCK_SKEW_DAYS:
+        raise cx.CruxError("CRUX_FUTURE_COLLECTION_PERIOD", "collection_period_after_run_clock")
+
+
+def _freshness(last: str, today: str) -> int:
+    return max(0, _days_between(last, today))
+
+
 def assess(metrics: dict) -> dict:
     """The Core Web Vitals assessment from one record's rated metrics."""
     ratings = {m: metrics[cx.METRICS[m]].get("rating") for m in CORE}
@@ -139,6 +158,7 @@ def shape_record(r: dict, today: str, retrieved_at: str) -> dict:
     if r["state"] != "OK":
         return {"state": r["state"], "provenance": _provenance("records:queryRecord", None, retrieved_at)}
     period = r["collection_period"]
+    check_period(period, today)
     prov = _provenance("records:queryRecord", period, retrieved_at)
     metrics = {}
     for name, short in cx.METRICS.items():
@@ -148,7 +168,7 @@ def shape_record(r: dict, today: str, retrieved_at: str) -> dict:
             continue
         metrics[short] = {"state": "OK", "metric": name, "p75": m["p75"], "unit": THRESHOLDS[name]["unit"],
                           "rating": rate(name, m["p75"]), "distribution": m["histogram"], "provenance": prov}
-    fresh = _days_between(period["last"], today)
+    fresh = _freshness(period["last"], today)
     return {"state": "OK", "reported_url": r.get("reported_url"), "collection_period": period,
             "extra_fields_ignored": r.get("extra_fields_ignored", 0),
             "freshness_days": fresh, "stale": fresh > STALE_DAYS["record"], "metrics": metrics,
@@ -159,6 +179,8 @@ def shape_history(r: dict, today: str, retrieved_at: str) -> dict:
     if r["state"] != "OK":
         return {"state": r["state"], "provenance": _provenance("records:queryHistoryRecord", None, retrieved_at)}
     periods = r["collection_periods"]
+    for p in periods:
+        check_period(p, today)
     span = {"first": periods[0]["first"], "last": periods[-1]["last"]}
     prov = _provenance("records:queryHistoryRecord", span, retrieved_at)
     metrics = {}
@@ -169,7 +191,7 @@ def shape_history(r: dict, today: str, retrieved_at: str) -> dict:
             continue
         metrics[short] = {"state": "OK", "metric": name, "p75s": m["p75s"], "unit": THRESHOLDS[name]["unit"],
                           "trend": trend(name, m["p75s"]), "provenance": prov}
-    fresh = _days_between(span["last"], today)
+    fresh = _freshness(span["last"], today)
     return {"state": "OK", "reported_url": r.get("reported_url"), "periods": len(periods),
             "extra_fields_ignored": r.get("extra_fields_ignored", 0),
             "collection_periods": periods, "freshness_days": fresh, "stale": fresh > STALE_DAYS["history"],

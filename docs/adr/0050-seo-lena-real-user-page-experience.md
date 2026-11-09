@@ -59,6 +59,7 @@ through the Chrome UX Report (CrUX) API and the CrUX History API. Lena reads it 
      ("Google Chrome UX Report (CrUX) API"), `provider`, `api_version`, `method` (`records:queryRecord` /
      `records:queryHistoryRecord`), `collection_period` and `retrieved_at`; entries carry `freshness_days` (from the
      period's last day to the run's date) and `stale` (> 7 days for current data, > 14 for history).
+   - **Future periods fail closed** (war-room finding): a period starting or ending more than 1 day (allowed clock skew) after the run's UTC date is FAILED `CRUX_FUTURE_COLLECTION_PERIOD`, start > end is FAILED `CRUX_PROTOCOL_ERROR`; never rated, never fresh, `freshness_days` never negative.
    - **Trend** (descriptive): the median p75 of the earliest 6 weekly periods with data against the latest 6; fewer
      than 12 periods with data is `INSUFFICIENT_HISTORY`; a change under 10% or under the metric's minimum step (LCP
      100 ms, INP 20 ms, CLS 0.01, FCP 100 ms, TTFB 50 ms) is `NO_CLEAR_CHANGE`; otherwise `IMPROVING` / `WORSENING`.

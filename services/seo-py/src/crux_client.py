@@ -118,7 +118,7 @@ MAX_EXTRA_FIELDS = 16
 DENSITY_TOLERANCE = 0.011              # densities are rounded (history: 4 decimals); a histogram sums to 1 within this
 
 CODES = ("CRUX_NOT_CONNECTED", "CRUX_AUTH_REFUSED", "CRUX_RATE_LIMITED", "CRUX_UNAVAILABLE", "CRUX_PROTOCOL_ERROR",
-         "CRUX_BUDGET_EXHAUSTED", "CRUX_KILLED", "CRUX_DEADLINE")
+         "CRUX_BUDGET_EXHAUSTED", "CRUX_KILLED", "CRUX_DEADLINE", "CRUX_FUTURE_COLLECTION_PERIOD")
 # NOT-SENT codes: a query that ends with one of these had no attempt of its own sent (BUDGET can also cut a query
 # between its retries); Lena reports such a query NOT_QUERIED, never FAILED
 NOT_SENT = frozenset({"CRUX_BUDGET_EXHAUSTED", "CRUX_DEADLINE"})
