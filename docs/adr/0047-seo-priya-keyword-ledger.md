@@ -145,7 +145,7 @@ account and developer token: a founder decision, not built.
 
 A query that ADR 0017's classifier calls `pii_suspect` (e-mails in any spelling, one phone-like run of 7+ digits not
 an ISO date, id- or secret-like words, and — added in review round 1, reworked in rounds 2 to 4,
-`search_performance` rules `2026-11-08.15`, so Osei's query classes use it too — address forms and over-long text):
+`search_performance` rules `2026-11-08.16`, so Osei's query classes use it too — address forms and over-long text):
 - an id- or secret-like word (round 4 narrowed this from the log templater's rule, which dropped model numbers, tire
   sizes, decimals and years — `24acc636a003`, `225/65r17`, `3.5`, `2012` — as ids): an e-mail in any spelling, a
   UUID, 16+ hex characters, a JWT-like dotted token, 20+ token characters, anything over 40 characters, a
@@ -228,8 +228,14 @@ an ISO date, id- or secret-like words, and — added in review round 1, reworked
   spelled digits looked for again with the most repeated short filler token, or an interleaved character at
   alternating positions, removed). **All 18,826 pairs are now dropped, and the committed test runs every pair**
   (`tests/test_query_privacy_r12.py::test_all_composed_pairs_drop`, in the default counted suite, about 10-20 s),
-  with round 11's sample kept as a fast check. No composed residual class remains pinned. What is still untested:
-  three or more obfuscations stacked, and obfuscations not in the corpus.
+  with round 11's sample kept as a fast check. What is still untested: three or more obfuscations stacked, and
+  obfuscations not in the corpus. **Correction (round 16):** "no composed residual" was true of THIS corpus only.
+  The round-16 reviewer's own independent corpus (not read here) still kept **0.21%** at 60525ea7, in the classes
+  named in the review — phone / SSN separators outside space . - (bullets, tildes, asterisks, katakana and other
+  middle dots, Unicode dashes, fraction and division slashes), 7-digit local numbers in version shapes and vanity
+  toll-free numbers — all fixed in round 16 and added to this corpus (eleven Unicode separators: 40,672 pairs).
+  The committed test pins this corpus's residual at **0 of 40,672**; the examples behind the reviewer's 0.21% are
+  theirs and are not reproduced here.
 - **Round 13 (over-drop fixed).** Round 12 let ONE spelled number word count in a run of 9+ *tokens*, and found
   that word inside ordinary words (`ph-one`, reversed `ho` in hotel / honda): 32 of the reviewer's 115 year / date
   queries were dropped (`iphone 2023 2024`, `2024-12-25 hotel deals`, `2010 2020 ohio state`). Now one word counts
@@ -274,8 +280,30 @@ an ISO date, id- or secret-like words, and — added in review round 1, reworked
   digits are a Luhn-valid Mastercard-range number (`25.12.2024-01.01.2025`); `90210 2024 restaurants` is kept (902
   is not an SSN area). A committed property test (`tests/test_query_privacy_r15.py`) writes 10 fake cards / phones /
   SSNs in 5 formats next to, around and inside 18 exemption shapes (3,650 queries) and behind 12 keywords (1,200
-  queries): every one is dropped. Pre-existing and unrelated (ADR 0017's classifier since gl-gsc): a query with the
-  word ` at ` counts as a spelled-out e-mail, so `meeting at 2pm` is dropped;
+  queries): every one is dropped.
+- **Round 16.** (1) Detector separators by Unicode CATEGORY, never a list: in the detectors' view every run of up to
+  16 punctuation (P*, every dash), symbol (S*), space (Z*) characters — continuing through marks (M*), after NFKC —
+  between two letters or digits is a separator (`934•333•2089`, `878–70–3759`, `202・555・0100`, U+2057, U+1D15E);
+  the generic digit rules and the token squashes read separators by category too; the detectors also run on the
+  text before percent-decoding (`202%555%0100`). A scan of all 7,741 such characters (every P / S / Z character
+  NFKC does not turn into a letter or digit) between the groups of a test card, two phones and an SSN, bare and
+  with `rfc` / a year / a date (123,856 queries): **0 kept**; the committed property test draws every P* and Z*
+  character and every eighth S* character from `unicodedata`. (2) New phone shapes: 7-digit local numbers with a
+  punctuation or symbol separator (`version 814.0202`, `555-0199`, `814•0202`; a plain space is the generic
+  rule's) and vanity toll-free numbers (`1-800-flo-wers`, `800 go fedex`). **Measured over-drop of the 7-digit
+  rule:** 1 of 16 number-shaped ordinary queries (`300-0100 code`, itself a local-number shape) and 0 across every
+  KEEP table and probe in the repository. (3) The ` at ` e-mail rule is now this classifier's own, e-mail SHAPED —
+  `<name> at|(at)|[at] <domain> dot|.|[dot] <tld>`, or `<name> at <mail provider>`; `logs._AT_WORD` (the log
+  templater's) is unchanged. Round 15's rule dropped about 98.5% of ` at ` queries; on 400 ordinary ` at ` queries
+  (`deals at walmart`, `meeting at 2pm`) it now drops **0**, while `john at gmail dot com`, `john (at) gmail (dot)
+  com`, `john at gmail.com`, `jane at gmail` still drop. (4) **Context never hides a value** (war room WR-F020 /
+  WR-F021, PR #57): besides the whole query, the detectors and the base64 check run on every maximal run of
+  non-ordinary tokens (`_suspicious_windows`), so words, tabs, emoji and CJK around a value
+  (`rug cleaner amFuZS5kb2 VAZXhhbXBs ZS5jb20=`) never stop a match; the generic rules never run on a window (their
+  exemptions need the query's context). Wrapped in context: 9,464 single-corpus queries (14 contexts) and 4,698
+  from a composed sample (6 contexts) in the committed tests, and 52,962 from the one-in-11 composed sample (14
+  contexts) offline — **0 kept**. All 12 known war-room failures (R0001, R0003-R0005, R0007, R0010-R0012, R0016-R0019)
+  pass on replay with this classifier.
   7+ digits in one run stay the digit-run rule's;
 - a street address: a house number (at the start, or after a space not preceded by `top` / `best`), an optional
   direction, 1-3 street-name tokens (none a stop or quantity word such as `near`, `in`, `best`, `hour`, `bedroom`,

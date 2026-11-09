@@ -42,7 +42,6 @@ import json
 import math
 import re
 import unicodedata
-from typing import Optional
 
 import lookalikes
 from agents import search_performance as sp
@@ -97,48 +96,48 @@ FRAME_VOCAB = STOP_WORDS | frozenset({
     "price", "prices", "pricing", "cost", "costs", "buy", "review", "reviews", "deal", "deals", "quote", "quotes",
     "hire", "service", "services", "company", "companies", "local", "professional", "choose", "find", "get", "clean",
     "cleaning", "fix", "repair", "install", "installation", "replace", "replacement", "use", "make", "need", "rent",
-    "rental", "diy", "tips", "guide", "ideas", "types", "kit", "is", "it", "worth", "good", "bad", "new", "used",
+    "rental", "diy", "tips", "guide", "ideas", "types", "kit", "it", "worth", "good", "bad", "new", "used",
     "small", "large", "commercial", "residential", "home", "house", "online", "i", "you"})
 
 CARD = {
     "agent": AGENT, "job": "produce the client's keyword ledger (one task)",
     "inputs": [
-        "Search Console Search Analytics for the tenant's bound property: property totals by date and query rows "
-        "(dataState final, type web, aggregated by property), through gsc_client",
-        "Bing Webmaster Tools GetQueryStats for one of the tenant's registered domains (adapter built, fixtures "
-        "only; NOT_CONNECTED until wired)",
+        ("Search Console Search Analytics for the tenant's bound property: property totals by date and query rows "
+        "(dataState final, type web, aggregated by property), through gsc_client"),
+        ("Bing Webmaster Tools GetQueryStats for one of the tenant's registered domains (adapter built, fixtures "
+        "only; NOT_CONNECTED until wired)"),
         "the tenant's brand tokens (registered domains, canonical entity name)",
     ],
     "outputs": [
-        f"{LEDGER_SCHEMA}: ESTABLISHED and EMERGING rows, each with query, tier, per-source metrics with source and "
-        "date range, confidence, uncertainty flags and an evidence pointer",
-        f"{HANDOFF_SCHEMA}: the EMERGING tier for Theo (conversation mining) and Naomi (prompt volume); contract "
-        "only, neither consumer is built",
+        (f"{LEDGER_SCHEMA}: ESTABLISHED and EMERGING rows, each with query, tier, per-source metrics with source and "
+        "date range, confidence, uncertainty flags and an evidence pointer"),
+        (f"{HANDOFF_SCHEMA}: the EMERGING tier for Theo (conversation mining) and Naomi (prompt volume); contract "
+        "only, neither consumer is built"),
     ],
     "does_not": ["crawl", "rank", "estimate market volume", "compute keyword difficulty", "call a model",
                  "buy data", "store query text"],
 }
 
 LIMITS = [
-    "Impressions, clicks, CTR and position are what the engine reported for this property; they are not market "
-    "search volume, which is not measured (no paid vendor; Google Ads Keyword Planner not built).",
-    "Search Console returns top rows only and omits anonymised queries; the anonymised share is reported, never "
-    "spread over the rows.",
-    "Impressions are the engine's full count for this property in the window, not a sample. The 95% band on them "
+    ("Impressions, clicks, CTR and position are what the engine reported for this property; they are not market "
+    "search volume, which is not measured (no paid vendor; Google Ads Keyword Planner not built)."),
+    ("Search Console returns top rows only and omits anonymised queries; the anonymised share is reported, never "
+    "spread over the rows."),
+    ("Impressions are the engine's full count for this property in the window, not a sample. The 95% band on them "
     "(exact Garwood Poisson interval) says how far such a count could move from one window to the next if the rate "
     "behind it stayed the same; it is a model of period-to-period variability, not sampling error, and not a "
-    "forecast.",
+    "forecast."),
     "Position is an average over the window as the engine reports it.",
-    "The CTR curve is this property's own, from the same window; a row's expected CTR leaves the row out, and a "
-    "bucket without enough support is INCONCLUSIVE.",
-    "A CTR gap carries a 95% interval from the row's Wilson score CTR interval against the expected CTR (the curve's "
+    ("The CTR curve is this property's own, from the same window; a row's expected CTR leaves the row out, and a "
+    "bucket without enough support is INCONCLUSIVE."),
+    ("A CTR gap carries a 95% interval from the row's Wilson score CTR interval against the expected CTR (the curve's "
     "own uncertainty is not added, so the true uncertainty is larger). A row under the established threshold, or a "
-    "gap whose interval includes 0, is INCONCLUSIVE.",
-    "The tier is decided on Search Console's count in its window. Bing's rows cover their own multi-week dates, so a "
-    "query only Bing measured is kept as measured but not tiered (MEASURED_NOT_TIERED, BING_ONLY_UNTIERED).",
-    "Derived EMERGING variants are pattern transfers from the site's own long tail; they have no volume and are not "
-    "evidence of demand.",
-    "Personal names cannot be reliably detected in queries: a query naming a person can appear in the ledger as the "
+    "gap whose interval includes 0, is INCONCLUSIVE."),
+    ("The tier is decided on Search Console's count in its window. Bing's rows cover their own multi-week dates, so a "
+    "query only Bing measured is kept as measured but not tiered (MEASURED_NOT_TIERED, BING_ONLY_UNTIERED)."),
+    ("Derived EMERGING variants are pattern transfers from the site's own long tail; they have no volume and are not "
+    "evidence of demand."),
+    ("Personal names cannot be reliably detected in queries: a query naming a person can appear in the ledger as the "
     "engine reported it. Dropped as personal data: e-mails, phone-like digit runs, id- or secret-like words (not "
     "model numbers, tire sizes, decimals or years; base64 / AWS-like words with '/' are), street addresses "
     "(house number, street name and suffix, a unit only after one), PO boxes, PMB numbers, rural routes, ZIP+4, a "
@@ -168,12 +167,13 @@ LIMITS = [
     "version numbers after their keyword ('firmware 2.3.11.4') and spec or model-number queries ('12v 100ah "
     "lifepo4 battery') are kept; a date with other digits next to it is never exempt, so it cannot hide a card, "
     "phone or SSN: card, phone and SSN detection always runs on the query as written, with no exemption of any "
-    "kind, and exemptions only relax the generic digit rules. Over-dropped on purpose: any query whose digits are "
+    "kind, and exemptions only relax the generic digit rules; separators are read by Unicode category, and words, "
+    "emoji or CJK around a value never hide it. Over-dropped on purpose: any query whose digits are "
     "a valid card, phone or SSN number however they are grouped ('10001 2025', 'version 10.0.19045.3803'). The "
     "rule also drops some non-addresses shaped like '<number> <word> st' "
     "or '<number> <word> court'. Derived "
     "variants are never built from a query with a capitalised word, nor from a frame adding a word outside a "
-    "closed vocabulary.",
+    "closed vocabulary."),
     "The ledger is computed on request and handed out once; it is not stored (only its SHA-256 and counts).",
 ]
 
@@ -290,7 +290,7 @@ def poisson_band(n: int) -> list:
     return [max(0.0, math.floor(lo * 100) / 100), math.ceil(hi * 100) / 100]
 
 
-def wilson_interval(clicks: int, impressions: int) -> Optional[list]:
+def wilson_interval(clicks: int, impressions: int) -> list | None:
     """The Wilson score 95% interval for a CTR (clicks / impressions); null without impressions."""
     if impressions <= 0:
         return None
@@ -301,7 +301,7 @@ def wilson_interval(clicks: int, impressions: int) -> Optional[list]:
     return [max(0.0, mid - half), min(1.0, mid + half)]
 
 
-def bucket(position: Optional[float]) -> Optional[str]:
+def bucket(position: float | None) -> str | None:
     if position is None:
         return None
     for name, upper in BUCKETS:
@@ -310,7 +310,7 @@ def bucket(position: Optional[float]) -> Optional[str]:
     return None
 
 
-def in_curve(g: Optional[dict], brand: bool) -> bool:
+def in_curve(g: dict | None, brand: bool) -> bool:
     """Whether a Search Console row is one of the curve's: established (at least the threshold), non-brand, with a
     position bucket."""
     return g is not None and not brand and g["impressions"] >= ESTABLISHED_MIN_IMPRESSIONS \
@@ -339,7 +339,7 @@ def ctr_curve(rows: list) -> dict:
     return out
 
 
-def opportunity(g: Optional[dict], curve: dict, brand: bool) -> dict:
+def opportunity(g: dict | None, curve: dict, brand: bool) -> dict:
     """The CTR gap of one Search Console row against the property's own curve (modeled; not traffic). The expected
     CTR leaves the row itself out of its bucket (leave-one-out), and the support minimums apply to what is left.
     The gap's 95% interval is the expected CTR minus the row's Wilson score CTR interval; the curve's own
@@ -389,7 +389,7 @@ class SourceResult:
     Search Console (query, clicks, impressions, ctr, position); Bing (query, date, clicks, impressions,
     avg_click_position, avg_impression_position)."""
 
-    def __init__(self, name: str, state: str, outcome: str, rows: Optional[list] = None, meta: Optional[dict] = None):
+    def __init__(self, name: str, state: str, outcome: str, rows: list | None = None, meta: dict | None = None):
         self.name, self.state, self.outcome = name, state, outcome
         self.rows = rows or []
         self.meta = meta or {}
@@ -434,7 +434,7 @@ def build(tenant_id: str, run_id: str, generated_at: str, brands: list, gsc: Sou
         pii["clicks"] += c
         pii["impressions"] += i
 
-    def slot(raw: str) -> Optional[dict]:
+    def slot(raw: str) -> dict | None:
         nonlocal dup_merged
         norm = normalize(raw)
         if not norm:

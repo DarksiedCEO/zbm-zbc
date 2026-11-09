@@ -900,7 +900,7 @@ WORD_KEEP = ("2.5 ton heat pump", "tires 225/65r17", "2012 ford f150 3.5 ecoboos
              "trane xr14 4 ton", "oil change 5w-30", "transmission repair 4l60e", "battery group 24f", "u.s flag",
              "16 seer ac unit price", "goodman gsx140361 specs")
 # the UUID below is a sample value, built from parts
-WORD_DROP = ("a1b2c3d4e5f6g7", "token abcd1234efgh5678", "-".join(("f47ac10b", "58cc", "4372", "a567", "0e02b2c3d479")),
+WORD_DROP = ("a1b2c3d4e5f6g7", "token abcd1234efgh5678", "-".join(("f47ac10b", "58cc", "4372", "a567", "0e02b2c3d479")),  # noqa: FLY002
              "deadbeefdeadbeef00", "abcdefgh.ijklmnop.qrstuvwx", "x" * 41, "jane_cv.pdf", "q9w8e7r6t5", "order 1234567",
              "acct ab12345678")
 
@@ -926,8 +926,8 @@ URL_LIKE_DROP = ("example.com/blog/how-to-clean-rugs", "acme.com/services/rug-cl
                  "shop.com/products/sku12345678", "example.com/blog/internationalization-guide",
                  "web2print-shop.com/catalogue/flyers")
 ROUND5_DROP = ("sw1a 1aa", "14 high st oxford ox1 4ag", "m1 1ae manchester", "12 new street", "6 place de la concorde",
-               "12 chemin du lac", "12 avenue des champs", "/".join(("wJalrXUtnFEMI", "K7MDENG", "bPxRfiCYEXAMPLEKEY")),
-               "/".join(("dGhpcy9pcy9h", "c2VjcmV0IGtleQ==")), "+".join(("YWJj/ZGVm", "Z2hp")))
+               "12 chemin du lac", "12 avenue des champs", "/".join(("wJalrXUtnFEMI", "K7MDENG", "bPxRfiCYEXAMPLEKEY")),  # noqa: FLY002
+               "/".join(("dGhpcy9pcy9h", "c2VjcmV0IGtleQ==")), "+".join(("YWJj/ZGVm", "Z2hp")))  # noqa: FLY002
 
 
 @pytest.mark.parametrize("q,want", [(q, "KEEP") for q in ROUND5_KEEP] + [(q, "DROP") for q in ROUND5_DROP])
@@ -937,17 +937,17 @@ def test_osei_round5_keep_drop_table(q, want):
 
 # Round 7 (fail safe): secrets smuggled into URL paths and query strings drop; only plain slugs and short version
 # tokens are exempt, so the round-6 URLs stay KEEP. Every secret shape is built from parts (no literal for scanners).
-_AKIA = "".join(("AKIA", "IOSFODNN7", "EXAMPLE"))
+_AKIA = "".join(("AKIA", "IOSFODNN7", "EXAMPLE"))  # noqa: FLY002
 ROUND7_DROP = (
-    "evil.com/" + _AKIA, "e.com/v1/" + _AKIA + "/docs", "host.com/" + "".join(("dGhpcyBp", "cyBhIHNl", "Y3JldA")),
-    "s.com/" + "".join(("AIza", "SyD-9tSrke72", "PouQMnMX-a7eZSW0jkFMBWY")),
-    "a.io/" + "".join(("x9k2m4", "p7q1w3", "e5r8t6y0")),
-    "evil.com/" + "".join(("a1b2c3d4", "e5f6g7h8")), "c.co/" + "/".join(("abc123def456", "ghi789jkl012")),
-    "e.com/" + "-".join(("p4ss", "w0rd", "1x9z", "k2m7", "q8r3")), "e.com/" + "".join(("s3cr3t", "p4ssw0rd", "1234")),
-    "evil.com/" + "".join(("k7mdeng2", "bpxrficy")), "evil.com/" + "".join(("abcdefghijklm", "nopqrstuvwxyz")),
-    "example.com/?token=" + "".join(("abcdefghij", "0123456789")), "example.com/x?key=" + "".join(("q8w7", "e6r5")),
-    "site.com/a?b=1&api_key=" + "".join(("zzzz", "zz9")), "example.com/?t=" + "".join(("a1b2c3d4e5", "f6g7h8i9")),
-    "reset ?password=" + "".join(("hunt", "er22")), _AKIA,
+    "evil.com/" + _AKIA, "e.com/v1/" + _AKIA + "/docs", "host.com/" + "".join(("dGhpcyBp", "cyBhIHNl", "Y3JldA")),  # noqa: FLY002
+    "s.com/" + "".join(("AIza", "SyD-9tSrke72", "PouQMnMX-a7eZSW0jkFMBWY")),  # noqa: FLY002
+    "a.io/" + "".join(("x9k2m4", "p7q1w3", "e5r8t6y0")),  # noqa: FLY002
+    "evil.com/" + "".join(("a1b2c3d4", "e5f6g7h8")), "c.co/" + "/".join(("abc123def456", "ghi789jkl012")),  # noqa: FLY002
+    "e.com/" + "-".join(("p4ss", "w0rd", "1x9z", "k2m7", "q8r3")), "e.com/" + "".join(("s3cr3t", "p4ssw0rd", "1234")),  # noqa: FLY002
+    "evil.com/" + "".join(("k7mdeng2", "bpxrficy")), "evil.com/" + "".join(("abcdefghijklm", "nopqrstuvwxyz")),  # noqa: FLY002
+    "example.com/?token=" + "".join(("abcdefghij", "0123456789")), "example.com/x?key=" + "".join(("q8w7", "e6r5")),  # noqa: FLY002
+    "site.com/a?b=1&api_key=" + "".join(("zzzz", "zz9")), "example.com/?t=" + "".join(("a1b2c3d4e5", "f6g7h8i9")),  # noqa: FLY002
+    "reset ?password=" + "".join(("hunt", "er22")), _AKIA,  # noqa: FLY002
 )
 @pytest.mark.parametrize("q", ROUND7_DROP + URL_LIKE_DROP)
 def test_osei_round7_url_secrets_and_round8_url_like_queries_drop(q):

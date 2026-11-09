@@ -629,7 +629,7 @@ GSC-12. **Limitations (honest).**
      the read visibly (`GSC_PROTOCOL_ERROR`) instead of being half-read.
    - Names in queries are not detected as such; they are safe only because no query text is kept. Address-shaped
      queries, PO boxes, PMB numbers, rural routes, ZIP+4, a state with a ZIP, UK and Canadian postcodes, French
-     leading forms (`350 rue …`) and any query over 512 characters are `pii_suspect` since rules `2026-11-08.15`
+     leading forms (`350 rue …`) and any query over 512 characters are `pii_suspect` since rules `2026-11-08.16`
      (ADR 0047, "Personal data"); the id / token word rule no longer drops model numbers, tire sizes, decimals or
      years (`24acc636a003`, `225/65r17`, `3.5`, `2012`). Not caught: bare named streets with no suffix (`1200
      broadway`, `123 n main`), landmark or building-name addresses, streets with more than three name words or an
@@ -649,8 +649,10 @@ GSC-12. **Limitations (honest).**
      every common order are kept (a 1,080-query year / date probe drops 0). Round 14: a date is exempt only when it
      stands alone. Round 15 (structural): card, phone and SSN detectors always run on the raw text with no
      exemption of any kind; exemptions only relax the generic digit rules. Over-dropped by design: digits that are a
-     valid card / phone / SSN however grouped (`10001 2025`). Also (gl-gsc, unchanged): ` at ` in a query counts as a
-     spelled-out e-mail.
+     valid card / phone / SSN however grouped (`10001 2025`). Round 16: detector separators by Unicode category;
+     7-digit local and vanity toll-free numbers; the classifier's ` at ` e-mail rule is e-mail shaped (`deals at
+     walmart` is kept; `logs._AT_WORD`, used by the log templater, is unchanged); every run of non-ordinary tokens is
+     scanned by the detectors, so context never hides a value.
      Round 11: no length rule on joined letter-digit text (spec queries kept); 9+ digits across filler tokens;
      homoglyph, enclosed and Spanish spelled digits; spaced / "dot" IPv4. Not caught: base64 under 12 characters, a random password written as a plain word. Over-dropped: a non-address shaped
      like `<number> <word> st|ave|dr…` or `<number> <word> court|place|way` at the end of a query. Osei keeps no query

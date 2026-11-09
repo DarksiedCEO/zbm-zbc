@@ -256,7 +256,7 @@ def test_frames_are_never_built_from_name_like_words():
 
 def test_unicode_queries_are_kept_and_normalised():
     led = build(gsc([("東京 ホテル 安い", 3, 80, 0.04, 6.0), ("Café  Prices", 2, 40, 0.05, 4.0),
-                     ("ＲＵＧ CLEANER", 1, 30, 0.03, 4.0), ("rug​cleaner tips", 0, 5, 0.0, 9.0)]))
+                     ("ＲＵＧ CLEANER", 1, 30, 0.03, 4.0), ("rug\u200bcleaner tips", 0, 5, 0.0, 9.0)]))
     t = by_text(led)
     assert "東京 ホテル 安い" in t and "café prices" in t and "rug cleaner" in t
     assert "rugcleaner tips" in t                                     # the zero-width space is removed, not a space

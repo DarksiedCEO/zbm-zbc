@@ -128,22 +128,23 @@ def test_ledger_reads_have_their_own_budget_and_never_starve_audits(tmp_path):
 
 
 def test_audits_spending_their_budget_do_not_block_the_ledger(tmp_path):
-    h, fake = setup(tmp_path, SEO_GSC_READS_PER_DAY="1")
+    h, _fake = setup(tmp_path, SEO_GSC_READS_PER_DAY="1")
     _audit_sp(h)
     assert _audit_sp(h)["reason"] == "GSC_BUDGET_EXHAUSTED"
     assert run(h)["ledger"]["sources"]["search_console"]["state"] == "OK"
 
 
 def test_the_default_ledger_budget_is_two_reads_a_day(tmp_path):
-    h, fake = setup(tmp_path)
+    h, _fake = setup(tmp_path)
     assert [run(h)["ledger"]["sources"]["search_console"]["state"] for _ in range(3)] == \
         ["OK", "OK", "GSC_BUDGET_EXHAUSTED"]
 
 
 @pytest.mark.parametrize("bad", ["0", "13", "two", "-1", "1.5"])
 def test_the_ledger_budget_setting_fails_closed(bad):
-    import config as config_mod
     from helpers import base_env
+
+    import config as config_mod
     with pytest.raises(RuntimeError, match="SEO_GSC_LEDGER_READS_PER_DAY must be a whole number from 1 to 12"):
         config_mod.load({**base_env(), "SEO_GSC_LEDGER_READS_PER_DAY": bad})
 
@@ -267,7 +268,7 @@ def test_sampling_remainder_and_truncation_are_flagged(tmp_path):
 
 
 def test_bing_through_an_injected_port_is_kept_apart_and_its_failures_are_partial(tmp_path):
-    h, fake = setup(tmp_path)
+    h, _fake = setup(tmp_path)
     bing = FakeBing()
     h.ports.first_party["bing_webmaster"] = bing.client()
     body = {"sources": ["gsc", "bing"], "bing_site_domain": "acme.test"}
@@ -302,7 +303,7 @@ def test_bing_not_connected_in_production_wiring(h):
 
 
 def test_a_crash_in_the_agent_closes_the_run_as_interrupted(tmp_path, monkeypatch):
-    h, fake = setup(tmp_path)
+    h, _fake = setup(tmp_path)
 
     def boom(*a, **k):
         raise ZeroDivisionError("rug cleaner")                          # text that must not be logged or recorded
@@ -326,7 +327,7 @@ def test_the_department_manager_lists_and_can_restrict_priya(tmp_path):
 
 
 def test_runs_and_the_budget_survive_a_restart(tmp_path):
-    h, fake = setup(tmp_path, data_dir=str(tmp_path / "data"), SEO_GSC_LEDGER_READS_PER_DAY="1")
+    h, _fake = setup(tmp_path, data_dir=str(tmp_path / "data"), SEO_GSC_LEDGER_READS_PER_DAY="1")
     out = run(h)
     h2 = h.restart(SEO_GSC_LEDGER_READS_PER_DAY="1")
     runs = h2.ok(h2.get("/tenants/acme/keyword-ledger-runs"))
@@ -336,7 +337,7 @@ def test_runs_and_the_budget_survive_a_restart(tmp_path):
 
 
 def test_an_unexpected_transport_failure_in_bing_is_a_source_failure(tmp_path):
-    h, fake = setup(tmp_path)
+    h, _fake = setup(tmp_path)
 
     class Broken:
         connected = True
@@ -359,7 +360,7 @@ def _consumer_canonical_sha(doc) -> str:
 
 
 def test_the_run_records_the_handoff_sha_per_priya_handoff_record_1(tmp_path):
-    h, fake = setup(tmp_path)
+    h, _fake = setup(tmp_path)
     out = run(h)
     doc = out["ledger"]["handoff"]
     assert out["handoff_record"] == "priya.handoff_record/1"
@@ -374,7 +375,7 @@ def test_the_run_records_the_handoff_sha_per_priya_handoff_record_1(tmp_path):
 
 
 def test_the_handoff_record_survives_a_restart_and_a_replay_and_keeps_no_query_text(tmp_path):
-    h, fake = setup(tmp_path, data_dir=str(tmp_path / "data"))
+    h, _fake = setup(tmp_path, data_dir=str(tmp_path / "data"))
     body = {"request_id": rid()}
     out = h.ok(h.post("/tenants/acme/keyword-ledger", body), 201)
     again = h.ok(h.post("/tenants/acme/keyword-ledger", body), 201)
@@ -387,7 +388,7 @@ def test_the_handoff_record_survives_a_restart_and_a_replay_and_keeps_no_query_t
 
 
 def test_a_run_without_search_console_still_records_an_empty_handoff_hash(tmp_path):
-    h, fake = setup(tmp_path)
+    h, _fake = setup(tmp_path)
     h.ports.first_party["search_console"].connected = False
     out = run(h)
     assert out["handoff_items"] == 0 and out["handoff_sha256"] == priya.handoff_sha(out["ledger"]["handoff"])

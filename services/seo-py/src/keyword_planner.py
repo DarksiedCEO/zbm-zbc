@@ -22,7 +22,7 @@ the account question are a founder decision before any adapter is built.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Protocol
+from typing import Protocol
 
 NOT_BUILT = "NOT_BUILT"
 DOC_URL = "https://developers.google.com/google-ads/api/docs/keyword-planning/generate-keyword-ideas"
@@ -49,14 +49,14 @@ class VolumeRange:
 @dataclass(frozen=True)
 class KeywordIdea:
     text: str
-    volume: Optional[VolumeRange]
-    competition: Optional[str]           # LOW | MEDIUM | HIGH as Google labels it; never turned into a difficulty
+    volume: VolumeRange | None
+    competition: str | None           # LOW | MEDIUM | HIGH as Google labels it; never turned into a difficulty
 
 
 class KeywordPlanIdeasPort(Protocol):
     connected: bool
 
-    def generate_keyword_ideas(self, seeds: list, language: Optional[str], geo_targets: list) -> list:
+    def generate_keyword_ideas(self, seeds: list, language: str | None, geo_targets: list) -> list:
         ...
 
 
@@ -66,7 +66,7 @@ class NotBuiltKeywordPlanner:
     connected = False
     state = NOT_BUILT
 
-    def generate_keyword_ideas(self, seeds: list, language: Optional[str], geo_targets: list) -> list:
+    def generate_keyword_ideas(self, seeds: list, language: str | None, geo_targets: list) -> list:
         raise NotImplementedError("Google Ads KeywordPlanIdeaService: interface only (ADR 0047)")
 
     @staticmethod

@@ -1,5 +1,5 @@
 """Review round 12 (search_performance 2026-11-08.12): the composed attack corpus over EVERY ordered pair of
-obfuscations (18,826 cases; part of the default, counted suite — about 10-20 s), and the round's four leak classes:
+obfuscations (40,672 cases since round 16; part of the default, counted suite — about 10-20 s), and the round's four leak classes:
 filler digit runs on the homoglyph view, one spelled word in a 9+ digit run, homoglyph digits with spelled words,
 and spelled words with filler or interleaving inside them."""
 
@@ -29,5 +29,5 @@ def test_round12_leak_classes_drop(q):
 def test_all_composed_pairs_drop():
     allc = list(ac.composed_cases())
     kept = [(b, n) for b, n, t in allc if sp.classify_query(t, ["acme"]) != "pii_suspect"]
-    assert len(allc) == 18826, len(allc)
+    assert len(allc) == 40672, len(allc)        # round 16: eleven Unicode separators added
     assert kept == [], kept

@@ -500,7 +500,7 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
     # ------------------------------------------------------------------ Priya's keyword ledger (ADR 0047)
 
     @app.post(P + "/tenants/{tid}/keyword-ledger", dependencies=auth, status_code=201)
-    def keyword_ledger(request: Request, req: dict = Depends(body(m.KeywordLedgerCreate)),
+    def keyword_ledger(request: Request, req: dict = Depends(body(m.KeywordLedgerCreate)),  # noqa: B008 (FastAPI)
                        scope: tuple = Depends(scoped("dashboard", "seo_agent"))) -> dict:
         """Priya's one task: the tenant's keyword ledger, computed now, handed out once, never stored."""
         return svc.run_keyword_ledger(scope[0], scope[1], req, andre=andre_if_presented(request))

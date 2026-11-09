@@ -2,6 +2,7 @@
 Priya's stored key, the full word rules on secret-chunked queries, URL-safe base64 with a tell, cards across short
 filler tokens, spelled-out digits, and the table-driven attack corpus (tests/attack_corpus.py)."""
 
+# ruff: noqa: FLY002 — values are joined from parts on purpose: no secret-shaped literal may reach a scanner
 from __future__ import annotations
 
 import base64

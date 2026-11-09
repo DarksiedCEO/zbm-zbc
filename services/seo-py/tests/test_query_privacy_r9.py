@@ -2,6 +2,7 @@
 cards split by filler letters, IPv6 / hex IPv4 / script schemes / spaced and "dot" hosts, ideographic full stops.
 Every attack from the round is a permanent DROP test; secret and card shapes are built from parts."""
 
+# ruff: noqa: FLY002 — values are joined from parts on purpose: no secret-shaped literal may reach a scanner
 from __future__ import annotations
 
 import json

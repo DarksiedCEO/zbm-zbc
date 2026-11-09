@@ -7,6 +7,7 @@ to print every case the classifier keeps. Values are built from parts so no lite
 ``cases()`` yields (base_name, obfuscation_name, text). Not every obfuscation applies to every value; ``SKIPPED``
 says which combinations are not generated and why (they are disclosed gaps or meaningless)."""
 
+# ruff: noqa: FLY002 — values are joined from parts on purpose: no secret-shaped literal may reach a scanner
 from __future__ import annotations
 
 import base64
@@ -50,9 +51,13 @@ BASES = {
 
 _WORDS = ("zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine")
 _SUPER = "⁰¹²³⁴⁵⁶⁷⁸⁹"
-SEPARATORS = {"space": " ", "dot": ".", "dash": "-", "nbsp": " ", "figure_space": " ",
-              "narrow_nbsp": " ", "nul": "\x00", "unit_sep": "\x1f", "private_use": "",
-              "zero_width_space": "​", "word_joiner": "⁠"}
+SEPARATORS = {"space": " ", "dot": ".", "dash": "-", "nbsp": "\u00a0", "figure_space": "\u2007",
+              "narrow_nbsp": "\u202f", "nul": "\x00", "unit_sep": "\x1f", "private_use": "\ue000",
+              "zero_width_space": "\u200b", "word_joiner": "\u2060",
+              # round 16: punctuation / symbol / dash separators the detectors once missed (by category, not a list)
+              "bullet": "\u2022", "en_dash": "\u2013", "em_dash": "\u2014", "minus_sign": "\u2212",
+              "middle_dot": "\u00b7", "katakana_middle_dot": "\u30fb", "fraction_slash": "\u2044", "tilde": "~",
+              "asterisk": "*", "quadruple_prime": "\u2057", "musical_half_note": "\U0001d15e"}
 
 
 def _map_digits(t: str, f) -> str:
@@ -111,14 +116,22 @@ def _groups(t: str, n: int = 4) -> list:
     return [t[i:i + n] for i in range(0, len(t), n)]
 
 
+def _sep_each(sep: str):
+    return lambda t, k: sep.join(t)
+
+
+def _sep_groups(sep: str):
+    return lambda t, k: sep.join(_groups(t))
+
+
 OBFUSCATIONS = {
     "plain": lambda t, k: t,
-    "combining_acute": lambda t, k: J(c + "́" for c in t),
-    "combining_keycap": lambda t, k: J(c + "⃣" for c in t),
-    "combining_underline": lambda t, k: J(c + "̲" for c in t),
-    "zero_width_between": lambda t, k: "​".join(t),
-    "bidi_override": lambda t, k: "‮" + t + "‬",
-    "bidi_isolates_between": lambda t, k: "⁦".join(t) + "⁩",
+    "combining_acute": lambda t, k: J(c + "\u0301" for c in t),
+    "combining_keycap": lambda t, k: J(c + "\u20e3" for c in t),
+    "combining_underline": lambda t, k: J(c + "\u0332" for c in t),
+    "zero_width_between": lambda t, k: "\u200b".join(t),
+    "bidi_override": lambda t, k: "\u202e" + t + "\u202c",
+    "bidi_isolates_between": lambda t, k: "\u2066".join(t) + "\u2069",
     "fullwidth": lambda t, k: _fullwidth(t),
     "math_bold": lambda t, k: _math_bold(t),
     "homoglyph_cyrillic": lambda t, k: _homoglyph(t),
@@ -142,8 +155,8 @@ OBFUSCATIONS = {
     "interleave_char": lambda t, k: "x".join(t),
     "case_change": lambda t, k: J(c.upper() if i % 2 else c.lower() for i, c in enumerate(t)),
     "filler_tokens": lambda t, k: "-ab-".join(_groups(t)),
-    **{f"sep_{n}_each": (lambda s: lambda t, k: s.join(t))(s) for n, s in SEPARATORS.items()},
-    **{f"sep_{n}_groups": (lambda s: lambda t, k: s.join(_groups(t)))(s) for n, s in SEPARATORS.items()},
+    **{f"sep_{n}_each": _sep_each(s) for n, s in SEPARATORS.items()},
+    **{f"sep_{n}_groups": _sep_groups(s) for n, s in SEPARATORS.items()},
 }
 
 # which obfuscations apply to which kind of value; the rest are not generated (reason in SKIPPED)

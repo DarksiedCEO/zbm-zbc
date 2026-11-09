@@ -3,6 +3,7 @@ Luhn-valid card numbers, for Osei's query classes and Priya's ledger alike. The 
 reviewer's (scratch attack scripts), every secret shape built from parts so no literal reaches a scanner. URL-like
 queries are dropped whole by design (disclosed in ADR 0047, ADR 0017 GSC-12, Priya LIMITS, the client report)."""
 
+# ruff: noqa: FLY002 — values are joined from parts on purpose: no secret-shaped literal may reach a scanner
 from __future__ import annotations
 
 import pytest

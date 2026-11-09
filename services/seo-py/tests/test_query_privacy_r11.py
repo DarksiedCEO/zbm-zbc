@@ -2,6 +2,7 @@
 letter-digit text), SSN / phone digits across filler tokens, homoglyph / enclosed / Spanish / mixed spelled digits,
 spaced and "dot" IPv4, and the composed (two-obfuscation) attack corpus with its residual pinned."""
 
+# ruff: noqa: FLY002 — values are joined from parts on purpose: no secret-shaped literal may reach a scanner
 from __future__ import annotations
 
 import attack_corpus as ac

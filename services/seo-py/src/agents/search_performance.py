@@ -37,6 +37,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import itertools
 import math
 import re
 import unicodedata
@@ -48,10 +49,12 @@ import lookalikes
 from agents import logs as logs_mod
 
 AGENT, TASK = "osei", "search_performance"
-VERSION = "2026-11-08.15"                     # query classes, templating and the aggregation rules below
+VERSION = "2026-11-08.16"                     # query classes, templating and the aggregation rules below
 # 2026-11-08.1 (Priya review round 1, M3): street addresses, unit / apartment numbers, PO boxes, ZIP+4 and a ZIP next
 #    to a US state are pii_suspect (looks_like_address)
 # 2026-11-08.2 (review round 2): the address rule needs address structure (it over-dropped service queries)
+# 2026-11-08.16 (review round 16): detector separators by Unicode category; 7-digit local and vanity toll-free
+#    numbers; detectors also before percent-decoding; the " at " e-mail rule narrowed to e-mail shape
 # 2026-11-08.15 (review round 15): STRUCTURAL: card / phone / SSN detectors always run on the raw text with no
 #    exemption; exemptions only touch the generic rules; issuer-prefix check for cards; date + time is one date token
 # 2026-11-08.14 (review round 14): dates are exempt only when they stand alone (never hide a card, phone or SSN);
@@ -310,7 +313,7 @@ _ALNUM_TOKEN = re.compile(r"[a-z0-9_\-=+~]+")
 def _transitions(w: str) -> int:
     """How often a word switches between letters and digits (``a1b2c3`` 5, ``24acc636a003`` 5, ``f150`` 1)."""
     kinds = [c.isdigit() for c in w if c.isalnum()]
-    return sum(1 for x, y in zip(kinds, kinds[1:]) if x != y)
+    return sum(1 for x, y in itertools.pairwise(kinds) if x != y)
 
 
 def _word_identifies(w: str) -> bool:
@@ -627,8 +630,11 @@ _HOMOGLYPH_SET = frozenset("lio|sbz")
 def homoglyph_digits(folded: str) -> str:
     """A view of the query with homoglyph letters read as digits, only inside digit-like words: a word with a real
     digit whose letters are all homoglyphs, and all-homoglyph words of 2+ characters next to such a word. Used only
-    by the 9+ digit-run and Luhn rules, so ``lol 2024`` (7 digits) is not hit."""
-    words = folded.split()
+    by the 9+ digit-run and Luhn rules, so ``lol 2024`` (7 digits) is not hit. Round 16: punctuation and symbols
+    glued to a word ("(l", "\U0001f4del") are not part of it."""
+    words = "".join(" " if unicodedata.category(c)[0] in "SZM" or (unicodedata.category(c)[0] == "P"
+                                                                    and c not in "-._/|:") else c
+                    for c in folded).split()
 
     def letters_ok(w):
         return all(not c.isalpha() or c in _HOMOGLYPH_SET for c in w if c not in "-._/")
@@ -721,6 +727,13 @@ def _entropy(w: str) -> float:
     return -sum((k / n) * math.log2(k / n) for k in (w.count(c) for c in set(w)))
 
 
+def _strip_symbols(w: str) -> str:
+    """Round 16: a word with every punctuation, symbol and mark character removed (by Unicode category), so a
+    secret split by bullets, dashes or middle dots ("a\u2022k\u2022i\u2022a ...") is judged as one token. '=', '+'
+    and '/' (base64) are symbols too: the base64 rules look at the cased text separately."""
+    return "".join(c for c in w if unicodedata.category(c)[0] not in "PSM")
+
+
 def split_secret(folded: str) -> bool:
     """A secret split by separators (rounds 8-10): each space-separated word with '/', '-', '_' and '.' removed is
     judged by the word rules (``abcd-1234-efgh-5678-ijkl-9012``); the whole query with spaces and separators removed
@@ -730,10 +743,10 @@ def split_secret(folded: str) -> bool:
     mixed) are NOT applied to the joined text: spec queries such as ``12v 100ah lifepo4 battery`` or ``r410a r22
     refrigerant`` join into long letter-digit strings and were dropped."""
     for w in folded.split():
-        j = re.sub(r"[/\-_.]", "", w)
+        j = _strip_symbols(w)                    # round 16: every P / S / M character, by category
         if j != w and j and _word_identifies(j):
             return True
-    whole = re.sub(r"[\s/\-_.]", "", folded)
+    whole = _strip_symbols(re.sub(r"\s", "", folded))
     if _SECRET_PREFIX.search(whole) or _SECRET_PREFIX.search(whole[::-1]):
         return True
     # round 11: a run of 12+ one-character words is a value spelled out character by character ("A K I A ...");
@@ -826,17 +839,31 @@ def _explained_spans(text: str) -> list:
     return date_spans(text) + [m.span() for m in _YEAR_WORD.finditer(text)]
 
 
-def _deseparated_hit(text: str) -> bool:
+def _deseparated_hit(text: str, explained_from: tuple | None = None) -> bool:
     """A phone or SSN whose digits are spread over consecutive digit groups ("2025/5/5 0100 2024", "2025 550100
     2024"): in every run of digit groups joined by separators or short fillers (ordinary words never join numbers),
     every window of whole consecutive groups is read as one number. Searched in every run that holds at least one
     digit group a date, time or year does not account for — a run of nothing but dates, times and years cannot
-    spell a number someone chose. Never given exempted text."""
-    text = _FILLER_STOP.sub(" #### ", text)
-    explained = [False] * len(text)
-    for a, b in _explained_spans(text):
-        for i in range(a, min(b, len(text))):
-            explained[i] = True
+    spell a number someone chose. Never given exempted text. ``explained_from`` (raw text, view-to-raw index map)
+    takes the dates, times and years from the RAW text when ``text`` is the separator view (round 16: "3:30" in the
+    view is "3 30", which no time rule recognises)."""
+    if explained_from is not None:
+        raw, idx = explained_from
+        raw_explained = [False] * len(raw)
+        for a, b in _explained_spans(raw):
+            for i in range(a, min(b, len(raw))):
+                raw_explained[i] = True
+        explained = [raw_explained[k] for k in idx]
+    else:
+        explained = [False] * len(text)
+        for a, b in _explained_spans(text):
+            for i in range(a, min(b, len(text))):
+                explained[i] = True
+    # ordinary words never join numbers: each becomes a " #### " barrier; the explained mask is spliced with it
+    for m in reversed(list(_FILLER_STOP.finditer(text))):
+        a, b = m.span()
+        text = text[:a] + " #### " + text[b:]
+        explained = explained[:a] + [False] * 6 + explained[b:]
     def in_letter_word(pos: int, n: int) -> bool:
         # a digit inside a mostly-letter word ("y2k", "mp3") is part of that word, not a number group
         a, b = pos, pos + n
@@ -865,10 +892,58 @@ def _deseparated_hit(text: str) -> bool:
     return False
 
 
+_VIEW_RUN = 16                 # NFKC can expand one symbol into four (U+2057 -> four primes), and separators stack
+
+
+def detector_view(text: str, with_map: bool = False):
+    """Round 16: the separator view for the detectors. Every run of up to three characters whose Unicode category is
+    punctuation (P*, every dash Pd included), symbol (S*) or space (Z*) — up to ``_VIEW_RUN`` of them, after NFKC — that
+    sits between two letters or digits (round 16: fillers such as "4111\u2022x\u20221111" too) becomes one
+    ASCII space, so ``934\u2022333\u20222089``, ``878\u201370\u20133759`` and ``202\u30fb555\u30fb0100`` read like
+    ``934 333 2089``. Categories, never a list of characters ('+' between two digits too; a leading '+' follows no
+    digit, so E.164 is kept). With ``with_map`` it also
+    returns, for each character of the view, the index of the raw character it came from."""
+    out, idx, i, n = [], [], 0, len(text)
+    while i < n:
+        c = text[i]
+        if out and out[-1].isalnum() and unicodedata.category(c)[0] in "PSZ":
+            j = i
+            # a run continues through marks (M*): symbols such as U+1D15E decompose into a base and a spacing mark
+            while j < n and j - i < _VIEW_RUN and unicodedata.category(text[j])[0] in "PSZM":
+                j += 1
+            if j < n and text[j].isalnum():
+                if not (out[-1].isalpha() and text[j].isalpha()):       # between two letters the run joins them
+                    out.append(" ")                                     # ("a\u2022b" -> "ab"); elsewhere a space
+                    idx.append(i)
+                i = j
+                continue
+        out.append(c)
+        idx.append(i)
+        i += 1
+    view = "".join(out)
+    return (view, idx) if with_map else view
+
+
+# a 7-digit local number (555-0199, 814.0202, 934\u2022 0202) written with a punctuation or symbol separator; a plain
+# space ("500 2024") is left to the generic digit-run rule, which already counts it
+_LOCAL7 = re.compile(r"(?<![\d.,])[2-9]\d\d(?=[^\w\s]|\s+[^\w\s])[^\w]{1,3}\d{4}(?![\d.,]?\d)")
+# vanity toll-free numbers: 1-800-flo-wers, 1 (888) callnow, 800-go-fedex: an 8xx toll-free code, then seven
+# letters or digits (at least two letters), in at most three groups
+_VANITY = re.compile(r"(?<![\da-z])(?:1[\s.\-]{0,3})?\(?8(?:00|33|44|55|66|77|88)\)?[\s.\-]{0,3}"
+                     r"(?=(?:[\s.\-]{0,3}[a-z0-9]){7}(?![a-z0-9]))(?=[\s.\-a-z0-9]*[a-z][\s.\-a-z0-9]*[a-z])"
+                     r"(?:[\s.\-]{0,3}[a-z0-9]){7}(?![a-z0-9])")
+
+
 def pii_detectors(raw: str) -> bool:
-    """The structural detectors (THE RULE above): card, phone, SSN on the raw text and its de-separated runs."""
-    return card_like(raw) or bool(_NANP.search(raw) or _E164.search(raw)) or any(
-        _valid_ssn(re.sub(r"\D", "", m.group())) for m in _SSN.finditer(raw)) or _deseparated_hit(raw)
+    """The structural detectors (THE RULE above): card, phone (NANP, E.164, 7-digit local, vanity toll-free) and
+    SSN, on the raw text and on its separator view (``detector_view``), including the de-separated runs."""
+    view, idx = detector_view(raw, with_map=True)
+    for t, expl in ((raw, None), (view, (raw, idx))):
+        if card_like(t) or _NANP.search(t) or _E164.search(t) or _VANITY.search(t) \
+                or _deseparated_hit(t, expl) \
+                or any(_valid_ssn(re.sub(r"\D", "", m.group())) for m in _SSN.finditer(t)):
+            return True
+    return bool(_LOCAL7.search(raw))
 
 
 # rounds 14-15: a software / standard version number of realistic dotted shape (2-4 parts, each at most 5 digits)
@@ -879,30 +954,103 @@ _VERSION = re.compile(r"\b(version|ver|firmware|fw|build|release|kernel|bios|dri
 _RFC_NUMBER = re.compile(r"\b(rfc|iso|ieee|ecma)\s*\d{1,5}(?!\d)")
 
 
+# round 16: an e-mail spelled with "at" — this classifier's own rule, narrowed from ``logs._AT_WORD`` (which the log
+# templater keeps, unchanged): "<name> at <domain> dot|. <tld>" in any bracket spelling, or "<name> at <mail
+# provider>". "deals at walmart", "meeting at 2pm" are not e-mails; "john at gmail dot com", "john (at) gmail (dot)
+# com", "john at gmail.com", "jane at gmail" are.
+_AT = r"(?:\bat\b|[\[(<{]\s*at\s*[\])>}]|\(\s*@\s*\)|\[\s*@\s*\])"
+_DOT = r"(?:\.|\bdot\b|[\[(<{]\s*(?:dot|\.)\s*[\])>}])"
+_MAIL_PROVIDERS = (r"gmail|googlemail|yahoo|ymail|hotmail|outlook|live|msn|icloud|me|mac|aol|proton(?:mail)?|pm|gmx|"
+                   r"mail|yandex|zoho|fastmail|tutanota|qq|163|126|comcast|verizon|att|sbcglobal|web|t-online")
+_AT_EMAIL = re.compile(r"[a-z0-9][\w.+\-]{0,63}\s*" + _AT + r"\s*(?:[a-z0-9][a-z0-9\-]{0,62}\s*" + _DOT
+                       + r"\s*)+[a-z]{2,24}\b|[a-z0-9][\w.+\-]{0,63}\s*" + _AT + r"\s*(?:" + _MAIL_PROVIDERS
+                       + r")\b|%40|&#0*64;|&commat;")
+
+
+_HOMO_LETTERS = frozenset("liosbzLIOSBZ|")
+
+
+def _ordinary(tok: str) -> bool:
+    """A context token that cannot be part of a disguised value: no letter or digit at all (emoji, punctuation), or
+    a word of 2+ letters in one ordinary case (or a script without case, such as 東京), not a number word and not
+    made only of letters that read as digits."""
+    if not any(c.isalnum() for c in tok):
+        return True
+    if not tok.isalpha() or len(tok) < 2 or all(c in _HOMO_LETTERS for c in tok):
+        return False
+    if tok.casefold() in _NUMBER_WORDS:
+        return False
+    return tok.islower() or tok.istitle() or (tok.isupper() and len(tok) <= 6) or not any(
+        c.lower() != c.upper() for c in tok)
+
+
+def _suspicious_windows(q: str) -> list:
+    """Round 16 (war room WR-F020 / WR-F021): every maximal run of non-ordinary tokens, so words, tabs, emoji and CJK
+    around a disguised value ("rug cleaner amFuZS5kb2 VAZXhhbXBs ZS5jb20=", "東京 <value>") never stop a match."""
+    toks = (q or "").split()
+    out, cur = [], []
+    for tok in toks + [""]:
+        if tok and not _ordinary(tok):
+            cur.append(tok)
+            continue
+        if cur and len(cur) < len(toks):
+            out.append(" ".join(cur))
+        cur = []
+    return out
+
+
 def classify_query(q: str, brands: list, _depth: int = 0) -> str:
-    """One query -> one class from ``QUERY_CLASSES``; the text is not kept. PII first (judged on the lookalike fold,
-    after invisible characters are removed, like the log templater)."""
+    """One query -> one class from ``QUERY_CLASSES``; the text is not kept. PII first: the whole query, and (round
+    16) every maximal run of non-ordinary tokens in it (``_suspicious_windows``), so context never hides a value."""
+    cls = _classify_core(q, brands, _depth)
+    if cls == "pii_suspect" or _depth or len(q or "") > MAX_QUERY_CHARS:
+        return cls
+    if any(_window_hit(w) for w in _suspicious_windows(q)):
+        return "pii_suspect"
+    return cls
+
+
+def _window_hit(w: str) -> bool:
+    """A window gets the DETECTORS only (card / phone / SSN on the raw text and its spelled and homoglyph views) and
+    the base64-of-text check — never the generic rules, whose exemptions need the whole query's context (a version
+    keyword, a date next to a word)."""
+    t = decode_query(w)
+    folded = _LOOKALIKE.fold_cased(t)
+    if pii_detectors(folded) or pii_detectors(_LOOKALIKE.fold_cased(strip_marks(w))) or base64_text(t, 1):
+        return True
+    spelled, glyphs = spelled_digits(folded), homoglyph_digits(folded)
+    if (spelled and pii_detectors(spelled)) or (glyphs and pii_detectors(glyphs)):
+        return True
+    return any(pii_detectors(v) for v in _defilled_views(folded)[1:])     # interleaved: "1x x2x x3x ..."
+
+
+def _classify_core(q: str, brands: list, _depth: int = 0) -> str:
+    """The classifier on one text (judged on the lookalike fold, after invisible characters are removed, like the
+    log templater)."""
     if len(q or "") > MAX_QUERY_CHARS:          # too long to classify cheaply: dropped as personal data, counted
         return "pii_suspect"
     t = decode_query(q)
     if len(t) > MAX_QUERY_CHARS:                # NFKC can expand a character many times (U+FDFA is 18)
         return "pii_suspect"
     folded = _LOOKALIKE.fold_cased(t)
-    words = folded.split()
-    # THE RULE (round 15): detectors first, on the raw normalised text and its de-obfuscated views, never exempted
+    # THE RULE (round 15): detectors first, on the raw normalised text and its de-obfuscated views, never exempted.
+    # Round 16: also on the text before percent-decoding ("202%555%0100": "%55" would decode into a letter).
+    undecoded = _LOOKALIKE.fold_cased(strip_marks(q or ""))
     spelled = spelled_digits(folded)
     glyphs = homoglyph_digits(folded)
-    if pii_detectors(folded) or (spelled and pii_detectors(spelled)) or (glyphs and pii_detectors(glyphs)):
+    if pii_detectors(folded) or pii_detectors(undecoded) or (spelled and pii_detectors(spelled)) \
+            or (glyphs and pii_detectors(glyphs)) or any(pii_detectors(v) for v in _defilled_views(folded)[1:]):
         return "pii_suspect"
     # exemptions below this line touch ONLY the generic digit-run / token rules (and the IP check)
     versioned = _RFC_NUMBER.sub(lambda m: m.group(1) + " #", _VERSION.sub(lambda m: m.group(1) + " #", folded))
     undated = isolated_dates_removed(versioned)
+    gview = detector_view(undated)              # round 16: the generic digit rules read separators by category too
     if url_like(versioned) or base64_text(t, _depth) or "@" in folded or logs_mod._EMAIL.search(folded) \
-            or logs_mod._AT_WORD.search(folded) \
-            or longest_digit_run(undated) >= PII_DIGIT_RUN or any(_word_identifies(w) for w in undated.split()) \
-            or card_like(undated) or split_secret(undated) or looks_like_address(folded) \
+            or _AT_EMAIL.search(folded) \
+            or longest_digit_run(gview) >= PII_DIGIT_RUN or any(_word_identifies(w) for w in undated.split()) \
+            or card_like(gview) or split_secret(undated) or looks_like_address(folded) \
             or (spelled and (longest_digit_run(spelled) >= PII_DIGIT_RUN or card_like(spelled))) \
-            or filler_digit_run(undated) >= FILLER_DIGIT_RUN \
+            or filler_digit_run(gview) >= FILLER_DIGIT_RUN \
             or (glyphs and (longest_digit_run(glyphs) >= 9 or card_like(glyphs)
                             or filler_digit_run(glyphs) >= FILLER_DIGIT_RUN)):
         return "pii_suspect"

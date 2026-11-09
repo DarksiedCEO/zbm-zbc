@@ -104,7 +104,7 @@ class KeywordLedgerCreate(Strict):
     when ``bing`` is a source."""
     request_id: RequestId
     sources: Annotated[list[Literal["gsc", "bing"]], Field(min_length=1, max_length=2)] = ["gsc"]
-    bing_site_domain: Optional[Annotated[StrictStr, Field(pattern=DOMAIN)]] = None
+    bing_site_domain: Annotated[StrictStr, Field(pattern=DOMAIN)] | None = None
 
 
 class LogIngestCreate(Strict):

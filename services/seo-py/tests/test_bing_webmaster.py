@@ -49,7 +49,7 @@ def test_dates_are_parsed_in_the_offset_bing_gives():
     assert bw.parse_date("/Date(1316156400000)/") == "2011-09-16"             # no offset: UTC
     for bad in ("2011-09-16", "/Date(abc)/", "/Date(1316156400000-2500)/", "/Date(99999999999999)/", 5, None,
                 "/Date(0)/"):
-        assert code_of(lambda: bw.parse_date(bad)).code == "BING_PROTOCOL_ERROR"
+        assert code_of(lambda bad=bad: bw.parse_date(bad)).code == "BING_PROTOCOL_ERROR"
 
 
 @pytest.mark.parametrize("answer", [
@@ -73,7 +73,7 @@ def test_dates_are_parsed_in_the_offset_bing_gives():
 def test_malformed_answers_are_protocol_errors(answer):
     fake = FakeBing()
     fake.script = [(200, answer)]
-    e = code_of(lambda: fake.client().query_stats(SITE, ok))
+    e = code_of(lambda fake=fake: fake.client().query_stats(SITE, ok))
     assert e.code == "BING_PROTOCOL_ERROR"
 
 
@@ -87,7 +87,7 @@ def test_unknown_extra_fields_are_ignored_and_required_fields_still_validated():
         del r[missing]
         fake = FakeBing()
         fake.script = [(200, {"d": [r]})]
-        assert code_of(lambda: fake.client().query_stats(SITE, ok)).detail == "row_shape"
+        assert code_of(lambda fake=fake: fake.client().query_stats(SITE, ok)).detail == "row_shape"
 
 
 def test_nan_and_non_json_and_gzip_and_oversized_bodies_are_refused():
@@ -95,14 +95,14 @@ def test_nan_and_non_json_and_gzip_and_oversized_bodies_are_refused():
                              (b"{}", {"content-length": str(bw.MAX_BODY + 1)})):
         fake = FakeBing()
         fake.script = [(200, payload, headers)]
-        assert code_of(lambda: fake.client().query_stats(SITE, ok)).code == "BING_PROTOCOL_ERROR"
+        assert code_of(lambda fake=fake: fake.client().query_stats(SITE, ok)).code == "BING_PROTOCOL_ERROR"
 
 
 def test_invalid_key_and_other_documented_error_bodies():
     fake = FakeBing()
     fake.script = [(400, {"ErrorCode": 3, "Message": "InvalidApiKey"})]
-    assert (lambda e: (e.code, e.detail))(code_of(lambda: fake.client().query_stats(SITE, ok))) == \
-        ("BING_AUTH_REFUSED", "InvalidApiKey")
+    e = code_of(lambda fake=fake: fake.client().query_stats(SITE, ok))
+    assert (e.code, e.detail) == ("BING_AUTH_REFUSED", "InvalidApiKey")
     fake = FakeBing()
     e = code_of(lambda: fake.client().query_stats("https://notmine.test/", ok))     # the fake's "not authorized"
     assert (e.code, e.detail) == ("BING_REFUSED", "error_code_14")
@@ -110,14 +110,14 @@ def test_invalid_key_and_other_documented_error_bodies():
                  [1]):
         fake = FakeBing()
         fake.script = [(400, body)]
-        assert code_of(lambda: fake.client().query_stats(SITE, ok)).code == "BING_PROTOCOL_ERROR"
+        assert code_of(lambda fake=fake: fake.client().query_stats(SITE, ok)).code == "BING_PROTOCOL_ERROR"
     for status in (401, 403):
         fake = FakeBing()
         fake.script = [(status, {})]
-        assert code_of(lambda: fake.client().query_stats(SITE, ok)).code == "BING_AUTH_REFUSED"
+        assert code_of(lambda fake=fake: fake.client().query_stats(SITE, ok)).code == "BING_AUTH_REFUSED"
     fake = FakeBing()
     fake.script = [(302, b"", {"location": "https://evil.test/"})]
-    assert code_of(lambda: fake.client().query_stats(SITE, ok)).code == "BING_PROTOCOL_ERROR"
+    assert code_of(lambda fake=fake: fake.client().query_stats(SITE, ok)).code == "BING_PROTOCOL_ERROR"
     assert len(fake.requests) == 1                                               # never followed
 
 
@@ -128,10 +128,10 @@ def test_429_and_5xx_retry_with_backoff_then_give_up_or_recover():
     assert stats["requests"] == 3 and fake.clock.sleeps == [1.0, 3.0] and rows
     fake = FakeBing()
     fake.script = [(500, {})] * 3
-    assert code_of(lambda: fake.client().query_stats(SITE, ok)).code == "BING_UNAVAILABLE"
+    assert code_of(lambda fake=fake: fake.client().query_stats(SITE, ok)).code == "BING_UNAVAILABLE"
     fake = FakeBing()
     fake.script = [(429, {})] * 3
-    assert code_of(lambda: fake.client().query_stats(SITE, ok)).code == "BING_RATE_LIMITED"
+    assert code_of(lambda fake=fake: fake.client().query_stats(SITE, ok)).code == "BING_RATE_LIMITED"
 
 
 def test_network_errors_are_retried_as_unavailable():
@@ -139,7 +139,7 @@ def test_network_errors_are_retried_as_unavailable():
         raise httpx.ConnectError("refused")
     fake = FakeBing()
     fake.script = [boom, boom, boom]
-    assert code_of(lambda: fake.client().query_stats(SITE, ok)).code == "BING_UNAVAILABLE"
+    assert code_of(lambda fake=fake: fake.client().query_stats(SITE, ok)).code == "BING_UNAVAILABLE"
 
 
 def test_request_budget_and_deadline():
@@ -166,7 +166,7 @@ def test_no_transport_means_no_call_and_the_site_url_is_checked():
     assert code_of(lambda: c.query_stats(SITE, ok)).detail == "no_deadline_backend"
     fake = FakeBing()
     for bad in ("acme.test", "https://acme.test/path", "ftp://acme.test/", "https://ACME.test/"):
-        assert code_of(lambda: fake.client().query_stats(bad, ok)).code == "BING_PROTOCOL_ERROR"
+        assert code_of(lambda fake=fake, bad=bad: fake.client().query_stats(bad, ok)).code == "BING_PROTOCOL_ERROR"
     assert fake.requests == []
     assert code_of(lambda: fake.client().keyword_stats("rug", "us", "en-US", ok)).detail == "not_built"
     assert fake.requests == []
@@ -176,7 +176,7 @@ def test_host_allowlist():
     for url in ("http://ssl.bing.com/webmaster/api.svc/json/GetQueryStats", "https://evil.test/webmaster/api.svc/json/x",
                 "https://ssl.bing.com:8443/webmaster/api.svc/json/x", "https://u:p@ssl.bing.com/webmaster/api.svc/json/x",
                 "https://ssl.bing.com/webmaster/api.svc/soap", "https://ssl.bing.com/webmaster/api.svc/json/x#f"):
-        assert code_of(lambda: bw.check_url(url)).code == "BING_PROTOCOL_ERROR"
+        assert code_of(lambda url=url: bw.check_url(url)).code == "BING_PROTOCOL_ERROR"
     bw.check_url("https://ssl.bing.com/webmaster/api.svc/json/GetQueryStats?siteUrl=x")
 
 

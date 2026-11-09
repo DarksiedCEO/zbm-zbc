@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import logging
 from datetime import date, timedelta
-from typing import Optional
 
 import bing_webmaster as bw
 from agents import priya
@@ -110,7 +109,7 @@ class KeywordsMixin:
             with self.lock:
                 self.running_keyword_runs.discard(run_id)
 
-    def _kw_authorize(self, t: dict, body: dict, andre: bool) -> Optional[str]:
+    def _kw_authorize(self, t: dict, body: dict, andre: bool) -> str | None:
         """Who may run Priya on whose data. Returns the Finance client to ask Compliance about (client tenants)."""
         if self.agent_blocked(priya.AGENT):
             raise Forbidden(R("AGENT_RESTRICTED"))
@@ -192,7 +191,7 @@ class KeywordsMixin:
             view = self.keyword_run_view(tid, run_id)
         return {**view, "envelope": env, "ledger": ledger, "ledger_retained": False}
 
-    def _kw_interrupt(self, tid: str, run_id: str, reason: str, error_type: Optional[str] = None) -> dict:
+    def _kw_interrupt(self, tid: str, run_id: str, reason: str, error_type: str | None = None) -> dict:
         data = {"run_id": run_id, "reason": reason}
         if error_type:
             data["error_type"] = error_type
