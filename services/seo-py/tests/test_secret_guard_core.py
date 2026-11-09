@@ -286,6 +286,9 @@ def _mutation_probes() -> dict:
 
     def split(s, ch):
         return ch.join(s)
+
+    def mail(ch):                    # r2 part 2: an address split by an invisible (no token rule rescues it)
+        return "write to jane.doe@exa" + ch + "mple.com"
     return {
         "check_a_label": ([(sg_ + "_label_hit", lambda v: False)], ["Z Best Media. password: " + hidden]),
         "check_b_userinfo": ([(sg_ + "_userinfo_hit", lambda v: False)], ["see ftp://admin:" + hidden + "@localhost/"]),
@@ -298,20 +301,22 @@ def _mutation_probes() -> dict:
                                     ["see https://" + akia.lower() + ".site.test/p now"]),
         "norm_nfkc": ([(sg_ + "_nfkc", lambda t: t)],
                       ["".join(chr(ord(c) + 0xFEE0) for c in akia)]),
-        "norm_map_chars": ([(sg_ + "_map_chars", lambda t: t)], [split(akia, "\u200b")]),
+        "norm_map_chars": ([(sg_ + "_map_chars", lambda t: t)], [split(akia, "\u200b"), mail("\u200b")]),
         "norm_map_spaces": ([(sg_ + "_MAP_SPACES", False)], ["mail jane.doe@exa\u2028mple.com"]),
-        "norm_hangul_fillers": ([(sg_ + "_HANGUL_FILLERS", frozenset())], [split(akia, "\u3164")]),
+        "norm_hangul_fillers": ([(sg_ + "_HANGUL_FILLERS", frozenset())], [split(akia, "\u3164"), mail("\u3164")]),
         "norm_drop_Cf": ([(sg_ + "_DROP_CATS", frozenset({"Cc", "Mn", "Me", "Co", "Cn", "Cs"}))],
-                         [split(akia, "\u2060"), split(akia, "\U000e0020")]),
+                         [split(akia, "\u2060"), split(akia, "\U000e0020"), mail("\u2060")]),
         "norm_drop_Mn": ([(sg_ + "_DROP_CATS", frozenset({"Cf", "Cc", "Me", "Co", "Cn", "Cs"}))],
-                         [split(akia, "\u034f"), split(akia, "\ufe0f")]),
-        "norm_drop_Cc": ([(sg_ + "_DROP_CATS", frozenset({"Cf", "Mn", "Me", "Co", "Cn", "Cs"}))], [split(akia, "\x01")]),
-        "norm_drop_Me": ([(sg_ + "_DROP_CATS", frozenset({"Cf", "Mn", "Cc", "Co", "Cn", "Cs"}))], [split(akia, "\u20dd")]),
-        "norm_drop_Co": ([(sg_ + "_DROP_CATS", frozenset({"Cf", "Mn", "Cc", "Me", "Cn", "Cs"}))], [split(akia, "\ue000")]),
-        "norm_drop_Cn": ([(sg_ + "_DROP_CATS", frozenset({"Cf", "Mn", "Cc", "Me", "Co", "Cs"}))], [split(akia, "\u0378")]),
+                         [split(akia, "\u034f"), split(akia, "\ufe0f"), mail("\u034f")]),
+        "norm_drop_Cc": ([(sg_ + "_DROP_CATS", frozenset({"Cf", "Mn", "Me", "Co", "Cn", "Cs"}))], [split(akia, "\x01"), mail("\x01")]),
+        "norm_drop_Me": ([(sg_ + "_DROP_CATS", frozenset({"Cf", "Mn", "Cc", "Co", "Cn", "Cs"}))], [split(akia, "\u20dd"), mail("\u20dd")]),
+        "norm_drop_Co": ([(sg_ + "_DROP_CATS", frozenset({"Cf", "Mn", "Cc", "Me", "Cn", "Cs"}))], [split(akia, "\ue000"), mail("\ue000")]),
+        "norm_drop_Cn": ([(sg_ + "_DROP_CATS", frozenset({"Cf", "Mn", "Cc", "Me", "Co", "Cs"}))], [split(akia, "\u0378"), mail("\u0378")]),
         "norm_collapse": ([(sg_ + "_collapse", lambda t: t)], ["  ".join(_rand_mixed(40, 5))]),
-        "norm_strip_markup": ([(sg_ + "_strip_markup", lambda t: t)], ["AKIA**IOSF**ODNN7" + "EXAMPLE"]),
-        "norm_confusable_fold": ([(sg_ + "_FOLD", type("NoFold", (), {"fold_cased": staticmethod(str.lower)})())],
+        "norm_strip_markup": ([(sg_ + "_strip_markup", lambda t: t)], ["AKIA**IOSF**ODNN7" + "EXAMPLE", "write to jane.doe@exa**mple**.com"]),
+        # r2 part 2: confusable folding is one step done in two places (label words, and the folded view of (c)-(f))
+        "norm_confusable_fold": ([(sg_ + "_FOLD", type("NoFold", (), {"fold_cased": staticmethod(str.lower)})()),
+                                  (sg_ + "_fold_confusables", lambda v: v)],
                                  ["p\u0430ssword: " + hidden]),
         # a label hidden by an encoding (the value itself is not key-shaped, so only the decoded label withholds)
         "decode_percent": ([(sg_ + "_percent", lambda t: t)], ["Z Best Media pa%73sword: " + hidden]),

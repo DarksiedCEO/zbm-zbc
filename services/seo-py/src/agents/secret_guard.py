@@ -179,9 +179,15 @@ def _decoded_runs(t: str) -> list:
 
 
 def views(text: str) -> list:
-    """Every inspection view of ``text`` (step 1): the normalised form, the markup-stripped form, each percent /
-    HTML-entity / escape decoding round (re-normalised), and the decoded base64 / hex runs of each. Distinct, in
-    order; bounded in number and size."""
+    """Every inspection view of ``text`` (see ``_tagged_views``)."""
+    return [v for v, _ in _tagged_views(text)]
+
+
+def _tagged_views(text: str) -> list:
+    """(view, folded) pairs. Every inspection view of ``text`` (step 1): the normalised form, the markup-stripped
+    form, each percent / HTML-entity / escape decoding round (re-normalised), the decoded base64 / hex runs of each,
+    and (``folded`` True) the ASCII-folded form of each non-ASCII view. Distinct, in order; bounded in number and
+    size."""
     base = _clean(text or "")
     out = [base]
     seen = {base}
@@ -203,7 +209,62 @@ def views(text: str) -> list:
         for d in _decoded_runs(v):
             add(d)
             add(_strip_markup(_clean(_entities(_percent(d)))))
-    return out
+    tagged = [(v, False) for v in out]
+    for v in out.copy():
+        if not v.isascii():
+            f = _ascii_fold(v)                             # r2 part 2: rules (b)-(f) also read the ASCII-folded form
+            if f not in seen:
+                seen.add(f)
+                tagged.append((f, True))
+    return tagged
+
+
+class _DigitTable(dict):
+    """``str.translate`` table: every non-ASCII Unicode decimal digit (Devanagari, Arabic-Indic, Bengali, Thai...)
+    read as its ASCII digit (filled on first use, bounded)."""
+
+    def __missing__(self, o: int) -> str:
+        c = chr(o)
+        d = None if c.isascii() else unicodedata.decimal(c, None)
+        r = c if d is None else str(d)
+        if len(self) < _CMAP_MAX:
+            self[o] = r
+        return r
+
+
+class _ConfusableTable(dict):
+    """``str.translate`` table: a non-ASCII letter the ``lookalikes`` table reads as ASCII letters (Cyrillic, Greek,
+    Cherokee, Latin with marks...) becomes those letters, case kept (an upper-case lookalike reads upper case)."""
+
+    def __missing__(self, o: int) -> str:
+        c = chr(o)
+        r = c
+        if not c.isascii():
+            up = c.lower() != c
+            m = _FOLD.mapping.get(c) or (_FOLD.mapping.get(c.lower()) if up else None)
+            if m and m.isascii() and m.isalpha():
+                # the skeleton reads capital I as "l": an upper-case lookalike of it is "I"
+                r = ("I" if m == "l" else m.upper()) if up else m
+        if len(self) < _CMAP_MAX:
+            self[o] = r
+        return r
+
+
+_DIGIT_FOLD = _DigitTable()
+_CONFUSABLE_FOLD = _ConfusableTable()
+
+
+def _fold_digits(v: str) -> str:
+    return v.translate(_DIGIT_FOLD)
+
+
+def _fold_confusables(v: str) -> str:
+    return v.translate(_CONFUSABLE_FOLD)
+
+
+def _ascii_fold(v: str) -> str:
+    """The folded inspection view: Unicode digits as ASCII digits, confusable letters as ASCII letters."""
+    return _fold_confusables(_fold_digits(v))
 
 
 def _percent(t: str) -> str:
@@ -442,7 +503,7 @@ def _prefix_hit(v: str) -> bool:
 # ------------------------------------------------------------------------------------------------ safe shapes
 # The SMALL disclosed allowlist (ADR 0050 v2 section 2d): occurrences are masked out before checks (d) and (e) only;
 # checks (a), (b), (c) and (f) still run on the unmasked text.
-_MASK = " \u00a7\u00a7\u00a7\u00a7 "
+_MASK = " \ue000\ue000\ue000\ue000 "   # private use: dropped from every view, so never typed
 _B = r"(?<![A-Za-z0-9])"
 _E = r"(?![A-Za-z0-9])"
 _SAFE_SHAPES = re.compile(
@@ -510,10 +571,17 @@ def _masked(v: str) -> str:
 _RUN = re.compile(r"[A-Za-z0-9+=]+")
 _HEX32 = re.compile(r"[0-9a-fA-F]{32,}")
 _TOK_SEP = re.compile(r"[.\-_/:]+")
-_EDGE = "\"'()[]{}<>,;!?\u00a7"
+_TOK_FILLER = re.compile(r"[^\w+=.\-/:]+")      # not a letter / digit / separator
+_ALNUM = re.compile(r"[^\W_]")
+_EDGE = "\"'()[]{}<>,;!?\u00a7\ue000"
+
+
+_ASCII_UP, _ASCII_LO, _ASCII_DG = re.compile(r"[A-Z]"), re.compile(r"[a-z]"), re.compile(r"[0-9]")
 
 
 def _classes(r: str) -> tuple:
+    if r.isascii():                                        # the same answer in one C-speed scan per class
+        return (_ASCII_UP.search(r) is not None, _ASCII_LO.search(r) is not None, _ASCII_DG.search(r) is not None)
     return (any(c.isupper() for c in r), any(c.islower() for c in r), any(c.isdigit() for c in r))
 
 
@@ -612,8 +680,12 @@ def _prefix_after_separator(t: str) -> bool:
     return False
 
 
+TOKEN_MEMO_MAX = 4096                    # distinct tokens remembered per call (repeated words are checked once)
+
+
 def _token_hit(v: str) -> bool:
-    toks = [t.strip(_EDGE) for t in v.split(" ")]
+    toks = v.split(" ")
+    seen: dict = {}                                        # token -> (per-token hit, separators removed), this call
     chain: list = []
     same: list = []
 
@@ -629,14 +701,22 @@ def _token_hit(v: str) -> bool:
                                                                     or bool(_AWS_JOINED.search(j)))
 
     for t in toks:
-        for r in _RUN.findall(t):
-            if _random_run(r):
-                return True
-        j = _TOK_SEP.sub("", t)
-        if j != t and (_split_key(t, j) or _prefix_after_separator(t)):
+        if t and "\ue000" not in t and not _ALNUM.search(t):
+            continue                                       # r2 part 2: a filler-only piece (``,,,,``) pads, never splits
+        t = t.strip(_EDGE)
+        if t:
+            t = _TOK_FILLER.sub("-", t)                    # any other filler run inside a token is a separator
+        got = seen.get(t)
+        if got is None:                                    # the per-token checks are a function of the token alone
+            j = _TOK_SEP.sub("", t)
+            got = (any(_random_run(r) for r in _RUN.findall(t))
+                   or (j != t and (_split_key(t, j) or _prefix_after_separator(t)))
+                   or (j != t and _prefix_found(j)), j)    # (the last: a prefix key split by separators)
+            if len(seen) < TOKEN_MEMO_MAX:
+                seen[t] = got
+        if got[0]:
             return True
-        if j != t and _prefix_found(j):
-            return True                                    # a prefix key split by separators (``ghp_ab.cd.ef``)
+        j = got[1]
         # fragments of a key split by spaces / line breaks: consecutive token-like pieces, and runs of 3+ pieces of
         # one length (``AKIA IOSF ODNN 7EXA MPLE``, ``A K I A ...``)
         if _tokenish(j):
@@ -657,16 +737,22 @@ def _token_hit(v: str) -> bool:
 
 # ------------------------------------------------------------------------------------------------ 2e. digit runs
 
-_DIGIT_COMPACT = re.compile(r"[\s.\-/()]+")
-_DIGIT_RUN = re.compile(r"\d(?:\D{0,3}\d)*")
+# r2 part 2: every character that is not a letter or a digit is filler (a padded group ``1234____5678,,,,9012`` reads
+# as one run); the safe-shape mark (U+E000) stays a barrier. ASCII digits only: Unicode digits are read through the
+# folded view (``_ascii_fold``).
+_DIGIT_FILLER = re.compile(r"[^\w\ue000]+|_+")
+DIGIT_LETTER_BRIDGE = 3                  # letters allowed between two digit groups of one run (after filler is gone)
+_DIGIT_RUN = re.compile(r"[0-9](?:[^\W\d_]{0,%d}[0-9])*" % DIGIT_LETTER_BRIDGE)
+_ASCII_DIGITS = "0123456789"
 
 
 def _digits_hit(v: str) -> bool:
-    if sum(1 for c in v if c.isdigit()) < 9:
+    if sum(map(v.count, _ASCII_DIGITS)) < 9:
         return False
-    compact = _DIGIT_COMPACT.sub("", v)
+    compact = _DIGIT_FILLER.sub("", v)
     for m in _DIGIT_RUN.finditer(compact):
-        if sum(1 for c in m.group(0) if c.isdigit()) >= 9:
+        g = m.group(0)
+        if len(g) >= 9 and sum(map(g.count, _ASCII_DIGITS)) >= 9:
             return True
     return False
 
@@ -820,8 +906,8 @@ def _mask_clean_urls(m: str) -> tuple:
 
 def _abc(text: str) -> str | None:
     """Checks (a)-(c) only, on every view (a text glued from parts, where (d) / (e) would read words as one)."""
-    for v in views(text):
-        for name, fn in _CHECK_FUNCS:
+    for v, folded in _tagged_views(text):
+        for name, fn in (_CHECK_FUNCS[1:] if folded else _CHECK_FUNCS):
             if globals()[fn](v):
                 return name
     return None
@@ -831,10 +917,11 @@ def _check(text: str, waive=frozenset(), urls: bool = True) -> str | None:
     if len(text) > MAX_INPUT:
         return "cap"
     personal = None
-    for v in views(text):
+    for v, folded in _tagged_views(text):
         if not v:
             continue
-        for name, fn in _CHECK_FUNCS:
+        # a folded view skips (a): the label rule folds confusables itself (``_letters_view`` / ``_fold_piece``)
+        for name, fn in (_CHECK_FUNCS[1:] if folded else _CHECK_FUNCS):
             if globals()[fn](v):
                 return name
         m = _masked(v)
