@@ -48,10 +48,12 @@ import lookalikes
 from agents import logs as logs_mod
 
 AGENT, TASK = "osei", "search_performance"
-VERSION = "2026-11-08.13"                     # query classes, templating and the aggregation rules below
+VERSION = "2026-11-08.14"                     # query classes, templating and the aggregation rules below
 # 2026-11-08.1 (Priya review round 1, M3): street addresses, unit / apartment numbers, PO boxes, ZIP+4 and a ZIP next
 #    to a US state are pii_suspect (looks_like_address)
 # 2026-11-08.2 (review round 2): the address rule needs address structure (it over-dropped service queries)
+# 2026-11-08.14 (review round 14): dates are exempt only when they stand alone (never hide a card, phone or SSN);
+#    year-only card windows, ZIP + year, spaced / compact / ranged dates, version numbers and decades kept
 # 2026-11-08.13 (review round 13): one spelled word counts only as a whole word with 9+ real digits, after the
 #    date and year-list exemptions (round 12 over-dropped year / date queries)
 # 2026-11-08.12 (review round 12): filler digit runs on the homoglyph view; one spelled word enough in a 9+ digit
@@ -152,10 +154,12 @@ def longest_digit_run(text: str) -> int:
     """The most digits in one phone-like run: ``555 010 0199``, ``(555) 010-0199``, ``+44 20 7946 0958`` count 10, 10
     and 12. Digits in different runs (``iphone 15 pro 256gb 2024``) are never added up (AEGIS gl-gsc L4). A run with
     two or more year-like groups (19xx / 20xx: ``covid 19 2020 2021``) is a list of years: its year groups do not
-    count. A phone number holding one such group (``555 010 2024``) is still caught. ISO dates (``2024-10-24``) are
-    taken out first and break a run."""
+    count. A phone number holding one such group (``555 010 2024``) is still caught. Calendar dates that stand alone
+    (``2024-10-24``, ``11/08/2025``; ``isolated_dates_removed``) are taken out first and break a run. A ZIP-sized
+    number next to one year (``90210 2024``) is still counted as nine digits: exempting it would let a 9-digit SSN
+    regrouped 5 + 4 (``12345 2019``) through, so that over-drop is kept and disclosed (round 14)."""
     best = 0
-    for m in _DIGIT_RUN.finditer(_ISO_DATE.sub(" # ", text)):
+    for m in _DIGIT_RUN.finditer(isolated_dates_removed(text)):
         groups = re.findall(r"\d+", m.group())
         years = [g for g in groups if _YEAR.fullmatch(g)]
         n = sum(len(g) for g in groups if len(years) < 2 or not _YEAR.fullmatch(g))
@@ -436,7 +440,15 @@ def url_like(folded: str) -> bool:
     if _URL_MARKS.search(folded) or _HOSTNAME.search(folded) or _SPACED_HOST.search(folded) \
             or _SPACED_IP.search(folded):
         return True
-    return any("/" in w and not _SLASH_OK.fullmatch(w) for w in folded.split())
+    return any("/" in w and not _SLASH_OK.fullmatch(w) and not _date_range(w) for w in folded.split())
+
+
+def _date_range(w: str) -> bool:
+    """A word that is only calendar dates joined by '/' or '-' ("2025-11-08/2025-11-09"; round 14)."""
+    rest = w
+    for a, b in reversed(date_spans(w)):
+        rest = rest[:a] + rest[b:]
+    return bool(date_spans(w)) and re.fullmatch(r"[/\-]*", rest) is not None
 
 
 def _luhn(digits: str) -> bool:
@@ -475,17 +487,57 @@ _NUMWORD_CONCAT = re.compile(r"(?:" + "|".join(sorted(_NUMBER_WORDS, key=len, re
 
 _MON = r"(?:0?[1-9]|1[0-2])"
 _DAY = r"(?:0?[1-9]|[12]\d|3[01])"
-# round 13: calendar dates in every common order and separator, months and days in range: 2025/11/08, 11/08/2025,
-# 08.11.2025, 12-25-2024 (the same separator twice)
-_SLASH_DATE = re.compile(r"(?<![\d/.\-])(?:(?:19|20)\d\d([/.\-])" + _MON + r"\1" + _DAY + r"|" + _MON + r"([/.\-])"
-                         + _DAY + r"\2(?:19|20)\d\d|" + _DAY + r"([/.\-])" + _MON + r"\3(?:19|20)\d\d)(?![\d/.\-])")
+_Y4 = r"(?:19|20)\d\d"
+
+
+def _date_alternatives() -> str:
+    """Calendar dates in every common order, each with ONE separator used twice (/ . - or a space), months and days
+    in range: 2025/11/08, 11/08/2025, 08.11.2025, 12-25-2024, 2025 01 01; and compact 20251108 (round 14)."""
+    alts = []
+    for sep in ("/", ".", "-", " "):
+        e = re.escape(sep)
+        alts += [_Y4 + e + _MON + e + _DAY, _MON + e + _DAY + e + _Y4, _DAY + e + _MON + e + _Y4]
+    alts.append(_Y4 + r"(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])")
+    return "|".join(f"(?:{x})" for x in alts)
+
+
+_SLASH_DATE = re.compile(r"(?<!\d)(?:" + _date_alternatives() + r")(?!\d)")
+_DATE_NEIGHBOURHOOD = 12      # characters either side within which another digit makes a date part of a longer run
+
+
+def date_spans(text: str) -> list:
+    spans = [m.span() for m in _ISO_DATE.finditer(text)]
+    spans += [m.span() for m in _SLASH_DATE.finditer(text) if not any(a <= m.start() < b for a, b in spans)]
+    return sorted(spans)
+
+
+def isolated_dates_removed(text: str) -> str:
+    """Round 14: a calendar date is taken out of the digit rules ONLY when it stands alone — every digit within
+    ``_DATE_NEIGHBOURHOOD`` characters on either side belongs to a date too (``2025-01-01 2025-12-31 hotel``). A date
+    with other digits next to it is left in, so it can never hide a card, phone or SSN (``22230 03/12/2003 222``,
+    ``2025/5/5 0199``, ``2 1909/9/9 99``)."""
+    spans = date_spans(text)
+    if not spans:
+        return text
+    in_date = [False] * len(text)
+    for a, b in spans:
+        for i in range(a, b):
+            in_date[i] = True
+    out = list(text)
+    for a, b in spans:
+        lo, hi = max(0, a - _DATE_NEIGHBOURHOOD), min(len(text), b + _DATE_NEIGHBOURHOOD)
+        if all(in_date[i] or not text[i].isdigit() for i in range(lo, hi)):
+            for i in range(a, b):
+                out[i] = " " if i > a else "#"
+    return "".join(out)
+
 _YEAR_WORD = re.compile(r"(?<!\d)(?:19|20)\d\d(?!\d)")
 
 
 def _without_dates_and_years(folded: str) -> str:
     """Round 13: the same exemptions the other digit rules use — ISO and slash / dot / dash dates removed, and
     year-like numbers (1900-2099) removed when there are two or more of them (``2023 2024``, ``2024-2025``)."""
-    t = _SLASH_DATE.sub(" # ", _ISO_DATE.sub(" # ", folded))
+    t = isolated_dates_removed(folded)                 # round 14: only dates that stand alone
     if len(_YEAR_WORD.findall(t)) >= 2:
         t = _YEAR_WORD.sub(" # ", t)
     return t
@@ -563,8 +615,11 @@ def homoglyph_digits(folded: str) -> str:
     def letters_ok(w):
         return all(not c.isalpha() or c in _HOMOGLYPH_SET for c in w if c not in "-._/")
 
-    mapped = [any(c.isdigit() for c in w) and letters_ok(w) and any(c in _HOMOGLYPH_SET for c in w) for w in words]
-    seed = [any(c.isdigit() for c in w) and letters_ok(w) for w in words]
+    def plural(w):                         # round 14: "1960s", "90s", "2010s" are decades, not "19605"
+        return re.fullmatch(r"\d+'?s", w) is not None
+    mapped = [any(c.isdigit() for c in w) and letters_ok(w) and any(c in _HOMOGLYPH_SET for c in w) and not plural(w)
+              for w in words]
+    seed = [any(c.isdigit() for c in w) and letters_ok(w) and not plural(w) for w in words]
 
     def near_seed(i):                    # a seed next door, or one word further across a short filler word
         for j in (i - 1, i + 1):
@@ -597,11 +652,14 @@ def filler_digit_run(folded: str) -> int:
     (``in``, ``to``, ``vs``, ``km`` ...) never join two numbers ("cars under 30000 in 50000 miles" is kept), and
     year-like groups do not count when there are two or more of them, as in ``longest_digit_run``."""
     best = 0
-    text = _FILLER_STOP.sub(" #### ", _ISO_DATE.sub(" # ", folded))     # ordinary words never join numbers
+    # ordinary words never join numbers; dates are NOT taken out here (round 14): the caller passes the text with
+    # only the dates that stand alone removed, so a date can never hide a phone or SSN next to it
+    text = _FILLER_STOP.sub(" #### ", folded)
     for m in _DIGIT_GROUPS_STRICT.finditer(text):
         groups = re.findall(r"\d+", m.group())
         years = [g for g in groups if _YEAR.fullmatch(g)]
-        best = max(best, sum(len(g) for g in groups if len(years) < 2 or not _YEAR.fullmatch(g)))
+        n = sum(len(g) for g in groups if len(years) < 2 or not _YEAR.fullmatch(g))
+        best = max(best, n)
     return best
 
 
@@ -609,16 +667,19 @@ def card_like(folded: str) -> bool:
     """A Luhn-valid run of 13-19 digits made of consecutive digit groups, whatever separates the groups (separators
     and at most one filler token of up to three characters: spaces, '-', '/', '.', ' x ', '-ab-') and whatever the
     groups look like (``4000 2019 2020 2021``, ``4539 x 1488 x 0343 x 6467``); every window of consecutive groups is
-    tried. A list of years that happens to pass Luhn is dropped too."""
+    tried. A window made only of year-like groups (``2001 2002 2003 2004``; no card network issues numbers starting
+    19xx / 20xx in that shape) is not a card (round 14); a single non-year group in it makes it one again."""
     for m in _DIGIT_GROUPS.finditer(folded):
         groups = re.findall(r"\d+", m.group())
         for i in range(len(groups)):
             d = ""
+            used = []
             for g in groups[i:]:
                 d += g
+                used.append(g)
                 if len(d) > 19:
                     break
-                if len(d) >= 13 and _luhn(d):
+                if len(d) >= 13 and _luhn(d) and not all(_YEAR.fullmatch(x) for x in used):
                     return True
     return False
 
@@ -709,6 +770,11 @@ def base64_text(cased: str, _depth: int = 0) -> bool:
     return False
 
 
+# round 14: a software / standard version number after its keyword is not an IP address, phone or card
+_VERSION = re.compile(r"\b(version|ver|firmware|fw|build|release|kernel|bios|driver|update|patch|ios|android|rfc|"
+                      r"iso|ieee|ecma|win(?:dows)?|v)\s*\.?\s*v?\d+(?:\.\d+){0,5}(?!\d)")
+
+
 def classify_query(q: str, brands: list, _depth: int = 0) -> str:
     """One query -> one class from ``QUERY_CLASSES``; the text is not kept. PII first (judged on the lookalike fold,
     after invisible characters are removed, like the log templater)."""
@@ -719,13 +785,16 @@ def classify_query(q: str, brands: list, _depth: int = 0) -> str:
         return "pii_suspect"
     folded = _LOOKALIKE.fold_cased(t)
     words = folded.split()
-    spelled = spelled_digits(folded)
-    glyphs = homoglyph_digits(folded)
-    undated = _SLASH_DATE.sub(" # ", folded)   # round 13: calendar dates are not digit runs, cards or filler runs
-    if url_like(folded) or base64_text(t, _depth) or "@" in folded or logs_mod._EMAIL.search(folded) \
+    versioned = _VERSION.sub(lambda m: m.group(1) + " #", folded)        # round 14: "firmware 2.3.11.4", "rfc 9110"
+    spelled = spelled_digits(versioned)
+    glyphs = homoglyph_digits(versioned)
+    # round 14: only dates that stand alone are exempt (isolated_dates_removed); the card, phone and SSN rules see
+    # every other digit as written
+    undated = isolated_dates_removed(versioned)
+    if url_like(versioned) or base64_text(t, _depth) or "@" in folded or logs_mod._EMAIL.search(folded) \
             or logs_mod._AT_WORD.search(folded) \
-            or longest_digit_run(undated) >= PII_DIGIT_RUN or any(_word_identifies(w) for w in words) \
-            or card_like(undated) or split_secret(folded) or looks_like_address(folded) \
+            or longest_digit_run(undated) >= PII_DIGIT_RUN or any(_word_identifies(w) for w in undated.split()) \
+            or card_like(undated) or split_secret(undated) or looks_like_address(folded) \
             or (spelled and (longest_digit_run(spelled) >= PII_DIGIT_RUN or card_like(spelled))) \
             or filler_digit_run(undated) >= FILLER_DIGIT_RUN \
             or (glyphs and (longest_digit_run(glyphs) >= 9 or card_like(glyphs)

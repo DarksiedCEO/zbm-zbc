@@ -163,11 +163,13 @@ LIMITS = [
     "IPv4 ('0300.0250.1.1'), a 'dot' host with an uncommon TLD, base64 of binary data split into short words, an "
     "address spaced out character by character, and obfuscations beyond the tested corpus (every single "
     "obfuscation and every ordered pair of two are tested and dropped). Phones and SSNs across filler tokens, "
-    "homoglyph, enclosed and Spanish spelled digits are caught, while year lists and calendar dates in any common "
-    "order ('2023 2024 honda civic', '11/08/2025 hotel') are kept; homoglyph, enclosed and Spanish spelled "
-    "digits, and spaced or 'dot' IPv4 addresses are caught; spec and model-number queries ('12v 100ah lifepo4 "
-    "battery') are kept. The "
-    "rule also drops some non-addresses shaped like '<number> <word> st' or '<number> <word> court'. Derived "
+    "homoglyph, enclosed and Spanish spelled digits, and spaced or 'dot' IPv4 addresses are caught. Year lists, "
+    "calendar dates that stand alone ('2023 2024 honda civic', '11/08/2025 hotel', '2025-11-08/2025-11-09'), "
+    "version numbers after their keyword ('firmware 2.3.11.4') and spec or model-number queries ('12v 100ah "
+    "lifepo4 battery') are kept; a date with other digits next to it is never exempt, so it cannot hide a card, "
+    "phone or SSN. Over-dropped on purpose: a ZIP-sized number next to a year ('90210 2024 restaurants'), which "
+    "has the digits of a regrouped SSN. The rule also drops some non-addresses shaped like '<number> <word> st' "
+    "or '<number> <word> court'. Derived "
     "variants are never built from a query with a capitalised word, nor from a frame adding a word outside a "
     "closed vocabulary.",
     "The ledger is computed on request and handed out once; it is not stored (only its SHA-256 and counts).",

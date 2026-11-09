@@ -145,7 +145,7 @@ account and developer token: a founder decision, not built.
 
 A query that ADR 0017's classifier calls `pii_suspect` (e-mails in any spelling, one phone-like run of 7+ digits not
 an ISO date, id- or secret-like words, and — added in review round 1, reworked in rounds 2 to 4,
-`search_performance` rules `2026-11-08.13`, so Osei's query classes use it too — address forms and over-long text):
+`search_performance` rules `2026-11-08.14`, so Osei's query classes use it too — address forms and over-long text):
 - an id- or secret-like word (round 4 narrowed this from the log templater's rule, which dropped model numbers, tire
   sizes, decimals and years — `24acc636a003`, `225/65r17`, `3.5`, `2012` — as ids): an e-mail in any spelling, a
   UUID, 16+ hex characters, a JWT-like dotted token, 20+ token characters, anything over 40 characters, a
@@ -239,7 +239,23 @@ an ISO date, id- or secret-like words, and — added in review round 1, reworked
   `12-25-2024`) are never digit runs, cards or filler runs — closing an older over-drop of non-ISO dates
   (`11/08/2025 iphone` had been dropped since round 3). A 1,080-query year / date probe (10 year forms and 8 date
   forms × 30 common words, both orders) drops 0, and 45 curated year / date KEEP tests pass
-  (`tests/test_query_privacy_r13.py`); all 18,826 composed pairs still drop;
+  (`tests/test_query_privacy_r13.py`); all 18,826 composed pairs still drop.
+- **Round 14 (a date must never hide a value).** Round 13 exempted every calendar date from the digit rules, so a
+  card written partly as a date passed — the documented Mastercard 2-series test number written as `22230
+  03/12/2003 222` (and `.` `-` `/` variants) — as did phones and SSNs next to a one-digit-month date (`2025/5/5
+  0199`, `2 1909/9/9 99`); older code also stripped every ISO / slash date unconditionally inside the digit-run
+  and filler rules. Now a date is exempt **only when it stands alone** (`isolated_dates_removed`: every digit
+  within 12 characters on either side belongs to a date too), and the card (Luhn 13-19), digit-run (phone / SSN)
+  and filler rules all run on that text, i.e. on the original digit stream wherever a date touches other digits.
+  A probe that writes every date-shaped window of public test card numbers, 555 phones and an example SSN as a
+  date (three orders, four separators, five glues: 200 cases) drops all of them. Over-drops fixed: date ranges
+  (`2025-11-08/2025-11-09 hotel`, `25.12.2024-01.01.2025 urlaub`), year lists in a card window (a window made
+  only of 19xx / 20xx groups is not a card — no card network issues numbers of that shape — and one non-year
+  group makes it one again), decades (`1960s 1970s music`), spaced and compact dates (`2025 01 01 holiday`,
+  `20251108 log`) and version numbers after their keyword (`firmware 2.3.11.4`, `version 10.0.19045.3803`, `rfc
+  9110 2022`). **Kept as a disclosed over-drop:** a ZIP-sized number next to one year (`90210 2024
+  restaurants`, `10001 2025 apartments`) — exempting it would let a 9-digit SSN regrouped 5 + 4 (`12345 2019`)
+  through, and privacy takes precedence. Tests: `tests/test_query_privacy_r14.py`;
   7+ digits in one run stay the digit-run rule's;
 - a street address: a house number (at the start, or after a space not preceded by `top` / `best`), an optional
   direction, 1-3 street-name tokens (none a stop or quantity word such as `near`, `in`, `best`, `hour`, `bedroom`,
