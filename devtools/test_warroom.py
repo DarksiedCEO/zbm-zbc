@@ -19,6 +19,7 @@ sys.dont_write_bytecode = True
 import chaos  # noqa: E402
 import corpus  # noqa: E402
 import engine  # noqa: E402
+import grammar  # noqa: E402
 import invariants  # noqa: E402
 import personas  # noqa: E402
 
@@ -274,6 +275,131 @@ ACTIONS = {"call_out": call_out, "fine": fine}
         self.assertIn("network access attempted", res["a"]["error"])
         self.assertIsNone(res["b"]["error"])
         self.assertEqual(res["b"]["steps"], [{"action": "x", "status": 201, "body": {"ok": True}}])
+
+
+class Generative(unittest.TestCase):
+    """The generative layer (grammar.py): invented cases are a pure function of the seed, their terminals come from
+    the repo, and a failing generated case is saved by itself (memory only grows)."""
+
+    def test_generators_are_deterministic_and_emit_json(self):
+        atoms = {"hosts": ["https://site.test/"], "ssrf": ["http://127.0.0.1:{port}/"], "injection": ["IGNORE"],
+                 "brand_texts": ["Acme cleans rugs."]}
+        for name in grammar.GENERATORS:
+            for seed in range(30):
+                a = grammar.generate(name, random.Random(seed), atoms)
+                self.assertEqual(a, grammar.generate(name, random.Random(seed), atoms), name)
+                self.assertIsInstance(json.loads(a), dict, name)
+        urls = {grammar.citation_url(random.Random(i), atoms) for i in range(400)}
+        self.assertGreater(len(urls), 300)                        # it explores, it does not repeat itself
+        for kind in grammar.HOST_KINDS:
+            self.assertIsInstance(grammar.host_of_kind(random.Random(1), kind, atoms), str, kind)
+
+    def test_a_generated_scenario_is_seeded_from_the_repo_and_rebuilds_by_id(self):
+        lib = engine.load_library("seo-py-idris")
+        a, b, c = engine.generate(lib, 1), engine.generate(lib, 1), engine.generate(lib, 2)
+        gen = [x for x in a if x.get("generated")]
+        self.assertTrue(gen)
+        self.assertEqual(a, b)
+        self.assertNotEqual([x["input"] for x in gen], [x["input"] for x in c if x.get("generated")])
+        self.assertTrue(all(x["case_id"].startswith("seo-py-idris/") for x in a))
+        dept, scenario, idx, variant, seed = engine.parse_case_id(gen[5]["case_id"])
+        again = [x for x in engine.generate(lib, seed, variant) if x["case_id"] == gen[5]["case_id"]]
+        self.assertEqual(again[0]["input"], gen[5]["input"])
+        sc = next(s for s in lib["scenarios"] if s["id"] == "generated-poisoned-answers")
+        atoms = engine.scenario_atoms(lib, sc)
+        self.assertIn("IGNORE ALL PREVIOUS INSTRUCTIONS", atoms["injection"][0])     # read from the pinned test
+        self.assertIn("Jungle Scout", atoms["brands"])
+
+    def test_a_generated_scenario_without_a_count_or_with_seeds_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            saved = engine.SCENARIOS
+            engine.SCENARIOS = Path(tmp)
+            try:
+                lib = {"library": "x", "version": 1, "service": "seo-py", "driver": "seo_py.py", "scenarios": [
+                    {"id": "g", "persona": "p", "input_field": "spec", "steps": [], "invariants": [],
+                     "generator": {"name": "callum_answer"}}]}
+                (Path(tmp) / "x.json").write_text(json.dumps(lib))
+                with self.assertRaises(engine.LibraryError):
+                    engine.load_library("x")
+                lib["scenarios"][0]["generator"] = {"name": "no_such_grammar", "count": 3}
+                (Path(tmp) / "x.json").write_text(json.dumps(lib))
+                with self.assertRaises(engine.LibraryError):
+                    engine.load_library("x")
+            finally:
+                engine.SCENARIOS = saved
+
+    def test_failing_generated_cases_are_saved_automatically_and_only_appended(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            saved = engine.REPLAY
+            engine.REPLAY = Path(tmp)
+            try:
+                fail = engine.judge({**Gate.CASE, "known_failure": None},
+                                    {"steps": [{"action": "a", "status": 500, "body": {}}], "state": {}, "error": None})
+                gen = engine.judge({**Gate.CASE, "case_id": "d/g#000.0@1", "input": {"spec": "{}"},
+                                    "known_failure": None, "generated": True},
+                                   {"steps": [{"action": "a", "status": 500, "body": {}}], "state": {}, "error": None})
+                dry = engine.promote({"d": [fail, gen]}, "2026-11-08", generated_only=True, write=False)
+                self.assertEqual([e["origin"] for e in dry["d"]], ["d/g#000.0@1"])
+                self.assertFalse((Path(tmp) / "d.json").exists())            # CI: the checkout is never written
+                self.assertEqual(engine.promote({"d": [fail, gen]}, "2026-11-08", generated_only=True),
+                                 {"d": ["d/R0001"]})
+                doc = engine.load_replay("d")
+                self.assertEqual(len(doc["cases"]), 1)
+                self.assertIsNone(doc["cases"][0]["known_failure"])           # blocks until triaged
+                self.assertEqual(engine.promote({"d": [gen]}, "2026-11-09", generated_only=True), {})
+            finally:
+                engine.REPLAY = saved
+
+    def test_structural_bound_and_empty_list_predicates(self):
+        obs = {"steps": [], "state": {"n": 3, "cap": 4, "v": [], "w": ["x"]}}
+        self.assertTrue(invariants.state_le(obs, "n", limit=3)[0])
+        self.assertTrue(invariants.state_le(obs, "n", limit_key="cap")[0])
+        self.assertFalse(invariants.state_le(obs, "n", limit=2)[0])
+        self.assertFalse(invariants.state_le(obs, "missing", limit=2)[0])     # not comparable never holds
+        self.assertTrue(invariants.state_empty(obs, "v")[0])
+        self.assertFalse(invariants.state_empty(obs, "w")[0])
+        self.assertFalse(invariants.state_empty(obs, "absent")[0])           # the driver must say what it judged
+
+    def test_the_idris_oracle_reads_lookalikes_dismissals_and_hosts_by_the_documented_rules(self):
+        import importlib.util
+        from types import SimpleNamespace
+        spec = importlib.util.spec_from_file_location("wr_lk", engine.REPO / "services/service-py/src/lookalikes.py")
+        lk = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(lk)
+        spec = importlib.util.spec_from_file_location("wr_drv_idris", engine.DRIVERS / "seo_py_idris.py")
+        drv = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(drv)
+        drv.SEO = SimpleNamespace(FOLD=lk.Table())
+        for name in ("Z Best Media", "Z-Best Media", "ZBestMedia Labs", "Zbestmedia LLC", "Z B\u0435st Media",
+                     "Z Bset Media", "Z\u200b Best Media", "\uff3a Best Media", "Site"):
+            self.assertTrue(drv.client_like(name), name)
+        for name in ("Refund Rangers", "Sitewise Analytics", "Bestway Media Co", "Z Best Media Network Partners"):
+            self.assertFalse(drv.client_like(name), name)
+        for host, want in (("site.test", True), ("www.site.test", True), ("s\u0456te.test", True),
+                           ("xn--ste-jhd.test", True), ("zbestmedia.com", True), ("zbestmedia.github.io", True),
+                           ("refundrangers.com", False), ("site.test.evil.test", False)):
+            self.assertEqual(drv.client_like_domain(host), want, host)
+        base = "Refund Rangers"
+        for v in ("refund rangers", "RefundRangers", "Refund-Rangers", "Refund Rangers, Inc.", "Refund Ranger",
+                  "The Refund Rangers Network", "R\u0435fund Rangers", "Refund\u200b Rangers", "Refund Rangerz",
+                  "Refund Rnagers", "Refund Rangers L.L.C."):
+            self.assertTrue(drv.covers(v, base), v)
+        for v in ("Refund", "Rangers Refund", "Pacmed Labs", "RefundRangersPro"):
+            self.assertFalse(drv.covers(v, base), v)
+        self.assertFalse(drv.covers("Springbot", "Ring"))
+        self.assertEqual(drv.oracle_host("WWW.Site.Test."), "CLIENT")
+        self.assertEqual(drv.oracle_host("s\u0456te.test"), "LOOKALIKE")
+        self.assertEqual(drv.oracle_host("evilsite.test"), "OTHER")
+        self.assertTrue(drv.on_domain("https://blog.acme.test/x", ["acme.test"]))
+        self.assertFalse(drv.on_domain("https://\u0430cme.test/x", ["acme.test"]))
+        self.assertFalse(drv.on_domain("https://acme.test.evil.test/", ["acme.test"]))
+        for kind in grammar.DISMISSAL_KINDS_MUST + grammar.DISMISSAL_KINDS_SHOULD:
+            v = grammar.dismissal_variant(base, kind, random.Random(kind))
+            self.assertEqual(v["documented"], kind in grammar.DISMISSAL_KINDS_MUST, kind)
+            if v["name"] and kind not in ("domain_other_tld", "domain_hyphen", "domain_private_suffix",
+                                          "domain_ccsld", "camel_plus_word", "leet", "two_edits", "reversed_words",
+                                          "idn_domain_named"):
+                self.assertTrue(drv.covers(v["name"], base), (kind, v["name"]))
 
 
 class Personas(unittest.TestCase):
