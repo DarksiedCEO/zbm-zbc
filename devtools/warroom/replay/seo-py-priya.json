@@ -1,0 +1,359 @@
+{
+ "library": "seo-py-priya",
+ "cases": [
+  {
+   "replay_id": "seo-py-priya/R0001",
+   "scenario": "personal-data-and-secrets-in-queries",
+   "origin": "seo-py-priya/personal-data-and-secrets-in-queries#002.1@1",
+   "chain": [
+    "sources=gsc",
+    "wrap_as=both"
+   ],
+   "seed_value": "round9_drop",
+   "input": {
+    "wrap_as": "both",
+    "sources": "gsc",
+    "corpus": "round9_drop"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F020",
+   "failed": [
+    "no_personal_data_in_ledger_keys_responses_records_or_logs: state.pii_leaked = [\"row text 'rug cleaner amFuZS5kb2 VAZXhhbXBs ZS5jb20= rug cleaner'\"]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-priya/R0002",
+   "scenario": "personal-data-and-secrets-in-queries",
+   "origin": "seo-py-priya/personal-data-and-secrets-in-queries#002.2@1",
+   "chain": [
+    "sources=gsc,bing",
+    "wrap_as=prefix"
+   ],
+   "seed_value": "round9_drop",
+   "input": {
+    "wrap_as": "prefix",
+    "sources": "gsc,bing",
+    "corpus": "round9_drop"
+   },
+   "added": "2026-11-08",
+   "known_failure": null,
+   "failed": [
+    "no_personal_data_in_ledger_keys_responses_records_or_logs: state.pii_leaked = [\"row text 'rug cleaner amFuZS5kb2 VAZXhhbXBs ZS5jb20='\"]"
+   ],
+   "fixed": "WR-F022"
+  },
+  {
+   "replay_id": "seo-py-priya/R0003",
+   "scenario": "personal-data-and-secrets-in-queries",
+   "origin": "seo-py-priya/personal-data-and-secrets-in-queries#002.3@1",
+   "chain": [
+    "sources=gsc",
+    "wrap_as=suffix"
+   ],
+   "seed_value": "round9_drop",
+   "input": {
+    "wrap_as": "suffix",
+    "sources": "gsc",
+    "corpus": "round9_drop"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F020",
+   "failed": [
+    "no_personal_data_in_ledger_keys_responses_records_or_logs: state.pii_leaked = [\"row text 'amFuZS5kb2 VAZXhhbXBs ZS5jb20= rug cleaner'\"]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-priya/R0004",
+   "scenario": "personal-data-and-secrets-in-queries",
+   "origin": "seo-py-priya/personal-data-and-secrets-in-queries#002.4@1",
+   "chain": [
+    "sources=gsc",
+    "wrap_as=cjk"
+   ],
+   "seed_value": "round9_drop",
+   "input": {
+    "wrap_as": "cjk",
+    "sources": "gsc",
+    "corpus": "round9_drop"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F020",
+   "failed": [
+    "no_personal_data_in_ledger_keys_responses_records_or_logs: state.pii_leaked = [\"row text '東京 amFuZS5kb2 VAZXhhbXBs ZS5jb20='\"]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-priya/R0005",
+   "scenario": "generated-hostile-properties",
+   "origin": "seo-py-priya/generated-hostile-properties#076.0@2",
+   "chain": [
+    "generator=priya_query_set"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"rows\": [[\"OpenTableReservations Tonight\", 0, 1, 0.0], [\"AirPod­s P­r­o Batt­ery Li­fe\", 1, 2147483648, 3.2], [\"café pri​ces\", 214748364, 2147483648, 3.2], [\"w/o drains\", 1, 999, 47.0], [\"זו רשימה של האפשרויות הטובות ביותר. sofa cleaner\", 10, 20, 10.4], [\"  carrier 24acc636a003 manual   \", 0, 0, 20.6], [\"100%wool rug\", 0, 25000, 1.0], [\"東京 ホ​テル 安‌い\", 0, 1000, 10.4]], \"pii\": [[\"round9_drop\", 5528, \"suffix\"], [\"round8_smuggles\", 3929, \"cjk\"]], \"env\": {\"SEO_GSC_PAGE_ROWS\": \"100\", \"SEO_GSC_MAX_PAGES\": \"1\"}, \"bing\": null, \"runs\": 1, \"dates\": [10, 150]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F020",
+   "failed": [
+    "no_personal_data_in_ledger_keys_responses_records_or_logs: state.pii_leaked = [\"row text 'amFuZS5kb2 VAZXhhbXBs ZS5jb20= rug cleaner'\"]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-priya/R0006",
+   "scenario": "generated-storms",
+   "origin": "seo-py-priya/generated-storms#095.0@2",
+   "chain": [
+    "generator=priya_storm"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"script\": [\"timeout\", \"gzip\", \"429ra5\"], \"token_script\": [\"tok_short\"], \"repeat\": true, \"env\": {\"SEO_GSC_DEADLINE_SECONDS\": \"5\", \"SEO_GSC_TIMEOUT_SECONDS\": \"2\"}, \"bing\": true, \"bing_script\": [\"rows_not_list\", \"503\"], \"runs\": 1, \"n_rows\": 3}"
+   },
+   "added": "2026-11-08",
+   "known_failure": null,
+   "failed": [
+    "work_structurally_bounded: state.work_over_bound = ['Search Console read took 11.0 fake seconds > 9']"
+   ],
+   "fixed": "WR-F023"
+  },
+  {
+   "replay_id": "seo-py-priya/R0007",
+   "scenario": "generated-hostile-properties",
+   "origin": "seo-py-priya/generated-hostile-properties#110.0@3",
+   "chain": [
+    "generator=priya_query_set"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"rows\": [[\"Abogado De Inmigracion Gratis\", 0, 2147483648, 5.5], [\"rug cl️ea️ne️r ne️ar me\", 0, 21, 47.0], [\"Plus PlayStation Games\", 0, 99, 0.0], [\"sofa cleaner\", 10, 20, 2.6], [\"以下是推荐的服务商列表。apt 12 carpet cleaning\", 12500, 25000, 20.6], [\"tires 225/65r17 다음은 추천 서비스 목록입니다.\", 49, 99, 0.0], [\"the BlackFriday TV Deals for a\", 50, 100, 5.5], [\"以下は おすすめの サービス です。1/2 hp sump pump\", 19, 19, 120.0], [\"ohio 45000 jobs\", 1, 101, 1.4], [\"a/b testings\", 1, 99, 120.0], [\"2\\u0000old court cases\", 500000, 1000000, 0.0], [\"TiḱT́ok Shóp Seĺler\", 0, 1, 1.0], [\"Peluqueria Para Hombres 以下は おすすめの サービス です。\", 0, 20, 3.2], [\"F­edE­x Tracking Nu­m­ber L­o­okup\", 99, 999, 47.0], [\"Pｒeｃｉo Deｌ Ｓｅgｕｒo Ｄｅ Ａｕｔo\", 1, 1000, 47.0], [\"Dentista\\tInfantil\\tMadrid\", 50, 100, 1.0], [\"rug cleaner\", 0, 2147483648, 0.0], [\"ca 90210 zip code ✨\", 0, 1, 3.2], [\"‮2012 ford f150 3.5 ecoboost‬\", 19, 19, 2.6], [\"Vuelos Baratos A Cancun ❤️\", 0, 5, 1.4], [\"file a claim\", 12500, 25000, 0.0], [\"com the dot bubble\", 0, 2147483648, 2.6], [\"#1\\u0000rug cleaner\", 99, 99, 47.0], [\"the data science course for a\", 1000000, 1000000, 47.0], [\"3 daуѕ іn st lоuiѕ\", 9, 19, 47.0]], \"pii\": [[\"round10_drop\", 6695, \"alone\"], [\"attack_corpus\", 1439, \"rtl\"], [\"round9_drop\", 46, \"alone\"], [\"round10_drop\", 4514, \"dup_spelling\"], [\"round9_drop\", 6272, \"cjk\"]], \"env\": {}, \"bing\": null, \"runs\": 1, \"dates\": [500, 90000]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F020",
+   "failed": [
+    "no_personal_data_in_ledger_keys_responses_records_or_logs: state.pii_leaked = [\"row text '東京 amFuZS5kb2 VAZXhhbXBs ZS5jb20='\"]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-priya/R0008",
+   "scenario": "generated-storms",
+   "origin": "seo-py-priya/generated-storms#037.0@3",
+   "chain": [
+    "generator=priya_storm"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"script\": [\"429\", \"rows_not_list\", \"gzip\", \"nan\", \"503\", \"empty_obj\"], \"token_script\": [\"tok_timeout\"], \"repeat\": true, \"env\": {\"SEO_GSC_DEADLINE_SECONDS\": \"5\", \"SEO_GSC_TIMEOUT_SECONDS\": \"2\"}, \"bing\": false, \"bing_script\": [\"502\", \"500\", \"ok\"], \"runs\": 1, \"n_rows\": 3}"
+   },
+   "added": "2026-11-08",
+   "known_failure": null,
+   "failed": [
+    "work_structurally_bounded: state.work_over_bound = ['Search Console read took 11.0 fake seconds > 9']"
+   ],
+   "fixed": "WR-F023"
+  },
+  {
+   "replay_id": "seo-py-priya/R0009",
+   "scenario": "generated-storms",
+   "origin": "seo-py-priya/generated-storms#122.0@3",
+   "chain": [
+    "generator=priya_storm"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"script\": [\"wrong_agg\", \"wrong_agg\", \"empty_obj\", \"503\", \"date_out_of_window\", \"clicks_gt_impr\"], \"token_script\": [\"tok_echo\", \"tok_timeout\"], \"repeat\": true, \"env\": {\"SEO_GSC_DEADLINE_SECONDS\": \"15\", \"SEO_GSC_TIMEOUT_SECONDS\": \"2\"}, \"bing\": false, \"bing_script\": [\"401\", \"503\", \"bad_date\"], \"runs\": 2, \"n_rows\": 8}"
+   },
+   "added": "2026-11-08",
+   "known_failure": null,
+   "failed": [
+    "work_structurally_bounded: state.work_over_bound = ['Search Console read took 23.0 fake seconds > 19']"
+   ],
+   "fixed": "WR-F023"
+  },
+  {
+   "replay_id": "seo-py-priya/R0010",
+   "scenario": "generated-hostile-properties",
+   "origin": "seo-py-priya/generated-hostile-properties#031.0@5",
+   "chain": [
+    "generator=priya_query_set"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"rows\": [[\"A/B Testing For Landing Pages\", 1, 19, 0.0], [\"deadbeefs cafes bad faces\", 1, 21, 1.0], [\"OpenTable Reservations Tonight\", 214748364, 2147483648, 1.0], [\"WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison \", 1073741824, 2147483648, 10.4], [\"東京ホテル 安い\", 500000, 1000000, 0.0], [\"dot com b0om\", 0, 0, 5.5], [\"PayPal\\tBusiness\\tAccount\", 1, 100, 10.4]], \"pii\": [[\"round9_drop\", 8071, \"prefix\"], [\"round8_attacks\", 2574, \"dup_spelling\"], [\"attack_corpus\", 3494, \"prefix\"], [\"round9_drop\", 2645, \"rtl\"], [\"attack_corpus_gaps\", 2954, \"tab\"]], \"env\": {}, \"bing\": [[\"A/B Testing For Landing Pages\", 1, 19, 0], [\"WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison WordPress Hosting Comparison \", 24, 3648, 2], [\"OpenTable Reservations Tonight\", 14, 3648, 0], [\"dot com b0om\", 0, 0, 3], [\"deadbeefs cafes bad faces\", 1, 21, 3], [\"PayPal\\tBusiness\\tAccount\", 1, 100, 4], [\"東京ホテル 安い\", 0, 0, 1]], \"runs\": 3, \"dates\": [3, 40]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F020",
+   "failed": [
+    "no_personal_data_in_ledger_keys_responses_records_or_logs: state.pii_leaked = [\"row text '\\\\u200famFuZS5kb2 VAZXhhbXBs ZS5jb20=\\\\u200f مرحبا'\"]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-priya/R0011",
+   "scenario": "generated-hostile-properties",
+   "origin": "seo-py-priya/generated-hostile-properties#066.0@5",
+   "chain": [
+    "generator=priya_query_set"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"rows\": [[\"tires 225/65r17\", 0, 1000, 1.0], [\"東京ホテル 安い\", 0, 21, 2.6], [\"Como L1mpi4r Una 4lfombr4\", 0, 0, 3.2], [\"  SharePoint Online Training   \", 100000, 1000000, 3.2], [\"‮LinkedIn Learning Courses‬\", 5, 5, 1.4], [\"Clases De Ingles Online Gratis\", 0, 0, 47.0], [\"AirPods Pro Battery Life ❤️\", 0, 0, 10.4], [\"Tires 225/65R17\", 21, 21, 2.6], [\"Abogado De Inmigracion Gratis 🧹\", 0, 100, 1.4], [\"‮PlayStation Plus Games‬\", 0, 19, 120.0], [\"ẂordPŕeśś Hostíng Compáŕison\", 1, 101, 3.2], [\"LinkedIns Learnings Coursess\", 214748364, 2147483648, 120.0], [\"h️ow to ch️o️ose a rug c️leane️r\", 49, 99, 1.4], [\"다음은 추천 서비스 목록입니다.Mejor Restaurante En Madrid\", 0, 1000, 3.2], [\"Ab‌o﻿gado D‌e Inm‌igr‌aci​o‌n G‍rat﻿is\", 0, 0, 1.4], [\"Mcdonalds Breakfast Hours\", 1073741824, 2147483648, 3.2], [\"‮how to rank on google 2024‬\", 1, 25000, 47.0], [\"PowerPoints Templatess Frees\", 1, 1000000, 120.0], [\"and/or\\tin\\tcontracts\", 0, 999, 2.6], [\"Taller Mecanico Cerca De Mi ✨\", 49, 99, 5.5], [\"3 n3w dr pepp3r flavor5\", 0, 1, 20.6], [\"tile cleaner\", 1, 19, 1.4], [\"node.js tutorial ❤️\", 0, 0, 2.6], [\"2\\u001flane road\", 25000, 25000, 120.0], [\"JavaScript\\tTutorial\\tFor\\tBeginners\", 2500, 25000, 1.4], [\"Ope­nTa­ble R­eservations Toni­gh­t\", 0, 999, 1.0], [\"McDonalds iPhone 15 Pro Max 256GB 以下は おすすめの サービス です。\", 214748364, 2147483648, 120.0], [\"SharePoint　Online　Training\", 99, 99, 120.0], [\"2 lan️e ro️ad\", 0, 5, 120.0], [\"3 NEW DR PEPPER FLAVORS\", 1, 5, 1.0], [\"#1 rug cl34n3r\", 0, 0, 1.0]], \"pii\": [[\"attack_corpus_gaps\", 7435, \"alone\"], [\"attack_corpus\", 4320, \"cjk\"], [\"round9_drop\", 6427, \"cjk\"], [\"attack_corpus_gaps\", 2258, \"suffix\"], [\"attack_corpus\", 470, \"alone\"]], \"env\": {}, \"bing\": null, \"runs\": 1, \"dates\": [0, 1]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F020",
+   "failed": [
+    "no_personal_data_in_ledger_keys_responses_records_or_logs: state.pii_leaked = [\"row text '東京 amFuZS5kb2 VAZXhhbXBs ZS5jb20='\"]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-priya/R0012",
+   "scenario": "generated-hostile-properties",
+   "origin": "seo-py-priya/generated-hostile-properties#086.0@5",
+   "chain": [
+    "generator=priya_query_set"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"rows\": [[\"10:30 am 4pp01n7ment\", 100, 100, 20.6], [\"Taller M3can1c0 Cerca De Mi\", 49, 99, 2.6], [\"ｒｕg ｃｌeanｅｒ ｎｅａｒ mｅ\", 0, 20, 1.0], [\"top 10 rug cleanerss\", 0, 0, 1.0], [\"carpet\\u0000cleaner\", 0, 5, 47.0], [\"carpet cleaner 🇺🇸\", 0, 0, 120.0], [\"datas sciences courses\", 0, 5, 47.0], [\"File A Claim\", 1, 100, 1.4], [\"Abogado De Inmigracion Gratis 다음은 추천 서비스 목록입니다.\", 0, 2147483648, 1.4], [\"  3 new dr pepper flavors   \", 2500, 25000, 3.2], [\"ohio 45000 jobs 🔥\", 0, 0, 1.0], [\"אנו ממליצים לבדוק את המקורות. 2.5 ton heat pump\", 10, 21, 120.0], [\"rug cleaner near me 🔥\", 0, 1, 0.0], [\"Vu3l05 B4r4t05 4 Cancun\", 0, 999, 120.0], [\"2 old court cases\", 0, 1, 3.2], [\"東京　ホテル　安い\", 0, 21, 1.4], [\"AirPodss Pro Batterys Lifes\", 499, 999, 3.2], [\"3 bed 2 bath 1500 sq ft 3 bed 2 bath 1500 sq ft 3 bed 2 bath 1500 sq ft 3 bed 2 bath 1500 sq ft 3 bed 2 bath 1500 sq ft 3 bed 2 bath 1500 sq ft 3 bed 2 bath 1500 sq ft 3 bed 2 bath 1500 sq ft 3 bed 2 bath 1500 sq ft \", 2, 21, 3.2], [\"dot com booms\", 0, 21, 1.4], [\"ac️m️e pricing\", 1, 1, 5.5], [\"tires\\u001f225/65r17\", 0, 0, 20.6], [\"Playstation Plus Games\", 19, 19, 47.0], [\"the 4 way stop for a\", 0, 1, 2.6], [\"PlayStation Games Plus\", 0, 1, 47.0], [\"2.5 ton he47 pump\", 12500, 25000, 5.5], [\"다음은 추천 서비스 목록입니다.the dot com bubble\", 100, 100, 2.6], [\"Jav️aScript Tut️orial For Beg️in️ners\", 0, 100, 20.6], [\"‮Vuelos Baratos A Cancun‬\", 1, 19, 20.6], [\"225/65r17 tires\", 0, 25000, 1.4], [\"هذه قائمة بأفضل الخيارات المتاحة. #1 rug cleaner\", 1, 25000, 1.4], [\"  McDonalds Breakfast Hours   \", 100000, 1000000, 5.5], [\"24/7 plumber\", 0, 19, 10.4], [\"rug cl34ner n34r m3\", 1, 20, 1.4], [\"Javascript Tutorial For Beginners\", 500, 1000, 1.0], [\"3 days in st louis\", 500000, 1000000, 0.0], [\"u.s　flag\", 0, 0, 10.4], [\"#1 rug clea️ner\", 0, 99, 1.0], [\"HubSpo7 CRM Pr1cing\", 0, 999, 1.4], [\"A️boga️do De Inm️ig️racion G️r️a️tis\", 0, 99, 2.6], [\"5 ｒｏｕte ｏｐｔｉoｎs\", 2500, 25000, 0.0], [\"2 rd round draft ✨\", 2, 5, 1.4], [\"以下是推荐的服务商列表。ohio 45000 jobs\", 1, 1000000, 1.0], [\"東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い 東京 ホテル 安い \", 0, 5, 1.0], [\"cáfé pŕićéś\", 1073741824, 2147483648, 47.0]], \"pii\": [[\"round9_drop\", 9062, \"cjk\"]], \"env\": {}, \"bing\": null, \"runs\": 3, \"dates\": [10, 150]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F020",
+   "failed": [
+    "no_personal_data_in_ledger_keys_responses_records_or_logs: state.pii_leaked = [\"row text '東京 amFuZS5kb2 VAZXhhbXBs ZS5jb20='\"]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-priya/R0013",
+   "scenario": "personal-data-and-secrets-in-queries",
+   "origin": "seo-py-priya/personal-data-and-secrets-in-queries#006.0@1",
+   "chain": [],
+   "seed_value": "attack_corpus_composed",
+   "input": {
+    "wrap_as": "alone",
+    "sources": "gsc",
+    "corpus": "attack_corpus_composed"
+   },
+   "added": "2026-11-08",
+   "known_failure": null,
+   "failed": [
+    "no_personal_data_in_ledger_keys_responses_records_or_logs: state.pii_leaked = [\"row text '3 se x ven  x 8 tw x o 8  x two  x 2 fo x ur 6 x  thr x ee 1 x  zer x o 0  x zero x  5'\", \"row text 'thre-ab-e se-ab-ven -ab-eigh-ab-t tw-ab-o ei-ab-ght -ab-two -ab-two -ab-four-ab- six-ab- thr-ab-ee o-ab-ne z-ab-ero -ab-zero-ab- zer-ab-o fi-ab-ve'\", \"row text '6 ze-ab-ro 1-ab- one-ab- 1 o-ab-ne 1-ab- one-ab- 1 o-ab-ne 1-ab- one-ab- 1 o-ab-ne 1-ab- sev-ab-en'\", \"row text 'uno -ab-dos -ab-tres-ab- cua-ab-tro -ab-cinc-ab-o se-ab-is s-ab-iete-ab- och-ab-o nu-ab-eve'\", \"row text 'five x  fiv x e fi x ve z x ero  x one  x zero x  zer x o on x e ni x ne n x ine'\"]"
+   ],
+   "fixed": "WR-F024"
+  },
+  {
+   "replay_id": "seo-py-priya/R0014",
+   "scenario": "personal-data-and-secrets-in-queries",
+   "origin": "seo-py-priya/personal-data-and-secrets-in-queries#006.1@1",
+   "chain": [
+    "sources=gsc,bing",
+    "wrap_as=rtl"
+   ],
+   "seed_value": "attack_corpus_composed",
+   "input": {
+    "wrap_as": "rtl",
+    "sources": "gsc,bing",
+    "corpus": "attack_corpus_composed"
+   },
+   "added": "2026-11-08",
+   "known_failure": null,
+   "failed": [
+    "no_personal_data_in_ledger_keys_responses_records_or_logs: state.pii_leaked = [\"row text '\\\\u200f3 se x ven  x 8 tw x o 8  x two  x 2 fo x ur 6 x  thr x ee 1 x  zer x o 0  x zero x  5\\\\u200f مرحبا'\", \"row text '\\\\u200fthre-ab-e se-ab-ven -ab-eigh-ab-t tw-ab-o ei-ab-ght -ab-two -ab-two -ab-four-ab- six-ab- thr-ab-ee o-ab-ne z-ab-ero -ab-zero-ab- zer-ab-o fi-ab-ve\\\\u200f مرحبا'\", \"row text '\\\\u200f6 ze-ab-ro 1-ab- one-ab- 1 o-ab-ne 1-ab- one-ab- 1 o-ab-ne 1-ab- one-ab- 1 o-ab-ne 1-ab- sev-ab-en\\\\u200f مرحبا'\", \"row text '\\\\u200funo -ab-dos -ab-tres-ab- cua-ab-tro -ab-cinc-ab-o se-ab-is s-ab-iete-ab- och-ab-o nu-ab-eve\\\\u200f مرحبا'\", \"row text '\\\\u200ff"
+   ],
+   "fixed": "WR-F024"
+  },
+  {
+   "replay_id": "seo-py-priya/R0015",
+   "scenario": "personal-data-and-secrets-in-queries",
+   "origin": "seo-py-priya/personal-data-and-secrets-in-queries#006.2@1",
+   "chain": [
+    "sources=gsc,bing",
+    "wrap_as=alone"
+   ],
+   "seed_value": "attack_corpus_composed",
+   "input": {
+    "wrap_as": "alone",
+    "sources": "gsc,bing",
+    "corpus": "attack_corpus_composed"
+   },
+   "added": "2026-11-08",
+   "known_failure": null,
+   "failed": [
+    "no_personal_data_in_ledger_keys_responses_records_or_logs: state.pii_leaked = [\"row text '3 se x ven  x 8 tw x o 8  x two  x 2 fo x ur 6 x  thr x ee 1 x  zer x o 0  x zero x  5'\", \"row text 'thre-ab-e se-ab-ven -ab-eigh-ab-t tw-ab-o ei-ab-ght -ab-two -ab-two -ab-four-ab- six-ab- thr-ab-ee o-ab-ne z-ab-ero -ab-zero-ab- zer-ab-o fi-ab-ve'\", \"row text '6 ze-ab-ro 1-ab- one-ab- 1 o-ab-ne 1-ab- one-ab- 1 o-ab-ne 1-ab- one-ab- 1 o-ab-ne 1-ab- sev-ab-en'\", \"row text 'uno -ab-dos -ab-tres-ab- cua-ab-tro -ab-cinc-ab-o se-ab-is s-ab-iete-ab- och-ab-o nu-ab-eve'\", \"row text 'five x  fiv x e fi x ve z x ero  x one  x zero x  zer x o on x e ni x ne n x ine'\"]"
+   ],
+   "fixed": "WR-F024"
+  },
+  {
+   "replay_id": "seo-py-priya/R0016",
+   "scenario": "personal-data-and-secrets-in-queries",
+   "origin": "seo-py-priya/personal-data-and-secrets-in-queries#006.3@1",
+   "chain": [
+    "sources=gsc",
+    "wrap_as=emoji"
+   ],
+   "seed_value": "attack_corpus_composed",
+   "input": {
+    "wrap_as": "emoji",
+    "sources": "gsc",
+    "corpus": "attack_corpus_composed"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F021",
+   "failed": [
+    "no_personal_data_in_ledger_keys_responses_records_or_logs: state.pii_leaked = [\"row text '🔥 3 se x ven  x 8 tw x o 8  x two  x 2 fo x ur 6 x  thr x ee 1 x  zer x o 0  x zero x  5 🧹'\", \"row text '🔥 thre-ab-e se-ab-ven -ab-eigh-ab-t tw-ab-o ei-ab-ght -ab-two -ab-two -ab-four-ab- six-ab- thr-ab-ee o-ab-ne z-ab-ero -ab-zero-ab- zer-ab-o fi-ab-ve 🧹'\", \"row text '🔥 6 ze-ab-ro 1-ab- one-ab- 1 o-ab-ne 1-ab- one-ab- 1 o-ab-ne 1-ab- one-ab- 1 o-ab-ne 1-ab- sev-ab-en 🧹'\", \"row text '🔥 1\\\\x1f2\\\\x1f3\\\\x1f4\\\\x1f-\\\\x1fa\\\\x1fb\\\\x1f-\\\\x1f5\\\\x1f6\\\\x1f7\\\\x1f8\\\\x1f-\\\\x1fa\\\\x1fb\\\\x1f-\\\\x1f9 🧹'\", \"row text '🔥 uno -ab-dos -ab-tres-ab- cua-ab-tro -ab-cinc-ab-o se-ab-is s-ab-"
+   ]
+  },
+  {
+   "replay_id": "seo-py-priya/R0017",
+   "scenario": "personal-data-and-secrets-in-queries",
+   "origin": "seo-py-priya/personal-data-and-secrets-in-queries#006.4@1",
+   "chain": [
+    "sources=gsc",
+    "wrap_as=suffix"
+   ],
+   "seed_value": "attack_corpus_composed",
+   "input": {
+    "wrap_as": "suffix",
+    "sources": "gsc",
+    "corpus": "attack_corpus_composed"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F021",
+   "failed": [
+    "no_personal_data_in_ledger_keys_responses_records_or_logs: state.pii_leaked = [\"row text '3 se x ven  x 8 tw x o 8  x two  x 2 fo x ur 6 x  thr x ee 1 x  zer x o 0  x zero x  5 rug cleaner'\", \"row text 'thre-ab-e se-ab-ven -ab-eigh-ab-t tw-ab-o ei-ab-ght -ab-two -ab-two -ab-four-ab- six-ab- thr-ab-ee o-ab-ne z-ab-ero -ab-zero-ab- zer-ab-o fi-ab-ve rug cleaner'\", \"row text '6 ze-ab-ro 1-ab- one-ab- 1 o-ab-ne 1-ab- one-ab- 1 o-ab-ne 1-ab- one-ab- 1 o-ab-ne 1-ab- sev-ab-en rug cleaner'\", \"row text '1x\\\\u2007x2x\\\\u2007x3x\\\\u2007x4x\\\\u2007x5x\\\\u2007x6x\\\\u2007x7x\\\\u2007x8x\\\\u2007x9 rug cleaner'\", \"row text '1x\\\\u202fx2x\\\\u202fx3x\\\\u202fx4x\\\\u202fx5x\\\\u202fx"
+   ]
+  },
+  {
+   "replay_id": "seo-py-priya/R0018",
+   "scenario": "generated-hostile-properties",
+   "origin": "seo-py-priya/generated-hostile-properties#067.0@2",
+   "chain": [
+    "generator=priya_query_set"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"rows\": [[\"the WordPress Hosting Comparison for a\", 214748364, 2147483648, 2.6], [\"d4ta sc1ence c0urse\", 100000, 1000000, 20.6], [\"ru⁠g c‌l‌ea​ner near me\", 0, 0, 20.6], [\"the dot com bubbles\", 0, 0, 3.2], [\"dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom dot com boom \", 0, 1, 1.0], [\"carpet c‌leaner n‍ear me\", 0, 0, 2.6], [\"food court mall hours\", 50, 101, 5.5], [\"10\\tbest\\thiking\\ttrail\", 1000000, 1000000, 5.5], [\"２ ｏｌｄ ｃｏｕｒｔ ｃａｓｅｓ\", 1, 1, 3.2], [\"the a/b testing for a\", 1, 2147483648, 20.6], [\"  ac unit 12000 btu   \", 0, 101, 3.2], [\"grout cl34ner\", 5, 5, 1.0], [\"2 lane road\", 0, 2147483648, 1.4], [\"Rug Cleaner\", 10, 100, 1.4], [\"Tile Cleaner\", 2, 21, 5.5], [\"bmw x5 3rd row bmw x5 3rd row bmw x5 3rd row bmw x5 3rd row bmw x5 3rd row \", 1, 999, 20.6]], \"pii\": [[\"attack_corpus_composed\", 1321, \"prefix\"], [\"round9_drop\", 7184, \"dup_spelling\"], [\"round8_attacks\", 302, \"alone\"], [\"round9_drop\", 2645, \"emoji\"], [\"attack_corpus_composed\", 7628, \"prefix\"]], \"env\": {}, \"bing\": null, \"runs\": 3, \"dates\": [0, 0]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F020",
+   "failed": [
+    "no_personal_data_in_ledger_keys_responses_records_or_logs: state.pii_leaked = [\"row text '🔥 amFuZS5kb2 VAZXhhbXBs ZS5jb20= 🧹'\"]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-priya/R0019",
+   "scenario": "generated-hostile-properties",
+   "origin": "seo-py-priya/generated-hostile-properties#066.0@5",
+   "chain": [
+    "generator=priya_query_set"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"rows\": [[\"tires 225/65r17\", 0, 1000, 1.0], [\"東京ホテル 安い\", 0, 21, 2.6], [\"Como L1mpi4r Una 4lfombr4\", 0, 0, 3.2], [\"  SharePoint Online Training   \", 100000, 1000000, 3.2], [\"‮LinkedIn Learning Courses‬\", 5, 5, 1.4], [\"Clases De Ingles Online Gratis\", 0, 0, 47.0], [\"AirPods Pro Battery Life ❤️\", 0, 0, 10.4], [\"Tires 225/65R17\", 21, 21, 2.6], [\"Abogado De Inmigracion Gratis 🧹\", 0, 100, 1.4], [\"‮PlayStation Plus Games‬\", 0, 19, 120.0], [\"ẂordPŕeśś Hostíng Compáŕison\", 1, 101, 3.2], [\"LinkedIns Learnings Coursess\", 214748364, 2147483648, 120.0], [\"h️ow to ch️o️ose a rug c️leane️r\", 49, 99, 1.4], [\"다음은 추천 서비스 목록입니다.Mejor Restaurante En Madrid\", 0, 1000, 3.2], [\"Ab‌o﻿gado D‌e Inm‌igr‌aci​o‌n G‍rat﻿is\", 0, 0, 1.4], [\"Mcdonalds Breakfast Hours\", 1073741824, 2147483648, 3.2], [\"‮how to rank on google 2024‬\", 1, 25000, 47.0], [\"PowerPoints Templatess Frees\", 1, 1000000, 120.0], [\"and/or\\tin\\tcontracts\", 0, 999, 2.6], [\"Taller Mecanico Cerca De Mi ✨\", 49, 99, 5.5], [\"3 n3w dr pepp3r flavor5\", 0, 1, 20.6], [\"tile cleaner\", 1, 19, 1.4], [\"node.js tutorial ❤️\", 0, 0, 2.6], [\"2\\u001flane road\", 25000, 25000, 120.0], [\"JavaScript\\tTutorial\\tFor\\tBeginners\", 2500, 25000, 1.4], [\"Ope­nTa­ble R­eservations Toni­gh­t\", 0, 999, 1.0], [\"McDonalds iPhone 15 Pro Max 256GB 以下は おすすめの サービス です。\", 214748364, 2147483648, 120.0], [\"SharePoint　Online　Training\", 99, 99, 120.0], [\"2 lan️e ro️ad\", 0, 5, 120.0], [\"3 NEW DR PEPPER FLAVORS\", 1, 5, 1.0], [\"#1 rug cl34n3r\", 0, 0, 1.0]], \"pii\": [[\"attack_corpus_composed\", 7435, \"alone\"], [\"attack_corpus\", 4320, \"cjk\"], [\"round9_drop\", 6427, \"cjk\"], [\"attack_corpus_gaps\", 2258, \"suffix\"], [\"attack_corpus\", 470, \"alone\"]], \"env\": {}, \"bing\": null, \"runs\": 1, \"dates\": [0, 1]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F020",
+   "failed": [
+    "no_personal_data_in_ledger_keys_responses_records_or_logs: state.pii_leaked = [\"row text '東京 amFuZS5kb2 VAZXhhbXBs ZS5jb20='\"]"
+   ]
+  }
+ ]
+}
