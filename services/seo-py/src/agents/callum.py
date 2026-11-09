@@ -43,7 +43,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-import unicodedata
 from collections.abc import Callable
 from datetime import timedelta
 from urllib.parse import unquote, urljoin, urlunsplit
@@ -303,81 +302,36 @@ def url_has_secret(url: str | None) -> bool:
     return secret_guard.url_has_secret(url)
 
 
-_SSN = re.compile(r"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)")
-_PHONE = re.compile(r"(?<!\d)(?:\+?\d{1,3}[\s.\-]?)?\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4}(?!\d)|\+\d{10,15}(?!\d)")
-# E.164, any country code: "+" then 7-15 digits, single spaces / dots / dashes / brackets allowed between digits
-_E164 = re.compile(r"(?<![\d+])\+[1-9](?:[\s.\-()]{0,2}\d){6,14}(?!\d)")
-# an e-mail address needs an alphabetic top-level domain (jsDelivr's ``pkg@1.2.3`` is a package version, not one)
-_EMAIL_SEG = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,24}(?![A-Za-z0-9-])")
-_CARD = re.compile(r"(?<!\d)(?:\d[ \-]?){12,18}\d(?!\d)")
-
-
-def _luhn(digits: str) -> bool:
-    total = 0
-    for i, c in enumerate(reversed(digits)):
-        d = int(c)
-        if i % 2:
-            d = d * 2 - 9 if d > 4 else d * 2
-        total += d
-    return total % 10 == 0
-
-
-def _segment_personal(seg: str) -> str | None:
-    """One path segment's personal data: an e-mail or IP (the prompt guard), or a number only when it is shaped like
-    a phone number, an SSN or a payment card (13-19 digits passing Luhn); a date or an id is not."""
-    forms = secret_guard.decodings(seg)
-    x = forms[-1]
-    if any(_E164.search(f) for f in forms):
-        return "number"                                   # an international phone number, any country code
-    xr = _separator_reading(x)
-    kind = personal_data(x) or personal_data(xr)
-    if kind == "email":
-        return "email" if _EMAIL_SEG.search(x) else None
-    if kind == "ip":
-        return kind
-    if kind is None:
-        return None
-    for form in (x, xr):
-        if _SSN.search(form) or _PHONE.search(form):
-            return "number"
-        for m in _CARD.finditer(form):
-            d = re.sub(r"\D", "", m.group(0))
-            if 13 <= len(d) <= 19 and _luhn(d) and (len(d) in (15, 16) or m.group(0) != d):
-                return "number"
-    return None
-
-
 def stored_url(url: str | None) -> dict | None:
-    """What a row keeps of a URL: scheme, host and path (query and fragment dropped), bounded; a path that looks like
-    personal data is withheld."""
+    """What a row keeps of a URL (ADR 0050 v2): scheme, host and only the path segments that pass the shared core's
+    checks on their own; query and fragment never kept. A failing segment becomes ``{secret}`` (a credential check)
+    or ``{withheld}`` (personal data: a long digit run, an e-mail, an IP address); a failing host label withholds the
+    whole URL. Bounded."""
     if not url:
         return None
     p = split_url(url)
-    if p is None or not p.hostname:
+    u = secret_guard.inspect_url(url) if p is not None else None
+    if u is None or not u["host"]:
         return {"url": None, "host": None, "query_dropped": False, "withheld": "UNREADABLE"}
-    path = p.path or "/"
-    withheld = None
-    segs = path.split("/")
-    bad, _ = secret_guard.url_secret_segments(url)
-    if bad:
-        # WR-F013: a secret-shaped path segment is replaced, never kept; host and the other segments stay (the
-        # allowed shapes — commit SHAs on code hosts, hashed asset names, document ids, shorteners — are kept)
-        path, withheld = "/".join("{secret}" if i in bad else x for i, x in enumerate(segs)), "SECRET_REDACTED"
-    # final review: only the OFFENDING segment is withheld, and a date or a numeric / alphanumeric id (DOI, arXiv,
-    # item ids, status ids, question ids, news date paths) is not personal data unless the phone / SSN / card shapes
-    # fire. An e-mail or an IP address anywhere in the path still withholds the whole path.
-    segs = path.split("/")
-    pii = [i for i, x in enumerate(segs) if x and _segment_personal(x)]
-    if pii:
-        path = "/".join("{withheld}" if i in pii else x for i, x in enumerate(segs))
-        withheld = withheld or "PERSONAL_DATA"
-    whole = personal_data(unquote(path))
-    if whole == "ip" or (whole == "email" and _EMAIL_SEG.search(unquote(path))):
-        path, withheld = "/{withheld}", "PERSONAL_DATA"
-    host = p.hostname.lower()[:253]
-    netloc = host if p.port in (None, 80, 443) else f"{host}:{p.port}"
-    kept = urlunsplit((p.scheme.lower(), netloc, path, "", ""))[:URL_MAX]
-    return {"url": kept, "host": host, "query_dropped": bool(p.query or p.fragment), "withheld": withheld}
+    dropped = bool(p.query or p.fragment)
+    if u["host_kind"] is not None:
+        return {"url": None, "host": None, "query_dropped": dropped,
+                "withheld": "SECRET_REDACTED" if u["host_kind"] == secret_guard.CREDENTIAL else "PERSONAL_DATA"}
+    segs = []
+    kinds = set()
+    for seg, kind in u["segments"]:
+        if kind is None and seg and personal_data(unquote(seg)) == "ip":
+            kind = secret_guard.PERSONAL
+        kinds.add(kind)
+        segs.append(secret_guard.URL_PLACEHOLDER[kind] if kind else seg)
+    path = "/".join(segs) or "/"
+    withheld = ("SECRET_REDACTED" if secret_guard.CREDENTIAL in kinds
+                else "PERSONAL_DATA" if secret_guard.PERSONAL in kinds else None)
+    host = u["host"][:253]
+    h = f"[{host}]" if ":" in host else host            # an IPv6 literal keeps its brackets (a readable URL)
+    netloc = h if u["port"] in (None, 80, 443) else f"{h}:{u['port']}"
+    kept = urlunsplit((u["scheme"], netloc, path, "", ""))[:URL_MAX]
+    return {"url": kept, "host": host, "query_dropped": dropped, "withheld": withheld}
 
 
 def _hop_hosts(redirects) -> list:
@@ -497,45 +451,49 @@ def classify_citation(url: str, domain: str, competitors: list, res: dict) -> di
             "competitor": comp}
 
 
-_BASE_SEPARATORS = frozenset("().+/,_-")
-_X_BETWEEN = re.compile(r"(?<=\d)[xX](?=\d)")
+# characters checked around the kept span, widened to whole words: BEFORE it, a credential label whose value starts
+# inside the span (``the password for the admin account is`` + value) or a key cut by the left edge; AFTER it, a key
+# cut by the right edge (or split by spaces across it)
+EXCERPT_MARGIN = 48
+EXCERPT_MARGIN_AFTER = 24
 
 
-def _separator_reading(text: str) -> str:
-    """The text with every Unicode punctuation / symbol / separator the base personal-data screen does not already
-    read as a separator (``•`` ``·`` ``|`` ``:`` ``*`` ``#`` …) read as a space, and ``x``/``X`` between two digits as
-    a space, so a phone / card / SSN written with an unusual separator is still seen (TNZ separator screen, upstreamed)."""
-    out = []
-    for c in text or "":
-        cat = unicodedata.category(c)
-        if c not in _BASE_SEPARATORS and not c.isspace() and cat[0] in "PSZ" and cat not in ("Pd", "Pc"):
-            out.append(" ")
-        else:
-            out.append(c)
-    return _X_BETWEEN.sub(" ", "".join(out))
-
-
-def personal_or_separator(text: str) -> str | None:
-    """Personal data on the text as written, else on its Unicode-separator reading."""
-    if not text:
+def _withheld_code(name: str | None) -> str | None:
+    """The row's ``withheld`` code for a failing check of the shared core (ADR 0050 v2)."""
+    if name is None:
         return None
-    return personal_data(text) or personal_data(_separator_reading(text))
+    if name == "e_digits":
+        return "personal_data:number"
+    if name == "f_email":
+        return "personal_data:email"
+    if name == "url_personal":
+        return "personal_data:url"
+    return "credential"
+
+
+def field_check(text) -> str | None:
+    """Callum's one screen for any text it keeps: the shared core's checks (credentials, card / SSN / phone numbers
+    through check (e), e-mail through (f)), plus an IP address by the prompt guard. The ``withheld`` code or None."""
+    code = _withheld_code(secret_guard.check(text))
+    if code is None and isinstance(text, str) and personal_data(text) == "ip":
+        code = "personal_data:ip"
+    return code
 
 
 def _safe_hint(hint) -> str | None:
-    """A cited engine's unverified hint/title: credentials redacted, then withheld entirely if it reads as personal
-    data (by the base screen or the Unicode-separator reading)."""
+    """A cited engine's unverified hint / title: kept only when the WHOLE hint is clearly safe, then bounded;
+    otherwise dropped (never cut)."""
     if not isinstance(hint, str):
         return None
-    red = secret_guard.redact_text(hint[:253])[0]
-    return None if personal_or_separator(red) is not None else red
+    return None if field_check(hint) is not None else hint[:253]
 
 
 def excerpt(text: str, terms: list) -> dict:
     """A short span of the answer for the drill-down: around the first brand mention, else the answer's opening.
-    Bounded, marked untrusted (envelope.observed), and withheld when it looks like personal data."""
-    # WR-F012: secrets are redacted from the whole answer BEFORE a span is chosen, so a cut key never survives
-    t, redacted = secret_guard.redact_text(" ".join((text or "").split()))
+    Bounded and marked untrusted (envelope.observed). ADR 0050 v2: the span AND ``EXCERPT_MARGIN`` characters on each
+    side are checked; if anything fails, the whole excerpt is withheld (``[withheld]`` for a credential, no excerpt
+    for personal data). Nothing is cut out of it."""
+    t = " ".join((text or "").split())
     basis, start = "answer_opening", 0
     for term in terms:
         m = re.search(r"(?<!\w)" + re.escape(term) + r"(?!\w)", t, re.IGNORECASE)
@@ -543,13 +501,18 @@ def excerpt(text: str, terms: list) -> dict:
             basis, start = "brand_mention", m.start()
     lo = max(0, start - 60) if basis == "brand_mention" else 0
     span = t[lo:lo + EXCERPT_MAX]
-    kind = personal_or_separator(span)
-    if kind is not None:
-        return {"basis": basis, "excerpt": None, "withheld": f"personal_data:{kind}"}
-    out = {"basis": basis, "excerpt": observed(span, EXCERPT_MAX), "withheld": None}
-    if redacted:
-        out["secret_redacted"] = True
-    return out
+    a, b = max(0, lo - EXCERPT_MARGIN), lo + EXCERPT_MAX + EXCERPT_MARGIN_AFTER
+    while a > 0 and not t[a - 1].isspace():
+        a -= 1                                       # whole words: a key cut by the margin edge is read whole
+    while b < len(t) and not t[b].isspace():
+        b += 1
+    code = field_check(t[a:b]) or field_check(span)
+    if code == "credential":
+        return {"basis": basis, "excerpt": observed(secret_guard.WITHHELD, EXCERPT_MAX), "withheld": code,
+                "secret_redacted": True}
+    if code is not None:
+        return {"basis": basis, "excerpt": None, "withheld": code}
+    return {"basis": basis, "excerpt": observed(span, EXCERPT_MAX), "withheld": None}
 
 
 def prompt_id(ps: dict, pi: int) -> str:

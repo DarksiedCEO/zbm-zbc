@@ -98,7 +98,7 @@ def _obfuscate(secret, how, rng):
     if how == "fullwidth":
         return "".join(chr(ord(c) + 0xFEE0) if "!" <= c <= "~" else c for c in secret)
     if how == "invisible":
-        return "​".join(secret)
+        return "\u200b".join(secret)
     if how == "linebreak":
         mid = len(secret) // 2
         return secret[:mid] + "\n" + secret[mid:]

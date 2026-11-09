@@ -1,336 +1,839 @@
 """
-Secret-shaped text and URLs in provider output (WR-F012, WR-F013; ADR 0046 B5 / B9). Callum keeps bounded excerpts of
-answer text and the URLs an engine cited; neither may ever carry a credential, the engine's own API key included. This
-module is ONE rule table with TWO entry points:
+Shared redaction core v2 for the SEO department (ADR 0050 v2, superseding the v1 text): WITHHOLD THE WHOLE FIELD UNLESS IT
+IS CLEARLY SAFE. Every field bound for storage, a log or client output (answer excerpts, titles, hints, candidate
+names, URL hosts / path segments / query pairs, any string swept by ``guard_record``) is
 
-  ``redact_text(text) -> (redacted_text, count)``  STABLE PUBLIC ENTRY POINT for any free text (answer excerpts, titles,
-                                                    hints; TNZ, PR #53, calls it): every secret-shaped span is replaced
-                                                    by ``[redacted]``; a URL written in the text that carries a secret
-                                                    is replaced whole. Never raises; ``("", 0)`` for empty input.
-  ``url_secret_segments(url) -> (bad, other)``      for a cited URL: the path-segment indexes to replace, and whether
-                                                    the query, fragment or user part carries one. ``url_has_secret``
-                                                    is the yes/no form; a URL that has one is never fetched.
+  1. NORMALISED for inspection (``views``): NFKC; Cf / Cc / Mn / Me / Co / Cn code points, variation selectors, tag
+     characters and Hangul fillers removed; every Unicode space or line / paragraph separator read as one space;
+     markdown emphasis, backticks and tags stripped; bounded decoding (percent up to ``PERCENT_ROUNDS`` rounds, HTML
+     entities, ``\\uXXXX`` / ``\\xXX`` escapes, base64- and hex-looking runs) for INSPECTION ONLY;
+  2. SAFE-CHECKED on every view (``check``): (a) no credential label word from the closed multilingual list,
+     (b) no ``scheme://user:pass@``, (c) no known strong-key prefix, (d) no long random-looking token, (e) no run of
+     9+ digits through separators, (f) no e-mail address. The small safe-shape allowlist (UUID, ISBN, EAN-13, Amazon
+     order id, ISO-8601 date-time, a commit SHA after the word "commit") is in ADR 0050 v2;
+  3. WITHHELD WHOLE when any check fails: the text becomes ``[withheld]`` (a URL keeps scheme, host and the path
+     segments that pass on their own). Nothing is ever cut out of the middle of a string.
 
-STRONG rules (``PROVIDERS`` below, plus labelled credentials and the AWS secret format) run on EVERY text, every URL
-segment, query key and value, fragment and user part, after EVERY decode round, with NO host or shape exemption. Host
-and URL-shape exemptions may only suppress the WEAK generic heuristics (mixed hex runs, high-entropy tokens).
+Inputs over ``MAX_INPUT`` characters are withheld unread. Every step is linear in the input. The original text is
+returned unchanged when it passes: normalised / decoded views are never emitted.
 
-Decoding: each input is checked as written and after each round of percent-decoding (until stable, at most
-``DECODE_ROUNDS``) and HTML-entity decoding; a key found after any round is a secret (redacted, never fetched).
-
-Prefixes match glued to any non-alphanumeric character (``tok-eyJ...``, ``x_ghp_...``, ``.AKIA...``), never inside a
-word. The AWS secret-access-key format is any 40-character run of ``[A-Za-z0-9/+]`` bounded by characters outside that
-class with at least one digit, one upper-case and one lower-case letter; in a URL path the run may cross ``/``
-segment boundaries, so the whole decoded path is scanned for 40-character windows aligned to segment or punctuation
-boundaries. Its cost (ordinary paths that happen to fit) is measured in tests (``test_callum.py``).
-
-NOTE for later unification: Priya's search-query classifier (PR #50, ``agents/search_performance.py``) applies close
-rules to search queries; the two should be merged into this one table when both land.
+Public entry points (names kept from v1 so callers do not break):
+  ``redact_text(text) -> (text or "[withheld]", findings)``   ``is_clearly_safe(text) -> bool``
+  ``safe_url(url) -> str``   ``url_secret_segments(url) -> (bad indexes, other)``   ``url_has_secret(url) -> bool``
+  ``guard_record(obj)``: fail-closed recursive sweep (dict keys and values, lists, tuples, sets, bytes, objects).
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
 import html
-import math
 import re
 import unicodedata
-from collections import Counter
 from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
 
-REDACTED = "[redacted]"
-DECODE_ROUNDS = 4
-GUARD_MAX_DEPTH = 8
+import lookalikes
 
-# Zero-width, bidi-control, word-joiner, BOM, soft hyphen, Mongolian vowel separator: stripped before matching so a key
-# split by an invisible character (``AK​IA…``) or wrapped in bidi overrides is matched as written (threat list:
-# obfuscations / invisible-char splits).
-_INVISIBLE = re.compile("[​-‏‪-‮⁠-⁤⁦-⁯﻿­᠎]")
+WITHHELD = "[withheld]"
+REDACTED = WITHHELD                      # v1 name; same marker
+MAX_INPUT = 65536                        # characters; a longer field is withheld unread
+URL_MAX_INPUT = 8192                     # characters; a longer URL is withheld unread (real citation URLs are short)
+PERCENT_ROUNDS = 3
+DECODE_RUNS_MAX = 64                     # base64 / hex runs decoded per view
+DECODE_RUN_MAX = 4096                    # characters of one run decoded
+GUARD_MAX_DEPTH = 16
+GUARD_MAX_NODES = 200000
+CHECKS = ("a_label", "b_userinfo", "c_prefix", "d_token", "e_digits", "f_email", "url_credential", "url_personal")
+
+# ------------------------------------------------------------------------------------------------ 1. normalise
+
+_FOLD = lookalikes.Table()
+_HANGUL_FILLERS = frozenset("\u115f\u1160\u3164\uffa0")
+_BLANKS = frozenset("\u2800\u180e")                       # braille blank, Mongolian vowel separator: read as space
+_DROP_CATS = frozenset(("Cf", "Cc", "Mn", "Me", "Co", "Cn", "Cs"))
+_CMAP: dict = {}
+_CMAP_MAX = 20000
 
 
-def _strip_invisible(s: str) -> str:
-    return _INVISIBLE.sub("", s or "")
+_MAP_SPACES = True
+
+
+def _map_char(c: str) -> str:
+    r = _CMAP.get(c)
+    if r is not None:
+        return r
+    if _MAP_SPACES and (c.isspace() or c in _BLANKS or unicodedata.category(c) in ("Zs", "Zl", "Zp")):
+        r = " "                                            # every Unicode space, line / paragraph separator, NEL
+    elif c in _HANGUL_FILLERS:
+        r = ""                                             # Hangul fillers (letters by category, invisible in use)
+    elif unicodedata.category(c) in _DROP_CATS:
+        # Cf format (zero-width, bidi, BOM, soft hyphen, TAG characters U+E0000-E007F), Cc control, Mn / Me marks
+        # (combining grapheme joiner U+034F, VARIATION SELECTORS U+FE00-FE0F and U+E0100-E01EF), Co private use,
+        # Cn unassigned, Cs surrogates
+        r = ""
+    else:
+        r = c
+    if len(_CMAP) < _CMAP_MAX:
+        _CMAP[c] = r
+    return r
+
+
+_SPACES = re.compile(r" {2,}")
+
+
+def _nfkc(t: str) -> str:
+    return unicodedata.normalize("NFKC", t)
+
+
+class _CharTable(dict):
+    """``str.translate`` table filled on first use of each code point (bounded): one C-speed pass per text."""
+
+    def __missing__(self, o: int) -> str:
+        r = _map_char(chr(o))
+        if len(self) < _CMAP_MAX:
+            self[o] = r
+        return r
+
+
+_TABLE = _CharTable()
+
+
+def _map_chars(t: str) -> str:
+    return t.translate(_TABLE)
+
+
+def _collapse(t: str) -> str:
+    return _SPACES.sub(" ", t).strip()
+
+
+def _clean(text: str) -> str:
+    """Step 1 without decoding: NFKC, the per-character map (spaces, invisibles, joiners, controls), NFKC again (a
+    removed joiner can let characters compose), runs of spaces collapsed."""
+    t = _nfkc(text)
+    if not t.isascii() or any(c < " " or c == "\x7f" for c in t):
+        t = _nfkc(_map_chars(t))
+    return _collapse(t)
 
 
 def normalise(text: str) -> str:
-    """NFKC fold (fullwidth / compatibility forms become ASCII) after invisible / bidi characters are stripped, so a
-    fullwidth or invisible-split key is matched by the same ASCII rules (threat list: NFKC, invisible-char splits)."""
-    return unicodedata.normalize("NFKC", _strip_invisible(text))
-
-# --------------------------------------------------------------------------------------------- the strong rule table
-# (provider, documented key shape). Glued after any non-alphanumeric character: the lookbehind is "not a letter or
-# digit", so "-", "_", "." and "/" before a prefix all match. Each entry is a documented format (provider docs /
-# secret-scanning partner formats); the generic ``sk-`` family additionally needs a digit and an upper-case letter so a
-# lower-case slug such as ``sk-ii-facial-essence`` is not a key.
-PROVIDERS = (
-    ("aws_access_key_id", r"(?:AKIA|ASIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|APKA|ABIA|ACCA)[A-Z0-9]{16}"),
-    ("openai_anthropic", r"sk-(?:proj-|svcacct-|admin-|ant-(?:api|admin)\d\d-)?[A-Za-z0-9_\-]{20,}"),
-    ("github", r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})"),
-    ("stripe", r"(?:(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{10,}|whsec_[A-Za-z0-9]{20,})"),
-    # Slack: bot/user/app/legacy/config tokens (``xox[a-z]-``, any letter), plus the refresh forms ``xoxe.xox[a-z]-``
-    # and ``xoxe-<digits>-`` (threat list: xox[a-z]- and refresh form)
-    ("slack", r"(?:xoxe\.xox[a-z]-[A-Za-z0-9\-]{10,}|xoxe-\d+-[A-Za-z0-9\-]{10,}|xox[a-z]-[A-Za-z0-9\-]{10,})"),
-    ("google_api", r"AIza[0-9A-Za-z_\-]{30,}"),
-    ("perplexity", r"pplx-[A-Za-z0-9]{16,}"),
-    ("gitlab", r"glpat-[A-Za-z0-9_\-]{20,}"),
-    ("npm", r"npm_[A-Za-z0-9]{30,}"),
-    ("huggingface", r"hf_[A-Za-z0-9]{30,}"),
-    ("sendgrid", r"SG\.[A-Za-z0-9_\-]{16,}\.[A-Za-z0-9_\-]{16,}"),
-    ("jwt", r"eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}"),
-)
-_PREFIX = re.compile(r"(?<![A-Za-z0-9])(?:" + "|".join(f"(?P<{n}>{rx})" for n, rx in PROVIDERS) + ")")
-# GLUE forms: the same fixed-prefix shapes with NO leading boundary, so a key glued to a word or to capital letters
-# (``internalAKIAIOSFODNN7EXAMPLE``, ``tokenAIza…``, ``configsk-ant-…``) is still caught (threat list: glued to
-# words/capitals). The ``sk-`` family keeps its ``_prefix_ok`` gate even when glued, so a lower-case slug is not a key.
-_GLUE = re.compile("(?:" + "|".join(f"(?P<{n}>{rx})" for n, rx in PROVIDERS) + ")")
-# labelled credentials: ANY value >=6 characters after a credential label and a separator (threat list: labelled
-# credentials). The label word (two-word labels with a space/underscore/dash allowed: ``api key``, ``access code``),
-# optionally wrapped in a dotted/dashed identifier (``X_API_KEY``, ``db.password``), including common non-English
-# labels. No "tokenish" gate when the separator is explicit (``:`` ``=`` ``->`` ``→`` ``—`` `` is `` `` - ``); prose
-# ("the key takeaway", "password protection") has no such separator so it stays.
-_CRED_WORD = (
-    r"api[ _\-]?keys?|apikey|secret[ _\-]?keys?|client[ _\-]?secret|access[ _\-]?(?:tokens?|codes?|keys?)"
-    r"|refresh[ _\-]?tokens?|authorization|authorisation|x[ _\-]?api[ _\-]?key|x[ _\-]?goog[ _\-]?api[ _\-]?key"
-    r"|bearer|auth|passphrase|passcode|passwords?|passwd|pwd|pin|secrets?|tokens?|credentials?"
-    r"|session[ _\-]?id|cookie|keys?|contrase[nñ]a|mot[ _]de[ _]passe|cl[eé]|schl[uü]ssel|senha|clave|chiave"
-    r"|пароль|ключ|密码|密碼|金鑰|秘钥|パスワード|비밀번호")
-_LABEL = (r"(?i)(?<![A-Za-z0-9])(?:[A-Za-z0-9]{1,16}[_\-.]){0,3}(?:" + _CRED_WORD
-          + r")(?:[_\-.][A-Za-z0-9]{1,16}){0,2}(?![A-Za-z0-9])")
-_VALUE = r"([^\s\"'<>&,;\]\}]{6,512})"
-_SCHEME = r"(?:(?i:basic|bearer|token|digest)\s+)?"
-# explicit separator -> no shape gate (``password: consistency`` is treated as a credential)
-_NAMED = re.compile(_LABEL + r"[\"']?\s{0,4}(?:[:=]|->|→|—|\sis\s|\s-\s|：|＝)\s{0,4}[\"']?" + _SCHEME + _VALUE)
-# bare whitespace -> a token-shaped value only (``key product`` stays prose; ``key <token>`` is a credential)
-_NAMED_SPACE = re.compile(_LABEL + r"\s+" + _SCHEME + r"([A-Za-z0-9_\-+/=.~]{8,512})")
-_AWS_SECRET = re.compile(r"(?<![A-Za-z0-9/+])[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+])")
-# a 40-character ``[A-Za-z0-9/+]`` run (any shape, digits optional) when labelled with aws / secret / key within 40
-# characters before it: the no-digit AWS secret form (threat list: AWS secret keys incl. no-digit secrets)
-_AWS_SECRET_LABELLED = re.compile(r"(?i)(?:aws|secret|key|access)[^A-Za-z0-9/+]{0,40}?([A-Za-z0-9/+]{40})(?![A-Za-z0-9+])")
-# an AWS access key id written with one whitespace between every character (``A K I A I O S F ...``): must hold a digit
-_AWS_SPACED = re.compile(r"(?<![A-Za-z0-9])(?:A\sK\sI\sA|A\sS\sI\sA|A\sG\sP\sA|A\sI\sD\sA|A\sR\sO\sA|A\sI\sP\sA"
-                         r"|A\sN\sP\sA|A\sN\sV\sA|A\sB\sI\sA|A\sC\sC\sA)(?:\s[A-Z0-9]){16}(?![A-Za-z0-9])")
-# a PEM / PGP private-key block (any key type); an unterminated block is redacted to the end of its base64 body
-_PEM = re.compile(r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----"
-                  r"(?:[\s\S]*?-----END (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----|[A-Za-z0-9+/=\s]*)")
-_HEX = re.compile(r"[0-9a-fA-F]{16,}")
-_TOKEN = re.compile(r"[A-Za-z0-9_\-+/=~]{20,}")
-_PIECE = re.compile(r"[A-Za-z0-9+=~]{20,}")          # "/" splits: a path is not one token (AWS keys: their rule)
-_URL_IN_TEXT = re.compile(r"(?i)\b(?:https?://|www\.)[^\s<>\"'`]+")
+    """The inspection form of ``text``: NFKC, invisible / joiner / control code points removed, every Unicode space
+    and line break read as one space (step 1 of ADR 0050 v2). Never emitted."""
+    return _clean(text or "")
 
 
-def _entropy(s: str) -> float:
-    n = len(s)
-    return -sum(c / n * math.log2(c / n) for c in Counter(s).values()) if n else 0.0
+_TAG = re.compile(r"<[^<>]{0,256}>")
+_MD = re.compile(r"[*`~\\]")
 
 
-def _mixed(v: str) -> bool:
-    return any(c.isdigit() for c in v) and any(c.isalpha() for c in v)
+def _strip_markup(t: str) -> str:
+    """Markdown emphasis / backticks / escapes and HTML-like tags removed (inspection only)."""
+    return _MD.sub("", _TAG.sub("", t)) if ("<" in t or "*" in t or "`" in t or "~" in t or "\\" in t) else t
 
 
-def _aws_shape(tok: str) -> bool:
-    return any(c.isdigit() for c in tok) and any(c.isupper() for c in tok) and any(c.islower() for c in tok)
+_ESC = re.compile(r"\\u([0-9a-fA-F]{4})|\\x([0-9a-fA-F]{2})")
 
 
-def _space_value_ok(v: str) -> bool:
-    """A value after a bare-whitespace label is a credential only when token-shaped (a digit, or long, or mixed case):
-    ``key product`` stays prose; ``key <token>`` does not. Explicit separators need no such gate."""
-    return (any(c.isdigit() for c in v) or len(v) >= 16
-            or (len(v) >= 10 and any(c.isupper() for c in v) and any(c.islower() for c in v)))
+def _unescape(t: str) -> str:
+    return _ESC.sub(lambda m: chr(int(m.group(1) or m.group(2), 16)), t) if "\\" in t else t
 
 
-_SK_SUBPREFIX = re.compile(r"sk-(?:proj|svcacct|admin|ant)-")
+_B64_RUN = re.compile(r"[A-Za-z0-9+/_\-]{12,}={0,2}")
+_HEX_RUN = re.compile(r"(?:[0-9a-fA-F]{2}){8,}")
 
 
-def _prefix_ok(m: re.Match) -> bool:
-    if m.lastgroup == "openai_anthropic":
-        body = m.group(0)
-        # a recognised sub-prefix (``sk-proj-``, ``sk-ant-…``) is distinctive on its own; a bare ``sk-<body>`` still
-        # needs a digit and an upper-case letter so a lower-case slug (``sk-ii-facial-essence``) is not a key
-        return bool(_SK_SUBPREFIX.match(body)) or (any(c.isdigit() for c in body) and any(c.isupper() for c in body))
-    return True
+def _printable(b: bytes) -> str | None:
+    try:
+        s = b.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if not s:
+        return None
+    ok = sum(1 for c in s if c.isprintable() or c in "\n\t\r")
+    return s if ok >= 0.85 * len(s) else None
 
 
-def decodings(text: str) -> list:
-    """``text`` as written, then its normalised form (NFKC + invisible/bidi strip), then after each percent-decoding
-    round (until stable, at most DECODE_ROUNDS) with HTML-entity decoding, re-normalised each round: every distinct
-    form, in order. The deepest-decoded form is last."""
-    raw = text or ""
-    out = [raw]
-    seen = {raw}
-    cur = normalise(raw)
-    if cur not in seen:
-        out.append(cur)
-        seen.add(cur)
-    for _ in range(DECODE_ROUNDS):
-        nxt = normalise(html.unescape(unquote(cur))) if ("%" in cur or "&" in cur) else cur
-        if nxt == cur:
-            break
-        if nxt not in seen:
-            out.append(nxt)
-            seen.add(nxt)
-        cur = nxt
+def _decoded_runs(t: str) -> list:
+    """Base64- and hex-looking runs of ``t`` decoded (when they decode to readable text), for inspection only.
+    Bounded: at most ``DECODE_RUNS_MAX`` runs of at most ``DECODE_RUN_MAX`` characters each."""
+    out: list = []
+    n = 0
+    for rx in (_HEX_RUN, _B64_RUN):
+        for m in rx.finditer(t):
+            n += 1
+            if n > DECODE_RUNS_MAX:
+                return out
+            run = m.group(0)[:DECODE_RUN_MAX]
+            try:
+                if rx is _HEX_RUN:
+                    b = bytes.fromhex(run if len(run) % 2 == 0 else run[:-1])
+                else:
+                    body = run.rstrip("=").replace("-", "+").replace("_", "/")
+                    body = body[: len(body) - len(body) % 4] if len(body) % 4 == 1 else body
+                    b = base64.b64decode(body + "=" * (-len(body) % 4), validate=True)
+            except (ValueError, binascii.Error):
+                continue
+            s = _printable(b)
+            if s:
+                out.append(_clean(s))
     return out
 
 
-# a line break (or form feed / vertical tab) sitting between two token characters: removed for a second strong pass so
-# a key split across lines is rejoined (threat list: line-break splits). A normal space/tab is NOT removed here, so
-# ordinary word spacing is never collapsed (that would glue a key to the next word and hide its boundary); single
-# spaces between every character are handled by ``_AWS_SPACED``. Bounded: one substitution pass.
-_SPLIT = re.compile(r"(?<=[A-Za-z0-9+/=_.~\-])[\r\n\f\v]+(?=[A-Za-z0-9+/=_.~\-])")
+def views(text: str) -> list:
+    """Every inspection view of ``text`` (step 1): the normalised form, the markup-stripped form, each percent /
+    HTML-entity / escape decoding round (re-normalised), and the decoded base64 / hex runs of each. Distinct, in
+    order; bounded in number and size."""
+    base = _clean(text or "")
+    out = [base]
+    seen = {base}
+
+    def add(v: str) -> None:
+        if v not in seen:
+            seen.add(v)
+            out.append(v)
+    add(_strip_markup(base))
+    cur = base
+    for _ in range(PERCENT_ROUNDS):
+        nxt = _clean(_unescape(_entities(_percent(cur))))     # escapes read before markup strips the backslash
+        if nxt == cur:
+            break
+        add(nxt)
+        add(_strip_markup(nxt))
+        cur = nxt
+    for v in out.copy():
+        for d in _decoded_runs(v):
+            add(d)
+            add(_strip_markup(_clean(_entities(_percent(d)))))
+    return out
 
 
-def _deglued(text: str) -> str:
-    return _SPLIT.sub("", text)
+def _percent(t: str) -> str:
+    return unquote(t) if "%" in t else t
 
 
-def _deglue_map(text: str):
-    """The text with split-point whitespace removed, plus a list mapping each kept-character index back to its index in
-    the original (so a strong span of the deglued form maps to an original span). ``(text, None)`` when nothing splits."""
-    cuts = list(_SPLIT.finditer(text))
-    if not cuts:
-        return text, None
-    drop = set()
-    for m in cuts:
-        drop.update(range(*m.span()))
-    out, mp = [], []
-    for i, ch in enumerate(text):
-        if i not in drop:
-            out.append(ch)
-            mp.append(i)
-    return "".join(out), mp
+def _entities(t: str) -> str:
+    return html.unescape(t) if "&" in t else t
 
 
-def _aws_spaced_ok(s: str) -> bool:
-    return any(c.isdigit() for c in s)
+decodings = views                        # v1 name used by callers; same function
+
+# ------------------------------------------------------------------------------------------------ 2a. label words
+# The CLOSED multilingual credential-label list (ADR 0050 v2 section 2a). Three ways to match, all case-insensitive on a
+# confusable-folded, diacritic-stripped view:
+#   _JOINED  long labels found anywhere in the text with every non-letter removed, so "pass word", "pass_word",
+#            "p.a.s.s.w.o.r.d", "api key", "DB_PASSWORD", "userPassword", "mot de passe" all read as the label;
+#   _PIECES  short labels that must be a whole piece (pieces split at non-letters, camelCase and letter/digit
+#            boundaries): "pass" in "DB_PASS", "auth" in "authToken", "pin", "sid", "token", "secret", "cookie";
+#   _SCRIPT  labels in scripts without word spacing, matched as substrings of the letters-only view.
+_JOINED = (
+    "password", "passwd", "passcode", "passphrase", "apikey", "accesskey", "accesstoken", "authtoken",
+    "secretkey", "privatekey", "clientsecret", "sessionid", "accesscode", "securitycode", "sessiontoken", "seedphrase",
+    "recoveryphrase", "mnemonic", "credential", "connectionstring", "accountkey", "refreshtoken", "bearertoken",
+    "sharedaccesssignature", "contrasena", "motdepasse", "passwort", "kennwort", "senha", "wachtwoord", "losenord",
+    "adgangskode", "salasana", "haslo", "katasandi", "matkhau", "parolasi", "heslo", "jelszo", "lozinka",
+)
+_PIECES = frozenset((
+    "pass", "pwd", "pw", "pin", "secret", "secrets", "token", "tokens", "auth", "authorization", "authorisation",
+    "bearer", "cookie", "cookies", "sid", "passwords", "credentials", "apikeys", "sig", "sifre", "parola", "clave",
+    "chiave", "schlussel", "cle", "otp", "totp",
+))
+_SCRIPT = (
+    "\u043f\u0430\u0440\u043e\u043b",                      # Russian / Ukrainian "parol'"
+    "\u043a\u043b\u044e\u0447 api",
+    "\u5bc6\u7801", "\u5bc6\u78bc", "\u53e3\u4ee4", "\u5bc6\u94a5", "\u79d8\u94a5", "\u91d1\u9470", "\u4ee4\u724c",
+    "\u30d1\u30b9\u30ef\u30fc\u30c9", "\u6697\u8a3c\u756a\u53f7", "\u30c8\u30fc\u30af\u30f3",
+    "\ube44\ubc00\ubc88\ud638", "\ube44\ubc88", "\uc554\ud638", "\ud1a0\ud070",
+    "\u0643\u0644\u0645\u0629\u0627\u0644\u0645\u0631\u0648\u0631", "\u0643\u0644\u0645\u0629\u0627\u0644\u0633\u0631",
+    "\u0631\u0645\u0632\u0639\u0628\u0648\u0631",
+    "\u092a\u093e\u0938\u0935\u0930\u094d\u0921", "\u0e23\u0e2b\u0e31\u0e2a\u0e1c\u0e48\u0e32\u0e19",
+    "\u05e1\u05d9\u05e1\u05de\u05d4", "\u03ba\u03c9\u03b4\u03b9\u03ba\u03bf\u03c3\u03c0\u03c1\u03bf\u03c3\u03b2",
+)
+_JOINED_RX = re.compile("|".join(sorted({w.replace(" ", "") for w in _JOINED}, key=len, reverse=True)))
+_PIECE_RX = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[^\W\d_A-Za-z]+")
+_SIG_RX = re.compile(r"(?i)(?<![a-z])sig\s*[=:]")
+_LETTER_RUN = re.compile(r"[^\W\d_]+")
+_NO_PAIR_JOIN = frozenset(("sid", "sig", "cle", "pw"))  # "customer's ID", "Cle Elum": too common split
+# "key" is an ordinary word ("the key takeaway"), so it is a label only when a value follows it: an explicit ":" / "="
+# and a value, or a token-shaped value (letters and digits, 8+ characters) as the next word
+_KEY_VALUE = re.compile(r"(?i)(?<![a-z])(?:keys?|cl[e\u00e9]s?|schl[u\u00fc]ssel)\s?(?:[:=]\s?[^\s]{6}"
+                        r"|\s(?=[A-Za-z0-9+/=_.\-]{0,64}\d)(?=[0-9+/=_.\-]{0,64}[A-Za-z])[A-Za-z0-9+/=_.\-]{8})")
 
 
-def _strong_spans_one(text: str) -> list:
-    spans = [m.span() for m in _PREFIX.finditer(text) if _prefix_ok(m)]
-    spans += [m.span() for m in _GLUE.finditer(text) if _prefix_ok(m)]
-    spans += [m.span() for m in _AWS_SPACED.finditer(text) if _aws_spaced_ok(m.group(0))]
-    spans += [m.span() for m in _PEM.finditer(text)]
-    spans += [m.span(1) for m in _NAMED.finditer(text)]
-    spans += [m.span(1) for m in _NAMED_SPACE.finditer(text) if _space_value_ok(m.group(1))]
-    spans += [m.span() for m in _AWS_SECRET.finditer(text) if _aws_shape(m.group(0))]
-    spans += [m.span(1) for m in _AWS_SECRET_LABELLED.finditer(text)]
-    return spans
+def _letters_view(v: str, strip_marks: bool = True) -> str:
+    """Confusables folded (``lookalikes``), lower case, diacritics stripped (Latin / Greek / Cyrillic only; Hangul
+    syllables are kept whole), then only letters kept."""
+    f = _FOLD.fold_cased(v)
+    if strip_marks and not f.isascii():
+        f = "".join(c for c in unicodedata.normalize("NFKD", f) if not unicodedata.combining(c))
+        f = unicodedata.normalize("NFC", f)
+    return "".join(c for c in f if c.isalpha())
 
 
-def _weak_spans_one(text: str) -> list:
-    spans = [m.span() for m in _HEX.finditer(text) if _mixed(m.group(0))]
-    spans += [m.span() for m in _TOKEN.finditer(text)
-              if any(_mixed(p) and sum(c.isdigit() for c in p) >= 2 and _entropy(p) >= 3.5
-                     for p in _PIECE.findall(m.group(0)))]
-    return spans
+_FOLD_CACHE: dict = {}
 
 
-def _strong_spans(text: str) -> list:
-    """The strong-rule spans of ``text`` as written. KEPT under this name for TNZ (PR #53), which calls it until it
-    switches to ``redact_text``; do not rename or remove before then."""
-    return sorted(_strong_spans_one(text or ""))
+def _fold_piece(p: str) -> str:
+    if p.isascii():
+        return p.lower()                                   # the confusable fold of ASCII letters is lower case
+    f = _FOLD_CACHE.get(p)
+    if f is not None:
+        return f
+    f = _fold_piece_slow(p)
+    if len(_FOLD_CACHE) < _CMAP_MAX and len(p) <= 32:
+        _FOLD_CACHE[p] = f
+    return f
 
 
-def strong_secret(text: str) -> bool:
-    """A STRONG rule fires on ``text``, any of its decodings, or the deglued form of any (a key split by a line break
-    or spaces). Never exempted."""
-    if not text:
-        return False
-    for d in decodings(text):
-        if _strong_spans_one(d):
+def _fold_piece_slow(p: str) -> str:
+    f = _FOLD.fold_cased(p)
+    if not f.isascii():
+        f = "".join(c for c in unicodedata.normalize("NFKD", f) if not unicodedata.combining(c))
+    return f
+
+
+def _pair_has_separator(v: str, w: str, nxt: str) -> bool:
+    """``s id:`` / ``p w =``: the split short label is followed by an explicit ``:`` or ``=``."""
+    return re.search(re.escape(w) + r"\W{1,3}" + re.escape(nxt) + r"\s{0,3}[:=]", v) is not None
+
+
+def _label_hit(v: str) -> bool:
+    if _SIG_RX.search(v) or _KEY_VALUE.search(v):
+        return True
+    n = len(v)
+    for m in _PIECE_RX.finditer(v):
+        p = m.group(0)
+        if len(p) > 16:
+            continue
+        f = _fold_piece(p)
+        if f not in _PIECES:
+            continue
+        if len(f) >= 5:
+            return True                                    # secret, token, bearer, cookie...: any piece boundary
+        # short labels (pass, pwd, pw, pin, sid, sig, otp, auth, cle) only as a whole word (delimited by a non
+        # letter / digit, ``_`` included): a random id often holds "Pw" or "Sid" at a camel-case boundary
+        a, b = m.span()
+        if (a == 0 or not v[a - 1].isalnum()) and (b == n or not v[b].isalnum()):
             return True
-        g = _deglued(d)
-        if g != d and _strong_spans_one(g):
+    words = _LETTER_RUN.findall(v)
+    for i, w in enumerate(words):
+        f = _fold_piece(w) if len(w) <= 16 else ""
+        if f in _PIECES and (len(f) >= 5 or w.isascii() is False):
+            return True                                    # a whole word in any script (``\u015fifre``)
+        if i + 1 < len(words):
+            # a short label split by one space / NBSP / separator (``to ken``, ``P IN``): two adjacent short words
+            nxt = words[i + 1]
+            if len(w) + len(nxt) <= 16 and (min(len(w), len(nxt)) <= 3 or len(w) + len(nxt) >= 8):
+                g = _fold_piece(w + nxt)
+                if g in _PIECES and (g not in _NO_PAIR_JOIN or _pair_has_separator(v, w, nxt)):
+                    return True
+    # a label spelled one letter at a time (``t o k e n``)
+    singles = "".join(w if len(w) == 1 else " " for w in words)
+    if any(_fold_piece(x) in _PIECES for x in singles.split() if len(x) >= 3):
+        return True
+    letters = _letters_view(v)
+    if _JOINED_RX.search(letters):
+        return True
+    raw_letters = letters if v.isascii() else "".join(c for c in v.lower() if c.isalpha())
+    return any(s.replace(" ", "") in raw_letters or s.replace(" ", "") in letters for s in _SCRIPT)
+
+
+# ------------------------------------------------------------------------------------------------ 2b. URL userinfo
+
+_USERINFO = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]{0,31}:/{1,3}[^\s/?#@]{1,256}@|(?<![:/])//[^\s/?#@:]{1,128}:[^\s/?#@]{0,256}@")
+
+
+def _userinfo_hit(v: str) -> bool:
+    if "@" not in v:
+        return False
+    return bool(_USERINFO.search(v) or _USERINFO.search(v.replace(" ", "")))
+
+
+# ------------------------------------------------------------------------------------------------ 2c. strong prefixes
+# (provider, documented key shape), matched GLUED (no left boundary) on every view, on the view with every space
+# removed, and on each separator-joined token. Each entry is a documented or partner-scanning format.
+PROVIDERS = (
+    ("aws_access_key_id", r"(?:AKIA|ASIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|APKA|ABIA|ACCA)[A-Z0-9]{16}"),
+    ("openai_anthropic", r"sk-(?:proj-|svcacct-|admin-|ant-(?:api|admin|oat|sid)\d\d-)[A-Za-z0-9_\-]{12,}"),
+    ("sk_generic", r"sk-[A-Za-z0-9_\-]{20,}"),
+    ("github", r"(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})"),
+    ("stripe", r"(?:(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{10,}|whsec_[A-Za-z0-9]{16,})"),
+    ("slack", (r"(?:xoxe\.xox[a-z]-[A-Za-z0-9\-]{10,}|xoxe-\d+-[A-Za-z0-9\-]{10,}|xox[a-z]-[A-Za-z0-9\-]{10,}"
+               r"|hooks\.slack\.com/services/T[A-Za-z0-9_/]{8,})")),
+    ("google", (r"(?:AIza[0-9A-Za-z_\-]{30,}|ya29\.[0-9A-Za-z_\-]{20,}|GOCSPX-[0-9A-Za-z_\-]{20,}"
+                r"|1//0[0-9A-Za-z_\-]{30,})")),
+    ("perplexity", r"pplx-[A-Za-z0-9]{16,}"),
+    ("gitlab", r"(?:glpat|gldt|glrt|glptt|glsoat)-[A-Za-z0-9_\-]{20,}"),
+    ("npm_pypi", r"(?:npm_[A-Za-z0-9]{30,}|pypi-[A-Za-z0-9_\-]{40,})"),
+    ("huggingface", r"hf_[A-Za-z0-9]{30,}"),
+    ("sendgrid", r"SG\.[A-Za-z0-9_\-]{16,}\.[A-Za-z0-9_\-]{16,}"),
+    ("jwt", r"eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.?[A-Za-z0-9_\-]*"),
+    ("shopify", r"shp(?:at|ss|ca|pa|tka)_[A-Fa-f0-9]{24,}"),
+    ("amazon_lwa", r"amzn1\.(?:oa2-cs|application-oa2-client|sellerapps)\.[A-Za-z0-9.\-]{8,}"),
+    ("azure", r"(?:AccountKey=[A-Za-z0-9+/=]{20,}|SharedAccessSignature|SharedAccessKey=|(?<![a-z])sv=20\d\d-\d\d-\d\d&)"),
+    ("square", r"(?:sq0atp|sq0csp|sq0idp|EAAA)[-_][A-Za-z0-9_\-]{16,}"),
+    ("vault", r"hv[sbr]\.[A-Za-z0-9_\-]{20,}"),
+    ("discord", r"[MNO][A-Za-z0-9_\-]{23,27}\.[A-Za-z0-9_\-]{6}\.[A-Za-z0-9_\-]{27,}"),
+    ("mapbox", r"(?:sk|pk|tk)\.eyJ[A-Za-z0-9_\-]{10,}"),
+    ("twilio", r"(?:SK|AC)[0-9a-f]{32}"),
+    ("mailgun", r"key-[0-9a-zA-Z]{32}"),
+    ("digitalocean", r"do[opr]_v1_[a-f0-9]{32,}"),
+    ("misc_saas", (r"(?:lin_api_|secret_[A-Za-z0-9]{40}|ntn_|xai-|gsk_|r8_|dapi[a-f0-9]{32}|pat[A-Za-z0-9]{14}\."
+                   r"|glc_|sntrys_|figd_|shpat_|rnd_|tskey-|pscale_tkn_|dp\.pt\.|fo1_|phc_|phx_)[A-Za-z0-9_\-]{8,}")),
+    ("db_uri", (r"(?i:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|rediss?|amqps?|mssql|sqlserver|jdbc:[a-z]+)"
+                r"://[^\s/@]{1,256}@")),
+    ("pem_pgp", r"-----BEGIN [A-Z0-9 ]{0,40}(?:PRIVATE KEY|PGP|OPENSSH|ENCRYPTED|CERTIFICATE REQUEST)[A-Z0-9 ]{0,20}-----"),
+)
+_PREFIX_RX = re.compile("|".join(f"(?P<{n}>{rx})" for n, rx in PROVIDERS))
+# families distinctive enough to match on the view with every space removed (a key split by spaces / line breaks);
+# the short or word-like ones (bare sk-, JWT, Discord, Mailgun, Twilio, misc) are matched on the spaced views only
+NOSPACE_FAMILIES = ("aws_access_key_id", "openai_anthropic", "github", "stripe", "slack", "google", "perplexity",
+                    "gitlab", "npm_pypi", "huggingface", "shopify", "amazon_lwa", "azure", "square", "vault",
+                    "mapbox", "digitalocean", "db_uri", "pem_pgp")
+_PREFIX_NOSPACE_RX = re.compile("|".join(f"(?P<{n}>{rx})" for n, rx in PROVIDERS if n in NOSPACE_FAMILIES))
+# one compiled pattern per family: each has a literal prefix the regex engine scans for quickly, while the combined
+# alternation tries every family at every position (about 6x slower on a 64 KB field)
+_PREFIX_EACH = tuple((n, re.compile(rx)) for n, rx in PROVIDERS)
+_PREFIX_EACH_NOSPACE = tuple((n, rx) for n, rx in _PREFIX_EACH if n in NOSPACE_FAMILIES)
+_LONG = 256
+
+
+def _prefix_found(s: str, nospace: bool = False) -> bool:
+    """A strong-key prefix family matches in ``s`` (the bare ``sk-`` family only with a digit and a capital)."""
+    if len(s) <= _LONG:
+        rx = _PREFIX_NOSPACE_RX if nospace else _PREFIX_RX
+        return any(m.lastgroup != "sk_generic" or _sk_ok(m) for m in rx.finditer(s))
+    for n, rx in (_PREFIX_EACH_NOSPACE if nospace else _PREFIX_EACH):
+        for m in rx.finditer(s):
+            if n != "sk_generic" or _sk_ok(m):
+                return True
+    return False
+# the same AWS id family with separators and spaces removed (an id split unevenly by spaces / line breaks)
+_AWS_JOINED = re.compile(r"(?:AKIA|ASIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|APKA|ABIA|ACCA)[A-Z0-9]{16}")
+_NOSEP = re.compile(r"[\s.\-_/:]+")
+
+
+def _sk_ok(m: re.Match) -> bool:
+    # a bare ``sk-<body>`` must look like a key (a digit and an upper-case letter), so ``sk-ii-facial-essence`` is not
+    body = m.group(0)
+    return any(c.isdigit() for c in body) and any(c.isupper() for c in body)
+
+
+def _prefix_hit(v: str) -> bool:
+    if _prefix_found(v):
+        return True
+    if " " in v and _prefix_found(v.replace(" ", ""), nospace=True):
+        return True
+    return bool(_AWS_JOINED.search(_NOSEP.sub("", v)))
+
+
+# ------------------------------------------------------------------------------------------------ safe shapes
+# The SMALL disclosed allowlist (ADR 0050 v2 section 2d): occurrences are masked out before checks (d) and (e) only;
+# checks (a), (b), (c) and (f) still run on the unmasked text.
+_MASK = " \u00a7\u00a7\u00a7\u00a7 "
+_B = r"(?<![A-Za-z0-9])"
+_E = r"(?![A-Za-z0-9])"
+_SAFE_SHAPES = re.compile(
+    _B + r"(?:"
+    r"(?P<uuid>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+    r"|(?P<order>\d{3}-\d{7}-\d{7})"
+    r"|(?P<ymd>(?:19|20)\d\d/(?:0?[1-9]|1[0-2])/(?:0?[1-9]|[12]\d|3[01]))"
+    r"|(?P<iso>(?:19|20)\d\d-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])"
+    r"(?:[T ](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,9})?)?(?:Z|[+-](?:[01]\d|2[0-3]):?[0-5]\d)?)?)"
+    r"|(?P<isbn13>(?:ISBN(?:-13)?:? ?)?97[89](?:[- ]?\d){10})"
+    r"|(?P<isbn10>ISBN(?:-10)?:? ?\d(?:[- ]?\d){8}[- ]?[\dX])"
+    r"|(?P<ean>\d{13})"
+    r"|(?i:commit|commits|revision|sha)[ :#]{1,3}(?P<sha>[0-9a-f]{7,40})"
+    r")" + _E)
+
+
+def _digits(s: str) -> list:
+    return [int(c) for c in s if c.isdigit()]
+
+
+def _ean_ok(s: str) -> bool:
+    d = _digits(s)
+    return len(d) == 13 and (sum(x * (3 if i % 2 else 1) for i, x in enumerate(d[:12])) + d[12]) % 10 == 0
+
+
+def _isbn10_ok(s: str) -> bool:
+    body = [c for c in s.upper().replace("ISBN-10", "").replace("ISBN", "") if c.isdigit() or c == "X"]
+    if len(body) != 10 or "X" in body[:9]:
+        return False
+    vals = [10 if c == "X" else int(c) for c in body]
+    return sum((10 - i) * x for i, x in enumerate(vals)) % 11 == 0
+
+
+def _shape_ok(m: re.Match) -> bool:
+    k = m.lastgroup
+    if k == "isbn13":
+        return _ean_ok(m.group(k))
+    if k == "isbn10":
+        return _isbn10_ok(m.group(k))
+    if k == "ean":
+        return _ean_ok(m.group(k))
+    return True
+
+
+def _masked(v: str) -> str:
+    """``v`` with every allowlisted safe shape replaced by a mark that no digit run or token can cross."""
+    if not any(c.isdigit() for c in v):
+        return v
+    out, at = [], 0
+    for m in _SAFE_SHAPES.finditer(v):
+        if not _shape_ok(m):
+            continue
+        a, b = m.span(m.lastgroup) if m.lastgroup == "sha" else m.span()
+        out.append(v[at:a])
+        out.append(_MASK)
+        at = b
+    if not out:
+        return v
+    out.append(v[at:])
+    return "".join(out)
+
+
+# ------------------------------------------------------------------------------------------------ 2d. random tokens
+
+_RUN = re.compile(r"[A-Za-z0-9+=]+")
+_HEX32 = re.compile(r"[0-9a-fA-F]{32,}")
+_TOK_SEP = re.compile(r"[.\-_/:]+")
+_EDGE = "\"'()[]{}<>,;!?\u00a7"
+
+
+def _classes(r: str) -> tuple:
+    return (any(c.isupper() for c in r), any(c.islower() for c in r), any(c.isdigit() for c in r))
+
+
+def _transitions(r: str) -> tuple:
+    """(letter<->digit changes, upper<->lower changes) along ``r``."""
+    ld = cs = 0
+    prev = None
+    for c in r:
+        k = "d" if c.isdigit() else ("u" if c.isupper() else ("l" if c.islower() else "o"))
+        if prev is not None and k != prev:
+            if "d" in (k, prev) and "o" not in (k, prev):
+                ld += 1
+            elif {k, prev} == {"u", "l"}:
+                cs += 1
+        prev = k
+    return ld, cs
+
+
+MIXED_MIN = 16                           # a run this long mixing upper case, lower case and digits is a key
+
+
+def _random_run(r: str, joined: bool = False) -> bool:
+    """One alphanumeric run (separators already removed) that looks like a key (check d). ``joined``: the run was
+    put together from space-separated pieces (the case-only rule does not apply: ordinary words would trip it)."""
+    n = len(r)
+    if n < MIXED_MIN:
+        return False
+    up, lo, dg = _classes(r)
+    if up and lo and dg and (n >= 20 or not joined):
+        return True                                        # mixing case and digits
+    if n >= 32 and _HEX32.search(r) and dg:
+        return True                                        # >= 32 hex characters
+    ld, cs = _transitions(r)
+    if n >= 32 and dg and (up or lo) and ld >= 6:
+        return True                                        # >= 32 base64 characters, letters and digits interleaved
+    return not joined and n >= 24 and up and lo and cs >= 0.35 * n   # long mixed-case run, no words in it
+
+
+def _tokenish(t: str) -> bool:
+    """A space-separated piece that could be a fragment of a split key: alphanumeric, and holding a digit next to a
+    letter or an upper-case letter after the first character."""
+    if not t or not _RUN.fullmatch(t):
+        return False
+    up, lo, dg = _classes(t)
+    return (dg and (up or lo)) or (lo and any(c.isupper() for c in t[1:]))
+
+
+# a piece made of whole words: CamelCase words (each a capital and 2+ lower-case letters, or a short acronym) with at
+# most four trailing digits (``BrandRevenue``, ``iPhone``, ``Item4490``, ``USB3``)
+_WORDLIKE = re.compile(r"(?:[a-z]{1,2})?(?:[A-Z]?[a-z]{2,}|[A-Z]{2,5}(?![a-z]))+\d{0,4}|[A-Z]{1,5}\d{1,4}|\d{1,4}")
+
+
+_PLAIN_WORD = re.compile(r"(?:[A-Z]?[a-z]+)+\d{0,4}|[A-Z]{2,6}\d{0,4}|\d{1,4}")
+
+
+def _mixed_inside(piece: str) -> bool:
+    """A piece that looks like a key fragment: letters mixed with digits or inner capitals, and not whole words."""
+    up, lo, dg = _classes(piece)
+    return ((dg and (up or lo)) or (lo and any(c.isupper() for c in piece[1:]))) and not _WORDLIKE.fullmatch(piece)
+
+
+# the distinctive prefix families with their own separators removed, matched at the START of a token whose
+# separators were all removed
+_JOINED_PREFIX = re.compile(
+    r"(?:AKIA|ASIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|APKA|ABIA|ACCA)[A-Z0-9]{16}|GOCSPX[A-Za-z0-9]{20,}"
+    r"|AIza[A-Za-z0-9]{30,}|gh[pousr][A-Za-z0-9]{30,}|githubpat[A-Za-z0-9]{30,}|gl(?:pat|dt|rt)[A-Za-z0-9]{18,}"
+    r"|xox[abposre][A-Za-z0-9]{15,}|shp(?:at|ss|ca|pa)[a-fA-F0-9]{28,}|sq0(?:atp|csp|idp)[A-Za-z0-9]{16,}"
+    r"|hv[sbr][A-Za-z0-9]{20,}|pplx[A-Za-z0-9]{20,}|npm[A-Za-z0-9]{30,}|hf[A-Za-z0-9]{30,}"
+    r"|sk(?:proj|ant|live|test|svcacct|admin)[A-Za-z0-9]{16,}|[rp]k(?:live|test)[A-Za-z0-9]{10,}|whsec[A-Za-z0-9]{20,}"
+    r"|ya29[A-Za-z0-9]{20,}|amzn1oa2cs[A-Za-z0-9]{8,}|SG[A-Za-z0-9]{40,}|eyJ[A-Za-z0-9]{30,}")
+
+
+def _nonword(pieces) -> str:
+    """The pieces that are not plain words or short numbers, joined (what is left of a slug once its words are set
+    aside: a key split into chunks keeps most of its length here, a slug keeps little)."""
+    return "".join(x for x in pieces if x and not _PLAIN_WORD.fullmatch(x))
+
+
+def _split_key(t: str, j: str) -> bool:
+    """A key split by separators (``. - _ / :``) inside one token: 32+ hex characters (with a hex letter) once the
+    separators are gone, or the NON-WORD pieces joined read as a key on their own (``Amazon-Report-2026-Fees`` keeps
+    nothing; ``GOCSP-X-ISc-Gebcy-8F5n3`` keeps ``XISc8F5n3``...)."""
+    for r in _RUN.findall(j):
+        h = _HEX32.search(r)
+        if h and any(c.isdigit() for c in h.group(0)) and any(c.isalpha() for c in h.group(0)):
+            return True
+    if _JOINED_PREFIX.match(j):
+        return True                                        # a prefix key with separators put in (``GOCSP-X-...``)
+    pieces = [x for x in _TOK_SEP.split(t) if x and not _PLAIN_WORD.fullmatch(x)]
+    nw = "".join(pieces)
+    return len(pieces) >= 2 and len(nw) >= MIXED_MIN and any(_random_run(r, joined=True) for r in _RUN.findall(nw))
+
+
+def _prefix_after_separator(t: str) -> bool:
+    """A prefix key whose BODY is split by separators (``hf_DN5.RpVI2X.QWhX1s``): the separators after the first
+    (and after the second) one are removed and the prefix table matched again."""
+    seps = [m.end() for m in _TOK_SEP.finditer(t)][:2]
+    for k in seps:
+        if k <= 12:
+            t2 = t[:k] + _TOK_SEP.sub("", t[k:])
+            if _prefix_found(t2):
+                return True
+    return False
+
+
+def _token_hit(v: str) -> bool:
+    toks = [t.strip(_EDGE) for t in v.split(" ")]
+    chain: list = []
+    same: list = []
+
+    def chain_bad(parts: list) -> bool:
+        if len(parts) < 2:
+            return False
+        nw = _nonword(parts)
+        return len(nw) >= MIXED_MIN and _random_run(nw, joined=True)
+
+    def same_bad(parts: list) -> bool:
+        j = "".join(parts)
+        return len(parts) >= 4 and any(c.isdigit() for c in j) and (_random_run(j, joined=True)
+                                                                    or bool(_AWS_JOINED.search(j)))
+
+    for t in toks:
+        for r in _RUN.findall(t):
+            if _random_run(r):
+                return True
+        j = _TOK_SEP.sub("", t)
+        if j != t and (_split_key(t, j) or _prefix_after_separator(t)):
+            return True
+        if j != t and _prefix_found(j):
+            return True                                    # a prefix key split by separators (``ghp_ab.cd.ef``)
+        # fragments of a key split by spaces / line breaks: consecutive token-like pieces, and runs of 3+ pieces of
+        # one length (``AKIA IOSF ODNN 7EXA MPLE``, ``A K I A ...``)
+        if _tokenish(j):
+            chain.append(j)
+        else:
+            if chain_bad(chain):
+                return True
+            chain = []
+        short = bool(j) and len(j) <= 4 and bool(_RUN.fullmatch(j))
+        if short and (not same or len(same[0]) == len(j)):
+            same.append(j)
+        else:
+            if same_bad(same):
+                return True
+            same = [j] if short else []
+    return chain_bad(chain) or same_bad(same)
+
+
+# ------------------------------------------------------------------------------------------------ 2e. digit runs
+
+_DIGIT_COMPACT = re.compile(r"[\s.\-/()]+")
+_DIGIT_RUN = re.compile(r"\d(?:\D{0,3}\d)*")
+
+
+def _digits_hit(v: str) -> bool:
+    if sum(1 for c in v if c.isdigit()) < 9:
+        return False
+    compact = _DIGIT_COMPACT.sub("", v)
+    for m in _DIGIT_RUN.finditer(compact):
+        if sum(1 for c in m.group(0) if c.isdigit()) >= 9:
             return True
     return False
 
 
-def weak_secret(text: str) -> bool:
-    return bool(text) and any(_weak_spans_one(d) for d in decodings(text))
+# ------------------------------------------------------------------------------------------------ 2f. e-mail
+
+_EMAIL_PLAIN = re.compile(r"[A-Za-z0-9._%+\-]@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,24}(?![A-Za-z])")
+_EMAIL_BRACKET = re.compile(r"(?i)[a-z0-9._%+\-] ?[\[\(\{<] ?(?:at|@) ?[\]\)\}>] ?[a-z0-9\-]{1,63}")
+_EMAIL_SPELLED = re.compile(r"(?i)[a-z0-9._%+\-] at [a-z0-9\-]{1,63}(?: ?[\[\(\{<]? ?dot ?[\]\)\}>]? ?[a-z0-9\-]{1,63}){1,4}"
+                            r"(?![a-z])")
 
 
-def has_secret(text: str) -> bool:
-    return strong_secret(text) or weak_secret(text)
+_TLDS = ("com", "net", "org", "io", "co", "us", "uk", "de", "fr", "ca", "au", "in", "jp", "es", "it", "nl", "edu",
+         "gov", "info", "biz", "me", "ai", "app", "dev", "shop", "store", "xyz", "online", "site", "email", "mail",
+         "ru", "br", "mx", "ch", "se", "no", "test", "example")
+EMAIL_AT_MAX = 256
+_LOCAL_CHAR = re.compile(r"[A-Za-z0-9._%+\-]")
+_DOMAIN_END = re.compile(r"[A-Za-z0-9\-]{1,63}(?:\.[A-Za-z0-9\-]{1,63}){0,8}\.(?:" + "|".join(_TLDS) + r")", re.IGNORECASE)
+def _email_hit(v: str) -> bool:
+    if "@" in v:
+        w = re.sub(r" ?@ ?", "@", v)
+        if _EMAIL_PLAIN.search(w):
+            return True
+        # an address split by spaces / line breaks: after each "@", the next words joined one at a time (at most 40
+        # words / 255 characters) until they read as a domain with a common top-level domain; a local-part character
+        # must precede the "@". More than EMAIL_AT_MAX "@" signs: withheld (fail closed).
+        ats = 0
+        for m in re.finditer("@", v):
+            ats += 1
+            if ats > EMAIL_AT_MAX:
+                return True
+            i = m.start() - 1
+            while i >= 0 and v[i] == " " and m.start() - i < 8:
+                i -= 1                                     # bounded look-back over spaces
+            if i < 0 or not _LOCAL_CHAR.fullmatch(v[i]):
+                continue
+            acc = ""
+            for tok in v[m.end():m.end() + 1024].lstrip(" ").split(" ")[:40]:
+                acc += tok
+                if len(acc) > 255:
+                    break
+                if _DOMAIN_END.fullmatch(acc.rstrip(".,;:!?)]}>\"'")):
+                    return True
+    low = v.lower()
+    if ("at" in low and ("[" in v or "(" in v or "{" in v or "<" in v)) and _EMAIL_BRACKET.search(v):
+        return True
+    return " at " in low and "dot" in low and _EMAIL_SPELLED.search(v) is not None
 
 
-def _merge(spans: list) -> list:
-    merged: list = []
-    for a, b in sorted(spans):
-        if merged and a <= merged[-1][1]:
-            merged[-1][1] = max(merged[-1][1], b)
-        else:
-            merged.append([a, b])
-    return merged
+# ------------------------------------------------------------------------------------------------ the check
+
+# (check, function name): looked up at call time, so a test can disable one check and show another test fails
+_CHECK_FUNCS = (("a_label", "_label_hit"), ("b_userinfo", "_userinfo_hit"), ("c_prefix", "_prefix_hit"))
+WAIVABLE = frozenset(("d_token", "e_digits"))           # the only checks a disclosed URL position may waive
+_URL_IN_TEXT = re.compile(r"(?i)(?:https?://|www\.)[^\s<>\"'`]{1,4096}")
 
 
-def redact_text(text: str) -> tuple:
-    """STABLE PUBLIC ENTRY POINT: ``redact_text(text) -> (redacted, findings)`` — ``redacted`` is ``text`` with every
-    secret-shaped span replaced by ``[redacted]``; ``findings`` is the number of spans redacted (an int, 0 when
-    nothing was found). Never raises; a non-string or empty input gives ``("", 0)`` / ``(text, 0)``.
+def _mask_clean_urls(m: str) -> tuple:
+    """A URL written in the text is judged by the URL rules: one that passes every per-part check (with the disclosed
+    URL positions) is masked out before checks (d) and (e), so a cited AP News or Drive link does not withhold the
+    prose around it; one that FAILS any part fails the whole text (``url_credential`` / ``url_personal``), since a
+    URL rule (a host label, a split path) may see what the text checks do not. Checks (a)-(c) and (f) already ran on
+    the unmasked text. Returns (masked text, failing check or None)."""
+    low = m.lower()
+    if "http" not in low and "www." not in low:
+        return m, None
+    worst: list = []
 
-    The same rule table as URLs: the strong rules and the weak heuristics on the text as written; any
-    whitespace-delimited word whose decoding (percent / HTML entities, repeated) holds a strong secret is redacted
-    whole; any URL written in the text that carries a secret by the URL rules (``url_has_secret``: path windows for
-    AWS keys that cross "/", queries, fragments) is redacted whole. Linear in the text apart from the per-URL checks,
-    which are bounded by each URL's length."""
-    if not isinstance(text, str) or not text:
-        return ("" if not isinstance(text, str) else text), 0
-    spans = _strong_spans_one(text) + _weak_spans_one(text)
-    # normalise (fullwidth / invisible) and decode a word in place, so an obfuscated single word is redacted whole
-    for m in re.finditer(r"\S+", text):
-        w = m.group(0)
-        if w != normalise(w) or "%" in w or "&" in w:
-            if strong_secret(w):
-                spans.append(m.span())
-    # a key split by a line break or spaces: strong spans of the deglued text mapped back to original coordinates (the
-    # whitespace inside the key is redacted with it)
-    deglued, mp = _deglue_map(text)
-    if mp is not None:
-        for a, b in _strong_spans_one(deglued):
-            spans.append((mp[a], mp[b - 1] + 1))
-    for m in _URL_IN_TEXT.finditer(text):
-        u = m.group(0).rstrip(".,;:!?)]}")
+    def repl(x: re.Match) -> str:
+        u = x.group(0).rstrip(".,;:!?)]}")
         url = u if "://" in u else "https://" + u
-        if url_has_secret(url):
-            spans.append((m.start(), m.start() + len(u)))
-    merged = _merge(spans)
-    if not merged:
-        return text, 0
-    out, at = [], 0
-    for a, b in merged:
-        out.append(text[at:a])
-        out.append(REDACTED)
-        at = b
-    out.append(text[at:])
-    return "".join(out), len(merged)
+        v = _url_verdict(url)
+        if v is None:
+            return _MASK + x.group(0)[len(u):]
+        worst.append(v)
+        return x.group(0)
+    out = _URL_IN_TEXT.sub(repl, m)
+    return out, ("url_credential" if CREDENTIAL in worst else ("url_personal" if worst else None))
 
 
-redact = redact_text                                   # the name callum.py used first; same function
+def _abc(text: str) -> str | None:
+    """Checks (a)-(c) only, on every view (a text glued from parts, where (d) / (e) would read words as one)."""
+    for v in views(text):
+        for name, fn in _CHECK_FUNCS:
+            if globals()[fn](v):
+                return name
+    return None
 
 
-def guard_record(obj, _depth: int = 0):
-    """FAIL-CLOSED sweep of anything bound for storage, a log or output (a dict, list, tuple or str; ADR 0050 M4).
-    Every string is run through ``redact_text``; if a STRONG rule still fires on the result (a split / glued / decoded
-    form the span pass could not place), the whole string is replaced by ``[redacted]``. Structure, numbers, booleans
-    and ``None`` are returned unchanged. Bounded recursion depth; never raises."""
-    if _depth > GUARD_MAX_DEPTH:
-        return REDACTED
-    if isinstance(obj, str):
-        red = redact_text(obj)[0]
-        return REDACTED if strong_secret(red) else red
-    if isinstance(obj, dict):
-        return {k: guard_record(v, _depth + 1) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return [guard_record(v, _depth + 1) for v in obj]
-    return obj
+def _check(text: str, waive=frozenset(), urls: bool = True) -> str | None:
+    if len(text) > MAX_INPUT:
+        return "cap"
+    personal = None
+    for v in views(text):
+        if not v:
+            continue
+        for name, fn in _CHECK_FUNCS:
+            if globals()[fn](v):
+                return name
+        m = _masked(v)
+        if urls:
+            m, bad_url = _mask_clean_urls(m)
+            if bad_url == "url_credential":
+                return bad_url
+            if bad_url and personal is None:
+                personal = bad_url
+        if "d_token" not in waive and _token_hit(m):
+            return "d_token"
+        if personal is None:
+            if "e_digits" not in waive and _digits_hit(m):
+                personal = "e_digits"
+            elif _email_hit(v):
+                personal = "f_email"
+    return personal                                        # a credential failure on any view wins over personal data
 
+
+def check(text, waive=frozenset()) -> str | None:
+    """The failing check for ``text`` (``"cap"``, ``"type"``, ``"error"`` or one of ``CHECKS``; a credential check
+    (a)-(d) is reported before a personal-data check (e)/(f)), or None when the text is clearly safe. Every check runs
+    on every inspection view. ``waive``: checks a disclosed URL position waives (only (d) and (e)). Never raises."""
+    if text is None:
+        return None
+    if not isinstance(text, str):
+        return "type"
+    if not text:
+        return None
+    try:
+        return _check(text, frozenset(waive) & WAIVABLE)
+    except Exception:  # noqa: BLE001 - fail closed: an input the checks cannot read is withheld
+        return "error"
+
+
+def is_clearly_safe(text) -> bool:
+    """True only when every check of ADR 0050 v2 passes on every inspection view of ``text``."""
+    return check(text) is None
+
+
+def redact_text(text) -> tuple:
+    """STABLE PUBLIC ENTRY POINT (v1 name): ``(text, 0)`` when ``text`` is clearly safe, else ``("[withheld]", 1)``.
+    The whole field is withheld; nothing is cut out of it. ``("", 0)`` for empty or non-string input."""
+    if not isinstance(text, str) or not text:
+        return "", 0
+    return (text, 0) if is_clearly_safe(text) else (WITHHELD, 1)
+
+
+redact = redact_text
+
+
+def strong_secret(text) -> bool:
+    """v1 name kept for callers: any check fails on ``text``."""
+    return bool(text) and not is_clearly_safe(text)
+
+
+has_secret = strong_secret
+
+
+def _strong_spans(text: str) -> list:
+    """v1 helper kept for TNZ (PR #53) until it switches to ``redact_text``: ``[(0, len(text))]`` when the text is
+    not clearly safe (v2 never returns a partial span), else ``[]``."""
+    return [] if is_clearly_safe(text or "") else [(0, len(text or ""))]
 
 # ------------------------------------------------------------------------------------------------ URLs
+# A URL is never checked as one string: scheme + host (each label) + each path segment + each query pair + the
+# fragment are checked one by one, and only what passes is kept (step 3). Checks (a)-(c) run on every part with no
+# exemption. The ONLY positional exemptions (ADR 0050 v2 section 3) waive checks (d) and (e), on these hosts and
+# positions: a commit SHA on a code host; a Google Docs / Drive document id; a numeric item / post id on the listed
+# hosts (never a 13-16 digit Luhn-valid number: a payment card stays withheld wherever it sits).
 
-# Exemptions below suppress ONLY the weak heuristics (``weak_secret``); the strong rules always run.
+CREDENTIAL, PERSONAL = "credential", "personal"
+_PERSONAL_CHECKS = frozenset(("e_digits", "f_email", "url_personal"))
 CODE_HOSTS = frozenset({"github.com", "gitlab.com", "bitbucket.org", "codeberg.org", "gist.github.com",
                         "huggingface.co"})
-_CODE_REF = frozenset({"commit", "commits", "tree", "blob", "raw", "compare", "blame", "resolve", "-"})
-# hosts (and their subdomains) whose ids are long and random by design: documents, short links, media, CDNs, page
-# builders, share links. Weak heuristics only.
+# the hosts v1 exempted from its weak heuristics; v2 exempts NONE of them as a host (only the positions in
+# ``POSITIONS``). Kept as a name so the property tests keep placing keys on every one of them.
 ID_HOSTS = frozenset({
     "docs.google.com", "drive.google.com", "sheets.google.com", "slides.google.com", "forms.gle", "t.co", "bit.ly",
     "goo.gl", "tinyurl.com", "ow.ly", "lnkd.in", "buff.ly", "rebrand.ly", "is.gd", "youtu.be", "amzn.to",
@@ -338,21 +841,77 @@ ID_HOSTS = frozenset({
     "apnews.com", "facebook.com", "fb.com", "wixstatic.com", "wix.com", "squarespace-cdn.com", "squarespace.com",
     "ctfassets.net", "contentful.com", "gist.github.com", "huggingface.co", "loom.com", "canva.com", "zoom.us",
     "jsdelivr.net", "unpkg.com", "cloudfront.net", "googleusercontent.com", "ytimg.com", "maps.app.goo.gl"})
-# a path or query that is a Google Maps place / data blob, wherever on google.*
-_MAPS = re.compile(r"^/maps(?:/|$)")
-# query parameters whose value is a public id on that host (weak heuristics only)
-ID_PARAMS = {"indeed.com": frozenset({"jk", "vjk"}), "youtube.com": frozenset({"v", "list", "si"}),
-             "google.com": frozenset({"id", "q", "data", "cid", "ftid"}), "zoom.us": frozenset({"pwd"}),
-             "facebook.com": frozenset({"story_fbid", "id", "fbid", "set"})}
+DOC_HOSTS = frozenset({"docs.google.com", "drive.google.com", "sheets.google.com", "slides.google.com"})
+_CODE_REF = frozenset({"commit", "commits", "tree", "blob", "raw", "compare", "blame"})
+_NUM = r"(?:A-)?\d{4,20}(?:\.\d{1,12})?(?:v\d{1,2})?(?:\.html?)?"
+_ANY = None
+# THE DISCLOSED URL POSITIONS (ADR 0050 v2 section 3). A segment that fullmatches the shape, on that host (or a
+# subdomain), right after one of the listed path words (``_ANY``: any position), has checks (d) and (e) waived; checks
+# (a), (b), (c) and (f) still run on it. A numeric id never waives a 13-16 digit Luhn-valid number (a payment card).
+POSITIONS = (
+    # an abbreviated (7-12) or full SHA-1 (40) commit id holding a letter; a compare range of two
+    ("commit_sha", CODE_HOSTS, _CODE_REF, (r"(?=[0-9]*[a-f])(?:[0-9a-f]{7,12}|[0-9a-f]{40})"
+                                           r"(?:\.\.\.?(?=[0-9]*[a-f])(?:[0-9a-f]{7,12}|[0-9a-f]{40}))?")),
+    ("gist_id", ("gist.github.com",), _ANY, r"[0-9a-f]{20,32}"),
+    # Google's own id shapes: Drive file / folder ids (33 chars from "1", 28 from "0B"), Docs / Sheets / Slides ids
+    # (44 chars from "1"); never 40 characters (the AWS secret length) and never all hex
+    ("google_doc_id", DOC_HOSTS, ("d", "folders", "e"), (r"(?![0-9a-fA-F]+$)(?:1[A-Za-z0-9_\-]{32}"
+                                                          r"|0B[A-Za-z0-9_\-]{26}|1[A-Za-z0-9_\-]{43})")),
+    ("figma_file", ("figma.com",), ("file", "design", "proto", "board"), r"[A-Za-z0-9]{22}"),
+    ("spotify_id", ("open.spotify.com",), ("episode", "track", "show", "playlist", "album", "artist"),
+     r"[A-Za-z0-9]{22}"),
+    ("ap_article", ("apnews.com",), ("article",), r"(?:[a-z0-9]{1,40}-){0,24}[0-9a-f]{32}"),
+    ("notion_page", ("notion.so", "notion.site"), _ANY, r"(?:[A-Za-z0-9]{1,40}-){0,24}[0-9a-f]{32}"),
+    ("loom_id", ("loom.com",), ("share", "embed"), r"[0-9a-f]{32}"),
+    ("facebook_pfbid", ("facebook.com",), ("posts",), r"pfbid[A-Za-z0-9]{30,120}"),
+    ("linkedin_activity", ("linkedin.com",), ("posts",), r"[A-Za-z0-9_\-]{1,200}-activity-\d{19}-[A-Za-z0-9_\-]{4}"),
+    ("wix_media", ("wixstatic.com",), ("media",), r"[0-9a-f]{6}_[0-9a-f]{32}~mv2\.[a-z]{3,4}"),
+    ("contentful_space", ("ctfassets.net",), _ANY, r"[a-z0-9]{12}"),
+    ("contentful_asset", ("ctfassets.net",), _ANY, r"[A-Za-z0-9]{20,24}"),
+    ("contentful_hash", ("ctfassets.net",), _ANY, r"[0-9a-f]{32}"),
+    ("canva_share", ("canva.com",), _ANY, r"DA[A-Za-z0-9_\-]{9}|[A-Za-z0-9_\-]{22}"),
+    ("chewy_item", ("chewy.com",), ("dp",), _NUM),
+    ("canva_template", ("canva.com",), ("templates",), r"EA[A-Za-z0-9_\-]{9}(?:-[a-z0-9\-]{1,200})?"),
+    ("squarespace_asset", ("squarespace-cdn.com",), _ANY, r"[0-9a-f]{24}|\d{13}-[A-Z0-9]{20}"),
+    ("font_file", ("fonts.gstatic.com",), _ANY, r"[A-Za-z0-9_\-]{20,120}\.(?:woff2?|ttf|otf)"),
+    ("next_build_id", _ANY, ("static",), r"[A-Za-z0-9_\-]{16,40}"),
+    ("google_maps", ("google.com",), _ANY, r"[^/]{1,2048}"),
+    # Gemini grounding redirects (agents/probes.py REDIRECTOR_HOSTS): an opaque redirect id Google issues; it must be
+    # fetchable to be resolved
+    ("gemini_redirect", ("vertexaisearch.cloud.google.com",), ("grounding-api-redirect",), r"[A-Za-z0-9_\-]{1,2048}"),
+    ("hashed_asset", _ANY, _ANY, (r"[A-Za-z0-9_\-]{1,80}[.\-][0-9a-f]{8,64}(?:\.[A-Za-z0-9_\-]{1,20}){0,3}"
+                                  r"\.(?:css|js|mjs|map|png|jpe?g|gif|svg|webp|avif|woff2?|ttf|otf|ico|json|wasm)")),
+    ("medium_post", ("medium.com",), _ANY, r"(?:[a-z0-9]{1,40}-){0,24}[0-9a-f]{12}"),
+    ("bbb_profile", ("bbb.org",), _ANY, r"(?:[a-z0-9]{1,40}-){0,24}\d{1,6}-\d{4,12}"),
+    ("amazon_help", ("sellercentral.amazon.com", "amazon.com"), ("external", "help", "node"), r"G\d{6,12}"),
+    ("x_status", ("x.com", "twitter.com"), ("status",), _NUM),
+    ("tiktok_id", ("tiktok.com",), ("video", "photo"), _NUM),
+    ("pinterest_pin", ("pinterest.com",), ("pin",), _NUM),
+    ("ebay_item", ("ebay.com",), ("itm",), _NUM),
+    ("walmart_item", ("walmart.com",), _ANY, _NUM),
+    ("etsy_listing", ("etsy.com",), ("listing",), _NUM),
+    ("vimeo_id", ("vimeo.com",), ("", "video", "videos"), _NUM),
+    ("aliexpress_item", ("aliexpress.com", "aliexpress.us"), ("item",), _NUM),
+    ("stackoverflow_q", ("stackoverflow.com", "stackexchange.com"), ("questions", "q", "a"), _NUM),
+    ("facebook_id", ("facebook.com",), ("posts", "videos", "permalink"), _NUM),
+    ("doi", ("doi.org",), _ANY, r"10\.\d{4,9}|[A-Za-z0-9.\-]{1,64}"),
+    ("arxiv", ("arxiv.org",), ("abs", "pdf", "html"), _NUM),
+    ("hn_item", ("news.ycombinator.com",), _ANY, _NUM),
+    ("retail_sku", ("target.com", "bestbuy.com", "homedepot.com", "lowes.com", "costco.com"), _ANY, _NUM),
+)
+_POSITIONS = tuple((name, hosts, words, re.compile(rx)) for name, hosts, words, rx in POSITIONS)
+# query keys whose all-digit value is a public numeric id (a product variant, a page): check (e) is waived for it,
+# never for a 13-16 digit Luhn-valid number
+QUERY_ID_KEYS = frozenset({"variant", "variant_id", "product_id", "pid", "item", "itemid", "id", "page", "p", "t",
+                           "start", "index", "story_fbid", "fbid", "post", "topic", "thread", "comment"})
+_QUERY_NUM = re.compile(r"\d{1,20}")
+# exact path words that are a site's own structure (a constant cannot carry a value), kept although they are on the
+# label list
+STRUCTURAL_SEGMENTS = {"pinterest.com": frozenset({"pin"})}
 TRACKING_PARAMS = frozenset({"gclid", "gbraid", "wbraid", "dclid", "fbclid", "msclkid", "yclid", "twclid", "ttclid",
                              "igshid", "li_fat_id", "mc_cid", "mc_eid", "_hsenc", "_hsmi", "mkt_tok", "_ga", "_gl",
-                             "srsltid", "ref_src", "ref_url", "si"})
-_ASSET = re.compile(r"[A-Za-z0-9_-]+[.-][0-9a-fA-F]{8,64}(?:\.[A-Za-z0-9_-]+)*\.(?:css|js|mjs|map|png|jpe?g|gif|svg|"
-                    r"webp|avif|woff2?|ttf|otf|eot|ico|json|html?|wasm|txt)")
-_SHA = re.compile(r"[0-9a-f]{7,64}(?:\.\.\.?[0-9a-f]{7,64})?")
-_LONG_HEX = re.compile(r"(?=[0-9a-fA-F]*[0-9])(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{48,}")
-# a 40-character window of the decoded path aligned to segment / punctuation boundaries (may cross "/")
-_AWS_WINDOW = re.compile(r"(?<![A-Za-z0-9+])(?=([A-Za-z0-9/+]{40})(?![A-Za-z0-9+]))")
+                             "srsltid", "ref_src", "ref_url", "si", "epik", "sc_cid", "irclickid", "s_kwcid"})
+URL_PLACEHOLDER = {CREDENTIAL: "{secret}", PERSONAL: "{withheld}"}
 
 
 def canon_host(host: str) -> str:
@@ -370,100 +929,189 @@ def _tracking(key: str) -> bool:
     return k in TRACKING_PARAMS or k.startswith("utm_")
 
 
-def _weak_exempt_path(host: str, path: str, segs: list, i: int) -> bool:
+def _kind(name: str | None) -> str | None:
+    if name is None:
+        return None
+    return PERSONAL if name in _PERSONAL_CHECKS else CREDENTIAL
+
+
+def _luhn(d: str) -> bool:
+    total = 0
+    for i, c in enumerate(reversed(d)):
+        x = int(c)
+        if i % 2:
+            x = x * 2 - 9 if x > 4 else x * 2
+        total += x
+    return total % 10 == 0
+
+
+def position(host: str, segs: list, i: int) -> str | None:
+    """The name of the disclosed URL position segment ``i`` of ``segs`` sits in on ``host`` (checks (d) and (e) are
+    waived there), or None."""
     seg = segs[i]
-    if _host_in(host, CODE_HOSTS) and i >= 1 and segs[i - 1] in _CODE_REF and _SHA.fullmatch(seg):
-        return True                                       # a commit / tree / blob SHA on a code host
-    if _host_in(host, CODE_HOSTS) and host in ("gist.github.com",) and _SHA.fullmatch(seg):
-        return True                                       # a gist id
-    if _ASSET.fullmatch(seg) or "_next" in segs[:i] or "_buildManifest.js" in segs:
-        return True                                       # a hashed asset name; a Next.js build id
-    if _host_in(host, ("google.com",)) and _MAPS.match(path):
-        return True                                       # a Google Maps place / data blob
-    return _host_in(host, ID_HOSTS) and not _LONG_HEX.search(unquote(seg))
+    prev = segs[i - 1] if i else ""
+    for name, hosts, words, rx in _POSITIONS:
+        if hosts is not _ANY and not _host_in(host, hosts):
+            continue
+        if words is not _ANY and prev not in words:
+            continue
+        if name == "next_build_id" and (i < 2 or segs[i - 2] != "_next"):
+            continue
+        if name == "google_maps" and (len(segs) < 2 or segs[1] != "maps"):
+            continue
+        if name.startswith("contentful_") and i != {"contentful_space": 1, "contentful_asset": 2,
+                                                    "contentful_hash": 3}[name]:
+            continue
+        if name == "canva_share" and not (i >= 2 and segs[1] == "design" and (
+                (i == 2 and len(segs) > 3) or (i == 3 and len(segs) > 4 and segs[4] in ("view", "edit", "watch")))):
+            continue
+        if not rx.fullmatch(seg):
+            continue
+        if rx.pattern == _NUM:
+            d = "".join(c for c in seg.split(".")[0] if c.isdigit())
+            if 13 <= len(d) <= 16 and _luhn(d):
+                return None                                # a payment-card-shaped number is never waived
+        return name
+    return None
 
 
-def _aws_in_path(path: str) -> set:
-    """Segment indexes covered by an AWS-format 40-character window of any decoding of ``path`` (strong). The window
-    may cross ``/`` boundaries; there is no path-word skip (ADR 0050: it let real keys through, so it is removed —
-    security over precision)."""
-    hits: set = set()
-    for d in decodings(path):
-        for m in _AWS_WINDOW.finditer(d):
-            run = m.group(1)
-            if _aws_shape(run):
-                first = d[:m.start(1)].count("/")
-                hits |= set(range(first, first + run.count("/") + 1))
-    return hits
+def _host_label_key(label: str) -> bool:
+    """A host label that looks like a key: host names are case-insensitive, so the prefix families are matched on the
+    upper-cased label too, and a long letters-and-digits label with digits interleaved is a key."""
+    up = label.upper()
+    if _prefix_found(up) or _AWS_JOINED.search(_NOSEP.sub("", up)):
+        return True
+    j = label.replace("-", "")
+    ld, _ = _transitions(j)
+    return len(j) >= 16 and any(c.isdigit() for c in j) and any(c.isalpha() for c in j) and ld >= 4
 
 
-def url_secret_segments(url: str) -> tuple:
-    """``(indexes of secret-shaped path segments, query or fragment or user part secret-shaped)`` for ``url``.
-
-    STRUCTURAL RULE: the strong rules run on every path segment, every query key and value (tracking and id parameters
-    included), the fragment, the user part and the whole decoded path (AWS windows crossing "/"), after every decode
-    round, whatever the host. Host and URL-shape exemptions only suppress the weak heuristics."""
-    return _url_secret_segments(url, 0)
+# raw format / control / separator characters in a URL part (bidi overrides hide a path's real reading)
+_CONTROL_RX = re.compile("[\x00-\x1f\x7f-\x9f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f"
+                         "\ufeff\ufff9-\ufffb\U000e0000-\U000e007f]")
 
 
-def _url_secret_segments(url: str, depth: int) -> tuple:
+def _inspect(url, urls: bool) -> dict | None:
+    if not isinstance(url, str) or len(url) > URL_MAX_INPUT:
+        return None
     try:
         p = urlsplit(url)
-        host = canon_host(p.hostname or "")
-        user, password = p.username, p.password
+        host = (p.hostname or "").lower()
+        port = p.port
     except ValueError:
-        return set(), True
-    # the URL as a whole, after every decode round: a key split by an encoded "&" / "#" / "/" (``&#47;``) is found in
-    # the decoded string, and the decoded URL is checked again by the same rules (bounded depth)
-    forms = decodings(url)
-    path = p.path or ""
-    encoded = {i for i, x in enumerate(path.split("/")) if x and decodings(x)[-1] != x}
-    if any(_strong_spans_one(f) for f in forms[1:]):
-        return encoded, True                              # every encoded path segment is withheld too
-    if depth < 1 and len(forms) > 1:
-        dbad, dother = _url_secret_segments(forms[-1], depth + 1)
-        if dbad or dother:
-            return encoded, True
-    # the host and every host label, at every decode level: a key hidden as a subdomain label is caught (ADR 0050:
-    # one scan over the whole URL, host labels included). Strong only; never exempted.
-    raw_host = re.sub(r":\d+$", "", (p.netloc or "").rsplit("@", 1)[-1])
-    other = bool(raw_host) and strong_secret(raw_host)
-    segs = path.split("/")
-    bad = set()
+        return None
+
+    def chk(x: str, waive=frozenset()) -> str | None:
+        try:
+            if not x:
+                return None
+            name = _check(x, waive, urls=urls)
+            if name is None and _CONTROL_RX.search(unquote(x)):
+                return "control"                           # a bidi / invisible / control character: never kept
+            return name
+        except Exception:  # noqa: BLE001 - fail closed
+            return "error"
+    raw_host = re.sub(r":\d*$", "", (p.netloc or "").rsplit("@", 1)[-1])
+    host_kind = None
+    for part in [raw_host] + raw_host.split("."):
+        k = _kind(chk(part)) or (CREDENTIAL if part and _host_label_key(part) else None)
+        if k is not None:
+            host_kind = k
+            break
+    ch = canon_host(host)
+    segs = (p.path or "").split("/")
+    waived = [position(ch, segs, i) if s else None for i, s in enumerate(segs)]
+    verdicts = []
     for i, seg in enumerate(segs):
-        if not seg:
-            continue
-        if strong_secret(seg):
-            bad.add(i)                                    # never exempted
-        elif weak_secret(seg) and not _weak_exempt_path(host, path, segs, i):
-            bad.add(i)
-    bad |= {i for i in _aws_in_path(path) if i < len(segs)}
-    pairs = parse_qsl(p.query or "", keep_blank_values=True)
-    id_params = next((v for h, v in ID_PARAMS.items() if _host_in(host, (h,))), frozenset())
-    weak_ok = _host_in(host, ID_HOSTS) or (_host_in(host, ("google.com",)) and _MAPS.match(path) is not None)
-    other = other or strong_secret(p.query or "") or strong_secret(p.fragment or "")
-    for k, v in pairs:
-        if strong_secret(k) or strong_secret(v) or strong_secret(f"{k}={v}"):
-            other = True                                  # tracking or id parameters included: never exempted
-        elif _LONG_HEX.search(unquote(v)) or (not _tracking(k) and k.lower() not in id_params and not weak_ok
-                                               and (weak_secret(v) or weak_secret(k))):
-            other = True
-    if p.query and not pairs and not weak_ok:
-        other = other or weak_secret(p.query)
-    for x in (p.fragment or "", user or "", password or ""):
-        if x and (strong_secret(x) or _LONG_HEX.search(unquote(x)) or (weak_secret(x) and not weak_ok)):
-            other = True
-    return bad, other
+        if seg and any(_host_in(ch, (h,)) and seg in w for h, w in STRUCTURAL_SEGMENTS.items()):
+            verdicts.append((seg, None))
+        else:
+            verdicts.append((seg, _kind(chk(seg, WAIVABLE if waived[i] else frozenset()))))
+    # a key or a number split across segments: the segments that passed alone (outside a disclosed position) read
+    # together as one text; if that fails, every one of them holding a digit or an upper-case letter is withheld
+    kept = [unquote(s) for i, (s, k) in enumerate(verdicts) if s and k is None and not waived[i]]
+    if kept:
+        cross = chk("/".join(kept)) or ("d_token" if _token_hit(_masked(_clean(" ".join(kept)))) else None)
+        if cross is not None:
+            kk = _kind(cross)
+            verdicts = [(s, kk if (s and k is None and not waived[i] and any(c.isdigit() or c.isupper() for c in s))
+                         else k) for i, (s, k) in enumerate(verdicts)]
+    # checks (a)-(c) on the WHOLE path glued (a URI or prefix key spread over segments; a segment already withheld
+    # for a credential is left out, one withheld for personal data is kept in): if that fails, every segment outside
+    # a disclosed position is withheld
+    glued = "".join(s if k != CREDENTIAL else " " for s, k in verdicts if s)
+    if glued.strip() and _abc(unquote(glued)):
+        verdicts = [(s, CREDENTIAL if (s and not waived[i]) else k) for i, (s, k) in enumerate(verdicts)]
+    query = []
+    for k, v in parse_qsl(p.query or "", keep_blank_values=True):
+        waive = WAIVABLE if (k.lower() in QUERY_ID_KEYS and _QUERY_NUM.fullmatch(v) and not (
+            13 <= len(v) <= 16 and _luhn(v))) else frozenset()
+        query.append((k, v, _kind(chk(k) or chk(v, waive) or chk(f"{k}={v}", waive)), _tracking(k)))
+    if p.query and not query:
+        query.append(("", p.query, _kind(chk(p.query)), False))
+    return {"scheme": (p.scheme or "").lower(), "host": host, "port": port, "host_kind": host_kind,
+            "userinfo": "@" in (p.netloc or ""), "segments": verdicts, "positions": waived, "query": query,
+            "fragment_kind": _kind(chk(p.fragment)) if p.fragment else None}
 
 
-def url_has_secret(url: str) -> bool:
+def inspect_url(url) -> dict | None:
+    """The per-part verdict of ``url`` (None when it cannot be read): ``scheme``, ``host``, ``port``, ``host_kind``
+    (None, ``credential`` or ``personal``: a failing host label withholds the whole URL), ``userinfo`` (present: never
+    kept), ``segments`` [(segment, kind or None)], ``positions`` [disclosed position name or None], ``query``
+    [(key, value, kind or None, is_tracking)], ``fragment_kind``. Tracking parameters get every check too (they are
+    dropped before a fetch and never kept, but a key in one still marks the URL as never fetched)."""
+    return _inspect(url, True)
+
+
+def _url_verdict(url: str) -> str | None:
+    """None when every part of ``url`` passes; else ``credential`` or ``personal`` (the worst part). A URL that
+    cannot be read counts as ``credential``."""
+    u = _inspect(url, False)
+    if u is None or not u["host"]:
+        return CREDENTIAL
+    kinds = {u["host_kind"], u["fragment_kind"], CREDENTIAL if u["userinfo"] else None}
+    kinds |= {k for _, k in u["segments"]} | {kind for _, _, kind, _ in u["query"]}
+    return CREDENTIAL if CREDENTIAL in kinds else (PERSONAL if PERSONAL in kinds else None)
+
+
+def safe_url(url) -> str:
+    """What may be kept of ``url``: scheme + host (a failing host label withholds the whole URL) + only the path
+    segments that pass on their own (a failing one becomes ``{secret}`` / ``{withheld}``); user info never; tracking
+    parameters dropped; the rest of the query kept only when every key and value passes; the fragment kept only when
+    it passes. ``[withheld]`` when the URL cannot be read."""
+    u = inspect_url(url)
+    if u is None or not u["host"] or u["host_kind"] is not None or check(u["scheme"]) is not None:
+        return WITHHELD
+    h = f"[{u['host']}]" if ":" in u["host"] else u["host"]
+    netloc = h if u["port"] in (None, 80, 443) else f"{h}:{u['port']}"
+    path = "/".join(URL_PLACEHOLDER[k] if k else s for s, k in u["segments"])
+    q = [(k, v) for k, v, kind, trk in u["query"] if not trk]
+    query = urlencode(q) if q and all(kind is None for _, _, kind, trk in u["query"] if not trk) else ""
+    frag = urlsplit(url).fragment if u["fragment_kind"] is None else ""
+    return urlunsplit((u["scheme"], netloc, path, query, frag))
+
+
+def url_secret_segments(url) -> tuple:
+    """v1 entry point: ``(indexes of path segments that fail a CREDENTIAL check (a)-(d), host / user info / query /
+    fragment fail a credential check)``. Personal-data failures ((e), (f)) are reported by ``inspect_url``."""
+    u = inspect_url(url)
+    if u is None:
+        return set(), True
+    bad = {i for i, (_, k) in enumerate(u["segments"]) if k == CREDENTIAL}
+    other = (u["host_kind"] == CREDENTIAL or u["userinfo"] or u["fragment_kind"] == CREDENTIAL
+             or any(kind == CREDENTIAL for _, _, kind, _ in u["query"]))
+    return bad, bool(other)
+
+
+def url_has_secret(url) -> bool:
+    """A URL with any credential-check failure in any part (tracking parameters included, for checks (a)-(c)): never
+    fetched."""
     bad, other = url_secret_segments(url)
     return bool(bad) or other
 
 
 def identity_query(url: str) -> list:
-    """The query parameters that identify the page (every non-tracking parameter, sorted): ``watch?v=A`` and
-    ``watch?v=B`` are two pages."""
+    """The query parameters that identify the page (every non-tracking parameter, sorted)."""
     try:
         pairs = parse_qsl(urlsplit(url).query or "", keep_blank_values=True)
     except ValueError:
@@ -472,8 +1120,8 @@ def identity_query(url: str) -> list:
 
 
 def canonical_key(url: str) -> str:
-    """The identity of a cited page: scheme, canonical host (lower case, no trailing dot, no ``www.``, no default
-    port), path and identity-bearing query (tracking parameters and the fragment dropped)."""
+    """The identity of a cited page (in memory only, hashed by the caller): scheme, canonical host, path and the
+    identity-bearing query (tracking parameters and the fragment dropped)."""
     try:
         p = urlsplit(url)
         port = p.port
@@ -495,6 +1143,130 @@ def fetch_url(url: str) -> str:
         return url
     pairs = parse_qsl(p.query, keep_blank_values=True)
     if not any(_tracking(k) for k, _ in pairs):
-        return url                                    # unchanged byte for byte
+        return url
     q = [(k, v) for k, v in pairs if not _tracking(k)]
     return urlunsplit((p.scheme, p.netloc, p.path, urlencode(q), p.fragment))
+
+
+# ------------------------------------------------------------------------------------------------ 4. guard_record
+# Exact strings the services THEMSELVES emit that contain a label word (closed vocabulary: field names, flags,
+# reason codes, placeholders). An exact match to a constant cannot carry a value, so it passes; everything else is
+# checked. Placeholders inside a kept URL are blanked before its check.
+VOCAB = frozenset({
+    "secret_redacted", "SECRET_REDACTED", "NOT_FETCHED_SECRET", "CITED_URL_NOT_FETCHED", "credential", "personal",
+    "withheld", "[withheld]", "{secret}", "{withheld}", "PERSONAL_DATA", "UNREADABLE", "max_tokens",
+    "input_tokens", "output_tokens", "total_tokens", "token_usage", "tokens", "prompt_tokens", "completion_tokens",
+})
+_PLACEHOLDERS = re.compile(r"\{secret\}|\{withheld\}|\[withheld\]")
+# keys whose values are machine values of one exact shape, produced by the service (hashes, timestamps)
+_TYPED = (
+    (re.compile(r"(?:.*_)?sha256$"), re.compile(r"[0-9a-f]{64}")),
+    # the service's own ids: "seo-<kind>-<40 hex>" (prompt ids add ":v<version>:<index>")
+    (re.compile(r"(?:.*_)?id$"), re.compile(r"seo-[a-z]{2,8}-[0-9a-f]{40}(?::v\d{1,6}:\d{1,6})?")),
+    (re.compile(r"(?:.*_)?(?:at|due|time|date)$"),
+     re.compile(r"(?:19|20)\d\d-\d\d-\d\d(?:[T ]\d\d:\d\d(?::\d\d(?:\.\d{1,9})?)?(?:Z|[+-]\d\d:?\d\d)?)?")),
+)
+
+
+def _str_ok(s: str, key) -> bool:
+    if s in VOCAB:
+        return True
+    if isinstance(key, str):
+        for krx, vrx in _TYPED:
+            if krx.fullmatch(key) and vrx.fullmatch(s):
+                return True
+    t = _PLACEHOLDERS.sub(" ", s) if ("{" in s or "[" in s) else s
+    return is_clearly_safe(t)
+
+
+class _Budget:
+    __slots__ = ("n",)
+
+    def __init__(self) -> None:
+        self.n = 0
+
+
+# One function per branch (looked up at call time, so a test can disable one branch and show another test fails).
+
+_URL_KEY = re.compile(r"(?:.*_)?url$")
+
+
+def _guard_str(s: str, key):
+    """A failing string becomes ``[withheld]``; under a ``url`` / ``*_url`` key it becomes None (a withheld URL is
+    null, as ``stored_url`` writes it, so no consumer reads ``[withheld]`` as a URL)."""
+    if _str_ok(s, key):
+        return s
+    return None if isinstance(key, str) and _URL_KEY.fullmatch(key) else WITHHELD
+
+
+def _guard_bytes(b, key):
+    s = bytes(b).decode("utf-8", "replace")
+    return s if _str_ok(s, key) else WITHHELD
+
+
+def _guard_key(k, i: int):
+    """A dict key: numbers / booleans / None kept; anything else read as text and checked (a failing key becomes
+    ``[withheld]#<n>`` so two withheld keys never collide)."""
+    if k is None or isinstance(k, (bool, int, float)):
+        return k
+    ks = k if isinstance(k, str) else (bytes(k).decode("utf-8", "replace") if isinstance(k, (bytes, bytearray))
+                                       else str(k))
+    return ks if _str_ok(ks, None) else f"{WITHHELD}#{i}"
+
+
+def _guard_dict(d: dict, depth: int, key, budget: _Budget) -> dict:
+    out = {}
+    for i, (k, v) in enumerate(d.items()):
+        gk = globals()["_guard_key"](k, i)
+        out[gk] = _guard(v, depth + 1, gk if isinstance(gk, str) else key, budget)
+    return out
+
+
+def _guard_seq(seq, depth: int, key, budget: _Budget) -> list:
+    return [_guard(v, depth + 1, key, budget) for v in seq]
+
+
+def _guard_set(st, depth: int, key, budget: _Budget) -> list:
+    return sorted((_guard(v, depth + 1, key, budget) for v in st), key=repr)
+
+
+def _guard_other(obj, key):
+    s = str(obj)
+    return s if _str_ok(s, key) else WITHHELD
+
+
+def _guard(obj, depth: int, key, budget: _Budget):
+    budget.n += 1
+    if depth > GUARD_MAX_DEPTH or budget.n > GUARD_MAX_NODES:
+        return WITHHELD
+    if obj is None or isinstance(obj, (bool, int, float)):
+        return obj
+    g = globals()
+    if isinstance(obj, str):
+        return g["_guard_str"](obj, key)
+    if isinstance(obj, (bytes, bytearray, memoryview)):
+        return g["_guard_bytes"](obj, key)
+    if isinstance(obj, dict):
+        return g["_guard_dict"](obj, depth, key, budget)
+    if isinstance(obj, (list, tuple)):
+        return g["_guard_seq"](obj, depth, key, budget)
+    if isinstance(obj, (set, frozenset)):
+        return g["_guard_set"](obj, depth, key, budget)
+    return g["_guard_other"](obj, key)
+
+
+def _on_guard_error(obj):
+    return WITHHELD
+
+
+def guard_record(obj):
+    """FAIL-CLOSED sweep of anything bound for storage, a log or output (step 4): every dict KEY and value, list,
+    tuple and set member is checked; bytes are decoded then checked; any other object is read with ``str()`` then
+    checked. A string that fails is replaced by ``[withheld]`` (a failing key by ``[withheld]#<n>``); numbers, booleans
+    and None are kept. Tuples and sets come back as lists. Bounded depth (``GUARD_MAX_DEPTH``) and size
+    (``GUARD_MAX_NODES``): beyond them, ``[withheld]``. If anything raises, the WHOLE record is withheld: the return is
+    then ``[withheld]`` (a string), which the caller must treat as a failed run."""
+    try:
+        return _guard(obj, 0, None, _Budget())
+    except Exception:  # noqa: BLE001 - fail closed
+        return globals()["_on_guard_error"](obj)

@@ -129,9 +129,15 @@ class CitationsMixin:
                     capability="audit")
                 if stop is not None:
                     return self._interrupt_citation_run(tid, cid, stop)
-                # ADR 0050 M4: fail-closed sweep of the whole result before it is stored/logged, so no excerpt, URL or
-                # engine hint can carry a credential into data/seo_log.jsonl even if an upstream redaction was missed
+                # ADR 0050 v2 step 4: fail-closed sweep of the whole result before it is stored/logged (every key and
+                # value; a field that is not clearly safe is withheld whole), so no excerpt, URL or engine hint can
+                # carry a credential or personal data into data/seo_log.jsonl even if an upstream check was missed.
+                # If the sweep itself fails it returns "[withheld]": the run is then closed as failed, never stored.
                 env = callum.secret_guard.guard_record(env)
+                if not isinstance(env, dict) or not isinstance(env.get("facts", {}), dict):
+                    return self._interrupt_citation_run(tid, cid, R("RUN_FAILED"),
+                                                        {"agent": "callum", "where": "secret_guard",
+                                                         "error_type": "GuardFailed"})
                 rsha = sha(env)
                 facts = env.get("facts") or {}
                 totals = (facts.get("metrics") or {}).get("totals") or {}

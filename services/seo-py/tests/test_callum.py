@@ -21,9 +21,8 @@ from helpers import Harness, rid
 
 import answer_adapter as aa
 import config as config_mod
-from agents import callum
+from agents import callum, probes
 from agents import osei as osei_mod
-from agents import probes
 from clock import FixedClock
 from ports import ProviderAnswer
 from primitives import Killed
@@ -1176,7 +1175,8 @@ def test_wr_f012_a_secret_in_the_answer_text_is_redacted_from_every_excerpt():
         dumped = json.dumps(r)
         assert secret not in dumped and secret[:12] not in dumped, secret
         ev = [x["evidence"] for x in r["rows"] if x.get("evidence")]
-        assert ev and all(e.get("secret_redacted") for e in ev) and "[redacted]" in ev[0]["excerpt"]["text"]
+        # ADR 0050 v2: the whole excerpt is withheld, never a span cut out of it (was: "[redacted]" in the text)
+        assert ev and all(e.get("secret_redacted") for e in ev) and ev[0]["excerpt"]["text"] == "[withheld]"
     assert callum.secret_guard.redact("Z Best Media helps with revenue-recovery-agency-2026 work.")[1] == 0
 
 
@@ -1301,7 +1301,14 @@ def test_ordinary_cited_urls_are_kept_and_fetchable():
     # fit the AWS 40-character format across "/" boundaries are now withheld — security over precision. Bounded here
     # and measured on the disclosed corpus below (<= 2.5%); these are documented residual over-redaction, never leaks.
     flagged = [u for u in KEEP_URLS if callum.url_has_secret(u)]
-    assert len(flagged) <= 3, flagged
+    # ADR 0050 v2 (was: <= 3 flagged): a URL part holding a credential LABEL WORD is withheld and never fetched (rule
+    # 2a, generic slugs included), and tracking values that look like keys are never fetched either; the utility
+    # cost is measured on the disclosed corpus in test_secret_guard_core.py. Stated here explicitly:
+    by_label = {u for u in KEEP_URLS if any(w in u for w in ("password", "token", "secret", "api-key", "authorization",
+                                                               "bearer"))}
+    by_tracking_value = {u for u in KEEP_URLS if "gclid=" in u or "fbclid=" in u}
+    assert set(flagged) == by_label | by_tracking_value, sorted(set(flagged) ^ (by_label | by_tracking_value))
+    assert len(by_label) == 9 and len(by_tracking_value) == 2
     for u in KEEP_URLS:
         s = callum.stored_url(u)
         # never a leaked secret: an id window may be replaced by {secret}, but no raw credential is ever kept
@@ -1322,18 +1329,19 @@ def test_secret_values_in_paths_queries_and_text_are_dropped():
             assert n and v not in red and v[:12] not in red, (text, red)
 
 
-@pytest.mark.parametrize("text", [
-    "Use password protection on every account.", "A secret menu and token rewards.", "Reset your password-reset link.",
-    "The bearer of this card.", "Order 1005006123456789 shipped; tweet 1852960912345678901.",
-    "Commit 8f14e45fceea167a5a36dedd4bea2543c1b2d3e4 on github.com/acme/site is public.",
-    "Z Best Media recovers revenue for 2026 sellers.",
+@pytest.mark.parametrize("text,verdict", [
+    # ADR 0050 v2 (was: every one kept): a field holding a credential label word is withheld whole (rule 2a, generic
+    # prose included), and a 9+ digit run that is not an allowlisted shape is withheld (rule 2e). Stated explicitly.
+    ("Use password protection on every account.", "a_label"), ("A secret menu and token rewards.", "a_label"),
+    ("Reset your password-reset link.", "a_label"), ("The bearer of this card.", "a_label"),
+    ("Order 1005006123456789 shipped; tweet 1852960912345678901.", "e_digits"),
+    ("Commit 8f14e45fceea167a5a36dedd4bea2543c1b2d3e4 on github.com/acme/site is public.", None),
+    ("Z Best Media recovers revenue for 2026 sellers.", None),
 ])
-def test_ordinary_prose_is_not_redacted(text):
+def test_ordinary_prose_is_not_redacted(text, verdict):
     red, n = callum.secret_guard.redact(text)
-    if "Commit" in text:
-        assert n <= 1                                       # a bare 40-hex SHA in prose may be redacted: no leak cost
-    else:
-        assert n == 0 and red == text, red
+    assert callum.secret_guard.check(text) == verdict
+    assert (red, n) == ((text, 0) if verdict is None else ("[withheld]", 1)), red
 
 
 # ---------------------------------------------------------------------------------------------- final review
@@ -1475,7 +1483,7 @@ def test_redact_text_is_the_stable_entry_point():
     assert sg.redact is sg.redact_text
     assert sg.redact_text("") == ("", 0) and sg.redact_text("plain words") == ("plain words", 0)
     red, n = sg.redact_text("AWS " + "wJalrXUtnFEMI" + "/K7MDENG/" + "bPxRfiCY" + "EXAMPLEKEY" + " done")
-    assert n == 1 and red == "AWS [redacted] done"
+    assert n == 1 and red == "[withheld]"                  # ADR 0050 v2: the whole field (was: "AWS [redacted] done")
 
 
 def test_cited_instead_identity_keeps_query_ids_and_canonicalises_the_host():
@@ -1535,6 +1543,8 @@ def test_the_one_table_covers_the_forms_tnz_needed_in_text_and_urls():
             u = "https://docs.google.com/d/x?q=" + urllib.parse.quote(s, safe="")
             assert sg.url_has_secret(u), (name, u)
     assert sg._strong_spans("x " + _fake_keys()["github"]) != []          # kept for TNZ until it switches
-    for prose in ("the key takeaway is growth", "password protection matters", "Our key product SKU12345678 sells",
-                  "Bearer of good news", "auth flow explained"):
+    for prose in ("the key takeaway is growth", "Our key product SKU12345678 sells"):
         assert sg.redact_text(prose) == (prose, 0), prose
+    # ADR 0050 v2 (was: kept): a credential label word withholds the field, generic prose included
+    for prose in ("password protection matters", "Bearer of good news", "auth flow explained"):
+        assert sg.redact_text(prose) == ("[withheld]", 1) and sg.check(prose) == "a_label", prose
