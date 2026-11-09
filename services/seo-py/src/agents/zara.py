@@ -51,7 +51,9 @@ HOLDS = ("THEO_PAYLOAD_INVALID", "NAOMI_PAYLOAD_INVALID", "THEO_SELF_CONTRADICTI
          "NAOMI_TENANT_OR_RUN_MISMATCH",
          # review round 6: the structural basis, each invariant with its own reason (so each is testable alone)
          "THEO_STRUCTURAL_CHECKED_EXCEEDS_COMPLETE", "THEO_STRUCTURAL_DIVERGENT_EXCEEDS_CHECKED",
-         "THEO_STRUCTURAL_AGREED_EXCEEDS_UNDIVERGED", "THEO_NATIVE_PATTERN_WITHOUT_BASIS")
+         "THEO_STRUCTURAL_AGREED_EXCEEDS_UNDIVERGED", "THEO_NATIVE_PATTERN_WITHOUT_BASIS",
+         # review round 7: an agreeing chain is never a flagged or too-long one
+         "THEO_STRUCTURAL_AGREED_INCLUDES_FLAGGED", "THEO_STRUCTURAL_AGREED_INCLUDES_TOO_LONG")
 _CONTRACTS = {"theo": theo.CONTRACT, "naomi": naomi.CONTRACT}
 MEMBERS = ("theo", "naomi")
 MEMBER_STATES = ("DONE", "FAILED", "RESTRICTED", "KILLED", "TIMED_OUT", "NOT_RUN")
@@ -105,9 +107,15 @@ def check_chains(chains, topic_key: str) -> Optional[str]:
             return "THEO_PAYLOAD_INVALID"
         inj = c["injection_suspected"]
         dv = c["divergent_under_history"]
-        if not isinstance(inj, dict) or not isinstance(inj.get("chains"), int) or inj["chains"] < 0 \
-                or not isinstance(dv, dict) or not all(isinstance(dv.get(k), int) and dv[k] >= 0
-                                                       for k in ("checked", "divergent", "agreed_clean")):
+        tl = c["too_long_to_scan"]
+
+        def _ints(d, keys) -> bool:
+            return isinstance(d, dict) and all(isinstance(d.get(k), int) and not isinstance(d.get(k), bool)
+                                               and d[k] >= 0 for k in keys)
+        if not _ints(inj, ("chains", "complete")) or not _ints(tl, ("chains", "complete")) \
+                or not _ints(dv, ("checked", "divergent", "agreed_clean")) \
+                or inj["chains"] > c["chains"] or tl["chains"] > c["chains"] \
+                or inj["complete"] > inj["chains"] or tl["complete"] > tl["chains"]:
             return "THEO_PAYLOAD_INVALID"
         rec, named = _counts(fr.get("recommended")), _counts(fr.get("named_first_only"))
         none, unknown = fr.get("none"), fr.get("unknown")
@@ -128,6 +136,10 @@ def check_chains(chains, topic_key: str) -> Optional[str]:
             return "THEO_STRUCTURAL_DIVERGENT_EXCEEDS_CHECKED"
         if dv["agreed_clean"] > dv["checked"] - dv["divergent"]:
             return "THEO_STRUCTURAL_AGREED_EXCEEDS_UNDIVERGED"
+        if inj["complete"] > nc or dv["agreed_clean"] > nc - inj["complete"]:
+            return "THEO_STRUCTURAL_AGREED_INCLUDES_FLAGGED"
+        if tl["complete"] > nc or dv["agreed_clean"] > nc - tl["complete"]:
+            return "THEO_STRUCTURAL_AGREED_INCLUDES_TOO_LONG"
         outcome = theo.client_outcome(fr["recommended"]["client"], nc)
         if outcome != c["client_outcome"] or c["client_recommended"].get("k") != fr["recommended"]["client"]:
             return "THEO_SELF_CONTRADICTION"

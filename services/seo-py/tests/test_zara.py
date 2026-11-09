@@ -328,3 +328,36 @@ def test_zara_holds_impossible_structural_counts():
     assert hold(checked=4) == "THEO_STRUCTURAL_CHECKED_EXCEEDS_COMPLETE"            # 4 checked of 3 complete
     assert hold(checked=2, divergent=3, agreed_clean=0) == "THEO_STRUCTURAL_DIVERGENT_EXCEEDS_CHECKED"
     assert hold(checked=3, divergent=1, agreed_clean=3) == "THEO_STRUCTURAL_AGREED_EXCEEDS_UNDIVERGED"
+
+
+# ---------------------------------------------------------------------------------------------- review round 7
+
+def test_an_agreeing_count_that_includes_flagged_chains_is_held():
+    t, plans, res, ch = _native_checked_chains()
+    k = t[0]["topic_key"]
+    vout, vol = volumes_for(t)
+    lie = copy.deepcopy(ch)                                     # agreed_clean 3 and INVISIBLE_THEN_RECOMMENDED kept
+    lie[k][0]["injection_suspected"].update(chains=3, complete=3)
+    assert box_with(t, plans, res, lie, vout, vol)["items"][0]["hold_reason"] == \
+        "THEO_STRUCTURAL_AGREED_INCLUDES_FLAGGED"
+
+
+def test_an_agreeing_count_that_includes_too_long_chains_is_held():
+    t, plans, res, ch = _native_checked_chains()
+    k = t[0]["topic_key"]
+    vout, vol = volumes_for(t)
+    lie = copy.deepcopy(ch)
+    lie[k][0]["too_long_to_scan"].update(chains=3, complete=3)
+    assert box_with(t, plans, res, lie, vout, vol)["items"][0]["hold_reason"] == \
+        "THEO_STRUCTURAL_AGREED_INCLUDES_TOO_LONG"
+
+
+def test_the_too_long_to_scan_shape_is_validated():
+    t, plans, res, ch = _native_checked_chains()
+    k = t[0]["topic_key"]
+    vout, vol = volumes_for(t)
+    for bad in ("garbage", {"chains": -1, "complete": 0}, {"chains": 4, "complete": 0}, {"chains": "3", "complete": 0},
+                {"chains": 1, "complete": 2}, {"complete": 0}):
+        lie = copy.deepcopy(ch)
+        lie[k][0]["too_long_to_scan"] = bad
+        assert box_with(t, plans, res, lie, vout, vol)["items"][0]["hold_reason"] == "THEO_PAYLOAD_INVALID", bad

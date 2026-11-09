@@ -466,3 +466,15 @@ numbers below are on fixtures written by the builder and overstate what an adver
    Console and Bing rows, `led["handoff"]`, recorded with `priya.handoff_sha` in
    `tests/fixtures/priya/handoff_f759ebaa.json`) validates, hashes to the same canonical SHA-256, verifies against a
    record of Priya's `keyword_runs` shape, and flows through Naomi and Zara.
+
+## Review round 7 (5df18c30: CONDITIONAL, one gap)
+
+Zara accepted a payload claiming `agreed_clean = 3` and `INVISIBLE_THEN_RECOMMENDED` while also reporting three
+complete chains flagged by the auxiliary guard or too long to scan, and did not validate `too_long_to_scan`. Now:
+`injection_suspected` and `too_long_to_scan` must both be `{chains, complete}` of whole numbers ≥ 0 with
+`complete ≤ chains ≤ chains of the summary` (Theo reports `too_long_to_scan.complete`), else THEO_PAYLOAD_INVALID;
+and a payload is HELD when `agreed_clean > complete − injection_suspected.complete`
+(`THEO_STRUCTURAL_AGREED_INCLUDES_FLAGGED`) or `agreed_clean > complete − too_long_to_scan.complete`
+(`THEO_STRUCTURAL_AGREED_INCLUDES_TOO_LONG`). One test each; removing each guard makes its test fail (five mutants,
+all killed).
+

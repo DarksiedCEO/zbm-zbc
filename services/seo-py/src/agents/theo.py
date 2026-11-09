@@ -727,6 +727,7 @@ def _summary(t: dict, e: str, turns: list, flags: list, samples: list, mode: str
                                                 "(opt-in SEO_THEO_STACKED_CHECK); a different pick may be the "
                                                 "history's influence, or ordinary sampling variation"},
             "too_long_to_scan": {"chains": len(too_long),
+                                 "complete": sum(1 for c in too_long if c["status"] == "COMPLETE"),
                                  "note": "a re-sent text over the guard's scan limit was not scanned; not an "
                                          "injection finding, but it cannot support the native pattern"},
             "injection_suspected": {"chains": len(injected), "complete": sum(1 for c in injected
