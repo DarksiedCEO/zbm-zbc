@@ -361,3 +361,44 @@ def test_the_too_long_to_scan_shape_is_validated():
         lie = copy.deepcopy(ch)
         lie[k][0]["too_long_to_scan"] = bad
         assert box_with(t, plans, res, lie, vout, vol)["items"][0]["hold_reason"] == "THEO_PAYLOAD_INVALID", bad
+
+
+
+# ---------------------------------------------------------------------------------------------- review round 8
+
+def _hold(field, value):
+    t, plans, res, ch = _native_checked_chains()
+    k = t[0]["topic_key"]
+    vout, vol = volumes_for(t)
+    lie = copy.deepcopy(ch)
+    if isinstance(value, dict) and value.pop("_merge", False):
+        lie[k][0][field].update(value)
+    else:
+        lie[k][0][field] = value
+    return box_with(t, plans, res, lie, vout, vol)["items"][0]["hold_reason"]
+
+
+def test_flagged_chains_counted_as_incomplete_cannot_hide_inside_agreed():
+    # every chain is complete (3 of 3): three flagged-but-"incomplete" chains are impossible
+    assert _hold("injection_suspected", {"_merge": True, "chains": 3, "complete": 0}) == \
+        "THEO_STRUCTURAL_AGREED_INCLUDES_FLAGGED"
+    assert _hold("too_long_to_scan", {"_merge": True, "chains": 3, "complete": 0}) == \
+        "THEO_STRUCTURAL_AGREED_INCLUDES_TOO_LONG"
+
+
+def test_the_flag_shapes_are_strict():
+    for field in ("injection_suspected", "too_long_to_scan"):
+        assert _hold(field, {"_merge": True, "extra": 1}) == "THEO_PAYLOAD_INVALID", field
+        assert _hold(field, {"chains": 0, "complete": 0}) == "THEO_PAYLOAD_INVALID", field      # note missing
+        assert _hold(field, {"chains": 0, "note": "x"}) == "THEO_PAYLOAD_INVALID", field         # complete missing
+        assert _hold(field, {"_merge": True, "chains": True}) == "THEO_PAYLOAD_INVALID", field   # a bool is no count
+        assert _hold(field, {"_merge": True, "chains": 1, "complete": 2}) == "THEO_PAYLOAD_INVALID", field
+        assert _hold(field, {"_merge": True, "chains": 4, "complete": 0}) == "THEO_PAYLOAD_INVALID", field
+
+
+def test_injection_suspected_guards_each_hold():
+    assert _hold("injection_suspected", {"chains": 0, "note": "x"}) == "THEO_PAYLOAD_INVALID"       # no KeyError
+    assert _hold("injection_suspected", {"_merge": True, "complete": True}) == "THEO_PAYLOAD_INVALID"
+    assert _hold("injection_suspected", {"_merge": True, "complete": "x"}) == "THEO_PAYLOAD_INVALID"
+    assert _hold("injection_suspected", {"_merge": True, "chains": 1, "complete": 2}) == "THEO_PAYLOAD_INVALID"
+    assert _hold("injection_suspected", {"_merge": True, "chains": 4, "complete": 3}) == "THEO_PAYLOAD_INVALID"

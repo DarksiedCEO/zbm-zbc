@@ -112,7 +112,10 @@ def check_chains(chains, topic_key: str) -> Optional[str]:
         def _ints(d, keys) -> bool:
             return isinstance(d, dict) and all(isinstance(d.get(k), int) and not isinstance(d.get(k), bool)
                                                and d[k] >= 0 for k in keys)
-        if not _ints(inj, ("chains", "complete")) or not _ints(tl, ("chains", "complete")) \
+        def _flag_shape(d) -> bool:                  # round 8: exactly Theo's keys, no extra ones
+            return isinstance(d, dict) and set(d) == {"chains", "complete", "note"} and isinstance(d["note"], str)
+        if not _flag_shape(inj) or not _flag_shape(tl) \
+                or not _ints(inj, ("chains", "complete")) or not _ints(tl, ("chains", "complete")) \
                 or not _ints(dv, ("checked", "divergent", "agreed_clean")) \
                 or inj["chains"] > c["chains"] or tl["chains"] > c["chains"] \
                 or inj["complete"] > inj["chains"] or tl["complete"] > tl["chains"]:
@@ -136,6 +139,11 @@ def check_chains(chains, topic_key: str) -> Optional[str]:
             return "THEO_STRUCTURAL_DIVERGENT_EXCEEDS_CHECKED"
         if dv["agreed_clean"] > dv["checked"] - dv["divergent"]:
             return "THEO_STRUCTURAL_AGREED_EXCEEDS_UNDIVERGED"
+        # round 8: flagged chains that are not complete cannot outnumber the chains that are not complete
+        if inj["chains"] - inj["complete"] > c["chains"] - nc:
+            return "THEO_STRUCTURAL_AGREED_INCLUDES_FLAGGED"
+        if tl["chains"] - tl["complete"] > c["chains"] - nc:
+            return "THEO_STRUCTURAL_AGREED_INCLUDES_TOO_LONG"
         if inj["complete"] > nc or dv["agreed_clean"] > nc - inj["complete"]:
             return "THEO_STRUCTURAL_AGREED_INCLUDES_FLAGGED"
         if tl["complete"] > nc or dv["agreed_clean"] > nc - tl["complete"]:
