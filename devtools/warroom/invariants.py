@@ -8,7 +8,7 @@ invariant MUST (gate-blocking) or SHOULD (scored, reported)."""
 from __future__ import annotations
 
 import json
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 # service-py (ADR 0014 + sweep A / AEGIS re-reviews): the alert codes that put a possible opt-out in front of Andre
 OPT_OUT_ALERTS = frozenset({"OPT_OUT_POSSIBLE", "EMAIL_OPT_OUT_UNCLEAR", "OPT_OUT_IN_QUOTED_TEXT",
@@ -78,6 +78,25 @@ def state_same(obs: dict, a: str, b: str) -> tuple[bool, str]:
     return va == vb, f"state.{a} = {va!r}, state.{b} = {vb!r}"
 
 
+def state_empty(obs: dict, key: str) -> tuple[bool, str]:
+    """``state.<key>`` is an empty list (the driver lists every violation it judged; none is the pass). A missing key
+    does not hold: the driver must always say what it checked."""
+    st = obs.get("state", {})
+    if key not in st:
+        return False, f"state.{key} missing: the driver did not judge it"
+    got = st[key]
+    return isinstance(got, list) and not got, f"state.{key} = {got!r}"[:600]
+
+
+def state_le(obs: dict, key: str, limit: Any = None, limit_key: Optional[str] = None) -> tuple[bool, str]:
+    """A structural bound: ``state.<key>`` <= a constant or <= ``state.<limit_key>`` (counts, never wall-clock time)."""
+    got = _field(obs.get("state", {}), key)
+    bound = limit if limit_key is None else _field(obs.get("state", {}), limit_key)
+    if not isinstance(got, (int, float)) or not isinstance(bound, (int, float)):
+        return False, f"state.{key} = {got!r}, bound = {bound!r}: not comparable"
+    return got <= bound, f"state.{key} = {got} <= {bound}"
+
+
 def no_echo(obs: dict, key: str = "foreign_identifiers") -> tuple[bool, str]:
     """No response body carries any of another person's identifiers (``state.<key>``, a list of strings)."""
     needles = [n for n in (_field(obs.get("state", {}), key) or []) if n]
@@ -120,6 +139,7 @@ INVARIANTS: dict[str, Callable[..., tuple[bool, str]]] = {
     "status_in": status_in, "field_equals": field_equals, "any_field_truthy": any_field_truthy,
     "refused_or_field_equals": refused_or_field_equals,
     "state_equals": state_equals, "state_in": state_in, "state_same": state_same, "no_echo": no_echo,
+    "state_empty": state_empty, "state_le": state_le,
     "opt_out_honoured_or_surfaced": opt_out_honoured_or_surfaced, "consent_is": consent_is,
     "consent_unchanged": consent_unchanged, "no_opt_out_alert": no_opt_out_alert,
 }

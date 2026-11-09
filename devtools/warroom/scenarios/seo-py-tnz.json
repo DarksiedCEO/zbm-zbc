@@ -1,0 +1,4341 @@
+{
+ "library": "seo-py-tnz",
+ "version": 1,
+ "department": "Search & Answer Intelligence (department 2): the conversation fireteam — Theo (conversation chains), Naomi (prompt volume) and their lead Zara (the real-time cross-check)",
+ "service": "seo-py",
+ "driver": "seo_py_tnz.py",
+ "basis": "ADR 0049 (Theo's plan fixed before turn one from the topic and Priya's items only; native multi-turn re-sends the engine's own content blocks exactly as received, under the adapter's provenance record; the native invisible-then-recommended pattern only on a structural re-ask that agreed on every complete chain with none flagged or too long; the auxiliary injection guard scans every re-sent text; Naomi's band, UNKNOWN never 0, never HIGH, unverified capped THIN; Priya's hand-off validated and verified against her record; Zara re-derives and HOLDS any inconsistent, foreign or duplicate payload, never fills in a missing half; failure isolation, bounded member wait, kill switches, budgets, isolation) on ADR 0046's adapter rules. The war room's own judge reads what the providers served and received, the clean control run, and its own consistency rules, never the agents' verdicts.",
+ "variants_per_seed": 2,
+ "scenarios": [
+  {
+   "id": "poisoned-native-answers",
+   "persona": "a poisoned answer engine: an instruction aimed at the model in the answer text, an Anthropic cited_text, a citation or search-result title (also the 100th result), a Gemini thought part or extra part, re-sent in native multi-turn",
+   "basis": "ADR 0049 §2 (the plan is fixed before turn one; an answer can only appear as an assistant turn), round 3 (the guard scans EVERY re-sent text: answer text, cited_text, result titles, Gemini parts), round 4 (provenance), round 5 (the native pattern only on a structural re-ask that agreed on every complete chain, none flagged)",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_theo.py",
+      "test": "test_round_four_families_are_flagged",
+      "parametrize": true
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_audits.py",
+      "module": "INJECTION"
+     }
+    }
+   ],
+   "input_field": "inject",
+   "params": {
+    "where": [
+     "text",
+     "cited_text",
+     "citation_title",
+     "result_title",
+     "many_results_title",
+     "gemini_thought",
+     "gemini_part"
+    ],
+    "at": [
+     "opening",
+     "compare",
+     "final"
+    ],
+    "engines": [
+     "anthropic,google",
+     "anthropic,google,openai,perplexity",
+     "anthropic",
+     "google",
+     "anthropic,openai"
+    ],
+    "stacked_check": [
+     "on",
+     "off"
+    ]
+   },
+   "fixed_input": {
+    "control": "plan"
+   },
+   "steps": [
+    {
+     "action": "fireteam_run",
+     "args": {
+      "inject": "$inject",
+      "where": "$where",
+      "at": "$at",
+      "engines": "$engines",
+      "stacked_check": "$stacked_check",
+      "control": "$control"
+     }
+    }
+   ],
+   "transforms": [
+    "homoglyph",
+    "zero_width",
+    "case_flip",
+    "leetspeak",
+    "letter_spacing",
+    "fullwidth",
+    "soft_hyphen",
+    "md_bullet",
+    "md_quote",
+    "md_heading",
+    "rtl_wrap",
+    "cjk_wrap"
+   ],
+   "chain_max": 2,
+   "variants_per_seed": 2,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "plan_never_altered_by_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "plan_violations"
+     }
+    },
+    {
+     "id": "answer_text_never_a_user_turn",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "injection_in_user_turns"
+     }
+    },
+    {
+     "id": "assistant_turn_resent_exactly_as_received",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "resend_not_as_served"
+     }
+    },
+    {
+     "id": "native_pattern_only_with_structural_basis",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "native_pattern_violations"
+     }
+    },
+    {
+     "id": "flaggable_resent_text_flags_its_chain",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "flaggable_resent_not_flagged"
+     }
+    },
+    {
+     "id": "too_long_resent_text_labelled",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "too_long_not_flagged"
+     }
+    },
+    {
+     "id": "no_chain_counted_without_an_accepted_final",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_chain_counted"
+     }
+    },
+    {
+     "id": "a_cap_never_cuts_a_chain_in_half",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "chain_cut_mid_chain_by_budget"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "caps_exceeded"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "unverified_volume_never_above_thin_cleared_or_test",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unverified_volume_promoted"
+     }
+    },
+    {
+     "id": "kill_switch_always_stops",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "kill_not_honoured"
+     }
+    },
+    {
+     "id": "zara_checks_every_topic_once",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "zara_checks_mismatch"
+     }
+    },
+    {
+     "id": "priya_query_text_never_recorded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "priya_query_text_recorded"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "client_never_wins_a_final_served_as_someone_elses",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_client_win"
+     }
+    },
+    {
+     "id": "guard_flags_nothing_when_nothing_flaggable_was_served",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "flagged_without_flaggable"
+     }
+    },
+    {
+     "id": "provider_kill_stops_only_that_engine",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "provider_kill_interrupted_run"
+     }
+    }
+   ]
+  },
+  {
+   "id": "long-resent-texts",
+   "persona": "an answer carrying a text over the injection guard's scan limit (20,000 characters) at a re-sent placement",
+   "basis": "ADR 0049 round 5-6 (a text over MAX_SCAN_CHARS is not scanned, labelled TOO_LONG_TO_SCAN, never 'injection', and cannot support the native pattern); round 2 (never truncated: a history over the cap ends the chain INCOMPLETE with no request)",
+   "seeds": [
+    {
+     "literal": [
+      "text",
+      "cited_text",
+      "citation_title",
+      "gemini_thought",
+      "gemini_part"
+     ]
+    }
+   ],
+   "input_field": "long_where",
+   "params": {
+    "long": [
+     20001,
+     26000,
+     90000,
+     250000
+    ],
+    "at": [
+     "compare",
+     "opening",
+     "final"
+    ],
+    "engines": [
+     "anthropic,google",
+     "anthropic",
+     "google"
+    ]
+   },
+   "fixed_input": {
+    "control": "plan"
+   },
+   "steps": [
+    {
+     "action": "fireteam_run",
+     "args": {
+      "long_where": "$long_where",
+      "long": "$long",
+      "at": "$at",
+      "engines": "$engines",
+      "control": "$control",
+      "long_at": "$at"
+     }
+    }
+   ],
+   "chain_max": 2,
+   "variants_per_seed": 3,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "plan_never_altered_by_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "plan_violations"
+     }
+    },
+    {
+     "id": "answer_text_never_a_user_turn",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "injection_in_user_turns"
+     }
+    },
+    {
+     "id": "assistant_turn_resent_exactly_as_received",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "resend_not_as_served"
+     }
+    },
+    {
+     "id": "native_pattern_only_with_structural_basis",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "native_pattern_violations"
+     }
+    },
+    {
+     "id": "flaggable_resent_text_flags_its_chain",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "flaggable_resent_not_flagged"
+     }
+    },
+    {
+     "id": "too_long_resent_text_labelled",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "too_long_not_flagged"
+     }
+    },
+    {
+     "id": "no_chain_counted_without_an_accepted_final",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_chain_counted"
+     }
+    },
+    {
+     "id": "a_cap_never_cuts_a_chain_in_half",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "chain_cut_mid_chain_by_budget"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "caps_exceeded"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "unverified_volume_never_above_thin_cleared_or_test",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unverified_volume_promoted"
+     }
+    },
+    {
+     "id": "kill_switch_always_stops",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "kill_not_honoured"
+     }
+    },
+    {
+     "id": "zara_checks_every_topic_once",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "zara_checks_mismatch"
+     }
+    },
+    {
+     "id": "priya_query_text_never_recorded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "priya_query_text_recorded"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "client_never_wins_a_final_served_as_someone_elses",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_client_win"
+     }
+    },
+    {
+     "id": "guard_flags_nothing_when_nothing_flaggable_was_served",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "flagged_without_flaggable"
+     }
+    },
+    {
+     "id": "provider_kill_stops_only_that_engine",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "provider_kill_interrupted_run"
+     }
+    }
+   ]
+  },
+  {
+   "id": "reader-facing-advice-in-answers",
+   "persona": "an answer with reader-facing advice that looks like an instruction (the guard's pinned negatives)",
+   "basis": "ADR 0049 round 3-4 (model-directed forms only: reader-facing advice is not flagged); every MUST above",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_theo.py",
+      "test": "test_reader_facing_advice_is_not_flagged",
+      "parametrize": true
+     }
+    }
+   ],
+   "input_field": "inject",
+   "params": {
+    "where": [
+     "text",
+     "cited_text",
+     "citation_title",
+     "result_title",
+     "many_results_title",
+     "gemini_thought",
+     "gemini_part"
+    ],
+    "at": [
+     "opening",
+     "compare"
+    ],
+    "engines": [
+     "anthropic,google",
+     "anthropic,google,openai,perplexity"
+    ]
+   },
+   "fixed_input": {
+    "control": "plan"
+   },
+   "steps": [
+    {
+     "action": "fireteam_run",
+     "args": {
+      "inject": "$inject",
+      "where": "$where",
+      "at": "$at",
+      "engines": "$engines",
+      "control": "$control"
+     }
+    }
+   ],
+   "chain_max": 2,
+   "variants_per_seed": 2,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "plan_never_altered_by_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "plan_violations"
+     }
+    },
+    {
+     "id": "answer_text_never_a_user_turn",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "injection_in_user_turns"
+     }
+    },
+    {
+     "id": "assistant_turn_resent_exactly_as_received",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "resend_not_as_served"
+     }
+    },
+    {
+     "id": "native_pattern_only_with_structural_basis",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "native_pattern_violations"
+     }
+    },
+    {
+     "id": "flaggable_resent_text_flags_its_chain",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "flaggable_resent_not_flagged"
+     }
+    },
+    {
+     "id": "too_long_resent_text_labelled",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "too_long_not_flagged"
+     }
+    },
+    {
+     "id": "no_chain_counted_without_an_accepted_final",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_chain_counted"
+     }
+    },
+    {
+     "id": "a_cap_never_cuts_a_chain_in_half",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "chain_cut_mid_chain_by_budget"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "caps_exceeded"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "unverified_volume_never_above_thin_cleared_or_test",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unverified_volume_promoted"
+     }
+    },
+    {
+     "id": "kill_switch_always_stops",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "kill_not_honoured"
+     }
+    },
+    {
+     "id": "zara_checks_every_topic_once",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "zara_checks_mismatch"
+     }
+    },
+    {
+     "id": "priya_query_text_never_recorded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "priya_query_text_recorded"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "client_never_wins_a_final_served_as_someone_elses",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_client_win"
+     }
+    },
+    {
+     "id": "guard_flags_nothing_when_nothing_flaggable_was_served",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "flagged_without_flaggable"
+     }
+    },
+    {
+     "id": "provider_kill_stops_only_that_engine",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "provider_kill_interrupted_run"
+     }
+    }
+   ]
+  },
+  {
+   "id": "injection-nested-deep-in-a-search-result",
+   "persona": "an Anthropic search result carrying an unmodelled field nested ten levels deep with an instruction in a title (outside the documented re-sent locations)",
+   "basis": "ADR 0049 round 3 lists the documented locations (answer text, cited_text, result title, Gemini parts); a deeper unmodelled field is re-sent as received (round 2) but is not among them, so its checks are SHOULD",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_theo.py",
+      "test": "test_round_four_families_are_flagged",
+      "parametrize": true
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_audits.py",
+      "module": "INJECTION"
+     }
+    }
+   ],
+   "input_field": "inject",
+   "params": {
+    "at": [
+     "compare",
+     "opening"
+    ]
+   },
+   "fixed_input": {
+    "where": "nested_deep",
+    "engines": "anthropic"
+   },
+   "steps": [
+    {
+     "action": "fireteam_run",
+     "args": {
+      "inject": "$inject",
+      "at": "$at",
+      "where": "$where",
+      "engines": "$engines"
+     }
+    }
+   ],
+   "chain_max": 2,
+   "variants_per_seed": 0,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "plan_never_altered_by_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "plan_violations"
+     }
+    },
+    {
+     "id": "answer_text_never_a_user_turn",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "injection_in_user_turns"
+     }
+    },
+    {
+     "id": "assistant_turn_resent_exactly_as_received",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "resend_not_as_served"
+     }
+    },
+    {
+     "id": "too_long_resent_text_labelled",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "too_long_not_flagged"
+     }
+    },
+    {
+     "id": "no_chain_counted_without_an_accepted_final",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_chain_counted"
+     }
+    },
+    {
+     "id": "a_cap_never_cuts_a_chain_in_half",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "chain_cut_mid_chain_by_budget"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "caps_exceeded"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "unverified_volume_never_above_thin_cleared_or_test",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unverified_volume_promoted"
+     }
+    },
+    {
+     "id": "kill_switch_always_stops",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "kill_not_honoured"
+     }
+    },
+    {
+     "id": "zara_checks_every_topic_once",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "zara_checks_mismatch"
+     }
+    },
+    {
+     "id": "priya_query_text_never_recorded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "priya_query_text_recorded"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "client_never_wins_a_final_served_as_someone_elses",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_client_win"
+     }
+    },
+    {
+     "id": "guard_flags_nothing_when_nothing_flaggable_was_served",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "flagged_without_flaggable"
+     }
+    },
+    {
+     "id": "provider_kill_stops_only_that_engine",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "provider_kill_interrupted_run"
+     }
+    },
+    {
+     "id": "flaggable_resent_text_flags_its_chain",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "flaggable_resent_not_flagged"
+     }
+    },
+    {
+     "id": "native_pattern_only_with_structural_basis",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "native_pattern_violations"
+     }
+    }
+   ]
+  },
+  {
+   "id": "final-answer-not-the-client-none",
+   "persona": "a final answer from Theo's pinned negation tables whose pinned winner is none, in markdown, right-to-left and CJK lines",
+   "basis": "ADR 0049 §3 (negation-aware lexical reading; the pinned fallbacks read as 'no recommendation', never a wrong win; tests/test_theo.py tables)",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_theo.py",
+      "test": "test_round_three_negation_cases",
+      "parametrize": true,
+      "field": 0,
+      "where": {
+       "1": "none"
+      }
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_theo.py",
+      "test": "test_documented_fallbacks_give_no_recommendation",
+      "parametrize": true
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_theo.py",
+      "test": "test_a_shared_pick_is_no_decisive_win",
+      "parametrize": true
+     }
+    }
+   ],
+   "input_field": "final",
+   "params": {
+    "engines": [
+     "anthropic,google,openai,perplexity",
+     "anthropic",
+     "openai"
+    ],
+    "stacked_check": [
+     "on",
+     "off"
+    ]
+   },
+   "fixed_input": {
+    "final_pick": "none"
+   },
+   "steps": [
+    {
+     "action": "fireteam_run",
+     "args": {
+      "final": "$final",
+      "engines": "$engines",
+      "stacked_check": "$stacked_check",
+      "final_pick": "$final_pick"
+     }
+    }
+   ],
+   "transforms": [
+    "md_bullet",
+    "md_quote",
+    "md_heading",
+    "rtl_wrap",
+    "cjk_wrap",
+    "md_table",
+    "cjk_tight",
+    "nbsp_spacing"
+   ],
+   "chain_max": 2,
+   "variants_per_seed": 2,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "plan_never_altered_by_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "plan_violations"
+     }
+    },
+    {
+     "id": "answer_text_never_a_user_turn",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "injection_in_user_turns"
+     }
+    },
+    {
+     "id": "assistant_turn_resent_exactly_as_received",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "resend_not_as_served"
+     }
+    },
+    {
+     "id": "native_pattern_only_with_structural_basis",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "native_pattern_violations"
+     }
+    },
+    {
+     "id": "flaggable_resent_text_flags_its_chain",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "flaggable_resent_not_flagged"
+     }
+    },
+    {
+     "id": "too_long_resent_text_labelled",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "too_long_not_flagged"
+     }
+    },
+    {
+     "id": "no_chain_counted_without_an_accepted_final",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_chain_counted"
+     }
+    },
+    {
+     "id": "a_cap_never_cuts_a_chain_in_half",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "chain_cut_mid_chain_by_budget"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "caps_exceeded"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "unverified_volume_never_above_thin_cleared_or_test",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unverified_volume_promoted"
+     }
+    },
+    {
+     "id": "kill_switch_always_stops",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "kill_not_honoured"
+     }
+    },
+    {
+     "id": "zara_checks_every_topic_once",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "zara_checks_mismatch"
+     }
+    },
+    {
+     "id": "priya_query_text_never_recorded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "priya_query_text_recorded"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "client_never_wins_a_final_served_as_someone_elses",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_client_win"
+     }
+    },
+    {
+     "id": "guard_flags_nothing_when_nothing_flaggable_was_served",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "flagged_without_flaggable"
+     }
+    },
+    {
+     "id": "provider_kill_stops_only_that_engine",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "provider_kill_interrupted_run"
+     }
+    }
+   ],
+   "downgrade": {
+    "md_table": [
+     "client_never_wins_a_final_served_as_someone_elses"
+    ],
+    "cjk_tight": [
+     "client_never_wins_a_final_served_as_someone_elses"
+    ],
+    "nbsp_spacing": [
+     "client_never_wins_a_final_served_as_someone_elses"
+    ]
+   },
+   "downgrade_basis": "md_table puts the sentence in a table cell next to a cue word, cjk_tight glues the words into CJK text and nbsp_spacing changes the spaces: the lexical rule is documented on plain sentences (ADR 0049 Limitations)"
+  },
+  {
+   "id": "final-answer-not-the-client-competitor",
+   "persona": "a final answer from Theo's pinned negation tables whose pinned winner is competitor, in markdown, right-to-left and CJK lines",
+   "basis": "ADR 0049 §3 (negation-aware lexical reading; the pinned fallbacks read as 'no recommendation', never a wrong win; tests/test_theo.py tables)",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_theo.py",
+      "test": "test_round_three_negation_cases",
+      "parametrize": true,
+      "field": 0,
+      "where": {
+       "1": "competitor"
+      }
+     }
+    }
+   ],
+   "input_field": "final",
+   "params": {
+    "engines": [
+     "anthropic,google,openai,perplexity",
+     "anthropic",
+     "openai"
+    ],
+    "stacked_check": [
+     "on",
+     "off"
+    ]
+   },
+   "fixed_input": {
+    "final_pick": "competitor"
+   },
+   "steps": [
+    {
+     "action": "fireteam_run",
+     "args": {
+      "final": "$final",
+      "engines": "$engines",
+      "stacked_check": "$stacked_check",
+      "final_pick": "$final_pick"
+     }
+    }
+   ],
+   "transforms": [
+    "md_bullet",
+    "md_quote",
+    "md_heading",
+    "rtl_wrap",
+    "cjk_wrap",
+    "md_table",
+    "cjk_tight",
+    "nbsp_spacing"
+   ],
+   "chain_max": 2,
+   "variants_per_seed": 2,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "plan_never_altered_by_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "plan_violations"
+     }
+    },
+    {
+     "id": "answer_text_never_a_user_turn",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "injection_in_user_turns"
+     }
+    },
+    {
+     "id": "assistant_turn_resent_exactly_as_received",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "resend_not_as_served"
+     }
+    },
+    {
+     "id": "native_pattern_only_with_structural_basis",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "native_pattern_violations"
+     }
+    },
+    {
+     "id": "flaggable_resent_text_flags_its_chain",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "flaggable_resent_not_flagged"
+     }
+    },
+    {
+     "id": "too_long_resent_text_labelled",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "too_long_not_flagged"
+     }
+    },
+    {
+     "id": "no_chain_counted_without_an_accepted_final",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_chain_counted"
+     }
+    },
+    {
+     "id": "a_cap_never_cuts_a_chain_in_half",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "chain_cut_mid_chain_by_budget"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "caps_exceeded"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "unverified_volume_never_above_thin_cleared_or_test",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unverified_volume_promoted"
+     }
+    },
+    {
+     "id": "kill_switch_always_stops",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "kill_not_honoured"
+     }
+    },
+    {
+     "id": "zara_checks_every_topic_once",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "zara_checks_mismatch"
+     }
+    },
+    {
+     "id": "priya_query_text_never_recorded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "priya_query_text_recorded"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "client_never_wins_a_final_served_as_someone_elses",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_client_win"
+     }
+    },
+    {
+     "id": "guard_flags_nothing_when_nothing_flaggable_was_served",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "flagged_without_flaggable"
+     }
+    },
+    {
+     "id": "provider_kill_stops_only_that_engine",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "provider_kill_interrupted_run"
+     }
+    }
+   ],
+   "downgrade": {
+    "md_table": [
+     "client_never_wins_a_final_served_as_someone_elses"
+    ],
+    "cjk_tight": [
+     "client_never_wins_a_final_served_as_someone_elses"
+    ],
+    "nbsp_spacing": [
+     "client_never_wins_a_final_served_as_someone_elses"
+    ]
+   },
+   "downgrade_basis": "md_table puts the sentence in a table cell next to a cue word, cjk_tight glues the words into CJK text and nbsp_spacing changes the spaces: the lexical rule is documented on plain sentences (ADR 0049 Limitations)"
+  },
+  {
+   "id": "final-answer-the-client",
+   "persona": "a final answer the suite pins as the client's pick (idioms that look negated, round-three cases)",
+   "basis": "ADR 0049 §3 round 2-3 (idioms positive); the miss is SHOULD (a lexical rule may under-read)",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_theo.py",
+      "test": "test_round_three_negation_cases",
+      "parametrize": true,
+      "field": 0,
+      "where": {
+       "1": "client"
+      }
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_theo.py",
+      "test": "test_idioms_that_look_negated_are_positive",
+      "parametrize": true
+     }
+    }
+   ],
+   "input_field": "final",
+   "params": {
+    "engines": [
+     "anthropic,google,openai,perplexity",
+     "google"
+    ]
+   },
+   "fixed_input": {
+    "final_pick": "client"
+   },
+   "steps": [
+    {
+     "action": "fireteam_run",
+     "args": {
+      "final": "$final",
+      "engines": "$engines",
+      "final_pick": "$final_pick"
+     }
+    }
+   ],
+   "transforms": [
+    "md_bullet",
+    "md_quote",
+    "md_heading",
+    "rtl_wrap",
+    "cjk_wrap"
+   ],
+   "chain_max": 2,
+   "variants_per_seed": 2,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "plan_never_altered_by_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "plan_violations"
+     }
+    },
+    {
+     "id": "answer_text_never_a_user_turn",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "injection_in_user_turns"
+     }
+    },
+    {
+     "id": "assistant_turn_resent_exactly_as_received",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "resend_not_as_served"
+     }
+    },
+    {
+     "id": "native_pattern_only_with_structural_basis",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "native_pattern_violations"
+     }
+    },
+    {
+     "id": "flaggable_resent_text_flags_its_chain",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "flaggable_resent_not_flagged"
+     }
+    },
+    {
+     "id": "too_long_resent_text_labelled",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "too_long_not_flagged"
+     }
+    },
+    {
+     "id": "no_chain_counted_without_an_accepted_final",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_chain_counted"
+     }
+    },
+    {
+     "id": "a_cap_never_cuts_a_chain_in_half",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "chain_cut_mid_chain_by_budget"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "caps_exceeded"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "unverified_volume_never_above_thin_cleared_or_test",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unverified_volume_promoted"
+     }
+    },
+    {
+     "id": "kill_switch_always_stops",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "kill_not_honoured"
+     }
+    },
+    {
+     "id": "zara_checks_every_topic_once",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "zara_checks_mismatch"
+     }
+    },
+    {
+     "id": "priya_query_text_never_recorded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "priya_query_text_recorded"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "client_never_wins_a_final_served_as_someone_elses",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_client_win"
+     }
+    },
+    {
+     "id": "guard_flags_nothing_when_nothing_flaggable_was_served",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "flagged_without_flaggable"
+     }
+    },
+    {
+     "id": "provider_kill_stops_only_that_engine",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "provider_kill_interrupted_run"
+     }
+    },
+    {
+     "id": "client_pick_read",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "client_win_missed"
+     }
+    }
+   ]
+  },
+  {
+   "id": "reask-disagrees",
+   "persona": "the structural re-ask (no history) picks someone else than the native final",
+   "basis": "ADR 0049 round 5 (any divergence: INVISIBLE_AT_OPENING_RECOMMENDED_UNCHECKED, never the native pattern)",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_theo.py",
+      "test": "test_round_three_negation_cases",
+      "parametrize": true,
+      "field": 0,
+      "where": {
+       "1": "competitor"
+      }
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_theo.py",
+      "test": "test_round_three_negation_cases",
+      "parametrize": true,
+      "field": 0,
+      "where": {
+       "1": "none"
+      }
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_theo.py",
+      "test": "test_documented_fallbacks_give_no_recommendation",
+      "parametrize": true
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_theo.py",
+      "test": "test_a_shared_pick_is_no_decisive_win",
+      "parametrize": true
+     }
+    }
+   ],
+   "input_field": "recheck",
+   "params": {
+    "engines": [
+     "anthropic,google",
+     "anthropic",
+     "google"
+    ]
+   },
+   "fixed_input": {
+    "recheck_pick": "other"
+   },
+   "steps": [
+    {
+     "action": "fireteam_run",
+     "args": {
+      "recheck": "$recheck",
+      "engines": "$engines",
+      "recheck_pick": "$recheck_pick"
+     }
+    }
+   ],
+   "chain_max": 2,
+   "variants_per_seed": 1,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "plan_never_altered_by_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "plan_violations"
+     }
+    },
+    {
+     "id": "answer_text_never_a_user_turn",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "injection_in_user_turns"
+     }
+    },
+    {
+     "id": "assistant_turn_resent_exactly_as_received",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "resend_not_as_served"
+     }
+    },
+    {
+     "id": "native_pattern_only_with_structural_basis",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "native_pattern_violations"
+     }
+    },
+    {
+     "id": "flaggable_resent_text_flags_its_chain",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "flaggable_resent_not_flagged"
+     }
+    },
+    {
+     "id": "too_long_resent_text_labelled",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "too_long_not_flagged"
+     }
+    },
+    {
+     "id": "no_chain_counted_without_an_accepted_final",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_chain_counted"
+     }
+    },
+    {
+     "id": "a_cap_never_cuts_a_chain_in_half",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "chain_cut_mid_chain_by_budget"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "caps_exceeded"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "unverified_volume_never_above_thin_cleared_or_test",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unverified_volume_promoted"
+     }
+    },
+    {
+     "id": "kill_switch_always_stops",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "kill_not_honoured"
+     }
+    },
+    {
+     "id": "zara_checks_every_topic_once",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "zara_checks_mismatch"
+     }
+    },
+    {
+     "id": "priya_query_text_never_recorded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "priya_query_text_recorded"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "client_never_wins_a_final_served_as_someone_elses",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_client_win"
+     }
+    },
+    {
+     "id": "guard_flags_nothing_when_nothing_flaggable_was_served",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "flagged_without_flaggable"
+     }
+    },
+    {
+     "id": "provider_kill_stops_only_that_engine",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "provider_kill_interrupted_run"
+     }
+    }
+   ]
+  },
+  {
+   "id": "reask-fails",
+   "persona": "the structural re-ask meets a storm (rate limit, 5xx, timeout, refusal, malformed, an empty answer)",
+   "basis": "ADR 0049 round 5 (a failed check leaves the chain unchecked: never the native pattern); kill and cancellation propagate",
+   "seeds": [
+    {
+     "literal": [
+      "429",
+      "500",
+      "503",
+      "timeout",
+      "connect",
+      "401echo",
+      "403",
+      "not_json",
+      "truncated",
+      "refusal",
+      "empty_text",
+      "ok"
+     ]
+    }
+   ],
+   "input_field": "storm",
+   "params": {
+    "engines": [
+     "anthropic,google",
+     "anthropic",
+     "google"
+    ]
+   },
+   "fixed_input": {
+    "storm_at": "recheck"
+   },
+   "steps": [
+    {
+     "action": "fireteam_run",
+     "args": {
+      "storm": "$storm",
+      "engines": "$engines",
+      "storm_at": "$storm_at"
+     }
+    }
+   ],
+   "chain_max": 2,
+   "variants_per_seed": 1,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "plan_never_altered_by_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "plan_violations"
+     }
+    },
+    {
+     "id": "answer_text_never_a_user_turn",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "injection_in_user_turns"
+     }
+    },
+    {
+     "id": "assistant_turn_resent_exactly_as_received",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "resend_not_as_served"
+     }
+    },
+    {
+     "id": "native_pattern_only_with_structural_basis",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "native_pattern_violations"
+     }
+    },
+    {
+     "id": "flaggable_resent_text_flags_its_chain",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "flaggable_resent_not_flagged"
+     }
+    },
+    {
+     "id": "too_long_resent_text_labelled",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "too_long_not_flagged"
+     }
+    },
+    {
+     "id": "no_chain_counted_without_an_accepted_final",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_chain_counted"
+     }
+    },
+    {
+     "id": "a_cap_never_cuts_a_chain_in_half",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "chain_cut_mid_chain_by_budget"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "caps_exceeded"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "unverified_volume_never_above_thin_cleared_or_test",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unverified_volume_promoted"
+     }
+    },
+    {
+     "id": "kill_switch_always_stops",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "kill_not_honoured"
+     }
+    },
+    {
+     "id": "zara_checks_every_topic_once",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "zara_checks_mismatch"
+     }
+    },
+    {
+     "id": "priya_query_text_never_recorded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "priya_query_text_recorded"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "client_never_wins_a_final_served_as_someone_elses",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_client_win"
+     }
+    },
+    {
+     "id": "guard_flags_nothing_when_nothing_flaggable_was_served",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "flagged_without_flaggable"
+     }
+    },
+    {
+     "id": "provider_kill_stops_only_that_engine",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "provider_kill_interrupted_run"
+     }
+    }
+   ]
+  },
+  {
+   "id": "storms-mid-chain",
+   "persona": "a provider storm at a chain's opening, compare or final turn (rate limits, 5xx, timeouts, refusals, a key echoed in a 401 body, malformed or truncated bodies, an empty answer)",
+   "basis": "ADR 0049 §3 (an incomplete chain's final is unknown, never the last answered turn; Callum's run rules: stop codes, protocol errors), ADR 0046 A4 (no key in any output)",
+   "seeds": [
+    {
+     "literal": [
+      "429",
+      "500",
+      "503",
+      "timeout",
+      "connect",
+      "401echo",
+      "403",
+      "not_json",
+      "truncated",
+      "refusal",
+      "empty_text",
+      "ok"
+     ]
+    }
+   ],
+   "input_field": "storm",
+   "params": {
+    "storm_at": [
+     "compare",
+     "opening",
+     "final"
+    ],
+    "engines": [
+     "anthropic,google,openai,perplexity",
+     "anthropic,openai",
+     "google,perplexity"
+    ]
+   },
+   "steps": [
+    {
+     "action": "fireteam_run",
+     "args": {
+      "storm": "$storm",
+      "storm_at": "$storm_at",
+      "engines": "$engines"
+     }
+    }
+   ],
+   "chain_max": 2,
+   "variants_per_seed": 2,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "plan_never_altered_by_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "plan_violations"
+     }
+    },
+    {
+     "id": "answer_text_never_a_user_turn",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "injection_in_user_turns"
+     }
+    },
+    {
+     "id": "assistant_turn_resent_exactly_as_received",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "resend_not_as_served"
+     }
+    },
+    {
+     "id": "native_pattern_only_with_structural_basis",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "native_pattern_violations"
+     }
+    },
+    {
+     "id": "flaggable_resent_text_flags_its_chain",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "flaggable_resent_not_flagged"
+     }
+    },
+    {
+     "id": "too_long_resent_text_labelled",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "too_long_not_flagged"
+     }
+    },
+    {
+     "id": "no_chain_counted_without_an_accepted_final",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_chain_counted"
+     }
+    },
+    {
+     "id": "a_cap_never_cuts_a_chain_in_half",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "chain_cut_mid_chain_by_budget"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "caps_exceeded"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "unverified_volume_never_above_thin_cleared_or_test",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unverified_volume_promoted"
+     }
+    },
+    {
+     "id": "kill_switch_always_stops",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "kill_not_honoured"
+     }
+    },
+    {
+     "id": "zara_checks_every_topic_once",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "zara_checks_mismatch"
+     }
+    },
+    {
+     "id": "priya_query_text_never_recorded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "priya_query_text_recorded"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "client_never_wins_a_final_served_as_someone_elses",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_client_win"
+     }
+    },
+    {
+     "id": "guard_flags_nothing_when_nothing_flaggable_was_served",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "flagged_without_flaggable"
+     }
+    },
+    {
+     "id": "provider_kill_stops_only_that_engine",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "provider_kill_interrupted_run"
+     }
+    }
+   ]
+  },
+  {
+   "id": "kill-switches-mid-chain-and-reask",
+   "persona": "a kill switch engaged while a chain request (or the structural re-ask) is in flight",
+   "basis": "ADR 0049 §6 (global, write, tenant, capability:ai_probe, capability:audit stop the run at its next step, interrupted, every result discarded; provider:<engine> stops that engine) and round 5 (never swallowed during the re-ask)",
+   "seeds": [
+    {
+     "literal": [
+      "global",
+      "write",
+      "tenant:zbm",
+      "capability:ai_probe",
+      "capability:audit",
+      "provider:anthropic",
+      "provider:google",
+      "provider:openai",
+      "provider:perplexity"
+     ]
+    }
+   ],
+   "input_field": "kill",
+   "params": {
+    "kill_at": [
+     "recheck",
+     "compare",
+     "opening",
+     "final"
+    ],
+    "kill_chain": [
+     0,
+     1,
+     2
+    ],
+    "engines": [
+     "anthropic,google,openai,perplexity",
+     "anthropic,google",
+     "openai,perplexity"
+    ]
+   },
+   "steps": [
+    {
+     "action": "fireteam_run",
+     "args": {
+      "kill": "$kill",
+      "kill_at": "$kill_at",
+      "kill_chain": "$kill_chain",
+      "engines": "$engines"
+     }
+    }
+   ],
+   "chain_max": 2,
+   "variants_per_seed": 3,
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "plan_never_altered_by_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "plan_violations"
+     }
+    },
+    {
+     "id": "answer_text_never_a_user_turn",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "injection_in_user_turns"
+     }
+    },
+    {
+     "id": "assistant_turn_resent_exactly_as_received",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "resend_not_as_served"
+     }
+    },
+    {
+     "id": "native_pattern_only_with_structural_basis",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "native_pattern_violations"
+     }
+    },
+    {
+     "id": "flaggable_resent_text_flags_its_chain",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "flaggable_resent_not_flagged"
+     }
+    },
+    {
+     "id": "too_long_resent_text_labelled",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "too_long_not_flagged"
+     }
+    },
+    {
+     "id": "no_chain_counted_without_an_accepted_final",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_chain_counted"
+     }
+    },
+    {
+     "id": "a_cap_never_cuts_a_chain_in_half",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "chain_cut_mid_chain_by_budget"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "caps_exceeded"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "unverified_volume_never_above_thin_cleared_or_test",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unverified_volume_promoted"
+     }
+    },
+    {
+     "id": "kill_switch_always_stops",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "kill_not_honoured"
+     }
+    },
+    {
+     "id": "zara_checks_every_topic_once",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "zara_checks_mismatch"
+     }
+    },
+    {
+     "id": "priya_query_text_never_recorded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "priya_query_text_recorded"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "client_never_wins_a_final_served_as_someone_elses",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_client_win"
+     }
+    },
+    {
+     "id": "guard_flags_nothing_when_nothing_flaggable_was_served",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "flagged_without_flaggable"
+     }
+    },
+    {
+     "id": "provider_kill_stops_only_that_engine",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "provider_kill_interrupted_run"
+     }
+    }
+   ]
+  },
+  {
+   "id": "budget-caps-hit-mid-chain",
+   "persona": "Theo's own run cap and each engine's per-run, daily and spend caps set so they are reached part-way through the chains",
+   "basis": "ADR 0049 §2 / §7 (a whole chain is reserved before its first turn, a native turn k as k units: a cap never cuts a chain in half; every engine budget and Theo's SEO_THEO_RUN_MAX_CALLS bind), ADR 0046 A5",
+   "seeds": [
+    {
+     "literal": [
+      "{\"theo_cap\": 1}",
+      "{\"theo_cap\": 6}",
+      "{\"theo_cap\": 7}",
+      "{\"theo_cap\": 13}",
+      "{\"theo_cap\": 15}",
+      "{\"theo_cap\": 29}",
+      "{\"caps\": {\"SEO_ANTHROPIC_RUN_MAX_CALLS\": \"5\"}}",
+      "{\"caps\": {\"SEO_ANTHROPIC_RUN_MAX_CALLS\": \"15\"}}",
+      "{\"caps\": {\"SEO_ANTHROPIC_DAILY_CALLS\": \"9\"}}",
+      "{\"caps\": {\"SEO_ANTHROPIC_TENANT_DAILY_CALLS\": \"20\"}}",
+      "{\"caps\": {\"SEO_ANTHROPIC_RUN_MAX_SPEND_USD\": \"0.5\"}}",
+      "{\"caps\": {\"SEO_GOOGLE_RUN_MAX_CALLS\": \"8\"}}",
+      "{\"caps\": {\"SEO_OPENAI_RUN_MAX_CALLS\": \"4\"}}",
+      "{\"caps\": {\"SEO_OPENAI_DAILY_CALLS\": \"7\"}}",
+      "{\"caps\": {\"SEO_GOOGLE_RUN_MAX_SPEND_USD\": \"0.2\"}}"
+     ]
+    }
+   ],
+   "input_field": "spec",
+   "params": {
+    "engines": [
+     "anthropic,google,openai",
+     "anthropic",
+     "anthropic,openai"
+    ],
+    "stacked_check": [
+     "on",
+     "off"
+    ]
+   },
+   "steps": [
+    {
+     "action": "fireteam_run",
+     "args": {
+      "spec": "$spec",
+      "engines": "$engines",
+      "stacked_check": "$stacked_check"
+     }
+    }
+   ],
+   "chain_max": 2,
+   "variants_per_seed": 2,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "plan_never_altered_by_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "plan_violations"
+     }
+    },
+    {
+     "id": "answer_text_never_a_user_turn",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "injection_in_user_turns"
+     }
+    },
+    {
+     "id": "assistant_turn_resent_exactly_as_received",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "resend_not_as_served"
+     }
+    },
+    {
+     "id": "native_pattern_only_with_structural_basis",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "native_pattern_violations"
+     }
+    },
+    {
+     "id": "flaggable_resent_text_flags_its_chain",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "flaggable_resent_not_flagged"
+     }
+    },
+    {
+     "id": "too_long_resent_text_labelled",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "too_long_not_flagged"
+     }
+    },
+    {
+     "id": "no_chain_counted_without_an_accepted_final",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_chain_counted"
+     }
+    },
+    {
+     "id": "a_cap_never_cuts_a_chain_in_half",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "chain_cut_mid_chain_by_budget"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "caps_exceeded"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "unverified_volume_never_above_thin_cleared_or_test",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unverified_volume_promoted"
+     }
+    },
+    {
+     "id": "kill_switch_always_stops",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "kill_not_honoured"
+     }
+    },
+    {
+     "id": "zara_checks_every_topic_once",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "zara_checks_mismatch"
+     }
+    },
+    {
+     "id": "priya_query_text_never_recorded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "priya_query_text_recorded"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "client_never_wins_a_final_served_as_someone_elses",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_client_win"
+     }
+    },
+    {
+     "id": "guard_flags_nothing_when_nothing_flaggable_was_served",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "flagged_without_flaggable"
+     }
+    },
+    {
+     "id": "provider_kill_stops_only_that_engine",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "provider_kill_interrupted_run"
+     }
+    }
+   ]
+  },
+  {
+   "id": "enterprise-scale-within-caps",
+   "persona": "an enterprise prompt set: ten prompts plus Priya's topics (up to fifteen) on all four engines, three turns and a re-ask each",
+   "basis": "ADR 0049 §6-7 (bounded work: requests within topics x samples x turns x attempts; every engine budget binds; Zara checks every topic exactly once)",
+   "seeds": [
+    {
+     "literal": [
+      "{\"prompts\": 10, \"priya\": \"unverified\", \"samples\": 3}",
+      "{\"prompts\": 10, \"priya\": \"verified\", \"samples\": 3}",
+      "{\"prompts\": 4, \"samples\": 5, \"priya\": \"verified\"}"
+     ]
+    }
+   ],
+   "input_field": "spec",
+   "params": {
+    "stacked_check": [
+     "on",
+     "off"
+    ]
+   },
+   "fixed_input": {
+    "engines": "anthropic,google,openai,perplexity",
+    "caps": {
+     "SEO_ANTHROPIC_RUN_MAX_CALLS": "5000",
+     "SEO_ANTHROPIC_RUN_MAX_SPEND_USD": "5000",
+     "SEO_ANTHROPIC_DAILY_CALLS": "100000",
+     "SEO_ANTHROPIC_DAILY_SPEND_USD": "50000",
+     "SEO_ANTHROPIC_TENANT_DAILY_CALLS": "100000",
+     "SEO_ANTHROPIC_TENANT_DAILY_SPEND_USD": "50000",
+     "SEO_GOOGLE_RUN_MAX_CALLS": "5000",
+     "SEO_GOOGLE_RUN_MAX_SPEND_USD": "5000",
+     "SEO_GOOGLE_DAILY_CALLS": "100000",
+     "SEO_GOOGLE_DAILY_SPEND_USD": "50000",
+     "SEO_GOOGLE_TENANT_DAILY_CALLS": "100000",
+     "SEO_GOOGLE_TENANT_DAILY_SPEND_USD": "50000",
+     "SEO_OPENAI_RUN_MAX_CALLS": "5000",
+     "SEO_OPENAI_RUN_MAX_SPEND_USD": "5000",
+     "SEO_OPENAI_DAILY_CALLS": "100000",
+     "SEO_OPENAI_DAILY_SPEND_USD": "50000",
+     "SEO_OPENAI_TENANT_DAILY_CALLS": "100000",
+     "SEO_OPENAI_TENANT_DAILY_SPEND_USD": "50000"
+    },
+    "theo_cap": 2000
+   },
+   "steps": [
+    {
+     "action": "fireteam_run",
+     "args": {
+      "spec": "$spec",
+      "stacked_check": "$stacked_check",
+      "engines": "$engines",
+      "caps": "$caps",
+      "theo_cap": "$theo_cap"
+     }
+    }
+   ],
+   "chain_max": 2,
+   "variants_per_seed": 1,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "plan_never_altered_by_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "plan_violations"
+     }
+    },
+    {
+     "id": "answer_text_never_a_user_turn",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "injection_in_user_turns"
+     }
+    },
+    {
+     "id": "assistant_turn_resent_exactly_as_received",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "resend_not_as_served"
+     }
+    },
+    {
+     "id": "native_pattern_only_with_structural_basis",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "native_pattern_violations"
+     }
+    },
+    {
+     "id": "flaggable_resent_text_flags_its_chain",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "flaggable_resent_not_flagged"
+     }
+    },
+    {
+     "id": "too_long_resent_text_labelled",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "too_long_not_flagged"
+     }
+    },
+    {
+     "id": "no_chain_counted_without_an_accepted_final",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_chain_counted"
+     }
+    },
+    {
+     "id": "a_cap_never_cuts_a_chain_in_half",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "chain_cut_mid_chain_by_budget"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "caps_exceeded"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "unverified_volume_never_above_thin_cleared_or_test",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unverified_volume_promoted"
+     }
+    },
+    {
+     "id": "kill_switch_always_stops",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "kill_not_honoured"
+     }
+    },
+    {
+     "id": "zara_checks_every_topic_once",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "zara_checks_mismatch"
+     }
+    },
+    {
+     "id": "priya_query_text_never_recorded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "priya_query_text_recorded"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "client_never_wins_a_final_served_as_someone_elses",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_client_win"
+     }
+    },
+    {
+     "id": "guard_flags_nothing_when_nothing_flaggable_was_served",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "flagged_without_flaggable"
+     }
+    },
+    {
+     "id": "provider_kill_stops_only_that_engine",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "provider_kill_interrupted_run"
+     }
+    }
+   ]
+  },
+  {
+   "id": "member-failures-and-timeouts",
+   "persona": "a fireteam member that raises, raises after its first topic, times out with a request in flight, or is restricted; the lead restricted",
+   "basis": "ADR 0049 §6 (failure isolation: a failed / timed-out / restricted member's half is null with the reason, never filled in, PARTIAL; a timed-out member is cancelled at its next guard check, at most one request in flight completes; a restricted Zara refuses the run)",
+   "seeds": [
+    {
+     "literal": [
+      "naomi_raises",
+      "theo_raises",
+      "theo_raises_after_first_topic",
+      "theo_timed_out_in_flight",
+      "naomi_timed_out",
+      "theo_restricted",
+      "naomi_restricted",
+      "zara_restricted",
+      "adapter_crash",
+      "both_raise"
+     ]
+    }
+   ],
+   "input_field": "failure",
+   "params": {
+    "engines": [
+     "anthropic,openai",
+     "anthropic,google,openai,perplexity"
+    ]
+   },
+   "steps": [
+    {
+     "action": "member_failure",
+     "args": {
+      "failure": "$failure",
+      "engines": "$engines"
+     }
+    }
+   ],
+   "variants_per_seed": 1,
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "member_state_as_documented",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "member_state_wrong"
+     }
+    },
+    {
+     "id": "missing_half_never_filled_in",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "member_half_filled_in"
+     }
+    },
+    {
+     "id": "no_cleared_or_flagged_from_a_missing_half",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "decision_from_missing_half"
+     }
+    },
+    {
+     "id": "at_most_one_request_after_the_member_closed",
+     "severity": "MUST",
+     "check": "state_le",
+     "args": {
+      "key": "requests_after_member_closed",
+      "limit": 1
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    }
+   ]
+  },
+  {
+   "id": "concurrent-runs",
+   "persona": "a second conversation run started from inside the first run's in-flight engine request",
+   "basis": "ADR 0049 §7 (one running run per tenant: 409 CONVERSATION_RUN_RUNNING; the same request id answers the same run; another tenant is independent)",
+   "seeds": [
+    {
+     "literal": [
+      "same_tenant_new_request",
+      "same_tenant_same_request",
+      "same_tenant_other_engines",
+      "other_tenant"
+     ]
+    }
+   ],
+   "input_field": "mode",
+   "params": {
+    "engines": [
+     "anthropic,openai",
+     "google,perplexity"
+    ]
+   },
+   "steps": [
+    {
+     "action": "concurrent_run",
+     "args": {
+      "mode": "$mode",
+      "engines": "$engines"
+     }
+    }
+   ],
+   "variants_per_seed": 1,
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "second_run_refused_or_same_run",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "second_run_not_refused"
+     }
+    },
+    {
+     "id": "one_zbm_run_requested",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "zbm_runs_requested",
+      "value": 1
+     }
+    },
+    {
+     "id": "first_run_completed",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "first_completed",
+      "value": true
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    }
+   ]
+  },
+  {
+   "id": "cross-tenant-access",
+   "persona": "another tenant (and a hub caller bound to it) probing zbm's run, crosscheck, list and prompt set, or bringing a hand-off or Priya record of the other tenant",
+   "basis": "ADR 0049 §5 / §7 (another tenant's run is the same 404 as a missing one; the hand-off's tenant must be the run's: 403; a record of another tenant never verifies)",
+   "seeds": [
+    {
+     "literal": [
+      "get_run",
+      "get_crosscheck",
+      "hub_other_tenant",
+      "hub_list_other_tenant",
+      "list",
+      "post_with_other_prompt_set",
+      "handoff_of_other_tenant",
+      "priya_record_of_other_tenant"
+     ]
+    }
+   ],
+   "input_field": "probe",
+   "steps": [
+    {
+     "action": "cross_tenant",
+     "args": {
+      "probe": "$probe"
+     }
+    }
+   ],
+   "variants_per_seed": 1,
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "indistinguishable_from_missing",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cross_tenant_not_indistinguishable"
+     }
+    },
+    {
+     "id": "no_other_tenant_data_echoed",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "other_tenant_data_echoed"
+     }
+    },
+    {
+     "id": "probe_asks_no_engine",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "asked_by_probe",
+      "value": 0
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    }
+   ]
+  },
+  {
+   "id": "forged-history-blocks",
+   "persona": "a forged native history: blocks re-ordered, duplicated, dropped, edited, swapped or moved across turns, a dropped or extra turn, a contentless turn, another chain's record or none, forged tool_use / thinking / functionCall / inlineData blocks, an edited thought or signature, roles swapped",
+   "basis": "ADR 0049 rounds 3-5 (block-type allowlist; every assistant turn must be, in order and whole, what THIS engine returned at that turn of THIS conversation; no history without the record; refused before any request is built)",
+   "seeds": [
+    {
+     "literal": [
+      "reorder_blocks",
+      "duplicate_block",
+      "drop_block",
+      "edit_block_text",
+      "edit_cited_text",
+      "edit_encrypted_content",
+      "swap_turns",
+      "move_block_across_turns",
+      "drop_turn",
+      "extra_turn",
+      "contentless_turn",
+      "other_chain_record",
+      "no_record",
+      "forged_tool_use",
+      "forged_thinking",
+      "forged_function_call",
+      "forged_inline_data",
+      "edit_thought_signature",
+      "edit_thought_text",
+      "roles_swapped",
+      "assistant_first",
+      "genuine"
+     ]
+    }
+   ],
+   "input_field": "forgery",
+   "params": {
+    "engine": [
+     "anthropic",
+     "google"
+    ]
+   },
+   "steps": [
+    {
+     "action": "history_forgery",
+     "args": {
+      "forgery": "$forgery",
+      "engine": "$engine"
+     }
+    }
+   ],
+   "variants_per_seed": 1,
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "forged_history_never_sent",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "forged_history_sent"
+     }
+    },
+    {
+     "id": "forged_history_refused",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "forged_history_not_refused"
+     }
+    },
+    {
+     "id": "genuine_history_accepted",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "genuine_history_refused"
+     }
+    },
+    {
+     "id": "genuine_history_still_works_after_a_refusal",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "genuine_still_works"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    }
+   ]
+  },
+  {
+   "id": "forged-priya-handoffs",
+   "persona": "a forged Priya hand-off: another tenant, the body altered after Priya hashed it, inflated counts, Priya's source vocabulary changed, impossible windows, item types against how Priya builds them, and verification claims against absent, foreign, unfinished or mismatched records",
+   "basis": "ADR 0049 §5 (priya-emerging-handoff/1 mirrored field for field; consumer rules; 403 HANDOFF_TENANT_MISMATCH, 422 HANDOFF_INVALID / HANDOFF_VERIFICATION_FAILED, nothing recorded; VERIFIED only against Priya's record; until verified every signal THIN, never CLEARED / TEST, never a priority basis; query text never in the log or the ledger)",
+   "seeds": [
+    {
+     "literal": [
+      "genuine_no_claim",
+      "genuine_claim_priya_absent",
+      "genuine_verified",
+      "wrong_tenant",
+      "altered_body_after_hash",
+      "claim_sha_of_altered",
+      "claim_run_id_mismatch",
+      "record_hash_mismatch",
+      "record_items_mismatch",
+      "record_other_tenant",
+      "record_not_completed",
+      "record_without_hash",
+      "inflated_10e12",
+      "inflated_just_over_bound",
+      "inflated_at_bound_unverified",
+      "below_threshold_with_20",
+      "below_threshold_with_19",
+      "gsc_source_on_bing_item",
+      "bing_source_on_gsc_item",
+      "source_short_vocabulary",
+      "source_case_changed",
+      "clicks_over_impressions",
+      "bool_impressions",
+      "float_impressions",
+      "negative_impressions",
+      "window_401_days",
+      "window_400_days",
+      "window_after_generated",
+      "window_inverted",
+      "derived_with_counts",
+      "observed_unknown_status",
+      "duplicate_item_key",
+      "bad_item_key",
+      "query_not_untrusted",
+      "query_too_long",
+      "unknown_schema",
+      "extra_item_field",
+      "claim_without_document",
+      "claim_malformed_sha",
+      "sixty_items_unverified"
+     ]
+    }
+   ],
+   "input_field": "forgery",
+   "params": {
+    "engines": [
+     "openai",
+     "anthropic,openai"
+    ]
+   },
+   "steps": [
+    {
+     "action": "handoff_forgery",
+     "args": {
+      "forgery": "$forgery",
+      "engines": "$engines"
+     }
+    }
+   ],
+   "variants_per_seed": 1,
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "handoff_outcome_as_documented",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "handoff_outcome_not_as_documented"
+     }
+    },
+    {
+     "id": "a_refused_handoff_records_and_asks_nothing",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "refused_but_recorded"
+     }
+    },
+    {
+     "id": "unverified_volume_never_above_thin_cleared_or_test",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unverified_volume_promoted"
+     }
+    },
+    {
+     "id": "verified_only_against_a_genuine_record",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "verified_without_genuine_record"
+     }
+    },
+    {
+     "id": "priya_query_text_never_recorded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "priya_query_text_recorded"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    }
+   ]
+  },
+  {
+   "id": "zara-payload-forgery",
+   "persona": "a forged member payload in Zara's inbox: the structural basis inflated (agreed with flagged / too-long chains, check off, stacked mode), turn-one counts negative or over n, outcome / strength / distribution contradictions, type confusion, extra or missing keys, another tenant or run, duplicates, an unplanned topic; Naomi's verification, confidence, band and signal contradicting each other",
+   "basis": "ADR 0049 §3, §4, §6 and rounds 6-7 (Zara re-derives outcome / pattern / strength from the counts and HOLDS any invalid, contradictory, foreign or duplicate payload; nothing passes downstream unchecked)",
+   "seeds": [
+    {
+     "literal": [
+      "agreed_inflated",
+      "agreed_with_flagged",
+      "agreed_with_too_long",
+      "native_check_off",
+      "native_pattern_stacked_mode",
+      "native_pattern_visible_at_opening",
+      "turn_one_negative_k",
+      "turn_one_k_over_n",
+      "turn_one_n_not_complete",
+      "outcome_mismatch",
+      "strength_mismatch",
+      "final_sum_mismatch",
+      "unknown_mismatch",
+      "bool_counts",
+      "string_count",
+      "extra_key",
+      "missing_key",
+      "foreign_tenant",
+      "foreign_run",
+      "duplicate_payload",
+      "unplanned_topic",
+      "naomi_verified_flag_mismatch",
+      "naomi_high_confidence",
+      "naomi_band_excludes_count",
+      "naomi_unknown_with_band",
+      "naomi_signal_claimed_but_verified",
+      "naomi_strong_unverified",
+      "naomi_signal_reliability_mismatch",
+      "naomi_band_not_signal_band",
+      "client_recommended_k_mismatch",
+      "checked_exceeds_complete",
+      "divergent_exceeds_checked",
+      "inj_complete_over_chains",
+      "loop_stopped_over_incomplete",
+      "turns_planned_mismatch",
+      "genuine"
+     ]
+    }
+   ],
+   "input_field": "forgery",
+   "params": {
+    "base": [
+     "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"checked\": true}",
+     "{\"chains\": 5, \"complete\": 3, \"wins\": 2, \"mention\": true, \"inj\": 1, \"checked\": true}",
+     "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"verified\": true, \"impressions\": 5000, \"checked\": true}",
+     "{\"chains\": 4, \"complete\": 4, \"wins\": 0, \"mode\": \"stacked\", \"volume\": \"none\"}",
+     "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"tl\": 1, \"checked\": true, \"verified\": true}"
+    ]
+   },
+   "steps": [
+    {
+     "action": "zara_forgery",
+     "args": {
+      "forgery": "$forgery",
+      "base": "$base"
+     }
+    }
+   ],
+   "variants_per_seed": 4,
+   "invariants": [
+    {
+     "id": "zara_never_raises_on_a_payload",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "zara_exceptions"
+     }
+    },
+    {
+     "id": "the_genuine_payloads_pass_the_war_rooms_own_rules",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "oracle_self_check"
+     }
+    },
+    {
+     "id": "zara_holds_any_inconsistent_payload",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unheld_inconsistent"
+     }
+    },
+    {
+     "id": "native_pattern_never_passes_without_its_basis",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "native_pattern_passed_without_basis"
+     }
+    },
+    {
+     "id": "unverified_volume_never_cleared_or_test",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unverified_volume_passed"
+     }
+    },
+    {
+     "id": "zara_does_not_hold_a_consistent_payload",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "over_held"
+     }
+    }
+   ]
+  },
+  {
+   "id": "generated-fireteam-chains",
+   "persona": "INVENTED by the war room: whole hostile conversation runs from a grammar (engines, samples, prompts, the check on or off, a disguised injection or reader-facing line at a random placement and turn, long texts, finals and re-asks from the negation tables, storms, kills, hand-offs, tight caps)",
+   "basis": "every fireteam MUST above, on inputs nobody listed; terminals from the suite's pinned injection positives / negatives and negation tables",
+   "generator": {
+    "name": "fireteam_chain",
+    "count": 40,
+    "atoms": {
+     "injection": [
+      {
+       "extract": {
+        "file": "tests/test_theo.py",
+        "test": "test_round_four_families_are_flagged",
+        "parametrize": true
+       }
+      },
+      {
+       "extract": {
+        "file": "tests/test_audits.py",
+        "module": "INJECTION"
+       }
+      }
+     ],
+     "benign": [
+      {
+       "extract": {
+        "file": "tests/test_theo.py",
+        "test": "test_reader_facing_advice_is_not_flagged",
+        "parametrize": true
+       }
+      }
+     ],
+     "finals_client": [
+      {
+       "extract": {
+        "file": "tests/test_theo.py",
+        "test": "test_round_three_negation_cases",
+        "parametrize": true,
+        "field": 0,
+        "where": {
+         "1": "client"
+        }
+       }
+      },
+      {
+       "extract": {
+        "file": "tests/test_theo.py",
+        "test": "test_idioms_that_look_negated_are_positive",
+        "parametrize": true
+       }
+      }
+     ],
+     "finals_competitor": [
+      {
+       "extract": {
+        "file": "tests/test_theo.py",
+        "test": "test_round_three_negation_cases",
+        "parametrize": true,
+        "field": 0,
+        "where": {
+         "1": "competitor"
+        }
+       }
+      }
+     ],
+     "finals_none": [
+      {
+       "extract": {
+        "file": "tests/test_theo.py",
+        "test": "test_round_three_negation_cases",
+        "parametrize": true,
+        "field": 0,
+        "where": {
+         "1": "none"
+        }
+       }
+      },
+      {
+       "extract": {
+        "file": "tests/test_theo.py",
+        "test": "test_documented_fallbacks_give_no_recommendation",
+        "parametrize": true
+       }
+      },
+      {
+       "extract": {
+        "file": "tests/test_theo.py",
+        "test": "test_a_shared_pick_is_no_decisive_win",
+        "parametrize": true
+       }
+      }
+     ]
+    }
+   },
+   "input_field": "spec",
+   "steps": [
+    {
+     "action": "fireteam_run",
+     "args": {
+      "spec": "$spec"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "plan_never_altered_by_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "plan_violations"
+     }
+    },
+    {
+     "id": "answer_text_never_a_user_turn",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "injection_in_user_turns"
+     }
+    },
+    {
+     "id": "assistant_turn_resent_exactly_as_received",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "resend_not_as_served"
+     }
+    },
+    {
+     "id": "native_pattern_only_with_structural_basis",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "native_pattern_violations"
+     }
+    },
+    {
+     "id": "flaggable_resent_text_flags_its_chain",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "flaggable_resent_not_flagged"
+     }
+    },
+    {
+     "id": "too_long_resent_text_labelled",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "too_long_not_flagged"
+     }
+    },
+    {
+     "id": "no_chain_counted_without_an_accepted_final",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_chain_counted"
+     }
+    },
+    {
+     "id": "a_cap_never_cuts_a_chain_in_half",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "chain_cut_mid_chain_by_budget"
+     }
+    },
+    {
+     "id": "caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "caps_exceeded"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "unverified_volume_never_above_thin_cleared_or_test",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unverified_volume_promoted"
+     }
+    },
+    {
+     "id": "kill_switch_always_stops",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "kill_not_honoured"
+     }
+    },
+    {
+     "id": "zara_checks_every_topic_once",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "zara_checks_mismatch"
+     }
+    },
+    {
+     "id": "priya_query_text_never_recorded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "priya_query_text_recorded"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "client_never_wins_a_final_served_as_someone_elses",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "wrong_client_win"
+     }
+    },
+    {
+     "id": "guard_flags_nothing_when_nothing_flaggable_was_served",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "flagged_without_flaggable"
+     }
+    },
+    {
+     "id": "provider_kill_stops_only_that_engine",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "provider_kill_interrupted_run"
+     }
+    },
+    {
+     "id": "client_pick_read",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "client_win_missed"
+     }
+    }
+   ]
+  },
+  {
+   "id": "generated-history-forgeries",
+   "persona": "INVENTED by the war room: 1-3 forgery ops composed on a genuine native history",
+   "basis": "ADR 0049 rounds 3-5",
+   "generator": {
+    "name": "history_forgery",
+    "count": 60,
+    "atoms": {
+     "injection": [
+      {
+       "extract": {
+        "file": "tests/test_theo.py",
+        "test": "test_round_four_families_are_flagged",
+        "parametrize": true
+       }
+      },
+      {
+       "extract": {
+        "file": "tests/test_audits.py",
+        "module": "INJECTION"
+       }
+      }
+     ]
+    }
+   },
+   "input_field": "spec",
+   "steps": [
+    {
+     "action": "history_forgery",
+     "args": {
+      "spec": "$spec"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "forged_history_never_sent",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "forged_history_sent"
+     }
+    },
+    {
+     "id": "forged_history_refused",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "forged_history_not_refused"
+     }
+    },
+    {
+     "id": "genuine_history_accepted",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "genuine_history_refused"
+     }
+    },
+    {
+     "id": "genuine_history_still_works_after_a_refusal",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "genuine_still_works"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    }
+   ]
+  },
+  {
+   "id": "generated-zara-payloads",
+   "persona": "INVENTED by the war room: random genuine Theo / Naomi pairs with 0-3 forgery ops",
+   "basis": "ADR 0049 §3-§6, rounds 6-7",
+   "generator": {
+    "name": "zara_payload",
+    "count": 120,
+    "atoms": {
+     "injection": [
+      {
+       "extract": {
+        "file": "tests/test_theo.py",
+        "test": "test_round_four_families_are_flagged",
+        "parametrize": true
+       }
+      },
+      {
+       "extract": {
+        "file": "tests/test_audits.py",
+        "module": "INJECTION"
+       }
+      }
+     ]
+    }
+   },
+   "input_field": "spec",
+   "steps": [
+    {
+     "action": "zara_forgery",
+     "args": {
+      "spec": "$spec"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "zara_never_raises_on_a_payload",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "zara_exceptions"
+     }
+    },
+    {
+     "id": "the_genuine_payloads_pass_the_war_rooms_own_rules",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "oracle_self_check"
+     }
+    },
+    {
+     "id": "zara_holds_any_inconsistent_payload",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unheld_inconsistent"
+     }
+    },
+    {
+     "id": "native_pattern_never_passes_without_its_basis",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "native_pattern_passed_without_basis"
+     }
+    },
+    {
+     "id": "unverified_volume_never_cleared_or_test",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unverified_volume_passed"
+     }
+    },
+    {
+     "id": "zara_does_not_hold_a_consistent_payload",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "over_held"
+     }
+    }
+   ]
+  },
+  {
+   "id": "generated-handoff-forgeries",
+   "persona": "INVENTED by the war room: Priya's own hand-off with 0-3 field mutations of documented validity and a verification claim",
+   "basis": "ADR 0049 §5",
+   "generator": {
+    "name": "handoff_forgery",
+    "count": 40,
+    "atoms": {
+     "injection": [
+      {
+       "extract": {
+        "file": "tests/test_theo.py",
+        "test": "test_round_four_families_are_flagged",
+        "parametrize": true
+       }
+      },
+      {
+       "extract": {
+        "file": "tests/test_audits.py",
+        "module": "INJECTION"
+       }
+      }
+     ]
+    }
+   },
+   "input_field": "spec",
+   "steps": [
+    {
+     "action": "handoff_forgery",
+     "args": {
+      "spec": "$spec"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "handoff_outcome_as_documented",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "handoff_outcome_not_as_documented"
+     }
+    },
+    {
+     "id": "a_refused_handoff_records_and_asks_nothing",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "refused_but_recorded"
+     }
+    },
+    {
+     "id": "unverified_volume_never_above_thin_cleared_or_test",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unverified_volume_promoted"
+     }
+    },
+    {
+     "id": "verified_only_against_a_genuine_record",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "verified_without_genuine_record"
+     }
+    },
+    {
+     "id": "priya_query_text_never_recorded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "priya_query_text_recorded"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    }
+   ]
+  }
+ ]
+}
