@@ -22,8 +22,14 @@ Rules (the audit product's, applied here):
     ``citation_run_recorded`` with its SHA-256 on the ledger. A run lost to a dead process is marked ``interrupted``
     by the ``interrupted-audits`` job; a run that raises is closed ``interrupted`` RUN_FAILED at once.
   - tenant isolation: another tenant's run answers the same 404 as a missing one.
-Ledger payloads carry ids, codes, counts and hashes only; the result (rows with bounded, untrusted excerpts) lives in
-the append-only log.
+Ledger payloads carry ids, codes, counts and hashes only. ADR 0051 (job 2, Option B): each row's full evidence (cited
+URL, excerpt, title, hint) is encrypted into the per-tenant citation vault (vault.py) under the run's tenant; the
+result committed to the append-only log keeps only the vault reference, SHA-256 hashes, host-only URLs, codes, counts
+and the strict filter's verdict flags (and is still swept by secret_guard.guard_record before the commit). The owning
+tenant's GET decrypts from the vault: a field the strict filter flags is masked with ``alert``, every other field is
+shown in full. No vault key with a data directory: the run fails closed (RUN_FAILED, VAULT_UNAVAILABLE) before any
+engine is asked, and nothing is written. Any exception while splitting, sweeping or committing closes the run
+RUN_FAILED (never left running); nothing raw is written on any path.
 """
 
 from __future__ import annotations
@@ -31,6 +37,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+import vault as vault_mod
 from agents import callum
 from envelope import sha
 from errors import Conflict, Forbidden, Invalid, NotFound
@@ -108,13 +115,19 @@ class CitationsMixin:
     def _execute_citation_run(self, cid: str, tid: str, domain: str, ps: dict) -> dict:
         from svc_audits import _where
         try:
+            if not self.vault.key_configured:
+                # ADR 0051: fail closed before any engine is asked (no spend, nothing kept): there is nowhere to keep
+                # the client's evidence, and it is never kept in plaintext instead
+                return self._interrupt_citation_run(tid, cid, R("RUN_FAILED"), _vault_failure())
             guard = self.guard(tid)
+            sink: list = []
             try:
                 guard(agent="callum")
                 resolver = callum.Resolver(self.ports.fetcher, guard, self.settings.callum_resolve_urls,
                                            self.settings.callum_resolve_max)
                 env = callum.run(self.ports.engines, ps, domain, self.settings.probe_samples, guard,
-                                 self.engine_budget(tid, cid, ps, subject="citation_run"), resolver, cid, self.clock)
+                                 self.engine_budget(tid, cid, ps, subject="citation_run"), resolver, cid, self.clock,
+                                 sink=sink)
             except Killed as k:
                 return self._interrupt_citation_run(tid, cid, k.code)
             except Exception as exc:  # noqa: BLE001 - a run that crashes is closed now, never left running
@@ -129,28 +142,44 @@ class CitationsMixin:
                     capability="audit")
                 if stop is not None:
                     return self._interrupt_citation_run(tid, cid, stop)
-                # ADR 0050 v2 step 4: fail-closed sweep of the whole result before it is stored/logged (every key and
-                # value; a field that is not clearly safe is withheld whole), so no excerpt, URL or engine hint can
-                # carry a credential or personal data into data/seo_log.jsonl even if an upstream check was missed.
-                # If the sweep itself fails it returns "[withheld]": the run is then closed as failed, never stored.
-                env = callum.secret_guard.guard_record(env)
-                if not isinstance(env, dict) or not isinstance(env.get("facts", {}), dict):
-                    return self._interrupt_citation_run(tid, cid, R("RUN_FAILED"),
-                                                        {"agent": "callum", "where": "secret_guard",
-                                                         "error_type": "GuardFailed"})
-                rsha = sha(env)
-                facts = env.get("facts") or {}
-                totals = (facts.get("metrics") or {}).get("totals") or {}
-                self._commit("citation_run_recorded", {"citation_run_id": cid, "result": env, "result_sha256": rsha},
-                             "seo", evidence=("citation_run_recorded", f"citation_run:{cid}",
-                                              {"citation_run_id": cid, "result_sha256": rsha,
-                                               "outcome": env["outcome"], "rows": len(facts.get("rows") or []),
-                                               "mentioned_not_cited": totals.get("mnc"),
-                                               "strength_answers": totals.get("strength")}, ("result", cid)))
+                try:
+                    failure = self._record_citation_result(tid, cid, env, sink)
+                except Exception as exc:  # noqa: BLE001 - split / sweep / commit failed: closed now, never left running
+                    where = _where(exc)
+                    log.error("citation run failed: %s at %s", type(exc).__name__, where)
+                    failure = _vault_failure() if isinstance(exc, vault_mod.VaultUnavailable) else {
+                        "agent": "callum", "where": where, "error_type": type(exc).__name__[:60]}
+                finally:
+                    sink.clear()                     # the plaintext evidence is dropped from memory either way
+                    env = None
+                if failure is not None:
+                    return self._interrupt_citation_run(tid, cid, R("RUN_FAILED"), failure)
                 return self.citation_run_view(tid, cid)
         finally:
             with self.lock:
                 self.running_citation_runs.discard(cid)
+
+    def _record_citation_result(self, tid: str, cid: str, env, sink: list) -> Optional[dict]:
+        """Under the lock. ADR 0051: split (each row's full evidence into the vault under ``tid``; the envelope keeps
+        references, hashes, host-only URLs and verdict flags), then the fail-closed sweep of the whole envelope
+        (ADR 0050 v2 step 4: every key and value; a field that is not clearly safe is withheld whole), then the commit.
+        Returns None when committed, else the failure (the run is then closed RUN_FAILED). Anything that raises here
+        is caught by the caller and closes the run the same way."""
+        env = callum.split_evidence(env, sink, lambda record: self.vault.put(tid, record))
+        env = callum.secret_guard.guard_record(env)
+        if not isinstance(env, dict) or not isinstance(env.get("facts", {}), dict):
+            # the sweep itself failed (it returns "[withheld]"): never stored
+            return {"agent": "callum", "where": "secret_guard", "error_type": "GuardFailed"}
+        rsha = sha(env)
+        facts = env.get("facts") or {}
+        totals = (facts.get("metrics") or {}).get("totals") or {}
+        self._commit("citation_run_recorded", {"citation_run_id": cid, "result": env, "result_sha256": rsha},
+                     "seo", evidence=("citation_run_recorded", f"citation_run:{cid}",
+                                      {"citation_run_id": cid, "result_sha256": rsha,
+                                       "outcome": env["outcome"], "rows": len(facts.get("rows") or []),
+                                       "mentioned_not_cited": totals.get("mnc"),
+                                       "strength_answers": totals.get("strength")}, ("result", cid)))
+        return None
 
     def _interrupt_citation_run(self, tid: str, cid: str, reason: str, failure: Optional[dict] = None) -> dict:
         with self.lock:
@@ -198,19 +227,39 @@ class CitationsMixin:
 
     # ------------------------------------------------------------------ views
 
+    def _owns(self, r: Optional[dict], tid: str) -> bool:
+        """Tenant isolation: a run is answered only on its own tenant's path (another tenant's run is the same 404 as
+        a missing one)."""
+        return r is not None and r["tenant_id"] == tid
+
     def citation_run_view(self, tid: str, cid: str, full: bool = True) -> dict:
+        """The owner's view (ADR 0051): the logged result with each row's evidence decrypted from the vault for
+        ``tid``; a field the strict filter flags is masked with ``alert``, every other field shown in full."""
         with self.lock:
             r = self.citation_runs.get(cid)
-            if r is None or r["tenant_id"] != tid:
+            if not self._owns(r, tid):
                 raise NotFound(R("CITATION_RUN_NOT_FOUND"))
             out = {k: v for k, v in r.items() if k != "result"}
             if r["status"] == "running" and cid not in self.running_citation_runs:
                 out["status"] = "running_elsewhere_or_interrupted"
             if full:
-                out["result"] = r["result"]
+                out["result"] = callum.client_view(r["result"], lambda ref: self._vault_record(tid, ref)) \
+                    if r["result"] is not None else None
             else:
                 out["outcome"] = (r["result"] or {}).get("outcome")
             return out
+
+    def _vault_record(self, tid: str, ref) -> tuple:
+        """(record, None) for the owning tenant, else (None, reason): never raises, never says why beyond the code."""
+        vid = vault_mod.parse_ref(ref)
+        if vid is None:
+            return None, R("VAULT_RECORD_NOT_FOUND")
+        try:
+            return self.vault.get(tid, vid), None
+        except vault_mod.VaultUnavailable:
+            return None, R("VAULT_UNAVAILABLE")
+        except vault_mod.VaultError:
+            return None, R("VAULT_RECORD_NOT_FOUND")
 
     def citation_runs_view(self, tid: str) -> list:
         with self.lock:
@@ -242,3 +291,7 @@ class CitationsMixin:
                 out["interrupted"] += 1
         out["outcomes"] = dict(sorted(out["outcomes"].items()))
         return out
+
+
+def _vault_failure() -> dict:
+    return {"agent": "callum", "where": "vault", "error_type": "VaultUnavailable", "code": R("VAULT_UNAVAILABLE")}

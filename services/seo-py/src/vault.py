@@ -18,7 +18,9 @@ from a closed set and never quote a key, a tenant record or a plaintext.
 Rotation: ``SEO_VAULT_KEY_PREVIOUS`` / ``SEO_VAULT_KEY_PREVIOUS_ID`` name the key being retired. It is used only to
 decrypt records written under it; every new write uses the current key. Re-encryption is not built (ADR 0051).
 
-Not wired into the service yet (job 2 of ADR 0051). Stdlib plus ``cryptography`` (already a dependency).
+Wired into the service by job 2 (svc_citations.py): a citation run puts each row's full evidence here and the log
+keeps only ``ref(vault_id)``. ``MemoryCitationVault`` is the same store without a file (the service's in-memory mode,
+used by tests): identical lines, identical encryption, nothing on disk. Stdlib plus ``cryptography``.
 """
 
 from __future__ import annotations
@@ -233,6 +235,41 @@ def load_vault_key(env: Optional[dict] = None) -> Optional[VaultKey]:
     if key is None or kid is None:
         raise VaultKeyInvalid(f"{ENV_KEY} and {ENV_KEY_ID} are set together (a previous key needs a current one)")
     return parse_vault_key(key, kid, prev, prev_id)
+
+
+EPHEMERAL_KEY_ID = "ephemeral"
+
+
+def ephemeral_vault_key() -> VaultKey:
+    """A fresh random key held in memory only, for the service's in-memory mode (no data directory, non-production):
+    nothing it encrypts outlives the process, so no key needs to be configured. Never used with a data directory."""
+    raw = os.urandom(KEY_BYTES)
+    while len(set(raw)) < 16:                        # 32 random bytes with < 16 distinct values: practically never
+        raw = os.urandom(KEY_BYTES)
+    material = _Material(EPHEMERAL_KEY_ID, raw)
+    raw = None
+    return VaultKey(material)
+
+
+# The log names a vault record by ``ref(vault_id)``: ``seo-vlt-`` + the 32-hex id + 8 hex of its SHA-256 (a check),
+# the shape of the service's other ids (``seo-<kind>-<40 hex>``), which the strict sweep (secret_guard.guard_record)
+# keeps under an ``*_id`` key. The ref is opaque: it names the record and says nothing of its content.
+REF_PREFIX = "seo-vlt-"
+_REF = re.compile(r"seo-vlt-([0-9a-f]{32})([0-9a-f]{8})")
+
+
+def ref(vault_id: str) -> str:
+    if not isinstance(vault_id, str) or not VAULT_ID.fullmatch(vault_id):
+        raise VaultRecordInvalid("not a vault id")
+    return REF_PREFIX + vault_id + hashlib.sha256(vault_id.encode("ascii")).hexdigest()[:8]
+
+
+def parse_ref(text) -> Optional[str]:
+    """The vault id a ref names, or None (malformed, or the check does not match)."""
+    m = _REF.fullmatch(text) if isinstance(text, str) else None
+    if m is None or hashlib.sha256(m.group(1).encode("ascii")).hexdigest()[:8] != m.group(2):
+        return None
+    return m.group(1)
 
 
 def _b64(data: bytes) -> str:
@@ -519,3 +556,51 @@ class CitationVault:
             obj = None
         plaintext = None
         return obj if type(obj) is dict else None
+
+
+class MemoryCitationVault(CitationVault):
+    """The same vault without a file: the service's in-memory mode (no data directory; non-production, tests). Every
+    record is the same encrypted line ``CitationVault`` would append, kept in a buffer of this process only; ``put``
+    and ``get`` are the base class's, so the encryption, the tenant tag and the fail-closed rules are identical."""
+
+    def __init__(self, key: Optional[VaultKey]):
+        if key is not None and type(key) is not VaultKey:
+            raise TypeError("key must be a VaultKey or None")
+        self._key = key
+        self.lock = threading.RLock()
+        self.data_dir = None
+        self.path = None
+        self._index = {}
+        self._size = 0
+        self._buf = bytearray()
+        self.bad_lines = 0
+        self.fault = None
+
+    def __repr__(self) -> str:
+        return f"MemoryCitationVault(records={len(self._index)}, key={'set' if self._key is not None else 'unset'})"
+
+    __str__ = __repr__
+
+    def _load(self) -> None:
+        return None
+
+    def _append(self, line: bytes) -> None:
+        if len(self._buf) != self._size:
+            raise VaultWriteError("the in-memory vault changed outside put; refusing to write")
+        self._buf += line + b"\n"
+
+    def _read_line(self, vault_id: str) -> Optional[bytes]:
+        with self.lock:
+            loc = self._index.get(vault_id)
+            if loc is None:
+                return None
+            offset, length = loc
+            got = bytes(self._buf[offset:offset + length + 1])
+        if len(got) != length + 1 or not got.endswith(b"\n"):
+            return None
+        return got[:-1]
+
+    def lines(self) -> list:
+        """The stored (encrypted) lines, for tests that check no plaintext is held."""
+        with self.lock:
+            return bytes(self._buf).split(b"\n")[:-1]

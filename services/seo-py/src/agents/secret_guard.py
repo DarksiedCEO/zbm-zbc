@@ -1319,13 +1319,17 @@ def url_secret_segments(url) -> tuple:
     return bad, bool(other)
 
 
-FETCH_BLOCKS = frozenset((CREDENTIAL, PERSONAL))         # r2 part 3a: personal data is never fetched either
+# ADR 0051 job 2 (Option B): only a CREDENTIAL finding blocks a fetch (sending a credential to a host is the harm); the
+# r2 part 3a block on personal-data findings is reverted: a personal-data-shaped URL (an item id, a phone number in a
+# path) is the client's own evidence, is fetched to classify it, and is never kept in the log (host only).
+FETCH_BLOCKS = frozenset((CREDENTIAL,))
 
 
 def url_has_secret(url) -> bool:
-    """A URL with any credential OR personal-data failure in any part (tracking parameters included): never fetched
-    (fail closed; a URL that cannot be read counts as failing). A grounding redirect on the exact redirector host is
-    judged with check (d) waived on its id only, so it can be resolved; its id is still never kept."""
+    """A URL with a CREDENTIAL failure in any part (tracking parameters included): never fetched (fail closed; a URL
+    that cannot be read counts as a credential failure). A personal-data finding alone does not block the fetch. A
+    grounding redirect on the exact redirector host is judged with check (d) waived on its id only, so it can be
+    resolved; its id is still never kept."""
     return _worst(_inspect(url, True, fetch=True)) in FETCH_BLOCKS
 
 

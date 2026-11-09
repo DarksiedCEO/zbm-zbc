@@ -175,6 +175,7 @@ class Settings:
     callum_resolve_urls: bool = False
     callum_resolve_max: int = 40
     report_branding: object = field(default_factory=lambda: _default_branding())   # client_report.Branding
+    vault_key: Optional[object] = field(default=None, repr=False)    # vault.VaultKey (redacted repr; ADR 0051)
     bind_addr: str = "127.0.0.1"
     port: int = 8500
 
@@ -383,6 +384,39 @@ def _usd(env, name: str, default: str, lo: str, hi: str) -> str:
     if not _USD.fullmatch(raw) or not Decimal(lo) <= Decimal(raw) <= Decimal(hi):
         raise RuntimeError(f"{name} must be a US-dollar amount from {lo} to {hi} (digits, at most 6 decimals)")
     return str(Decimal(raw).quantize(Decimal("0.000001")))
+
+
+def _vault(env, s: "Settings") -> None:
+    """ADR 0051 (job 2): the client citation vault key. ``SEO_VAULT_KEY`` / ``SEO_VAULT_KEY_PREVIOUS`` or, preferred,
+    ``SEO_VAULT_KEY_FILE`` / ``SEO_VAULT_KEY_PREVIOUS_FILE`` (the *_FILE rules: regular file, owned by this user, mode
+    0600 / 0400, no symlink); the ids stay plain variables (``SEO_VAULT_KEY_ID`` / ``SEO_VAULT_KEY_PREVIOUS_ID``).
+    A file and its variable both set refuses start. Nothing set: no key (with a data directory every citation run then
+    fails closed, VAULT_UNAVAILABLE). Errors name the variable, never its value."""
+    import vault
+    merged = {}
+    for name, file_name in ((vault.ENV_KEY, "SEO_VAULT_KEY_FILE"), (vault.ENV_PREVIOUS_KEY, "SEO_VAULT_KEY_PREVIOUS_FILE")):
+        path = (env.get(file_name) or "").strip()
+        plain = (env.get(name) or "").strip()
+        if path and plain:
+            raise RuntimeError(f"{file_name} and {name} are both set; set one")
+        if path:
+            raw = _secret_file_bytes(env, file_name, max_bytes=256)
+            try:
+                merged[name] = raw.decode("ascii")
+            except UnicodeDecodeError:
+                raise RuntimeError(f"{file_name} must hold the key as base64url text") from None
+            raw = None
+        elif plain:
+            merged[name] = plain
+    for name in (vault.ENV_KEY_ID, vault.ENV_PREVIOUS_KEY_ID):
+        if (env.get(name) or "").strip():
+            merged[name] = env.get(name)
+    try:
+        s.vault_key = vault.load_vault_key(merged)
+    except vault.VaultKeyInvalid as exc:
+        raise RuntimeError(str(exc)) from None
+    finally:
+        merged = None
 
 
 def _perplexity(env, s: "Settings") -> None:
@@ -630,6 +664,7 @@ def load(env: Optional[dict] = None) -> Settings:
     _gsc(env, s)
     _perplexity(env, s)
     _answer_engines(env, s)
+    _vault(env, s)
     s.report_branding = _branding(env)
     s.bind_addr = (env.get("SEO_BIND_ADDR") or "127.0.0.1").strip()
     s.port = _int(env, "SEO_PORT", 8500, 1024, 65535)

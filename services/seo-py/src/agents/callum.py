@@ -33,8 +33,12 @@ The Mentioned-Not-Cited priority list (``CONTRACT_MNC``) is Callum's OUTPUT CONT
 and Adaeze (content gap); neither consumer is built (ADR 0046).
 
 Provider text is DATA: scanned in memory for brand terms; only a bounded excerpt (``EXCERPT_MAX`` characters, marked
-untrusted, withheld when it looks like personal data) is kept for the dashboard drill-down. Cited URLs are kept
-without their query string or fragment (``query_dropped``), a path that looks like personal data is withheld.
+untrusted) is kept for the dashboard drill-down. ADR 0051 (job 2, Option B): when the service passes a ``sink`` the
+client's full evidence for each row (cited URL, excerpt, title, hint) is handed to it for the per-tenant encrypted
+vault, and ``split_evidence`` turns the envelope into the form that is logged: host-only URLs, SHA-256 hashes and the
+strict filter's verdict flags, never a path or a text. ``client_view`` rebuilds the owner's view from the vault: a
+field the strict filter flags is masked (``alert``), every other field is shown in full. Without a sink (unit use)
+the rows are the strict lane's stored forms, as before.
 
 No agent touches service state, the ledger or the log: the service records what this module returns.
 """
@@ -295,7 +299,8 @@ def is_redirector(url: str) -> bool:
 
 
 def url_has_secret(url: str | None) -> bool:
-    """A URL whose path, query, fragment or user part looks like it carries a credential: never fetched (WR-F013)."""
+    """A URL whose host, path, query, fragment or user part looks like it carries a CREDENTIAL: never fetched (WR-F013).
+    A personal-data finding alone does not block the fetch (ADR 0051 job 2)."""
     p = split_url(url) if url else None
     if p is None:
         return False
@@ -492,11 +497,9 @@ def _safe_hint(hint) -> str | None:
     return None if field_check(hint) is not None else hint[:253]
 
 
-def excerpt(text: str, terms: list) -> dict:
-    """A short span of the answer for the drill-down: around the first brand mention, else the answer's opening.
-    Bounded and marked untrusted (envelope.observed). ADR 0050 v2: the span AND ``EXCERPT_MARGIN`` characters on each
-    side are checked; if anything fails, the whole excerpt is withheld (``[withheld]`` for a credential, no excerpt
-    for personal data). Nothing is cut out of it."""
+def _excerpt_span(text: str, terms: list) -> tuple:
+    """(basis, span, withheld code): the kept span and the strict check of it AND ``EXCERPT_MARGIN`` characters on
+    each side (whole words)."""
     t = " ".join((text or "").split())
     basis, start = "answer_opening", 0
     for term in terms:
@@ -510,7 +513,16 @@ def excerpt(text: str, terms: list) -> dict:
         a -= 1                                       # whole words: a key cut by the margin edge is read whole
     while b < len(t) and not t[b].isspace():
         b += 1
-    code = field_check(t[a:b]) or field_check(span)
+    return basis, span, field_check(t[a:b]) or field_check(span)
+
+
+def excerpt(text: str, terms: list) -> dict:
+    """A short span of the answer for the drill-down: around the first brand mention, else the answer's opening.
+    Bounded and marked untrusted (envelope.observed). ADR 0050 v2: the span AND ``EXCERPT_MARGIN`` characters on each
+    side are checked; if anything fails, the whole excerpt is withheld (``[withheld]`` for a credential, no excerpt
+    for personal data). Nothing is cut out of it. (The strict lane's form; the client's full excerpt goes to the
+    vault through the sink, ADR 0051.)"""
+    basis, span, code = _excerpt_span(text, terms)
     if code == "credential":
         return {"basis": basis, "excerpt": observed(secret_guard.WITHHELD, EXCERPT_MAX), "withheld": code,
                 "secret_redacted": True}
@@ -524,21 +536,26 @@ def prompt_id(ps: dict, pi: int) -> str:
 
 
 def classify(engines: dict, prompt_set: dict, domain: str, resolver: Resolver, run_id: str, observed_at: str,
-             refresh_due: str) -> dict:
+             refresh_due: str, sink: list | None = None) -> dict:
     """Rows, metrics and the MNC priority list from the collected samples of every engine (``engines``: name ->
-    collect() result). Deterministic for the same input."""
+    collect() result). Deterministic for the same input. ``sink`` (ADR 0051): a list that receives each kept row's
+    full evidence and verdict flags (``evidence_entry``); the row then names it by ``evidence_ref`` (its index)."""
     terms, competitors = prompt_set["brand_terms"], list(prompt_set.get("competitor_domains") or [])
     term_rules = prompt_set.get("brand_term_rules")
     rows: list = []
     per: dict = {}                                   # (engine, prompt_index) -> tallies
     truncated = 0
 
-    def add(row: dict) -> None:
+    def add(row: dict, entry: dict | None = None) -> int | None:
         nonlocal truncated
         if len(rows) < MAX_ROWS:
+            if sink is not None and entry is not None:
+                row["evidence_ref"] = len(sink)
+                sink.append(entry)
             rows.append(row)
-        else:
-            truncated += 1
+            return row.get("evidence_ref")
+        truncated += 1
+        return None
 
     for eng, r in engines.items():
         for s in r["samples"]:
@@ -574,8 +591,10 @@ def classify(engines: dict, prompt_set: dict, domain: str, resolver: Resolver, r
             if not cites:
                 k["zero_citation_answers"] += 1
             ev = excerpt(text, terms)
+            raw_ex = _raw_excerpt(text, terms) if sink is not None else None
             basis = getattr(a, "citation_basis", None)
             hints = getattr(a, "citation_hints", None) or {}
+            titles = getattr(a, "citation_titles", None) or {}
             classes = []
             for c in cites:
                 # WR-F013: a URL carrying a secret is never fetched, whatever the resolution setting
@@ -605,42 +624,50 @@ def classify(engines: dict, prompt_set: dict, domain: str, resolver: Resolver, r
                         "url": dec.get("url"), "host": dec.get("host"), "answers": 0, "competitor": cl["competitor"],
                         "canonical_to_client": cl["class"] == "CANONICAL_TO_CLIENT"})
                     ci["answers"] += 1
+                else:
+                    ci = None
                 hint = hints.get(c["url"])
                 # r2 part 3a: a grounding redirect's id is never emitted: its row shows the resolved target (stored
                 # form) or, unresolved, the withheld redirect form
                 shown = (cl["chain"]["final"] if is_redirector(c["url"]) and cl["chain"]["final"]
                          else cl["chain"]["cited"]) or {}
-                add({**base, "class": cl["class"], "reason": cl["reason"], "url": shown.get("url"),
-                     "position": c["position"], "via": cl["via"],
-                     "chain": cl["chain"], "flags": cl["flags"], "competitor": cl["competitor"],
-                     "citation_basis": basis,
-                     "engine_hint_unverified": _safe_hint(hint),
-                     "evidence": {"url": shown.get("url"), **ev}})
+                entry = evidence_entry(_shown_raw(c["url"], res), res, raw_ex, titles.get(c["url"]), hint,
+                                       ev["withheld"]) \
+                    if sink is not None else None
+                ref = add({**base, "class": cl["class"], "reason": cl["reason"], "url": shown.get("url"),
+                           "position": c["position"], "via": cl["via"],
+                           "chain": cl["chain"], "flags": cl["flags"], "competitor": cl["competitor"],
+                           "citation_basis": basis,
+                           "engine_hint_unverified": _safe_hint(hint),
+                           "evidence": {"url": shown.get("url"), **ev}}, entry)
+                if ci is not None and ref is not None and "evidence_ref" not in ci:
+                    ci["evidence_ref"] = ref                 # the client sees this page's URL from that row's record
             strength = "STRENGTH_URL" in classes
             if strength:
                 k["strength"] += 1
             said = brand_mention.mention(text, terms, term_rules, domain=domain, client_cited=strength)
             if said["mentioned"] and not strength:
+                entry = evidence_entry(None, {}, raw_ex, None, None, ev["withheld"]) if sink is not None else None
                 if "INCONCLUSIVE" in classes:
                     k["inconclusive_answers"] += 1
                     add({**base, "class": "INCONCLUSIVE", "reason": "MENTION_WITH_UNRESOLVED_CITATIONS",
-                         "url": None, "position": None, "evidence": {"url": None, **ev}})
+                         "url": None, "position": None, "evidence": {"url": None, **ev}}, entry)
                 elif said["confidence"] == brand_mention.LOW:
                     # L1: only a term that may be a common word, with no disambiguation configured: reported apart,
                     # never in the headline rate or the MNC list
                     k["mnc_low"] += 1
                     add({**base, "class": "MENTIONED_NOT_CITED", "confidence": "LOW_CONFIDENCE",
                          "reason": "BRAND_TERM_MAY_BE_COMMON_WORD", "url": None, "position": None,
-                         "citations_in_answer": len(cites), "evidence": {"url": None, **ev}})
+                         "citations_in_answer": len(cites), "evidence": {"url": None, **ev}}, entry)
                 else:
                     k["mnc"] += 1
-                    add({**base, "class": "MENTIONED_NOT_CITED", "confidence": "HIGH", "reason": None, "url": None,
-                         "position": None, "citations_in_answer": len(cites),
-                         "canonical_to_client_citations": classes.count("CANONICAL_TO_CLIENT"),
-                         "evidence": {"url": None, **ev}})
+                    ref = add({**base, "class": "MENTIONED_NOT_CITED", "confidence": "HIGH", "reason": None,
+                               "url": None, "position": None, "citations_in_answer": len(cites),
+                               "canonical_to_client_citations": classes.count("CANONICAL_TO_CLIENT"),
+                               "evidence": {"url": None, **ev}}, entry)
                     if len(k["evidence"]) < MAX_EVIDENCE_PER_ITEM:
                         k["evidence"].append({"engine": eng, "sample": s["sample"], "observed_at": observed_at,
-                                              **ev})
+                                              **ev, **({"evidence_ref": ref} if sink is not None else {})})
     metrics = _metrics(per, prompt_set, run_id, engines)
     return {"rows": rows, "rows_truncated": truncated, "metrics": metrics,
             "mnc_priority": mnc_priority(per, prompt_set, run_id, domain, observed_at)}
@@ -766,8 +793,9 @@ def mnc_priority(per: dict, ps: dict, run_id: str, domain: str, generated_at: st
 # ---------------------------------------------------------------------------------------------- the envelope
 
 def run(engines: dict, prompt_set: dict | None, domain: str, n: int, guard: Callable, budget, resolver: Resolver,
-        run_id: str, clock) -> dict:
-    """Callum's citation-source run: collect every engine of the prompt set, classify, return the envelope."""
+        run_id: str, clock, sink: list | None = None) -> dict:
+    """Callum's citation-source run: collect every engine of the prompt set, classify, return the envelope. ``sink``:
+    see ``classify`` (ADR 0051); the envelope then holds ``evidence_ref`` indexes for ``split_evidence``."""
     method = (f"Each prompt of prompt set {{ps}} v{{ver}} asked {n} times per engine through the multi-engine adapter; "
               "every URL the engine attributed to an answer is classified STRENGTH_URL / CANONICAL_TO_CLIENT / "
               "OPPORTUNITY_URL / LOOKALIKE_URL / INCONCLUSIVE, and every answer that names a brand term without a "
@@ -791,7 +819,7 @@ def run(engines: dict, prompt_set: dict | None, domain: str, n: int, guard: Call
         for eng in prompt_set["engines"]:
             collected[eng] = collect(eng, engines.get(eng), prompt_set, n, guard, budget)
         result = classify({e: r for e, r in collected.items() if r["outcome"] != NOT_CONNECTED}, prompt_set, domain,
-                          resolver, run_id, observed_at, refresh_due)
+                          resolver, run_id, observed_at, refresh_due, sink=sink)
     except Killed as k:
         return envelope(AGENT, TASK, "KILLED", [], methodology=methodology, limitations=LIMITS, reason=k.code,
                         facts={"engines": {e: {"outcome": r["outcome"]} for e, r in collected.items()}})
@@ -857,3 +885,256 @@ def _findings(result: dict, stopped: dict) -> list:
                            detail={"engine": e, "reason": r["reason"], "outcome": r["outcome"]}))
     return out
 
+
+
+# ---------------------------------------------------------------------------------------------- the vault split
+# ADR 0051 (job 2, Option B). The client's full evidence for a row goes to the per-tenant encrypted vault; what is
+# logged (data/seo_log.jsonl, the ledger, events) keeps only the vault reference, SHA-256 hashes, host-only URLs
+# (the host itself checked by the strict filter), counts / codes and the strict filter's verdict flags. The owner's
+# view is rebuilt from the vault: a flagged field is masked with ``alert``, every other field is shown in full.
+
+EVIDENCE_FIELDS = ("cited_url", "final_url", "canonical_url", "excerpt", "title", "hint")
+URL_FIELDS = frozenset(("cited_url", "final_url", "canonical_url"))
+RECORD_VERSION = 1
+MASK = {"credential": "[hidden: looks like a credential]", "personal": "[hidden: looks like personal data]"}
+MASK_REASON = {"credential": "LOOKS_LIKE_CREDENTIAL", "personal": "LOOKS_LIKE_PERSONAL_DATA"}
+
+
+def url_flag(url) -> str | None:
+    """The strict filter's verdict on a whole URL, as a ``withheld`` code: None, ``credential`` or
+    ``personal_data:url`` (every part: host, user info, path, query (tracking parameters too), fragment; a URL that
+    cannot be read is ``credential``). The service's own withheld grounding-redirect form is None (it carries no
+    value)."""
+    if url is None:
+        return None
+    if not isinstance(url, str):
+        return "credential"
+    if is_redirector(url) and url == secret_guard.redirect_withheld(url):
+        return None
+    try:
+        v = secret_guard._url_verdict(url)
+    except Exception:  # noqa: BLE001 - fail closed
+        return "credential"
+    return None if v is None else ("credential" if v == secret_guard.CREDENTIAL else "personal_data:url")
+
+
+def _raw_excerpt(text: str, terms: list) -> str | None:
+    """The client's excerpt (for the vault): the same span the strict lane judged, as displayed (control characters
+    removed, bounded)."""
+    _basis, span, _code = _excerpt_span(text, terms)
+    o = observed(span, EXCERPT_MAX)
+    return o["text"] if o is not None else None
+
+
+def _shown_raw(url: str, res: dict) -> str:
+    """The URL a row shows the client: a redirector's resolved target, a grounding redirect's withheld form (its id
+    is never stored, not even in the vault), else the cited URL as the engine gave it."""
+    if is_redirector(url) and res.get("state") == "RESOLVED" and isinstance(res.get("final_url"), str):
+        return res["final_url"]
+    return secret_guard.redirect_withheld(url) or url
+
+
+def evidence_entry(cited_url, res: dict, excerpt_text, title, hint, excerpt_flag=None) -> dict:
+    """One row's vault record (full evidence) and the strict filter's verdict on each field. ``excerpt_flag``: the
+    strict lane's verdict on the excerpt (its span AND the margins around it, on the text as the engine gave it); the
+    excerpt is flagged when that or the same check on the kept text fails."""
+    def text(x):
+        return x[:2000] if isinstance(x, str) else None
+    final = res.get("final_url") if res.get("state") == "RESOLVED" and isinstance(res.get("final_url"), str) else None
+    canon = res.get("canonical_url") if isinstance(res.get("canonical_url"), str) else None
+    record = {"v": RECORD_VERSION, "cited_url": text(cited_url), "final_url": text(final),
+              "canonical_url": text(canon), "excerpt": text(excerpt_text), "title": text(title), "hint": text(hint)}
+    flags = {f: _flag(f, record[f]) for f in EVIDENCE_FIELDS}
+    if record["excerpt"] is not None:
+        flags["excerpt"] = excerpt_flag or flags["excerpt"]
+    return {"record": record, "flags": flags}
+
+
+def _flag(name: str, value) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return "credential"
+    return url_flag(value) if name in URL_FIELDS else field_check(value)
+
+
+def _sha(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def checked_host(host) -> dict:
+    """A host for the log: kept only when the strict filter passes it (whole and label by label); else withheld."""
+    if not isinstance(host, str) or not host:
+        return {"host": None, "host_withheld": None}
+    u = secret_guard.inspect_url("https://" + host + "/") if "/" not in host and "@" not in host else None
+    if u is None or not u["host"] or u["host_kind"] is not None or secret_guard.check(host) is not None:
+        kind = (u or {}).get("host_kind")
+        return {"host": None, "host_withheld": "PERSONAL_DATA" if kind == secret_guard.PERSONAL else "SECRET_REDACTED"}
+    return {"host": host[:253], "host_withheld": None}
+
+
+def url_host(url) -> dict:
+    """The host of ``url`` for the log (checked), or why it is withheld."""
+    if not isinstance(url, str):
+        return {"host": None, "host_withheld": None}
+    u = secret_guard.inspect_url(url)
+    if u is None or not u["host"]:
+        return {"host": None, "host_withheld": "UNREADABLE"}
+    if u["host_kind"] is not None:
+        return {"host": None, "host_withheld": "SECRET_REDACTED" if u["host_kind"] == secret_guard.CREDENTIAL
+                else "PERSONAL_DATA"}
+    return checked_host(u["host"])
+
+
+def _chain_part(d) -> dict | None:
+    if not isinstance(d, dict):
+        return None
+    h = checked_host(d.get("host")) if d.get("host") else {"host": None, "host_withheld": d.get("withheld")}
+    return {**h, "query_dropped": bool(d.get("query_dropped"))}
+
+
+def _log_fields(entry: dict) -> dict:
+    rec, flags = entry["record"], entry["flags"]
+    return {f: {"sha256": _sha(rec[f]), "flag": flags[f]} for f in EVIDENCE_FIELDS if isinstance(rec.get(f), str)}
+
+
+_ROW_TEXT_KEYS = ("url", "chain", "evidence", "engine_hint_unverified", "evidence_ref")
+
+
+def log_row(row: dict, vault_ref: str | None, entry: dict | None) -> dict:
+    """The logged form of a row: no URL path, no text; the vault reference, hashes, host-only URLs, verdict flags."""
+    out = {k: v for k, v in row.items() if k not in _ROW_TEXT_KEYS}
+    ch = row.get("chain")
+    if isinstance(ch, dict):
+        out["chain"] = {"cited": _chain_part(ch.get("cited")), "resolution": ch.get("resolution"),
+                        "final": _chain_part(ch.get("final")), "canonical": _chain_part(ch.get("canonical")),
+                        "redirects": ch.get("redirects"),
+                        "hop_hosts": [checked_host(h)["host"] for h in (ch.get("hop_hosts") or [])][:20]}
+    if entry is None or vault_ref is None:
+        out.update(host=None, host_withheld=None, evidence=None)
+        return out
+    out.update(url_host(entry["record"]["cited_url"]))
+    ev = row.get("evidence") if isinstance(row.get("evidence"), dict) else {}
+    out["evidence"] = {"vault_id": vault_ref, "basis": ev.get("basis"), "fields": _log_fields(entry)}
+    return out
+
+
+def _log_mnc(mp, refs: dict, sink: list):
+    if not isinstance(mp, dict) or not isinstance(mp.get("items"), list):
+        return mp
+    items = []
+    for it in mp["items"]:
+        inst = []
+        for x in it.get("cited_instead") or []:
+            r = x.get("evidence_ref")
+            inst.append({**{k: v for k, v in x.items() if k not in ("url", "host", "evidence_ref")},
+                         **checked_host(x.get("host")), "vault_id": refs.get(r)})
+        evs = []
+        for e in it.get("evidence") or []:
+            r = e.get("evidence_ref")
+            entry = sink[r] if isinstance(r, int) and r in refs else None
+            evs.append({"engine": e.get("engine"), "sample": e.get("sample"), "observed_at": e.get("observed_at"),
+                        "basis": e.get("basis"), "vault_id": refs.get(r),
+                        "excerpt": _log_fields(entry).get("excerpt") if entry else None})
+        hosts = sorted({x["host"] for x in inst if x["host"]})
+        items.append({**it, "cited_instead": inst, "evidence": evs,
+                      "for_adaeze": {**(it.get("for_adaeze") or {}), "hosts": hosts}})
+    return {**mp, "items": items}
+
+
+def split_evidence(env, sink: list, put: Callable):
+    """The envelope as it is logged: every row's full evidence ``put`` into the vault (``put(record) -> vault id``),
+    the row reduced to ``log_row``; the MNC list likewise. Raises on anything inconsistent (the run then fails)."""
+    from vault import ref as vault_ref
+    facts = env.get("facts") if isinstance(env, dict) else None
+    if not isinstance(facts, dict) or not isinstance(facts.get("rows"), list):
+        return env                                   # no rows (NOT_CONNECTED, KILLED): nothing to keep
+    refs: dict = {}
+    rows = []
+    for row in facts["rows"]:
+        i = row.get("evidence_ref")
+        if i is None:
+            rows.append(log_row(row, None, None))
+            continue
+        if not isinstance(i, int) or not 0 <= i < len(sink) or i in refs:
+            raise ValueError("a row names evidence that is not in the sink")
+        refs[i] = vault_ref(put(sink[i]["record"]))
+        rows.append(log_row(row, refs[i], sink[i]))
+    return {**env, "facts": {**facts, "rows": rows, "mnc_priority": _log_mnc(facts.get("mnc_priority"), refs, sink)}}
+
+
+def _display(name: str, value, logged_flag) -> dict | None:
+    """One field of the owner's view: in full, or masked with ``alert`` when the strict filter flags it (the flag
+    recorded at the run, or the same check on the value now)."""
+    if value is None:
+        return None
+    flag = logged_flag or _flag(name, value)
+    if flag is None:
+        out = {"value": value, "alert": False, "reason": None}
+    else:
+        kind = "credential" if flag == "credential" else "personal"
+        out = _mask(kind, flag)
+    if name == "excerpt":
+        out["untrusted"] = True
+    return out
+
+
+def _mask(kind: str, flag: str) -> dict:
+    return {"value": MASK[kind], "alert": True, "reason": MASK_REASON[kind], "check": flag}
+
+
+def _shown(d) -> str | None:
+    return d["value"] if isinstance(d, dict) and not d["alert"] else None
+
+
+def client_row(row: dict, got: Callable) -> dict:
+    """The owner's view of a logged row. ``got(vault_ref) -> (record, None) | (None, reason code)``."""
+    out = dict(row)
+    ev = row.get("evidence")
+    if not isinstance(ev, dict) or not ev.get("vault_id"):
+        out["url"] = None
+        return out
+    record, why = got(ev["vault_id"])
+    if record is None:
+        out["url"] = None
+        out["engine_hint_unverified"] = None
+        out["evidence"] = {"vault_id": ev["vault_id"], "basis": ev.get("basis"), "available": False, "reason": why}
+        return out
+    fields = ev.get("fields") or {}
+    shown = {f: _display(f, record.get(f), (fields.get(f) or {}).get("flag")) for f in EVIDENCE_FIELDS}
+    out["url"] = _shown(shown["cited_url"])
+    out["engine_hint_unverified"] = _shown(shown["hint"])
+    out["evidence"] = {"vault_id": ev["vault_id"], "basis": ev.get("basis"), "available": True, **shown}
+    return out
+
+
+def _client_mnc(mp, got: Callable):
+    if not isinstance(mp, dict) or not isinstance(mp.get("items"), list):
+        return mp
+    items = []
+    for it in mp["items"]:
+        inst = []
+        for x in it.get("cited_instead") or []:
+            rec, _why = got(x["vault_id"]) if x.get("vault_id") else (None, None)
+            u = None
+            if rec is not None:
+                name = "final_url" if rec.get("final_url") else "cited_url"
+                u = _display(name, rec.get(name), None)
+            inst.append({**x, "url": _shown(u), "url_evidence": u})
+        evs = []
+        for e in it.get("evidence") or []:
+            rec, why = got(e["vault_id"]) if e.get("vault_id") else (None, None)
+            flag = (e.get("excerpt") or {}).get("flag")
+            evs.append({**e, "excerpt": _display("excerpt", rec.get("excerpt"), flag) if rec is not None else None,
+                        **({} if rec is not None else {"reason": why})})
+        items.append({**it, "cited_instead": inst, "evidence": evs})
+    return {**mp, "items": items}
+
+
+def client_view(env, got: Callable):
+    """The owner's view of a logged envelope (rows and the MNC list rebuilt from the vault)."""
+    facts = env.get("facts") if isinstance(env, dict) else None
+    if not isinstance(facts, dict) or not isinstance(facts.get("rows"), list):
+        return env
+    return {**env, "facts": {**facts, "rows": [client_row(r, got) for r in facts["rows"]],
+                             "mnc_priority": _client_mnc(facts.get("mnc_priority"), got)}}

@@ -45,6 +45,8 @@ CODES = frozenset({
     "ENGINE_BUDGET_EXHAUSTED", "ENGINE_KILLED", "ENGINE_NOT_CONNECTED",
     # Callum's citation-source runs (ADR 0046; svc_citations.py)
     "CITATION_RUN_NOT_FOUND", "CITATION_RUN_RUNNING", "CITATION_RUN_NOT_COMPLETED",
+    # the client citation vault (ADR 0051, job 2; vault.py): no key (fail closed) / a record that cannot be read
+    "VAULT_UNAVAILABLE", "VAULT_RECORD_NOT_FOUND",
     # generic
     "REQUEST_ID_REUSED", "LEDGER_UNAVAILABLE", "STORE_UNAVAILABLE", "INTEGRITY_UNVERIFIED", "SERVICE_CLOSED",
     "JOB_UNKNOWN", "JOB_RUNNING", "INVALID", "FORBIDDEN_FIELD",

@@ -128,6 +128,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
                 raise DataDirBusy("the data-directory claim handed to this service instance is not held (released, "
                                   "stale, another instance's, or already adopted); refusing to start")
         try:
+            self.vault = self._open_vault(settings)
             import client_report
             if not isinstance(getattr(settings, "report_branding", None), client_report.Branding):
                 # AEGIS L-8: refuse to start rather than answer the client-report route with a 500
@@ -136,6 +137,18 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
         except BaseException:
             self.close()
             raise
+
+    @staticmethod
+    def _open_vault(settings):
+        """ADR 0051 (job 2): the client citation vault. With a data directory: ``citation_vault.jsonl`` there, under
+        the configured key (no key: every citation run fails closed, VAULT_UNAVAILABLE). Without one (in-memory,
+        non-production): the in-memory backend, same encryption, under the configured key or a random key held in
+        memory only (nothing outlives the process)."""
+        import vault
+        key = getattr(settings, "vault_key", None)
+        if settings.data_dir:
+            return vault.CitationVault(settings.data_dir, key)
+        return vault.MemoryCitationVault(key if key is not None else vault.ephemeral_vault_key())
 
     def close(self) -> None:
         """Give the data directory back. A closed instance is inert: its log refuses every write, every commit is

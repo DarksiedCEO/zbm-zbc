@@ -1,10 +1,10 @@
 # ADR 0051 - SEO (Dept 2): client citation vault (Option B)
 
 Number to be confirmed at merge (0051 is the next unused number in `docs/adr` on this branch; open PRs elsewhere may
-already claim it). Status: job 1 built Nov 9 2026 on `claude/seo-callum-engines-20261108`. **Not in force.** The
-module and its tests exist; nothing in the service calls them yet (job 2 wires `agents/callum.py` and
-`svc_citations.py`). Fixtures and synthetic data only: no real key exists, no client data has been stored. Extends
-ADR 0046 (Callum's citation sources) and sits beside ADR 0050 (the redaction core, which is not changed).
+already claim it). Status: job 1 (the module) and job 2 (the wiring, below) built Nov 9 2026 on
+`claude/seo-callum-engines-20261108`. **Not in force** until merged and a key is set with Andre's approval. Fixtures
+and synthetic data only: no real key exists, no client data has been stored. Extends ADR 0046 (Callum's citation
+sources) and sits beside ADR 0050 (the redaction core; job 2 changes only its fetch rule, decision 8).
 
 ## Context
 
@@ -48,12 +48,44 @@ service, adds a dependency and a network hop the department does not otherwise n
 7. **Concurrency.** One re-entrant lock (`threading.RLock`, as `service.Service.lock` and `RecordLog.lock`) around
    the index and the append; one process per data directory is already guaranteed by the data-directory flock.
 
+## Job 2: the wiring (svc_citations.py, agents/callum.py, service.py, config.py)
+
+8. **Vault in the service.** `SeoService.vault`: `CitationVault(SEO_DATA_DIR, key)` with a data directory;
+   `MemoryCitationVault` (same lines, same encryption, no file) without one (in-memory, non-production), under the
+   configured key or, if none, a random key held in memory only. The key also comes from `SEO_VAULT_KEY_FILE` /
+   `SEO_VAULT_KEY_PREVIOUS_FILE` (the service's *_FILE rules; a file and its variable both set refuses start).
+9. **Fail closed.** A data directory without a key: a citation run is closed `RUN_FAILED` with
+   `failure.code = VAULT_UNAVAILABLE` right after its request is recorded, before any engine is asked; nothing else
+   is written (no vault file).
+10. **Storage split.** `callum.classify(..., sink=)` hands each kept row's full evidence (`cited_url` (a grounding
+    redirect's id is never kept, not even here), `final_url`, `canonical_url`, `excerpt`, `title`, `hint`) and the
+    strict filter's verdict on each field to the service, which `put`s it into the vault under the run's tenant.
+    `callum.split_evidence` then reduces every row to what is logged (`seo_log.jsonl`, the ledger, events): the vault
+    reference (`seo-vlt-` + id + 8 hex check, `vault.ref`), a SHA-256 per field, the verdict flag per field, the host
+    only (itself checked by the strict filter; a failing host is withheld), chain hosts, counts and codes. The MNC list
+    is reduced the same way. `guard_record` still sweeps the whole envelope before `_commit`. Split, sweep and commit
+    run in one guarded block: any exception closes the run `RUN_FAILED` (never left running) and nothing raw is
+    written; records already put stay encrypted and unreferenced.
+11. **Owner's view.** `GET .../citation-runs/{cid}` (and the MNC export) for the owning tenant rebuilds rows from the
+    vault (`callum.client_view`): a field the strict filter flags (recorded flag, or the same check on the value now)
+    is returned masked (`[hidden: looks like a credential]` / `[hidden: looks like personal data]`, `alert: true`,
+    `reason` `LOOKS_LIKE_CREDENTIAL` / `LOOKS_LIKE_PERSONAL_DATA`); every other field in full. Another tenant: the same
+    404 as a missing run. A record that cannot be read (no key, rotated away) shows `available: false` with a code,
+    never an error. The client report renders audit envelopes only and has no citation-run path.
+12. **Fetch rule (ADR 0050 r2 part 3a decision 6 reverted).** Only a credential finding blocks a fetch; a
+    personal-data-shaped URL is fetched (it is the client's evidence) and never logged. The exact-host exemptions of
+    r2 part 3a stay (the log no longer keeps paths, so they cost nothing there).
+13. **Utility (client view, measured on the disclosed corpora).** Excerpts masked: 22 / 312 (7.05%), bar 5%, MISSED
+    (all by check (a), a credential label word). URLs masked: 73 / 306 (23.9%) on `utility_corpus_v2`, 650 / 1180
+    (55.1%) on `url_corpus`, bar 2.5%, MISSED (random-looking and numeric ids, label words in slugs, key-like tracking
+    values). The display uses the strict filter as is; a looser display rule is an owner decision.
+
 ## Threat model
 
 | Threat | What stops it | What does not |
 |---|---|---|
 | Disk read (backup, volume snapshot, a stolen copy of the data dir) | AES-256-GCM; the key is not on disk; tenant tags are keyed, so tenant names cannot be confirmed by hashing guesses | Record count, sizes and write times are visible |
-| Log read | The vault writes no log line; job 2 puts only the opaque vault id in `seo_log.jsonl` | Whatever job 2 or a caller logs on its own |
+| Log read | The vault writes no log line; the logged row keeps the vault reference, SHA-256 hashes, host-only URLs and verdict flags | Plain SHA-256 of a short, guessable field (an e-mail or phone alone in a hint) can be confirmed by hashing guesses |
 | Cross-tenant read | Keyed tenant tag checked before decryption; tenant id in the associated data | A caller that passes the wrong tenant id on a client's behalf (the API's tenant authentication is the boundary) |
 | Tamper (ciphertext, nonce, tag, key id, record moved to another tenant or id) | GCM tag over ciphertext and associated data; every failure is `VaultNotFound` | Deletion, truncation or rollback of whole lines by someone with write access to the data dir (a missing record is not found, not detected) |
 | Missing key | `put` refuses and writes nothing; malformed settings refuse | - |

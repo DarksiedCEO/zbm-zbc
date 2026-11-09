@@ -151,6 +151,11 @@ def test_utility_urls_stay_under_the_bar():
     assert len(reduced) == 65, len(reduced)
     stored = [u for _, u in urls if (callum.stored_url(u) or {}).get("withheld")]
     assert len(stored) == 64, len(stored)
+    # ADR 0051 job 2: the log keeps host only, so the strict lane's URL numbers above no longer cost the client
+    # anything; what the owner sees is the CLIENT view, where a URL the strict filter flags (any part, tracking
+    # parameters included) is masked with an alert. The 2.5% bar is MISSED: measured 73 / 306 (23.9%). Recorded, not met
+    masked = [u for _, u in urls if callum.url_flag(u)]
+    assert len(masked) == 73, len(masked)
 
 
 # the v1 precision fixtures, now with their v2 verdicts stated explicitly (rule 2a withholds any field holding a

@@ -206,9 +206,12 @@ class TestGroundingRedirect:
     def test_prefix_and_digit_rules_still_block_a_redirect_fetch(self):
         r = random.Random(SEED)
         for n in range(N):
-            for mid in (_prefix_key(r), _luhn_digits(r)):
+            for mid, kind in ((_prefix_key(r), sg.CREDENTIAL), (_luhn_digits(r), sg.PERSONAL)):
                 u = _redirect("Ab" + mid + "cd")
-                assert callum.url_has_secret(u), n
+                # the fetch judgement still reads the id with rules (c) and (e); ADR 0051 job 2: only a credential
+                # blocks the fetch (a card-shaped id is fetched to resolve it and is never stored)
+                assert sg._worst(sg._inspect(u, True, fetch=True)) == kind, n
+                assert callum.url_has_secret(u) == (kind == sg.CREDENTIAL), n
                 assert mid not in json.dumps(callum.stored_url(u)), n
 
     def test_classification_emits_the_resolved_target_or_the_withheld_form(self):
@@ -240,7 +243,7 @@ class TestRulesCAndEInExemptPositions:
                      (f"https://docs.google.com/document/d/1{_mixed(r, 27)}{card}/edit", card, "PERSONAL_DATA")]
             for u, v, why in cases:
                 s = callum.stored_url(u)
-                if (not callum.url_has_secret(u) or v in sg.safe_url(u) or _leaks(v, s) or s["withheld"] != why
+                if (not _flagged(u) or v in sg.safe_url(u) or _leaks(v, s) or s["withheld"] != why
                         or sg.guard_record({"url": u})["url"] is not None):
                     bad.append(n)
         assert bad == [], (len(bad), N)
@@ -283,7 +286,7 @@ class TestQueryIds:
                                                                         _plain_digits(r, 21))]
             urls += [f"https://www.amazon.com/dp/x?id={_ssn()}", f"https://www.amazon.com/dp/x?id={_phone()}"]
             for u in urls:
-                if not callum.url_has_secret(u) or "?" in sg.safe_url(u):
+                if not _flagged(u) or "?" in sg.safe_url(u):
                     bad.append(n)
         assert bad == [], (len(bad), len(nums))
 
@@ -319,26 +322,46 @@ class TestUrlsInText:
 # ------------------------------------------------------------------------------------------------ decision 6
 
 class TestFailClosedFetch:
-    def test_personal_data_anywhere_in_a_url_blocks_the_fetch(self):
+    # ADR 0051 job 2 (owner decision, Option B): the r2 part 3a block on fetching personal-data-shaped URLs is reverted.
+    # Personal data anywhere in a URL is still FLAGGED by the strict filter (never kept in the log, masked for the
+    # client); only a credential finding blocks the fetch.
+    def test_personal_data_anywhere_in_a_url_is_flagged_but_does_not_block_the_fetch(self):
         r = random.Random(SEED)
         bad = []
         for n in range(N):
             card = _luhn_digits(r)
             for v in (_phone(), _email(), _ssn(), card):
                 for u in (f"https://site.test/c/{v}/x", f"https://site.test/c?q={v}", f"https://site.test/c#{v}"):
-                    if not callum.url_has_secret(u) or not sg.url_has_secret(u):
+                    if (sg._url_verdict(u) != sg.PERSONAL or callum.url_flag(u) != "personal_data:url"
+                            or callum.url_has_secret(u) or sg.url_has_secret(u)):
                         bad.append(n)
         assert bad == [], len(bad)
 
-    def test_a_personal_url_is_never_fetched_through_classification(self):
+    def test_a_personal_url_is_fetched_through_classification_and_never_stored(self):
         from test_callum import answer, classify, collected, resolver
-        u = f"https://site.test/c/{_phone()}/x"
+        phone = _phone()
+        u = f"https://site.test/c/{phone}/x"
+        res = resolver({})
+        r = classify(collected((0, answer(cites=[u]))), res)
+        assert len(res.fetcher.fetched) == 1 and r["rows"][0]["chain"]["resolution"] != "NOT_FETCHED_SECRET"
+        assert phone not in json.dumps(r) and "".join(c for c in phone if c.isdigit()) not in json.dumps(r)
+
+    def test_a_credential_url_is_never_fetched(self):
+        from test_callum import answer, classify, collected, resolver
+        r0 = random.Random(SEED)
+        u = f"https://site.test/c/{_prefix_key(r0)}/x"
         res = resolver({})
         r = classify(collected((0, answer(cites=[u]))), res)
         assert res.fetcher.fetched == [] and r["rows"][0]["chain"]["resolution"] == "NOT_FETCHED_SECRET"
 
 
 # ------------------------------------------------------------------------------------------------ mutation bite
+
+def _flagged(u: str) -> bool:
+    """The strict filter flags ``u`` (a credential or personal-data shape in any part). Before ADR 0051 job 2 these
+    tests read ``url_has_secret``, which then also blocked personal data; the rule under test is the verdict."""
+    return sg._url_verdict(u) is not None
+
 
 def _bite_cases():
     ids = _dtrip(_drive_id, n=4)
@@ -363,22 +386,25 @@ def _bite_cases():
         "canva_index": ([("_canva_index_ok", lambda i: True)],
                         lambda: sg.position("canva.com", ["", "x", "design", did], 3) is None),
         "waive_d_only": ([("POSITION_WAIVE", sg.WAIVABLE)],
-                         lambda: callum.url_has_secret(f"https://open.spotify.com/track/{sp[0][:6]}{card}")),
+                         lambda: _flagged(f"https://open.spotify.com/track/{sp[0][:6]}{card}")),
         "redirect_never_stored": ([("_redirect_host", lambda h: False)],
                                   lambda: benign not in sg.safe_url(_redirect(benign))
                                   and benign not in json.dumps(callum.stored_url(_redirect(benign)))),
         "redirect_exact_host": ([("_redirect_host", lambda h: h.rstrip(".").endswith(sg.REDIRECT_HOST))],
                                 lambda: callum.url_has_secret(_redirect(rid[0], "x." + RHOST))),
         "query_commerce_hosts": ([("_commerce_host", lambda h: True)],
-                                 lambda: callum.url_has_secret(f"https://site.test/p?variant={num}")),
+                                 lambda: _flagged(f"https://site.test/p?variant={num}")),
         "query_keys": ([("QUERY_ID_KEYS", sg.QUERY_ID_KEYS | {"pid"})],
-                       lambda: callum.url_has_secret(f"https://www.amazon.com/dp/x?pid={num}")),
+                       lambda: _flagged(f"https://www.amazon.com/dp/x?pid={num}")),
         "query_card_ssn": ([("_card_or_ssn", lambda v: False)],
-                           lambda: callum.url_has_secret(f"https://acme.myshopify.com/p?variant={card}")),
+                           lambda: _flagged(f"https://acme.myshopify.com/p?variant={card}")),
         "mask_exempt_dependent": ([("_url_judge", judge_no_dep)],
                                   lambda: sg.check(f"Z Best Media: read {_drive(ids[3])} today.") is not None),
-        "fetch_personal": ([("FETCH_BLOCKS", frozenset({sg.CREDENTIAL}))],
-                           lambda: callum.url_has_secret(f"https://site.test/c/{_phone()}/x")),
+        # ADR 0051 job 2: the fetch policy is load-bearing both ways (a credential blocks; personal data alone does not)
+        "fetch_credential": ([("FETCH_BLOCKS", frozenset())],
+                             lambda: callum.url_has_secret(f"https://site.test/c/{_prefix_key(random.Random(SEED))}/x")),
+        "fetch_personal_allowed": ([("FETCH_BLOCKS", frozenset({sg.CREDENTIAL, sg.PERSONAL}))],
+                                   lambda: not callum.url_has_secret(f"https://site.test/c/{_phone()}/x")),
     }
 
 
