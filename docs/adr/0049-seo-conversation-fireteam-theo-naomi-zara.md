@@ -511,3 +511,41 @@ counted as incomplete cannot hide inside `agreed_clean` (`x.chains − x.complet
 5. **Priya's record**: `verify` refuses (FAILED) a record of another contract string, of another run, or whose
    `handoff_items` is missing, a bool or not the item count; `validate` refuses extra top-level and query keys.
 Mutation check: each new guard removed makes its own test fail (16 mutants, all killed).
+
+## Review round 10 (1834acf6: REJECTED)
+
+The branch now merges #51's tip (38565cdd) so Theo can use `agents/secret_guard.py` (not edited).
+
+1. **Zara recomputes Naomi's band.** Structural damage is HELD: every band ordered, non-negative, finite and holding
+   the count; the per-day band ordered; `unit`, `estimator`, `proxy_for`, each signal's `source`, `data_class`
+   (`measured` / `claimed`) and `provenance` (exact keys, producer `priya`, Priya's contract, a bool
+   `verified_against_priya_record`) are the contract; `reliability_if_verified` is the count's. Self-contradictions
+   are FLAGGED and the volume half is then never a ranking basis: `VOLUME_BAND_MISMATCH` (a band differs from
+   `naomi.garwood(k)` Zara computes itself, or the per-day band from it, or the topic band from the signal's) and
+   `VOLUME_PROVENANCE_MISMATCH` (`verified` vs a signal's provenance, data class, or the reliability its
+   verification allows). A volume-based basis needs `verified`, verified provenance AND `data_class: measured` on
+   every signal (`zara.volume_verified`).
+2. **`text_redact` is a thin wrapper over secret_guard.** It normalises (invisible characters removed;
+   percent-decoding repeated until stable, at most 6 passes), runs secret_guard's strong detectors (incl. `pplx-`),
+   then only the DELTA rules secret_guard lacks: PEM private keys, all ten AWS key-id prefixes with whitespace
+   allowed between any two characters (prefix included; a spaced match needs a digit), labelled AWS secrets,
+   `whsec_`, `glpat-`, `Bearer` without a digit, one generalised labelled-credential rule (any identifier holding
+   key / token / secret / password / auth / bearer / credential / session id / cookie, then `:` / `=` and a
+   token-shaped value) and single-character-spaced keys. **The delta rules are to be upstreamed into secret_guard**,
+   and secret_guard needs a public text entry point (Theo calls its private `_strong_spans` until then); after that
+   `text_redact` only normalises.
+3. **Separators.** `agents/separator_screen.py` reads every Unicode P*/S*/Z* character the base screen does not
+   already read (from `unicodedata`, not a list), and `x` between digits, as a space, and runs the BASE screen
+   (`prompt_guard.personal_data`, unchanged) on that reading too, so the base allowances (round counts, year ranges,
+   versions) still apply. Property test over separators generated from those categories (runs of 1 and 3).
+   **Measured excerpt withholding** (base screen, `callum.excerpt`, not changed): 0 of 128 benign answer texts in the
+   committed fixtures (`tests/fixtures/injection/labelled.json` benign split, answer-engine and Perplexity
+   fixtures); 4 of 20 (20%) number-heavy synthetic answer sentences (one of them a real phone number; the others an
+   order id, a case number and a long SKU report count). The separator screen withheld none extra on either set. The
+   reviewer measured 26.2% on their corpus; the committed corpus has too few numbers to be representative.
+4. **Mutation survivors**: `directional` must be a bool (an int 0 equals False and passed), `native_status` is None
+   exactly for a stacked chain, `named_first_only` is a strict box, `basis` is Theo's exact `FR_BASIS`,
+   `max_confidence` MEDIUM, `by_turn` as long as the plan, turn numbers 1..n, each kind with its own source
+   (`theo.TURN_SOURCES`), the opening first and only first, and the service hands Zara the run's engines. Also:
+   `verify()` never crashes on a non-dict record or document, and `model` / `model_version` are redacted.
+   Mutation check: 41 mutants, all killed.

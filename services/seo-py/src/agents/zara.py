@@ -20,6 +20,9 @@ tenant or run, names a topic nobody planned, or contradicts itself is HELD, neve
   UNSTABLE_FLAG_MISMATCH       Theo: its ``unstable`` flag disagrees with the stability Zara recomputes
   RATE_MISMATCH                Theo: a rate's value / ci95 / directional disagree with its own k and n
   ENGINES_DISAGREE             Theo: one engine's chains recommend the client, another's a competitor
+  VOLUME_BAND_MISMATCH         Naomi: a band differs from the Garwood band Zara recomputes from the count (round 10)
+  VOLUME_PROVENANCE_MISMATCH   Naomi: ``verified`` disagrees with a signal's provenance, data class or reliability
+                               (both are self-contradictions: the volume half is never a ranking basis)
   HANDOFF_NOT_VERIFIED         Naomi: the volume rests on a hand-off not verified against Priya's record (BLOCKING:
                                the topic is never CLEARED, never TEST, and volume is never a priority basis)
 Verdicts (closed): CLEARED (both halves, no conflict), FLAGGED (both halves, conflicts listed; passes downstream with
@@ -41,7 +44,7 @@ import math
 import threading
 from typing import Optional
 
-from agents import naomi, theo
+from agents import naomi, priya_handoff, theo
 from envelope import envelope, finding
 
 AGENT, TASK = "zara", "fireteam_crosscheck"
@@ -50,8 +53,9 @@ CONTRACT = "zara.conversation_volume/1"
 VERDICTS = ("CLEARED", "FLAGGED", "PARTIAL", "NOTHING_OBSERVED", "HELD")
 CONFLICTS = ("STRONG_CHAIN_THIN_VOLUME", "STRONG_CHAIN_UNKNOWN_VOLUME", "VOLUME_WITHOUT_CHAIN", "UNSTABLE_CHAIN",
              "ENGINES_DISAGREE", "HANDOFF_NOT_VERIFIED", "UNSTABLE_FLAG_MISMATCH",
-             "RATE_MISMATCH")
+             "RATE_MISMATCH", "VOLUME_BAND_MISMATCH", "VOLUME_PROVENANCE_MISMATCH")
 SELF_CONTRADICTIONS = ("UNSTABLE_FLAG_MISMATCH", "RATE_MISMATCH")   # never a chain ranking basis
+VOLUME_SELF_CONTRADICTIONS = ("VOLUME_BAND_MISMATCH", "VOLUME_PROVENANCE_MISMATCH")   # never a volume basis
 HOLDS = ("THEO_PAYLOAD_INVALID", "NAOMI_PAYLOAD_INVALID", "THEO_SELF_CONTRADICTION", "NAOMI_SELF_CONTRADICTION",
          "TOPIC_NOT_PLANNED", "BOTH_MEMBERS_MISSING", "DUPLICATE_PAYLOAD", "THEO_TENANT_OR_RUN_MISMATCH",
          "NAOMI_TENANT_OR_RUN_MISMATCH",
@@ -95,6 +99,9 @@ _TURN_KEYS = {"turn", "kind", "source", "client_mentioned", "client_mentioned_un
 _FR_KEYS = {"recommended", "named_first_only", "none", "unknown", "basis", "max_confidence"}
 _DV_KEYS = {"checked", "divergent", "agreed_clean", "note"}
 _BAND_KEYS = {"low", "high", "interval", "method"}
+_PROV_KEYS = {"producer", "contract", "volume_status", "verified_against_priya_record"}
+_SIGNAL_SOURCES = tuple("priya_handoff:" + x for x in priya_handoff.COUNT_SOURCES)
+_DATA_CLASSES = ("measured", "claimed")
 _SIGNAL_KEYS = {"source", "priya_key", "observed_impressions", "window", "window_days", "band", "band_per_day",
                 "reliability", "reliability_if_verified", "unit", "data_class", "provenance"}
 
@@ -135,7 +142,8 @@ def _theo_shape(c: dict, nc: int, engines) -> Optional[str]:
     """Round 9: every nested structure of a chain summary, strictly (keys, types, ranges)."""
     if not isinstance(c.get("engine"), str) or (engines is not None and c["engine"] not in engines):
         return "THEO_PAYLOAD_INVALID"
-    if c["native_status"] is not None and not isinstance(c["native_status"], str):
+    ns = c["native_status"]                       # round 10: None exactly for a stacked chain, else a string
+    if (c.get("context_mode") == theo.NATIVE) != isinstance(ns, str) or (ns is not None and not isinstance(ns, str)):
         return "THEO_PAYLOAD_INVALID"
     if not all(_nat(c[k]) for k in ("chains", "complete", "loop_stopped", "turns_planned")):
         return "THEO_PAYLOAD_INVALID"
@@ -155,7 +163,7 @@ def _theo_shape(c: dict, nc: int, engines) -> Optional[str]:
     fr = c["final_recommendation"]
     if not isinstance(fr, dict) or set(fr) != _FR_KEYS or not _box_ok(fr["recommended"]) \
             or not _box_ok(fr["named_first_only"]) or not _nat(fr["none"]) or not _nat(fr["unknown"]) \
-            or not isinstance(fr["basis"], str) or fr["max_confidence"] != "MEDIUM":
+            or fr["basis"] != theo.FR_BASIS or fr["max_confidence"] != "MEDIUM":
         return "THEO_PAYLOAD_INVALID"
     if not _rate_ok(c["client_recommended"], nc):
         return "THEO_PAYLOAD_INVALID"
@@ -163,8 +171,9 @@ def _theo_shape(c: dict, nc: int, engines) -> Optional[str]:
     if not isinstance(bt, list) or len(bt) != c["turns_planned"]:
         return "THEO_PAYLOAD_INVALID"
     for i, x in enumerate(bt):
-        if not isinstance(x, dict) or set(x) != _TURN_KEYS or x["turn"] != i + 1 or x["kind"] not in theo.TURN_KINDS \
-                or not isinstance(x["source"], str):
+        # the kind must be one Theo plans, with that kind's source; the opening comes first and only first
+        if not isinstance(x, dict) or set(x) != _TURN_KEYS or x["turn"] != i + 1 \
+                or x["source"] not in theo.TURN_SOURCES.get(x["kind"], ()) or (i == 0) != (x["kind"] == "opening"):
             return "THEO_PAYLOAD_INVALID"
         if not all(_rate_ok(x[k], nc) for k in ("client_mentioned", "client_cited", "competitor_mentioned")):
             return "THEO_PAYLOAD_INVALID"
@@ -203,7 +212,59 @@ def _volume_shape(v: dict) -> Optional[str]:
             return "NAOMI_PAYLOAD_INVALID"
         if sg["reliability"] not in naomi.RELIABILITY or sg["reliability_if_verified"] not in naomi.RELIABILITY:
             return "NAOMI_PAYLOAD_INVALID"
+        # round 10: bands ordered, non-negative and holding the count; the contract's unit, source and provenance
+        k = sg["observed_impressions"]
+        if not 0 <= sb["low"] <= k <= sb["high"] or (pd is not None and not 0 <= pd["low"] <= pd["high"]):
+            return "NAOMI_SELF_CONTRADICTION"
+        if sg["unit"] != naomi.UNIT or sg["source"] not in _SIGNAL_SOURCES or sg["data_class"] not in _DATA_CLASSES \
+                or not isinstance(sg["priya_key"], str):
+            return "NAOMI_PAYLOAD_INVALID"
+        pv = sg["provenance"]
+        if not isinstance(pv, dict) or set(pv) != _PROV_KEYS or pv["producer"] != "priya" \
+                or pv["contract"] != priya_handoff.SCHEMA or not isinstance(pv["verified_against_priya_record"], bool) \
+                or not isinstance(pv["volume_status"], str):
+            return "NAOMI_PAYLOAD_INVALID"
+        if sg["reliability_if_verified"] != naomi._reliability(k):
+            return "NAOMI_SELF_CONTRADICTION"
+    if v["unit"] != naomi.UNIT or v["estimator"] != naomi.ESTIMATOR or v["proxy_for"] != naomi.PROXY_FOR:
+        return "NAOMI_PAYLOAD_INVALID"
     return None
+
+
+def volume_verified(v: dict) -> bool:
+    """Round 10: a volume is verified only when Naomi's flag, every signal's provenance and every signal's data class
+    all say so; anything less is never a volume-based basis."""
+    return v["verified"] is True and bool(v["signals"]) and all(
+        sg["provenance"]["verified_against_priya_record"] is True and sg["data_class"] == "measured"
+        for sg in v["signals"])
+
+
+def volume_band_mismatch(v: dict) -> bool:
+    """Round 10: Zara recomputes the Garwood band (and the per-day band) from the count itself; the topic band is the
+    signal's. A band that differs is a self-contradiction (FLAGGED)."""
+    if v["status"] == "UNKNOWN":
+        return False
+    for sg in v["signals"]:
+        want = naomi.garwood(sg["observed_impressions"])
+        days = sg["window_days"]
+        pd = None if not isinstance(days, int) or isinstance(days, bool) or days <= 0 else \
+            {"low": math.floor(want["low"] / days * 1000) / 1000, "high": math.ceil(want["high"] / days * 1000) / 1000}
+        if sg["band"] != want or sg["band_per_day"] != pd:
+            return True
+    return v["band"] != v["signals"][0]["band"]
+
+
+def volume_provenance_mismatch(v: dict) -> bool:
+    """Naomi's ``verified`` disagrees with a signal's provenance or data class, or a signal's reliability is not the
+    one its verification allows."""
+    if v["status"] == "UNKNOWN":
+        return False
+    for sg in v["signals"]:
+        ver = sg["provenance"]["verified_against_priya_record"]
+        if ver != v["verified"] or (sg["data_class"] == "measured") != ver \
+                or sg["reliability"] != (naomi._reliability(sg["observed_impressions"]) if ver else "THIN"):
+            return True
+    return False
 
 
 def _counts(box) -> Optional[int]:
@@ -367,7 +428,11 @@ def conflicts(chains: list, vol: dict) -> list:
               c["complete"] for c in chains)
     if pro and con:
         out.append("ENGINES_DISAGREE")
-    if vol["status"] != "UNKNOWN" and vol["verified"] is not True:
+    if volume_band_mismatch(vol):
+        out.append("VOLUME_BAND_MISMATCH")                # round 10: Zara's own Garwood band differs
+    if volume_provenance_mismatch(vol):
+        out.append("VOLUME_PROVENANCE_MISMATCH")          # verified flag vs provenance / data class / reliability
+    if vol["status"] != "UNKNOWN" and not volume_verified(vol):
         out.append("HANDOFF_NOT_VERIFIED")                 # blocking: never CLEARED, never TEST, never ranked
     return out
 
@@ -473,11 +538,16 @@ class Crosscheck:
                 "volume_missing": None if has_v else self._missing("naomi")}
         if not (has_c and has_v):
             # review round 2: an unverified volume half is named on a PARTIAL item too
-            unv = has_v and vo["status"] != "UNKNOWN" and vo["verified"] is not True
-            item.update(verdict="PARTIAL", conflicts=["HANDOFF_NOT_VERIFIED"] if unv else [],
+            unv = has_v and vo["status"] != "UNKNOWN" and not volume_verified(vo)
+            vcf = ([] if not has_v else [x for x, bad in (("VOLUME_BAND_MISMATCH", volume_band_mismatch(vo)),
+                                                          ("VOLUME_PROVENANCE_MISMATCH",
+                                                           volume_provenance_mismatch(vo))) if bad])
+            item.update(verdict="PARTIAL", conflicts=vcf + (["HANDOFF_NOT_VERIFIED"] if unv else []),
                         downstream={"passes": True, "decision": "INSUFFICIENT_EVIDENCE",
                                     "priority_basis": "chain_only" if has_c else
-                                    "volume_only" if vo["status"] != "UNKNOWN" and vo["verified"] is True else "none"})
+                                    "volume_only" if vo["status"] != "UNKNOWN" and volume_verified(vo)
+                                    and not volume_band_mismatch(vo) and not volume_provenance_mismatch(vo)
+                                    else "none"})
             return item
         if not any(c["complete"] for c in ch) and vo["status"] == "UNKNOWN":
             item.update(verdict="NOTHING_OBSERVED", conflicts=[],
@@ -485,18 +555,16 @@ class Crosscheck:
             return item
         cf = conflicts(ch, vo)
         strong = any(c["strength"] == "STRONG" for c in ch)
-        vol_ok = vo["reliability"] in ("MODERATE", "STRONG") and vo["verified"] is True
-        vol_usable = vo["status"] != "UNKNOWN" and vo["verified"] is True
-        if cf and set(cf) & set(SELF_CONTRADICTIONS):    # Theo's summary disagrees with its own counts: the chain
-            item.update(verdict="FLAGGED", conflicts=cf,   # half is not a ranking basis at all
-                        downstream={"passes": True, "decision": "INSUFFICIENT_EVIDENCE",
-                                    "priority_basis": "volume_only" if vol_usable else "none"})
-        elif cf:
+        chain_bad, vol_bad = set(cf) & set(SELF_CONTRADICTIONS), set(cf) & set(VOLUME_SELF_CONTRADICTIONS)
+        chain_ok = any(c["complete"] for c in ch) and not chain_bad
+        vol_usable = vo["status"] != "UNKNOWN" and volume_verified(vo) and not vol_bad
+        vol_ok = vol_usable and vo["reliability"] in ("MODERATE", "STRONG")
+        if cf:
+            # a self-contradicting half (round 9 chain, round 10 volume) is never a ranking basis
             item.update(verdict="FLAGGED", conflicts=cf,
                         downstream={"passes": True, "decision": "INSUFFICIENT_EVIDENCE",
-                                    "priority_basis": "chain_only" if any(c["complete"] for c in ch) and not vol_ok
-                                    else "chain_and_volume" if vol_ok and any(c["complete"] for c in ch)
-                                    else "volume_only" if vol_usable else "none"})
+                                    "priority_basis": "chain_and_volume" if chain_ok and vol_ok
+                                    else "chain_only" if chain_ok else "volume_only" if vol_usable else "none"})
         else:
             item.update(verdict="CLEARED", conflicts=[],
                         downstream={"passes": True, "decision": "TEST" if strong and vol_ok else "WATCH",

@@ -68,7 +68,8 @@ import hashlib
 import re
 from typing import Callable, Optional
 
-from agents import brand_mention, domain_match, injection_guard, priya_handoff, split_url, text_redact
+from agents import (brand_mention, domain_match, injection_guard, priya_handoff, separator_screen, split_url,
+                    text_redact)
 from agents.callum import excerpt
 from agents.probes import MIN_USABLE, REDIRECTOR_HOSTS, _switch_code, extract_citations, wilson
 from agents.prompt_guard import personal_data
@@ -99,6 +100,10 @@ FOLLOWUPS = {"compare": "What are the main options to compare for this, and how 
 PRIYA_FOLLOWUP = "What about this: {query}"
 CONTEXT_TEMPLATE = "Earlier in this conversation I asked:\n{earlier}\nMy next question: {question}"
 TURN_KINDS = ("opening", "compare", "priya_followup", "decide")
+TURN_SOURCES = {"opening": ("prompt_set", "priya"), "compare": ("template",), "priya_followup": ("priya",),
+                "decide": ("template",)}
+FR_BASIS = ("lexical: a cue sentence and a confirmed mention, negation-aware; 'named first in the final answer' is "
+            "reported apart, never a win")
 CHAIN_STATUS = ("COMPLETE", "INCOMPLETE", "LOOP_STOPPED", "NOT_ASKED")
 OUTCOMES = ("RECOMMENDED", "NOT_RECOMMENDED", "MIXED")
 PATTERNS = ("INVISIBLE_THEN_RECOMMENDED", "INVISIBLE_AT_OPENING_RECOMMENDED_UNCHECKED",
@@ -540,7 +545,8 @@ def _one_chain(t, ti, si, n, turns, e, s, guard, cap, ctx, clock, iso, rows) -> 
             if err_code in STOP_CODES:
                 s["stop"], s["stop_detail"] = err_code, err_detail
             break
-        meta = {"model": a.model, "model_version": a.model_version, "provider_asked_at": a.asked_at,
+        meta = {"model": _clean_label(a.model), "model_version": _clean_label(a.model_version),
+                "provider_asked_at": a.asked_at,
                 "answer_sha256": a.answer_sha256 or _sha(a.text)}
         if a.status == "REFUSAL":
             rows.append({**row, **meta, "status": "REFUSAL"})
@@ -554,7 +560,8 @@ def _one_chain(t, ti, si, n, turns, e, s, guard, cap, ctx, clock, iso, rows) -> 
         if t["source"] == "prompt_set":
             # round 9: credentials redacted on the RAW answer text, every rule, before the excerpt is cut and kept
             clean, fired = text_redact.redact(a.text)
-            ex = {**excerpt(clean, ctx["terms"]), "redacted": fired}
+            # round 10: and a second personal-data reading (any Unicode P*/S*/Z* separator) on the kept excerpt
+            ex = {**separator_screen.screen(excerpt(clean, ctx["terms"])), "redacted": fired}
         else:
             ex = {"basis": None, "excerpt": None, "withheld": "PRIYA_QUERY_CONTEXT", "redacted": []}
         label = injection_guard.scan_all(injection_guard.resent_texts(a))
@@ -625,7 +632,8 @@ def _stacked_check(port, turns, guard, meter, ctx, final) -> tuple:
     alt = recommendation(a, ctx)
     label = injection_guard.scan_all(injection_guard.resent_texts(a))
     divergent = (alt["winner"], alt["name"], alt["counts"]) != (final["winner"], final["name"], final["counts"])
-    ev = {"status": "ANSWER", "model": a.model, "model_version": a.model_version, "provider_asked_at": a.asked_at,
+    ev = {"status": "ANSWER", "model": _clean_label(a.model), "model_version": _clean_label(a.model_version),
+          "provider_asked_at": a.asked_at,
           "answer_sha256": a.answer_sha256 or _sha(a.text),
           "recheck": {"winner": alt["winner"], "name": alt["name"], "counts": alt["counts"], "divergent": divergent},
           **({"injection_suspected": True} if label == "INJECTION_SUSPECTED" else {}),
@@ -634,6 +642,11 @@ def _stacked_check(port, turns, guard, meter, ctx, final) -> tuple:
 
 
 # ---------------------------------------------------------------------------------------------- summaries
+
+def _clean_label(x):
+    """A provider's model / model-version string as stored: credentials redacted (round 10), bounded."""
+    return text_redact.redact(x)[0][:200] if isinstance(x, str) else x
+
 
 def _rate(k: int, nn: int) -> dict:
     return {"value": None if nn == 0 else round(k / nn, 4), "k": k, "n": nn, "ci95": wilson(k, nn),
@@ -748,8 +761,7 @@ def _summary(t: dict, e: str, turns: list, flags: list, samples: list, mode: str
                                      "named_first_only": {"client": named["client"],
                                                           "competitor": dict(sorted(named["competitor"].items()))},
                                      "none": none, "unknown": len(samples) - nc,
-                                     "basis": "lexical: a cue sentence and a confirmed mention, negation-aware; "
-                                              "'named first in the final answer' is reported apart, never a win",
+                                     "basis": FR_BASIS,
                                      "max_confidence": "MEDIUM"},
             "client_recommended": _rate(rec["client"], nc), "client_outcome": outcome,
             "unstable": len(set(winners)) > 1, "pattern": pattern, "strength": strength}

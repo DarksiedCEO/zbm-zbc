@@ -185,11 +185,13 @@ def verify(doc: dict, tenant_id: str, claimed_run_id: Optional[str], claimed_sha
     if not isinstance(claimed_run_id, str) or not _RUN.fullmatch(claimed_run_id) \
             or not isinstance(claimed_sha, str) or not _SHA.fullmatch(claimed_sha):
         return {"state": "FAILED", "reason": "CLAIM_MALFORMED"}
+    if not isinstance(doc, dict):
+        return {"state": "FAILED", "reason": "DOCUMENT_MALFORMED"}
     if doc.get("run_id") != claimed_run_id:
         return {"state": "FAILED", "reason": "RUN_ID_MISMATCH"}
     if canonical_sha(doc) != claimed_sha:
         return {"state": "FAILED", "reason": "DOCUMENT_HASH_MISMATCH"}
-    if record is None or record.get("tenant_id") != tenant_id:
+    if not isinstance(record, dict) or record.get("tenant_id") != tenant_id:     # round 10: never a crash
         return {"state": "NOT_VERIFIED", "reason": "PRIYA_RECORD_NOT_FOUND"}
     if record.get("status") != "completed":
         return {"state": "NOT_VERIFIED", "reason": "PRIYA_RUN_NOT_COMPLETED"}

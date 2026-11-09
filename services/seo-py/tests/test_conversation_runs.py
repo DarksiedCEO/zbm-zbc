@@ -573,3 +573,18 @@ def test_a_real_priya_hand_off_is_accepted_verified_and_used_end_to_end(tmp_path
     topics = v["result"]["topics"]
     assert [t["source"] for t in topics].count("priya") >= 1 and all(t["text"] is None for t in topics
                                                                       if t["source"] == "priya")
+
+
+def test_the_service_hands_zara_the_run_engines_so_a_foreign_engine_is_held(tmp_path, monkeypatch):
+    """Review round 10: svc_conversations passes ps["engines"] to Zara; a chain claiming an engine the run never
+    asked is HELD (without the run engines it would pass)."""
+    from agents import theo as theo_mod
+    orig = theo_mod.run_chains
+
+    def relabel(*a, emit=None, **k):
+        return orig(*a, emit=lambda key, chains: emit(key, [{**c, "engine": "gemini"} for c in chains]), **k)
+    monkeypatch.setattr(theo_mod, "run_chains", relabel)
+    h = svc(tmp_path)
+    v = h.ok(run(h, pset(h), priya_handoff=doc()), 201)
+    z = h.ok(h.get(f"/tenants/zbm/conversation-runs/{v['conversation_run_id']}/crosscheck"))
+    assert [(i["verdict"], i["hold_reason"]) for i in z["items"]] == [("HELD", "THEO_PAYLOAD_INVALID")] * 2

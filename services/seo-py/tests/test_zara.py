@@ -561,3 +561,100 @@ def test_naomi_band_and_every_signal_are_strict_and_finite():
               sig(band_per_day={"low": 0, "high": 1, "x": 2}), sig(reliability="HUGE"),
               sig(reliability_if_verified="HUGE")):
         assert _held(None, volume_edit=e) == ("HELD", "NAOMI_PAYLOAD_INVALID")
+
+
+# ---------------------------------------------------------------------------------------------- review round 10
+
+def _vol(**kw):
+    """A volume edit: dotted paths into the topic volume (``signals.0.band``) set to values."""
+    def e(v):
+        for path, value in kw.items():
+            d, parts = v, path.split("__")
+            for p in parts[:-1]:
+                d = d[int(p)] if p.isdigit() else d[p]
+            d[parts[-1]] = value
+    return e
+
+
+def test_a_forged_naomi_band_or_provenance_never_clears():
+    ok = _item_after(None)
+    assert ok["verdict"] == "CLEARED" and ok["downstream"]["decision"] == "TEST"
+    # an impossible band (negative, not holding the count) is HELD
+    assert _held(None, volume_edit=_vol(signals__0__band={"low": -5000, "high": -1, "interval": "garwood_poisson_95",
+                                                          "method": "x"})) == ("HELD", "NAOMI_SELF_CONTRADICTION")
+    # a band that holds the count but is not the Garwood band of it is FLAGGED and never a volume basis
+    for e in (_vol(band={"low": 0, "high": 1e12, "interval": "garwood_poisson_95", "method": "x"}),
+              _vol(signals__0__band={"low": 0, "high": 1e12, "interval": "garwood_poisson_95", "method": "x"}),
+              _vol(signals__0__band_per_day={"low": 0, "high": 999.0})):
+        i = _item_after(None, volume_edit=e)
+        assert i["verdict"] == "FLAGGED" and "VOLUME_BAND_MISMATCH" in i["conflicts"], i["conflicts"]
+        assert i["downstream"]["priority_basis"] == "chain_only" and i["downstream"]["decision"] != "TEST"
+    # verified at the top, but a signal's provenance or data class says otherwise
+    for e in (_vol(signals__0__provenance__verified_against_priya_record=False),
+              _vol(signals__0__data_class="claimed")):
+        i = _item_after(None, volume_edit=e)
+        assert i["verdict"] == "FLAGGED" and {"VOLUME_PROVENANCE_MISMATCH", "HANDOFF_NOT_VERIFIED"} <= set(
+            i["conflicts"]), i["conflicts"]
+        assert i["downstream"]["priority_basis"] == "chain_only"
+    i = _item_after(None, volume_edit=_vol(signals__0__reliability="THIN"))           # not what verification allows
+    assert i["verdict"] == "FLAGGED" and "VOLUME_PROVENANCE_MISMATCH" in i["conflicts"]
+
+
+def test_naomi_unit_estimator_source_and_provenance_are_the_contract():
+    for e in (_vol(unit="searches"), _vol(estimator="other/1"), _vol(proxy_for="x"), _vol(signals__0__unit="x"),
+              _vol(signals__0__source="priya_handoff:scraped"), _vol(signals__0__data_class="guessed"),
+              _vol(signals__0__provenance__producer="someone"), _vol(signals__0__provenance__contract="x/1"),
+              _vol(signals__0__provenance__verified_against_priya_record=1),
+              _vol(signals__0__provenance__extra=1), _vol(signals__0__priya_key=None)):
+        assert _held(None, volume_edit=e) == ("HELD", "NAOMI_PAYLOAD_INVALID")
+    for e in (_vol(signals__0__reliability_if_verified="THIN"),
+              _vol(signals__0__band_per_day={"low": 5.0, "high": 1.0}),
+              _vol(signals__0__band={"low": 400.0, "high": 500.0, "interval": "garwood_poisson_95", "method": "x"})):
+        assert _held(None, volume_edit=e) == ("HELD", "NAOMI_SELF_CONTRADICTION")
+
+
+def test_each_theo_shape_guard_holds_on_its_own():
+    """Review round 10 mutation survivors: each of these, alone, would otherwise CLEAR."""
+    def turn(i, **kw):
+        def e(cs):
+            cs[0]["by_turn"][i].update(kw)
+        return e
+
+    def drop_last_turn(cs):
+        cs[0]["by_turn"].pop()
+
+    def short_plan(cs):                                 # length and plan agree with each other, not with turn 1..n
+        cs[0]["by_turn"] = cs[0]["by_turn"][1:]
+        cs[0]["turns_planned"] = len(cs[0]["by_turn"])
+    edits = {
+        "directional_int": _set(("client_recommended", "directional"), 0),
+        "turn_directional_int": _set(("by_turn", 0, "client_mentioned", "directional"), 0),
+        "native_status_on_stacked": _set(("native_status",), "documented"),
+        "native_status_type": _set(("native_status",), 5),
+        "named_first_only_box": _set(("final_recommendation", "named_first_only"), {"client": 0}),
+        "named_first_only_bool": _set(("final_recommendation", "named_first_only"), {"client": False,
+                                                                                    "competitor": {}}),
+        "basis_type": _set(("final_recommendation", "basis"), 5),
+        "basis_other": _set(("final_recommendation", "basis"), "llm judge"),
+        "max_confidence": _set(("final_recommendation", "max_confidence"), "HIGH"),
+        "by_turn_length": drop_last_turn,
+        "turn_number": turn(1, turn=7),
+        "turn_kind": turn(1, kind="verdict"),
+        "turn_source": turn(1, source="engine"),
+        "turn_source_for_kind": turn(-1, source="priya"),
+        "second_opening": turn(1, kind="opening", source="prompt_set"),
+        "first_not_opening": turn(0, kind="compare", source="template"),
+        "plan_shifted": short_plan,
+    }
+    for name, e in edits.items():
+        assert _held(e) == ("HELD", "THEO_PAYLOAD_INVALID"), name
+
+
+def test_a_native_chain_must_carry_a_native_status():
+    t, plans, res, ch = _native_checked_chains()
+    k = t[0]["topic_key"]
+    vout, vol = volumes_for(t)
+    assert isinstance(ch[k][0]["native_status"], str)
+    lie = copy.deepcopy(ch)
+    lie[k][0]["native_status"] = None
+    assert box_with(t, plans, res, lie, vout, vol)["items"][0]["hold_reason"] == "THEO_PAYLOAD_INVALID"

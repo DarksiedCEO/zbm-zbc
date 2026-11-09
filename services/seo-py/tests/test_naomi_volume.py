@@ -214,3 +214,14 @@ def test_validation_rejects_extra_top_level_and_query_keys():
     it = item("a", "q one", counts=dict(GSC))
     it["query"]["extra"] = "x"
     assert priya_handoff.validate(handoff(it), "zbm") == ["items[0].query"]
+
+
+def test_verification_never_crashes_on_a_record_or_document_of_the_wrong_type():
+    doc = handoff(item("a", "q one", counts=dict(GSC)))
+    h = priya_handoff.canonical_sha(doc)
+    for rec in ("x", [], 5, True):
+        assert priya_handoff.verify(doc, "zbm", doc["run_id"], h, rec) == {"state": "NOT_VERIFIED",
+                                                                          "reason": "PRIYA_RECORD_NOT_FOUND"}
+    for bad in ("x", [], None):
+        assert priya_handoff.verify(bad, "zbm", doc["run_id"], h, None) == {"state": "FAILED",
+                                                                           "reason": "DOCUMENT_MALFORMED"}
