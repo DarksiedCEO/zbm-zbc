@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import json
+import urllib.parse
 import os
 
 import httpx
@@ -406,7 +407,7 @@ def test_an_excerpt_or_a_path_that_looks_like_personal_data_is_withheld():
     assert "555 010 0199" not in dumped and "jane@example.com" not in dumped
     row = r["rows"][0]
     assert row["evidence"]["excerpt"] is None and row["evidence"]["withheld"].startswith("personal_data:")
-    assert row["chain"]["cited"]["withheld"] == "PERSONAL_DATA" and row["url"] == "https://competitor.test/{withheld}"
+    assert row["chain"]["cited"]["withheld"] == "PERSONAL_DATA" and row["url"] == "https://competitor.test/users/{withheld}/profile"
 
 
 def test_rows_are_bounded():
@@ -1307,3 +1308,89 @@ def test_ordinary_prose_is_not_redacted(text):
         assert n <= 1                                       # a bare 40-hex SHA in prose may be redacted: no leak cost
     else:
         assert n == 0 and red == text, red
+
+
+# ---------------------------------------------------------------------------------------------- final review
+
+def _fake_keys():
+    """Documented FAKE example values only, assembled at run time (no key literal in the source)."""
+    ex = "EXAMPLE"
+    return {"aws_id": "AKIA" + "IOSFODNN7" + ex, "aws_secret": "wJalrXUtnFEMI" + "/K7MDENG/" + "bPxRfiCY" + ex + "KEY",
+            "openai": "sk-proj-" + ex + "Ab3dE5gH7jK9mN1p", "anthropic": "sk-ant-api03-" + ex + "Ab3dE5gH7jK9mN1p",
+            "github": "ghp_" + ex + "Ab3dE5gH7jK9mN1pQ3sT5", "perplexity": "pplx-" + ex + "Ab3dE5gH7jK9mN",
+            "stripe": "sk_test_" + ex + "Ab3dE5gH7j", "jwt": _synthetic_jwt(), "test_key": te.KEYS["openai"]}
+
+
+PROPERTY_HOSTS = sorted(callum.secret_guard.ID_HOSTS | callum.secret_guard.CODE_HOSTS
+                        | callum.secret_guard.ID_PATH_HOSTS) + ["x.notion.site", "site.test", "evil.test",
+                                                                "sіte.test", "competitor.test", "indeed.com"]
+
+
+def _placements(host, v):
+    q = urllib.parse.quote(v, safe="")
+    return [f"https://{host}/{v}", f"https://{host}/d/{v}/edit", f"https://{host}/org/repo/commit/{v}",
+            f"https://{host}/p?key={q}", f"https://{host}/p?gclid={q}", f"https://{host}/p?jk={q}",
+            f"https://{host}/p?v={q}", f"https://{host}/p#{v}", f"https://{host}/p?auth=Bearer%20{q}",
+            f"https://{host}/p?x=1#token={q}"]
+
+
+def test_property_every_fake_key_on_every_host_in_every_url_part_is_redacted_and_never_fetched():
+    # final review: the strong detectors run with NO host or shape exemption
+    keys = _fake_keys()
+    checked = 0
+    for name, v in keys.items():
+        for host in PROPERTY_HOSTS:
+            for u in _placements(host, v):
+                assert callum.url_has_secret(u), (name, u)
+                stored = json.dumps(callum.stored_url(u))
+                assert v not in stored and urllib.parse.quote(v, safe="") not in stored, (name, u, stored)
+                checked += 1
+    assert checked == len(keys) * len(PROPERTY_HOSTS) * 10
+    # and through a real classification: never fetched, never stored, with resolution on
+    res = resolver({}, enabled=True)
+    urls = [_placements(h, v)[0] for h in ("docs.google.com", "t.co", "github.com") for v in keys.values()]
+    r = classify(collected((0, answer(cites=urls))), res)
+    dumped = json.dumps(r)
+    assert res.fetcher.fetched == [] and not any(v in dumped for v in keys.values())
+    assert all("SECRET_REDACTED" in x["flags"] for x in r["rows"] if x.get("url"))
+
+
+@pytest.mark.parametrize("url", [
+    "https://fonts.gstatic.com/s/inter/v13/UcCO3FwrK3iLTeHuS_fvQtMwCp50KnMw2boKoduKmMEVuLyfAZ9hiA.woff2",
+    "https://open.spotify.com/episode/4rOoJ6Egrf8K2IrywzwOMk", "https://www.notion.so/acme/Plan-2026-8f3a9c1b7e4d5a6f8e9d0c1b2a3f4e5d",
+    "https://acme.notion.site/Roadmap-3f2a9c1b7e4d5a6f8e9d0c1b2a3f4e5d", "https://www.figma.com/file/Ab3dE5gH7jK9mN1pQ3sT5v/Design",
+    "https://www.figma.com/design/Ab3dE5gH7jK9mN1pQ3sT5v/Site", "https://www.indeed.com/viewjob?jk=3f2a9c1b7e4d5a6f",
+])
+def test_over_redaction_leftovers_are_kept(url):
+    assert not callum.url_has_secret(url), url
+    assert callum.stored_url(url)["withheld"] is None
+
+
+@pytest.mark.parametrize("url", [
+    "https://doi.org/10.1145/3290605.3300857", "https://arxiv.org/abs/2401.12345", "https://www.ebay.com/itm/195812345678",
+    "https://www.walmart.com/ip/1234567890", "https://www.etsy.com/listing/1523456789/rug", "https://vimeo.com/876543210",
+    "https://www.tiktok.com/@acme/video/7301234567890123456", "https://www.pinterest.com/pin/1234567890123456789/",
+    "https://stackoverflow.com/questions/12345678/x", "https://news.site.test/2026/11/08/revenue-story",
+    "https://x.com/acme/status/1852960912345678901",
+])
+def test_dates_and_ids_in_paths_are_not_personal_data(url):
+    s = callum.stored_url(url)
+    assert s["withheld"] is None and "{withheld}" not in s["url"], (url, s)
+
+
+def test_personal_data_withholds_only_the_offending_segment():
+    for seg, kind in (("call-555-010-0199", "phone"), ("123-45-6789", "ssn"), ("4111-1111-1111-1111", "card"),
+                      ("4111111111111111", "card")):
+        s = callum.stored_url(f"https://site.test/contact/{seg}/info")
+        assert s["url"] == "https://site.test/contact/{withheld}/info" and s["withheld"] == "PERSONAL_DATA", (kind, s)
+    assert callum.stored_url("https://site.test/u/jane@example.com/p")["url"] == "https://site.test/u/{withheld}/p"
+
+
+def test_cited_instead_never_merges_different_articles_on_one_host():
+    a = "https://news.test/contact/call-555-010-0199/one"
+    b = "https://news.test/contact/call-555-010-0188/two"
+    r = classify(collected((0, answer(cites=[a])), (0, answer(cites=[b]))))
+    items = r["mnc_priority"]["items"]
+    assert len(items) == 1 and len(items[0]["cited_instead"]) == 2
+    assert {x["url"] for x in items[0]["cited_instead"]} == {"https://news.test/contact/{withheld}/one",
+                                                            "https://news.test/contact/{withheld}/two"}

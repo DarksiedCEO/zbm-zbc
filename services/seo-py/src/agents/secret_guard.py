@@ -86,15 +86,45 @@ def _aws_secret(tok: str) -> bool:
         and any(c.isdigit() or c in "/+" for c in tok) and _entropy(tok) >= 4.0 and not _LOWER_RUN.search(tok)
 
 
-def _spans(text: str) -> list:
+def _strong_spans(text: str) -> list:
+    """The STRONG detectors: documented prefixes, labelled credentials, JWTs, the AWS secret format. They run on every
+    text and every URL part with NO exemption of any kind (final review: an exemption must never switch them off)."""
     spans = [m.span() for m in _PREFIX.finditer(text)]
     spans += [m.span(1) for m in _NAMED.finditer(text) if _token_shaped(m.group(1))]
     spans += [m.span() for m in _JWT.finditer(text)]
     spans += [m.span() for m in _AWS_SECRET.finditer(text) if _aws_secret(m.group(0))]
-    spans += [m.span() for m in _HEX.finditer(text)
-              if any(c.isdigit() for c in m.group(0)) and any(c.isalpha() for c in m.group(0))]
+    return spans
+
+
+def _weak_spans(text: str) -> list:
+    """The WEAK (generic) heuristics: mixed hex runs and high-entropy tokens. Only these may be suppressed by a host
+    or URL-shape exemption."""
+    spans = [m.span() for m in _HEX.finditer(text)
+             if any(c.isdigit() for c in m.group(0)) and any(c.isalpha() for c in m.group(0))]
     spans += [m.span() for m in _TOKEN.finditer(text) if _high_entropy(m.group(0))]
-    return sorted(spans)
+    return spans
+
+
+def _spans(text: str) -> list:
+    return sorted(_strong_spans(text) + _weak_spans(text))
+
+
+def _both(fn, text: str) -> bool:
+    if not text:
+        return False
+    if fn(text):
+        return True
+    decoded = unquote(text) if "%" in text else text
+    return decoded != text and bool(fn(decoded))
+
+
+def strong_secret(text: str) -> bool:
+    """A strong detector fires, as written or percent-decoded. Never exempted."""
+    return _both(_strong_spans, text)
+
+
+def weak_secret(text: str) -> bool:
+    return _both(_weak_spans, text)
 
 
 def _merge(spans: list) -> list:
@@ -141,6 +171,7 @@ def redact(text: str) -> tuple:
 
 # ------------------------------------------------------------------------------------------------ URLs
 
+# Exemptions below suppress ONLY the weak heuristics (``weak_secret``); the strong detectors always run.
 CODE_HOSTS = frozenset({"github.com", "gitlab.com", "bitbucket.org", "codeberg.org"})
 _CODE_REF = frozenset({"commit", "commits", "tree", "blob", "raw", "compare", "blame", "-"})
 ID_HOSTS = frozenset({"docs.google.com", "drive.google.com", "sheets.google.com", "slides.google.com",
@@ -152,6 +183,12 @@ TRACKING_PARAMS = frozenset({"gclid", "gbraid", "wbraid", "dclid", "fbclid", "ms
 _ASSET = re.compile(r"[A-Za-z0-9_-]+[.-][0-9a-fA-F]{8,64}(?:\.[A-Za-z0-9_-]+)*\.(?:css|js|mjs|map|png|jpe?g|gif|svg|"
                     r"webp|avif|woff2?|ttf|otf|eot|ico|json|html?|wasm|txt)")
 _SHA = re.compile(r"[0-9a-f]{7,64}(?:\.\.\.?[0-9a-f]{7,64})?")
+# hosts whose ids are long and random by design (weak heuristics only): font files, episode / page / file ids
+ID_PATH_HOSTS = frozenset({"fonts.gstatic.com", "open.spotify.com", "notion.so", "figma.com"})
+ID_PATH_SUFFIXES = (".notion.site",)
+# query parameters whose value is a public id on that host (weak heuristics only)
+ID_PARAMS = {"indeed.com": frozenset({"jk", "vjk"}), "youtube.com": frozenset({"v", "list"}),
+             "google.com": frozenset({"id", "q"})}
 
 
 def _tracking(key: str) -> bool:
@@ -159,9 +196,20 @@ def _tracking(key: str) -> bool:
     return k in TRACKING_PARAMS or k.startswith("utm_")
 
 
+_LONG_HEX = re.compile(r"(?=[0-9a-fA-F]*[0-9])(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{48,}")
+
+
+def _id_host(host: str) -> bool:
+    return host in ID_HOSTS or host in ID_PATH_HOSTS or host.endswith(ID_PATH_SUFFIXES)
+
+
 def url_secret_segments(url: str) -> tuple:
-    """``(indexes of secret-shaped path segments, query or fragment or user part secret-shaped)`` for ``url``, with
-    the allowed URL shapes above applied."""
+    """``(indexes of secret-shaped path segments, query or fragment or user part secret-shaped)`` for ``url``.
+
+    STRUCTURAL RULE (final review): the strong detectors (documented prefixes, labelled credentials, JWTs, the AWS
+    secret format) run on EVERY path segment, query key and value, the fragment and the user part, whatever the host —
+    no host or shape exemption reaches them. The allowed hosts and URL shapes above only suppress the weak generic
+    heuristics (mixed hex runs, high entropy)."""
     try:
         p = urlsplit(url)
         host = (p.hostname or "").lower().rstrip(".")
@@ -172,33 +220,53 @@ def url_secret_segments(url: str) -> tuple:
         host = host[4:]
     segs = (p.path or "").split("/")
     bad = set()
-    if host not in ID_HOSTS:
-        for i, seg in enumerate(segs):
-            if not seg or not has_secret(seg):
-                continue
-            if host in CODE_HOSTS and i >= 2 and segs[i - 1] in _CODE_REF and _SHA.fullmatch(seg):
-                continue                                  # a commit / tree SHA on a code host
-            if _ASSET.fullmatch(seg):
-                continue                                  # a hashed asset name
-            bad.add(i)
-        # an AWS-format secret holds "/", so it spans segments: every run of consecutive segments 40 characters long
-        # (bounded: at most 64 segments are looked at)
-        dec = [unquote(x) for x in segs[:64]]
-        for i in range(len(dec)):
-            total = -1
-            for j in range(i, len(dec)):
-                total += len(dec[j]) + 1
-                if total > 40:
-                    break
-                if total == 40:
-                    run = "/".join(dec[i:j + 1])
-                    if _AWS_SECRET.fullmatch(run) and _aws_secret(run):
-                        bad |= set(range(i, j + 1))
-    rest = [v for k, v in parse_qsl(p.query or "", keep_blank_values=True) if not _tracking(k)]
-    rest += [k for k, _ in parse_qsl(p.query or "", keep_blank_values=True) if not _tracking(k)]
-    other = any(has_secret(x) for x in rest + [p.fragment or "", user or "", password or ""] if x)
-    if not other and p.query and not parse_qsl(p.query, keep_blank_values=True):
-        other = has_secret(p.query)
+    for i, seg in enumerate(segs):
+        if not seg:
+            continue
+        if strong_secret(seg):
+            bad.add(i)                                    # never exempted
+            continue
+        if not weak_secret(seg):
+            continue
+        if host in CODE_HOSTS and i >= 2 and segs[i - 1] in _CODE_REF and _SHA.fullmatch(seg):
+            continue                                      # a commit / tree SHA on a code host
+        if _ASSET.fullmatch(seg):
+            continue                                      # a hashed asset name
+        if _id_host(host) and not _LONG_HEX.search(unquote(seg)):
+            # document / short-link / episode / page / font ids; a 48+ mixed hex run (a derived key, a hash-sized
+            # token) is never such an id, so it is exempted only by the code-SHA and asset shapes above
+            continue
+        bad.add(i)
+    # an AWS-format secret holds "/", so it spans segments: every run of consecutive segments 40 characters long
+    # (bounded: at most 64 segments are looked at). A strong rule: no exemption.
+    dec = [unquote(x) for x in segs[:64]]
+    for i in range(len(dec)):
+        total = -1
+        for j in range(i, len(dec)):
+            total += len(dec[j]) + 1
+            if total > 40:
+                break
+            if total == 40:
+                run = "/".join(dec[i:j + 1])
+                # a run ACROSS segments must not include a plain path word (a segment under 3 characters or all
+                # lower-case letters, such as "file" / "d"): random 40-character keys rarely split that way
+                words = j > i and any(len(x) < 3 or (x.isalpha() and x.islower()) for x in dec[i:j + 1])
+                if not words and _AWS_SECRET.fullmatch(run) and _aws_secret(run):
+                    bad |= set(range(i, j + 1))
+    pairs = parse_qsl(p.query or "", keep_blank_values=True)
+    id_params = ID_PARAMS.get(host, frozenset())
+    other = False
+    for k, v in pairs:
+        if strong_secret(k) or strong_secret(v) or strong_secret(f"{k}={v}"):
+            other = True                                  # tracking or id parameters included: never exempted
+        elif _LONG_HEX.search(unquote(v)) or (not _tracking(k) and k.lower() not in id_params
+                                               and not _id_host(host) and (weak_secret(v) or weak_secret(k))):
+            other = True
+    if p.query and not pairs:
+        other = other or strong_secret(p.query) or (not _id_host(host) and weak_secret(p.query))
+    for x in (p.fragment or "", user or "", password or ""):
+        if x and (strong_secret(x) or weak_secret(x)):
+            other = True
     return bad, other
 
 

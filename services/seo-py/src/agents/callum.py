@@ -41,10 +41,11 @@ No agent touches service state, the ledger or the log: the service records what 
 
 from __future__ import annotations
 
+import hashlib
 import re
 from datetime import timedelta
 from typing import Callable, Optional
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
 
 from agents import brand_mention, domain_match, secret_guard, split_url
 from agents.prompt_guard import personal_data
@@ -292,6 +293,39 @@ def url_has_secret(url: Optional[str]) -> bool:
     return secret_guard.url_has_secret(url)
 
 
+_SSN = re.compile(r"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)")
+_PHONE = re.compile(r"(?<!\d)(?:\+?\d{1,3}[\s.\-]?)?\(?\d{3}\)?[\s.\-]\d{3}[\s.\-]\d{4}(?!\d)|\+\d{10,15}(?!\d)")
+_CARD = re.compile(r"(?<!\d)(?:\d[ \-]?){12,18}\d(?!\d)")
+
+
+def _luhn(digits: str) -> bool:
+    total = 0
+    for i, c in enumerate(reversed(digits)):
+        d = int(c)
+        if i % 2:
+            d = d * 2 - 9 if d > 4 else d * 2
+        total += d
+    return total % 10 == 0
+
+
+def _segment_personal(seg: str) -> Optional[str]:
+    """One path segment's personal data: an e-mail or IP (the prompt guard), or a number only when it is shaped like
+    a phone number, an SSN or a payment card (13-19 digits passing Luhn); a date or an id is not."""
+    x = unquote(seg)
+    kind = personal_data(x)
+    if kind in ("email", "ip"):
+        return kind
+    if kind is None:
+        return None
+    if _SSN.search(x) or _PHONE.search(x):
+        return "number"
+    for m in _CARD.finditer(x):
+        d = re.sub(r"\D", "", m.group(0))
+        if 13 <= len(d) <= 19 and _luhn(d) and (len(d) in (15, 16) or m.group(0) != d):
+            return "number"
+    return None
+
+
 def stored_url(url: Optional[str]) -> Optional[dict]:
     """What a row keeps of a URL: scheme, host and path (query and fragment dropped), bounded; a path that looks like
     personal data is withheld."""
@@ -308,7 +342,15 @@ def stored_url(url: Optional[str]) -> Optional[dict]:
         # WR-F013: a secret-shaped path segment is replaced, never kept; host and the other segments stay (the
         # allowed shapes — commit SHAs on code hosts, hashed asset names, document ids, shorteners — are kept)
         path, withheld = "/".join("{secret}" if i in bad else x for i, x in enumerate(segs)), "SECRET_REDACTED"
-    if personal_data(path) is not None:
+    # final review: only the OFFENDING segment is withheld, and a date or a numeric / alphanumeric id (DOI, arXiv,
+    # item ids, status ids, question ids, news date paths) is not personal data unless the phone / SSN / card shapes
+    # fire. An e-mail or an IP address anywhere in the path still withholds the whole path.
+    segs = path.split("/")
+    pii = [i for i, x in enumerate(segs) if x and _segment_personal(x)]
+    if pii:
+        path = "/".join("{withheld}" if i in pii else x for i, x in enumerate(segs))
+        withheld = withheld or "PERSONAL_DATA"
+    if personal_data(unquote(path)) in ("email", "ip"):
         path, withheld = "/{withheld}", "PERSONAL_DATA"
     host = p.hostname.lower()[:253]
     netloc = host if p.port in (None, 80, 443) else f"{host}:{p.port}"
@@ -530,7 +572,12 @@ def classify(engines: dict, prompt_set: dict, domain: str, resolver: Resolver, r
                     k["lookalike_onto_client"] += 1
                 if cl["class"] in ("OPPORTUNITY_URL", "CANONICAL_TO_CLIENT"):
                     dec = (cl["chain"]["final"] or cl["chain"]["cited"]) or {}
-                    ci = k["cited_instead"].setdefault(dec.get("url") or "?", {
+                    # keyed on a hash of the ORIGINAL URL that decided it (query/fragment dropped as stored), so two
+                    # different articles whose stored forms are both shortened ({withheld}) never merge
+                    orig = res.get("final_url") if res.get("state") == "RESOLVED" else c["url"]
+                    okey = hashlib.sha256(str(orig).split("#")[0].split("?")[0].encode("utf-8", "surrogatepass")
+                                          ).hexdigest()
+                    ci = k["cited_instead"].setdefault(okey, {
                         "url": dec.get("url"), "host": dec.get("host"), "answers": 0, "competitor": cl["competitor"],
                         "canonical_to_client": cl["class"] == "CANONICAL_TO_CLIENT"})
                     ci["answers"] += 1

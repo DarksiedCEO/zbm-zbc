@@ -249,6 +249,23 @@ B9. **War room fixes (PR #55 findings WR-F011..WR-F014; replays `seo-py-callum/R
       (AWS's `AKIAIOSFODNN7EXAMPLE` and its example secret key, built at run time) dropped from paths, queries,
       fragments and text. A long digit run in a path may still be withheld as possible personal data (the prompt
       guard's pre-existing rule): the stored path is shortened, the URL is still fetched.
+    - **Structural rule (final review).** The STRONG detectors — documented key prefixes, labelled credentials, JWTs,
+      the AWS secret format — run on EVERY URL path segment, query key and value (tracking and id parameters
+      included), fragment and user part, and on all text, with NO host or URL-shape exemption. Host and shape
+      exemptions (Google Docs / Drive / Sheets / Slides, link shorteners, fonts.gstatic.com, open.spotify.com,
+      notion.so / *.notion.site, figma.com, code-host SHAs, hashed asset names, id query parameters such as Indeed
+      `jk` or YouTube `v`) may only suppress the WEAK generic heuristics (mixed hex runs, high entropy), and a 48+
+      mixed hex run (a derived key) is exempted only by the code-SHA and asset shapes. The rule is stated in
+      `secret_guard.url_secret_segments` and pinned by a committed property test: every fake key × every allowed,
+      code and attacker host × ten path / query / fragment placements is redacted and never fetched (round-1 of this
+      review found 81 leaks through a host exemption that switched every detector off).
+    - **Personal data in paths (final review).** Only the offending segment is withheld (`{withheld}`); a date or a
+      numeric / alphanumeric id (DOI, arXiv, eBay / Walmart / Etsy item ids, TikTok / Vimeo / Pinterest ids,
+      StackOverflow question ids, news date paths, status ids) is not personal data unless it is shaped like a phone
+      number, an SSN or a payment card (13-19 digits passing Luhn; a bare digit run only at 15 or 16 digits); an
+      e-mail or IP address still withholds its segment. A phone number split across segments is not detected.
+      `cited_instead` is keyed on a hash of the original URL (query and fragment dropped) and shows the redacted URL,
+      so two different articles whose stored forms look alike never merge.
     - The war room's fake web now encodes chains without hex digits (the reviewer's path fix for PR #55), so its
       redirect cases are fetched and exercise the resolution logic.
 
