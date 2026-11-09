@@ -290,9 +290,16 @@ def _fold_piece_slow(p: str) -> str:
     return f
 
 
-def _pair_has_separator(v: str, w: str, nxt: str) -> bool:
-    """``s id:`` / ``p w =``: the split short label is followed by an explicit ``:`` or ``=``."""
-    return re.search(re.escape(w) + r"\W{1,3}" + re.escape(nxt) + r"\s{0,3}[:=]", v) is not None
+PAIR_WINDOW = 64                         # characters searched on each side of a split short label
+
+
+def _pair_has_separator(v: str, w: str, nxt: str, at: int = 0, end: int | None = None) -> bool:
+    """``s id:`` / ``p w =``: the split short label is followed by an explicit ``:`` or ``=``. Only the window of
+    ``PAIR_WINDOW`` characters around the pair (``v[at:end]``) is searched, so a text of many short pairs stays linear;
+    a match inside the window is found exactly as a search of the whole text would find it."""
+    end = len(v) if end is None else end
+    win = v[max(0, at - PAIR_WINDOW):end + PAIR_WINDOW]
+    return re.search(re.escape(w) + r"\W{1,3}" + re.escape(nxt) + r"\s{0,3}[:=]", win) is not None
 
 
 def _label_hit(v: str) -> bool:
@@ -313,7 +320,8 @@ def _label_hit(v: str) -> bool:
         a, b = m.span()
         if (a == 0 or not v[a - 1].isalnum()) and (b == n or not v[b].isalnum()):
             return True
-    words = _LETTER_RUN.findall(v)
+    runs = list(_LETTER_RUN.finditer(v))
+    words = [r.group(0) for r in runs]
     for i, w in enumerate(words):
         f = _fold_piece(w) if len(w) <= 16 else ""
         if f in _PIECES and (len(f) >= 5 or w.isascii() is False):
@@ -323,7 +331,8 @@ def _label_hit(v: str) -> bool:
             nxt = words[i + 1]
             if len(w) + len(nxt) <= 16 and (min(len(w), len(nxt)) <= 3 or len(w) + len(nxt) >= 8):
                 g = _fold_piece(w + nxt)
-                if g in _PIECES and (g not in _NO_PAIR_JOIN or _pair_has_separator(v, w, nxt)):
+                if g in _PIECES and (g not in _NO_PAIR_JOIN or _pair_has_separator(v, w, nxt, runs[i].start(),
+                                                                                runs[i + 1].end())):
                     return True
     # a label spelled one letter at a time (``t o k e n``)
     singles = "".join(w if len(w) == 1 else " " for w in words)
@@ -390,8 +399,13 @@ NOSPACE_FAMILIES = ("aws_access_key_id", "openai_anthropic", "github", "stripe",
                     "mapbox", "digitalocean", "db_uri", "pem_pgp")
 _PREFIX_NOSPACE_RX = re.compile("|".join(f"(?P<{n}>{rx})" for n, rx in PROVIDERS if n in NOSPACE_FAMILIES))
 # one compiled pattern per family: each has a literal prefix the regex engine scans for quickly, while the combined
-# alternation tries every family at every position (about 6x slower on a 64 KB field)
-_PREFIX_EACH = tuple((n, re.compile(rx)) for n, rx in PROVIDERS)
+# alternation tries every family at every position (about 6x slower on a 64 KB field). These are only asked whether
+# a family matches at all, so a family can be given a linear-time form that matches a text exactly when it does:
+#   jwt  the first part runs to the end of its letters / digits run and needs a "." there, so a later "eyJ" in the same
+#        run can only match when the first one does; starting at a run's start and committing (atomic group) to its
+#        first "eyJ" stops every "eyJ" of a long run rescanning the run (quadratic: 1 s at 64 KB of "eyJeyJ...")
+_LINEAR_FORMS = {"jwt": r"(?<![A-Za-z0-9_\-])(?>[A-Za-z0-9_\-]*?eyJ)[A-Za-z0-9_\-]{8,}+\.[A-Za-z0-9_\-]{8,}"}
+_PREFIX_EACH = tuple((n, re.compile(_LINEAR_FORMS.get(n, rx))) for n, rx in PROVIDERS)
 _PREFIX_EACH_NOSPACE = tuple((n, rx) for n, rx in _PREFIX_EACH if n in NOSPACE_FAMILIES)
 _LONG = 256
 
@@ -547,18 +561,11 @@ def _tokenish(t: str) -> bool:
     return (dg and (up or lo)) or (lo and any(c.isupper() for c in t[1:]))
 
 
-# a piece made of whole words: CamelCase words (each a capital and 2+ lower-case letters, or a short acronym) with at
-# most four trailing digits (``BrandRevenue``, ``iPhone``, ``Item4490``, ``USB3``)
-_WORDLIKE = re.compile(r"(?:[a-z]{1,2})?(?:[A-Z]?[a-z]{2,}|[A-Z]{2,5}(?![a-z]))+\d{0,4}|[A-Z]{1,5}\d{1,4}|\d{1,4}")
-
-
-_PLAIN_WORD = re.compile(r"(?:[A-Z]?[a-z]+)+\d{0,4}|[A-Z]{2,6}\d{0,4}|\d{1,4}")
-
-
-def _mixed_inside(piece: str) -> bool:
-    """A piece that looks like a key fragment: letters mixed with digits or inner capitals, and not whole words."""
-    up, lo, dg = _classes(piece)
-    return ((dg and (up or lo)) or (lo and any(c.isupper() for c in piece[1:]))) and not _WORDLIKE.fullmatch(piece)
+# a plain word piece: CamelCase / lower-case words with at most four trailing digits, a short acronym with at most four
+# digits, or a short number. ``(?:[A-Z]?[a-z])++`` accepts exactly what ``(?:[A-Z]?[a-z]+)+`` does (every capital
+# followed by a lower-case letter) but each character has one reading, so a long run followed by a rejected character
+# (a fifth digit, a capital, an accented letter) fails in linear time instead of backtracking exponentially.
+_PLAIN_WORD = re.compile(r"(?:[A-Z]?[a-z])++\d{0,4}|[A-Z]{2,6}\d{0,4}|\d{1,4}")
 
 
 # the distinctive prefix families with their own separators removed, matched at the START of a token whose
@@ -670,6 +677,61 @@ _EMAIL_PLAIN = re.compile(r"[A-Za-z0-9._%+\-]@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)
 _EMAIL_BRACKET = re.compile(r"(?i)[a-z0-9._%+\-] ?[\[\(\{<] ?(?:at|@) ?[\]\)\}>] ?[a-z0-9\-]{1,63}")
 _EMAIL_SPELLED = re.compile(r"(?i)[a-z0-9._%+\-] at [a-z0-9\-]{1,63}(?: ?[\[\(\{<]? ?dot ?[\]\)\}>]? ?[a-z0-9\-]{1,63}){1,4}"
                             r"(?![a-z])")
+# ``_EMAIL_SPELLED`` is the specification; ``_spelled_email`` decides the same thing in linear time. The regex engine
+# backtracks over every place a label could end before a glued "dot" (``x at dotdotdot...``: 0.4 s for one 400-character
+# word, a minute for a 64 KB field); here every reachable position is carried at once as one bit of an integer (a
+# set-of-states run of the same pattern), each step a few whole-text bit operations.
+_SPELLED_CLASS = {"c": re.compile(r"(?i)[a-z0-9._%+\-]"), "l": re.compile(r"(?i)[a-z0-9\-]"),
+                  "z": re.compile(r"(?i)[a-z]"), "a": re.compile(r"(?i)a"), "t": re.compile(r"(?i)t"),
+                  "d": re.compile(r"(?i)d"), "o": re.compile(r"(?i)o"), " ": re.compile(" "),
+                  "(": re.compile(r"[\[\(\{<]"), ")": re.compile(r"[\]\)\}>]")}
+
+
+class _BitTable(dict):
+    """``str.translate`` table: a code point becomes "1" when it matches ``rx``, else "0" (filled on first use)."""
+
+    def __init__(self, rx: re.Pattern) -> None:
+        super().__init__()
+        self.rx = rx
+
+    def __missing__(self, o: int) -> str:
+        r = "1" if self.rx.fullmatch(chr(o)) else "0"
+        if len(self) < _CMAP_MAX:
+            self[o] = r
+        return r
+
+
+_SPELLED_TABLES = {k: _BitTable(rx) for k, rx in _SPELLED_CLASS.items()}
+
+
+def _spelled_email(v: str) -> bool:
+    """``_EMAIL_SPELLED.search(v) is not None``, in linear time (bit ``i`` of a mask: position ``i`` of ``v``)."""
+    m = {k: int(v.translate(t)[::-1] or "0", 2) for k, t in _SPELLED_TABLES.items()}
+    sp, lab = m[" "], m["l"]
+
+    def opt(s: int, k: str) -> int:                       # an optional character of class k
+        return s | ((s & m[k]) << 1)
+
+    def label(s: int) -> int:                            # [a-z0-9\-]{1,63}: every end position reachable from s
+        ends = 0
+        for _ in range(63):
+            s = (s & lab) << 1
+            if not s:
+                break
+            ends |= s
+        return ends
+    starts = m["c"] & (sp >> 1) & (m["a"] >> 2) & (m["t"] >> 3) & (sp >> 4)   # "<c> at " begins here
+    ends = label(starts << 5)
+    tail = ((1 << (len(v) + 1)) - 1) & ~m["z"]                                  # (?![a-z]): not a letter, or the end
+    for _ in range(4):
+        s = opt(opt(opt(ends, " "), "("), " ")
+        s = ((((s & m["d"]) << 1) & m["o"]) << 1 & m["t"]) << 1                 # "dot"
+        ends = label(opt(opt(opt(s, " "), ")"), " "))
+        if ends & tail:
+            return True
+        if not ends:
+            break
+    return False
 
 
 _TLDS = ("com", "net", "org", "io", "co", "us", "uk", "de", "fr", "ca", "au", "in", "jp", "es", "it", "nl", "edu",
@@ -706,7 +768,7 @@ def _email_hit(v: str) -> bool:
     low = v.lower()
     if ("at" in low and ("[" in v or "(" in v or "{" in v or "<" in v)) and _EMAIL_BRACKET.search(v):
         return True
-    return " at " in low and "dot" in low and _EMAIL_SPELLED.search(v) is not None
+    return " at " in low and "dot" in low and _spelled_email(v)
 
 
 # ------------------------------------------------------------------------------------------------ the check
@@ -715,6 +777,8 @@ def _email_hit(v: str) -> bool:
 _CHECK_FUNCS = (("a_label", "_label_hit"), ("b_userinfo", "_userinfo_hit"), ("c_prefix", "_prefix_hit"))
 WAIVABLE = frozenset(("d_token", "e_digits"))           # the only checks a disclosed URL position may waive
 _URL_IN_TEXT = re.compile(r"(?i)(?:https?://|www\.)[^\s<>\"'`]{1,4096}")
+URL_TEXT_MAX = 64                        # URLs written in one field that are inspected; more: the field is withheld
+URL_PARTS_MAX = 1024                     # URL parts (host labels, segments, query pairs, fragment) inspected per field
 
 
 def _mask_clean_urls(m: str) -> tuple:
@@ -722,21 +786,35 @@ def _mask_clean_urls(m: str) -> tuple:
     URL positions) is masked out before checks (d) and (e), so a cited AP News or Drive link does not withhold the
     prose around it; one that FAILS any part fails the whole text (``url_credential`` / ``url_personal``), since a
     URL rule (a host label, a split path) may see what the text checks do not. Checks (a)-(c) and (f) already ran on
-    the unmasked text. Returns (masked text, failing check or None)."""
+    the unmasked text. More than ``URL_TEXT_MAX`` URLs or ``URL_PARTS_MAX`` URL parts in one field: ``"cap"`` (the
+    field is withheld; fail closed, so a URL-dense text stays fast). Returns (masked text, failing check or None)."""
     low = m.lower()
     if "http" not in low and "www." not in low:
         return m, None
+    n = 0
+    for _ in _URL_IN_TEXT.finditer(m):
+        n += 1
+        if n > URL_TEXT_MAX:
+            return m, "cap"
     worst: list = []
+    budget = [URL_PARTS_MAX]
 
     def repl(x: re.Match) -> str:
+        if budget[0] < 0:
+            return x.group(0)                              # over the part cap: the field is withheld below
         u = x.group(0).rstrip(".,;:!?)]}")
         url = u if "://" in u else "https://" + u
+        budget[0] -= _url_parts(url)
+        if budget[0] < 0:
+            return x.group(0)
         v = _url_verdict(url)
         if v is None:
             return _MASK + x.group(0)[len(u):]
         worst.append(v)
         return x.group(0)
     out = _URL_IN_TEXT.sub(repl, m)
+    if budget[0] < 0:
+        return m, "cap"
     return out, ("url_credential" if CREDENTIAL in worst else ("url_personal" if worst else None))
 
 
@@ -762,7 +840,7 @@ def _check(text: str, waive=frozenset(), urls: bool = True) -> str | None:
         m = _masked(v)
         if urls:
             m, bad_url = _mask_clean_urls(m)
-            if bad_url == "url_credential":
+            if bad_url in ("url_credential", "cap"):
                 return bad_url
             if bad_url and personal is None:
                 personal = bad_url
@@ -989,6 +1067,18 @@ def _host_label_key(label: str) -> bool:
 # raw format / control / separator characters in a URL part (bidi overrides hide a path's real reading)
 _CONTROL_RX = re.compile("[\x00-\x1f\x7f-\x9f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f"
                          "\ufeff\ufff9-\ufffb\U000e0000-\U000e007f]")
+
+
+def _url_parts(url: str) -> int:
+    """About how many parts ``_inspect`` checks in ``url`` (never fewer): the host and each of its labels, the path
+    segments, the query pairs and the fragment."""
+    try:
+        p = urlsplit(url)
+    except ValueError:
+        return 1
+    q = p.query or ""
+    return (2 + (p.netloc or "").count(".") + (p.path or "").count("/") + 1
+            + ((q.count("&") + q.count(";") + 1) if q else 0) + (1 if p.fragment else 0))
 
 
 def _inspect(url, urls: bool) -> dict | None:
