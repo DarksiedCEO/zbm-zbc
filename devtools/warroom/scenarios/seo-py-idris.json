@@ -1,0 +1,4987 @@
+{
+ "library": "seo-py-idris",
+ "version": 1,
+ "department": "Search & Answer Intelligence (department 2): Idris, the Competitor Visibility agent",
+ "service": "seo-py",
+ "driver": "seo_py_idris.py",
+ "basis": "ADR 0048 (D1-D8 and review rounds 1-5: Idris reads Callum's answers only, never asks an engine; emerging candidates are presence-only until a person confirms them; k <= n and compute() never crashes; client lookalikes are never a candidate, a tracked competitor or a client citation; dismissals cover documented respellings; another tenant's objects are the same 404 as missing ones; nothing of an answer beyond 3 PII-screened excerpts of 160 characters per candidate; a failing Idris never changes Callum's response) and ADR 0046 (Callum). The war room's oracle (shared fold from service-py, WHATWG host reading, A-label decoding, its own dismissal-coverage and reuse rules) judges independently of idris.py.",
+ "variants_per_seed": 2,
+ "scenarios": [
+  {
+   "id": "injected-brand-names",
+   "persona": "a poisoned answer engine whose answers carry prompt injections promoting a fake brand (with its own domain cited) to the top of the benchmark",
+   "basis": "ADR 0048 D6 / round 4 (an answer holding an injection counts for no candidate), round 1 (emerging never in a share, a leader or a headline before confirmation); seed: the suite's pinned injection",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_audits.py",
+      "module": "INJECTION"
+     }
+    }
+   ],
+   "input_field": "inject",
+   "params": {
+    "cited": [
+     "yes",
+     "no"
+    ]
+   },
+   "fixed_input": {
+    "cited": "yes"
+   },
+   "steps": [
+    {
+     "action": "injected_brand",
+     "args": {
+      "inject": "$inject",
+      "cited": "$cited"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "zero_width",
+    "homoglyph",
+    "whitespace_runs",
+    "letter_spacing",
+    "fullwidth"
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    },
+    {
+     "id": "every_visibility_run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "vis_ok",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "non-brands-in-provider-shapes",
+   "persona": "answers naming places, people, events, products, publishers, job titles and acronyms in list, pricing and mid-sentence shapes",
+   "basis": "ADR 0048 rounds 2-3 (non-brands are not candidates); seeds: the suite's pinned precision names",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_idris.py",
+      "test": "test_round_2_precision_non_brands_are_not_candidates",
+      "parametrize": true
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_idris.py",
+      "test": "test_round_3_non_brands_are_not_candidates",
+      "parametrize": true
+     }
+    }
+   ],
+   "input_field": "name",
+   "fixed_input": {
+    "non_competitor": "yes",
+    "shape": "uncited_listing"
+   },
+   "params": {
+    "shape": [
+     "uncited_listing",
+     "pricing",
+     "mid_sentence"
+    ]
+   },
+   "steps": [
+    {
+     "action": "named_candidate",
+     "args": {
+      "name": "$name",
+      "shape": "$shape",
+      "non_competitor": "$non_competitor"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "homoglyph",
+    "zero_width",
+    "fullwidth"
+   ],
+   "variants_per_seed": 1,
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    },
+    {
+     "id": "every_visibility_run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "vis_ok",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "candidates-confirmed-dismissed-undone",
+   "persona": "real-looking brands named and cited by two engines, then confirmed, dismissed, confirmed-then-dismissed or dismissed-then-undone by the owner, the agent or the tenant",
+   "basis": "ADR 0048 round 2 (confirmation is the only way into the shares; a dismissal ends a confirmation), round 1 (undismissal by the owner); seeds: the suite's pinned recall names",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_idris.py",
+      "test": "test_round_2_recall_brands_named_mid_sentence_are_found",
+      "parametrize": true
+     }
+    }
+   ],
+   "input_field": "name",
+   "fixed_input": {
+    "shape": "cited_listing",
+    "decision": "none"
+   },
+   "params": {
+    "shape": [
+     "cited_listing",
+     "heading",
+     "table",
+     "pricing"
+    ],
+    "decision": [
+     "none",
+     "confirm",
+     "dismiss",
+     "confirm_then_dismiss",
+     "dismiss_then_undismiss",
+     "confirm_by_hub",
+     "dismiss_by_seo_agent"
+    ]
+   },
+   "steps": [
+    {
+     "action": "named_candidate",
+     "args": {
+      "name": "$name",
+      "shape": "$shape",
+      "decision": "$decision"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "fullwidth",
+    "zero_width"
+   ],
+   "variants_per_seed": 2,
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    },
+    {
+     "id": "every_visibility_run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "vis_ok",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "hostile-citations",
+   "persona": "a new brand cited only through a platform, publisher, institution, shortener, link-in-bio page, Gemini's redirector, a lookalike of the client or a competitor, an IP literal, or a private-suffix / IDN host",
+   "basis": "ADR 0048 D4 (citation owners: a lookalike is never the client or the competitor), round 4 (platforms never candidates), round 5 (shorteners unresolved; PSL private suffixes keep the whole name); seeds: the suite's pinned URLs and hosts",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_idris.py",
+      "test": "test_cited_platforms_publishers_and_institutions_are_never_a_candidate",
+      "parametrize": true,
+      "field": 0
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_idris.py",
+      "test": "test_shorteners_are_never_candidates_unless_resolution_followed_them",
+      "parametrize": true
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_callum.py",
+      "test": "test_domain_matching_reuses_domain_match_subdomains_twins_and_lookalikes",
+      "parametrize": true,
+      "field": 0
+     }
+    }
+   ],
+   "input_field": "url",
+   "steps": [
+    {
+     "action": "hostile_citation",
+     "args": {
+      "url": "$url"
+     }
+    }
+   ],
+   "transforms": [
+    "url_scheme_case",
+    "url_host_case",
+    "url_subdomain",
+    "url_tracking_query",
+    "url_fragment",
+    "url_trailing_slash",
+    "url_percent_encode",
+    "url_fullwidth"
+   ],
+   "variants_per_seed": 1,
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    },
+    {
+     "id": "every_visibility_run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "vis_ok",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "client-lookalike-texts",
+   "persona": "answers naming a client lookalike (hyphenated, homoglyph, one edit, legal-suffix, glued) as a provider (then a reviewer confirms every candidate offered), citing a lookalike of the client's domain, the brand's own label, an IDN spelling or a private-suffix host",
+   "basis": "ADR 0048 D6 / round 1 (CLIENT_LOOKALIKE, CLIENT_VARIANT: never a candidate; a lookalike host is never the client); seeds: the suite's pinned lookalike texts",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_idris.py",
+      "test": "test_the_extractor_excludes_what_is_not_a_new_brand",
+      "parametrize": true,
+      "field": 0,
+      "where": {
+       "1": "CLIENT_LOOKALIKE"
+      }
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_idris.py",
+      "test": "test_the_extractor_excludes_what_is_not_a_new_brand",
+      "parametrize": true,
+      "field": 0,
+      "where": {
+       "1": "CLIENT_VARIANT"
+      }
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_idris.py",
+      "test": "test_review_round_1_non_brands_are_excluded",
+      "parametrize": true,
+      "field": 0,
+      "where": {
+       "1": "CLIENT_LOOKALIKE"
+      }
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_idris.py",
+      "test": "test_review_round_1_non_brands_are_excluded",
+      "parametrize": true,
+      "field": 0,
+      "where": {
+       "1": "CLIENT_VARIANT"
+      }
+     }
+    }
+   ],
+   "input_field": "text",
+   "fixed_input": {
+    "cite": "lookalike_domain",
+    "then": "confirm_all"
+   },
+   "params": {
+    "cite": [
+     "lookalike_domain",
+     "punycode_domain",
+     "brand_label",
+     "brand_label_idn",
+     "private_suffix",
+     "none"
+    ],
+    "then": [
+     "confirm_all",
+     "none"
+    ]
+   },
+   "steps": [
+    {
+     "action": "lookalike_text",
+     "args": {
+      "text": "$text",
+      "cite": "$cite",
+      "then": "$then"
+     }
+    }
+   ],
+   "transforms": [
+    "homoglyph",
+    "zero_width",
+    "fullwidth",
+    "case_flip",
+    "punct_variants",
+    "whitespace_runs"
+   ],
+   "variants_per_seed": 3,
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    },
+    {
+     "id": "every_visibility_run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "vis_ok",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "client-lookalike-names",
+   "persona": "the client's own brand respelt (spacing, hyphen, glued, homoglyphs, invisible characters, full-width, legal suffixes) named as a provider with lookalike, IDN or private-suffix domains",
+   "basis": "ADR 0048 D6 / round 1; the names are the ADR's own examples (literal)",
+   "seeds": [
+    {
+     "literal": [
+      "Z Best Media",
+      "ZBest Media",
+      "Z-Best Media",
+      "ZBestMedia Labs",
+      "Zbestmedia LLC",
+      "Z Best Media Group",
+      "Z Bset Media",
+      "Z Best Medai",
+      "ZBM Best Media"
+     ],
+     "basis": "ADR 0048 D6 and review round 1 examples, plus one-edit spellings"
+    }
+   ],
+   "input_field": "name",
+   "fixed_input": {
+    "cite": "lookalike_domain"
+   },
+   "params": {
+    "cite": [
+     "lookalike_domain",
+     "punycode_domain",
+     "brand_label",
+     "brand_label_idn",
+     "private_suffix",
+     "none"
+    ]
+   },
+   "steps": [
+    {
+     "action": "client_lookalike",
+     "args": {
+      "name": "$name",
+      "cite": "$cite"
+     }
+    }
+   ],
+   "transforms": [
+    "homoglyph",
+    "zero_width",
+    "fullwidth",
+    "case_flip"
+   ],
+   "variants_per_seed": 3,
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    },
+    {
+     "id": "every_visibility_run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "vis_ok",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "client-lookalike-as-tracked-competitor",
+   "persona": "an owner (or an attacker with the agent's token) tracking the client's own brand or domain, respelt, as a competitor",
+   "basis": "ADR 0048 D8 (422 COMPETITOR_IS_CLIENT), round 1 (excluded at run time: excluded_tracked)",
+   "seeds": [
+    {
+     "literal": [
+      "Z Best Media",
+      "ZBest Media",
+      "Z-Best Media",
+      "ZBestMedia Labs",
+      "Zbestmedia LLC",
+      "Z Best Media Group",
+      "Z Bset Media",
+      "Site",
+      "Rival Co"
+     ],
+     "basis": "ADR 0048 D6 / D8 examples; Rival Co is a control"
+    }
+   ],
+   "input_field": "name",
+   "fixed_input": {
+    "domain": "none"
+   },
+   "params": {
+    "domain": [
+     "none",
+     "client",
+     "sub",
+     "homoglyph",
+     "punycode"
+    ]
+   },
+   "steps": [
+    {
+     "action": "lookalike_competitor_set",
+     "args": {
+      "name": "$name",
+      "domain": "$domain"
+     }
+    }
+   ],
+   "transforms": [
+    "homoglyph",
+    "zero_width",
+    "fullwidth",
+    "case_flip"
+   ],
+   "variants_per_seed": 3,
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    }
+   ]
+  },
+  {
+   "id": "huge-and-repeated-lists",
+   "persona": "answers with 600-item lists, a name repeated 500 times, 400-row tables, 300 headings, 2,000 citations, 100,000 characters of whitespace, nested lists",
+   "basis": "ADR 0048 D5/D6 (25 candidates an answer, 200 a run, 2,000 rows, 3 excerpts of 160, 10 listed, 20 watch), round 5 (k <= n; compute never crashes)",
+   "seeds": [
+    {
+     "literal": [
+      "list_600",
+      "same_name_500",
+      "client_500",
+      "table_400",
+      "headings_300",
+      "nested_lists",
+      "one_line_100k",
+      "citations_2000",
+      "tracked_spam",
+      "whitespace_100k"
+     ],
+     "basis": "the driver's huge shapes"
+    }
+   ],
+   "input_field": "shape",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "huge",
+     "args": {
+      "shape": "$shape"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    },
+    {
+     "id": "every_visibility_run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "vis_ok",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "overlapping-term-sets",
+   "persona": "competitor sets whose terms overlap (containment, end-start, equal after case / spacing / homoglyph / invisible / full-width folding, against the client's term) so one span could name two brands",
+   "basis": "ADR 0048 round 1 HIGH and round 2 HIGH (422 COMPETITOR_TERMS_OVERLAP; at run time one span names one brand)",
+   "seeds": [
+    {
+     "literal": [
+      "contained",
+      "end_start",
+      "equal_case",
+      "equal_spacing",
+      "equal_homoglyph",
+      "equal_zero_width",
+      "equal_fullwidth",
+      "contained_homoglyph",
+      "client_contained",
+      "client_end_start",
+      "client_homoglyph",
+      "punct",
+      "three_way"
+     ],
+     "basis": "the driver's overlap shapes (OVERLAPS)"
+    }
+   ],
+   "input_field": "kind",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "overlap_set",
+     "args": {
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    },
+    {
+     "id": "overlapping_set_refused",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "set_status",
+      "value": 422
+     }
+    }
+   ]
+  },
+  {
+   "id": "dismissal-bypass",
+   "persona": "a dismissed candidate coming back respelt: case, spacing, hyphens, legal suffixes, plurals, 'The ... Network', homoglyphs, full-width, invisible characters, one edit, its domain on another TLD, hyphenated, on a private suffix or a ccSLD; and undocumented respellings",
+   "basis": "ADR 0048 round 1 MED and round 2 (DismissalIndex: key, folded tokens without legal suffixes and plurals, contiguous tokens, one edit for 6+); undocumented respellings are scored SHOULD (dismissed_name_not_on_watch / the oracle decides coverage)",
+   "seeds": [
+    {
+     "literal": [
+      "exact",
+      "upper",
+      "lower",
+      "joined",
+      "hyphen",
+      "extra_spaces",
+      "legal_inc",
+      "legal_llc_dotted",
+      "comma_inc",
+      "plural_toggle",
+      "prefix_the",
+      "suffix_network",
+      "homoglyph",
+      "fullwidth",
+      "zero_width",
+      "one_edit",
+      "transposition",
+      "domain_other_tld",
+      "domain_hyphen",
+      "domain_private_suffix",
+      "domain_ccsld",
+      "domain_only",
+      "camel_plus_word",
+      "leet",
+      "idn_domain_named",
+      "two_edits",
+      "reversed_words"
+     ],
+     "basis": "grammar.DISMISSAL_KINDS_MUST + DISMISSAL_KINDS_SHOULD"
+    }
+   ],
+   "input_field": "variant_kind",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "dismissal_bypass",
+     "args": {
+      "variant_kind": "$variant_kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    },
+    {
+     "id": "every_visibility_run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "vis_ok",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "confirm-dismiss-undismiss-authz",
+   "persona": "callers that may not confirm, dismiss or undo (Compliance, another tenant's hub, a hub without its tenant token, no caller, the agent or the hub undoing), and malformed or foreign keys",
+   "basis": "ADR 0048 D6 / rounds 1-2 (dismiss: owner or tenant; confirm: owner or tenant; undismiss: the owner on the dashboard only; a key must be one seen in the tenant's observations, compact)",
+   "seeds": [
+    {
+     "literal": [
+      "confirm_by_compliance",
+      "confirm_by_hub_other_tenant",
+      "confirm_by_hub_no_tenant_token",
+      "confirm_no_caller",
+      "confirm_unseen_key",
+      "confirm_key_not_compact",
+      "confirm_key_homoglyph",
+      "confirm_key_with_suffix",
+      "confirm_dismissed",
+      "dismiss_by_compliance",
+      "dismiss_by_hub_other_tenant",
+      "dismiss_unseen_key",
+      "undismiss_by_hub",
+      "undismiss_by_seo_agent",
+      "undismiss_by_compliance",
+      "undismiss_by_hub_other_tenant",
+      "undismiss_never_dismissed",
+      "confirm_under_other_tenant_path",
+      "dismiss_under_other_tenant_path",
+      "undismiss_under_other_tenant_path"
+     ],
+     "basis": "the driver's authz probes"
+    }
+   ],
+   "input_field": "probe",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "authz",
+     "args": {
+      "probe": "$probe"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    },
+    {
+     "id": "refused",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "probe_refused",
+      "value": true
+     }
+    },
+    {
+     "id": "nothing_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "probe_recorded",
+      "value": 0
+     }
+    },
+    {
+     "id": "competitor_set_unchanged",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "probe_view_changed",
+      "value": false
+     }
+    },
+    {
+     "id": "foreign_key_same_as_missing",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "probe_same_as_missing",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "cross-tenant-idris",
+   "persona": "another tenant's hub or dashboard probing zbm's competitor set, visibility runs, prompt set and domain: exact ids, case and encoding variants, traversal, lists, starting runs",
+   "basis": "ADR 0048 D8 (another tenant's objects answer the same 404 as missing ones; the hub reads its own tenant only and never starts a run)",
+   "seeds": [
+    {
+     "literal": [
+      "hub_get_vis",
+      "hub_list_vis",
+      "hub_get_set",
+      "dashboard_get_vis_under_acme",
+      "compliance_get_vis_under_acme",
+      "vis_id_uppercased",
+      "vis_id_trailing_slash",
+      "vis_id_percent_encoded",
+      "vis_path_traversal",
+      "hub_start_vis_on_zbm",
+      "acme_vis_with_zbm_prompt_set",
+      "acme_vis_on_zbm_domain",
+      "hub_set_on_zbm",
+      "acme_set_view",
+      "acme_list_vis"
+     ],
+     "basis": "the driver's probes"
+    }
+   ],
+   "input_field": "probe",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "cross_tenant",
+     "args": {
+      "probe": "$probe"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    },
+    {
+     "id": "refused_or_own_view",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "probe_refused",
+      "value": true
+     }
+    },
+    {
+     "id": "same_as_missing",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "probe_same_as_missing",
+      "value": true
+     }
+    },
+    {
+     "id": "nothing_of_zbm_echoed",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "foreign_echoed"
+     }
+    },
+    {
+     "id": "nothing_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "probe_recorded",
+      "value": 0
+     }
+    },
+    {
+     "id": "no_engine_asked",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "probe_asked",
+      "value": 0
+     }
+    }
+   ]
+  },
+  {
+   "id": "cross-tenant-history",
+   "persona": "another tenant whose own runs, dismissals and confirmations name the same brand",
+   "basis": "ADR 0048 D6 (look-back over the tenant's own observations for its domain), D8 isolation",
+   "seeds": [
+    {
+     "literal": [
+      "acme_runs_only",
+      "acme_dismisses",
+      "acme_confirms"
+     ],
+     "basis": "the driver's shapes"
+    }
+   ],
+   "input_field": "shape",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "history_isolation",
+     "args": {
+      "shape": "$shape"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    },
+    {
+     "id": "every_visibility_run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "vis_ok",
+      "value": true
+     }
+    },
+    {
+     "id": "no_foreign_history_counted",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "foreign_history_counted"
+     }
+    }
+   ]
+  },
+  {
+   "id": "reuse-window-abuse",
+   "persona": "visibility runs against stale, out-of-window, mismatched (competitor set, prompt-set version, engines), interrupted, unobserved, restricted-era, other-tenant and clock-skewed citation runs",
+   "basis": "ADR 0048 D2 (reuse rules, review round 1: observed_at decides the age) — the oracle's own record of each run decides",
+   "seeds": [
+    {
+     "literal": [
+      "fresh_then_reuse",
+      "max_age_zero",
+      "just_inside_window",
+      "just_outside_window",
+      "short_window",
+      "competitor_set_changed",
+      "competitor_set_changed_back",
+      "prompt_set_new_version",
+      "prompt_set_back_to_old_content",
+      "widened_engines",
+      "narrowed_engines",
+      "interrupted_run",
+      "observer_failed",
+      "callum_alone_reusable",
+      "callum_alone_before_set",
+      "restricted_then_active",
+      "two_runs_latest_wins",
+      "other_tenant_run",
+      "clock_backwards"
+     ],
+     "basis": "the driver's reuse shapes (REUSE_SHAPES)"
+    }
+   ],
+   "input_field": "shape",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "reuse",
+     "args": {
+      "shape": "$shape"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    },
+    {
+     "id": "reuse_follows_the_rules",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "reuse_violations"
+     }
+    }
+   ]
+  },
+  {
+   "id": "concurrent-runs",
+   "persona": "something happens while a visibility run's citation run is in flight: a second run, a replay of the same request, a dismissal, a confirmation, a competitor-set change, a restriction",
+   "basis": "ADR 0048 D2 (one running citation run per tenant; idempotent by request id; reuse needs the set now in force), D6 (dismissals)",
+   "seeds": [
+    {
+     "literal": [
+      "second_fresh_run",
+      "second_reusing_run",
+      "same_request_replayed",
+      "dismiss_in_flight",
+      "confirm_in_flight",
+      "set_change_in_flight",
+      "restrict_in_flight"
+     ],
+     "basis": "the driver's concurrency shapes"
+    }
+   ],
+   "input_field": "shape",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "concurrent",
+     "args": {
+      "shape": "$shape"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    },
+    {
+     "id": "concurrency_rules_hold",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "concurrency_violations"
+     }
+    }
+   ]
+  },
+  {
+   "id": "enterprise-scale",
+   "persona": "20 tracked competitors (5 terms, 5 domains each) x 50 prompts x 4 engines, dense answers naming many tracked, emerging and lookalike brands",
+   "basis": "ADR 0048 D8 (20 tracked), D5 (2,000 rows), D6 (200 candidates a run, 10 listed); structural bounds only",
+   "seeds": [
+    {
+     "literal": [
+      "20x50x4",
+      "20x10x4_dense"
+     ],
+     "basis": "the driver's scale shapes"
+    }
+   ],
+   "input_field": "shape",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "scale",
+     "args": {
+      "shape": "$shape"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    },
+    {
+     "id": "every_visibility_run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "vis_ok",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "callum-observer-failures",
+   "persona": "Idris failing while it observes a citation run: its observer cannot be built or raises, observe raises (KeyError, recursion, memory, a kill), returns garbage, its extractor / injection guard / brand matcher / NER raise, recording fails or the ledger refuses",
+   "basis": "ADR 0048 D2 review round 1 (a failing Idris can never change Callum's response, outcome or HTTP status: byte-for-byte against a run without Idris); a run without observations is recorded with no numbers",
+   "seeds": [
+    {
+     "literal": [
+      "working_observer",
+      "construct_raises",
+      "call_raises",
+      "observe_raises",
+      "observe_recursion",
+      "observe_memory",
+      "observe_killed",
+      "observe_unserialisable",
+      "observe_returns_none",
+      "candidates_raises",
+      "injection_guard_raises",
+      "brand_mention_raises",
+      "record_raises",
+      "ledger_rejects_observations",
+      "ner_port_raises"
+     ],
+     "basis": "the driver's failure modes (_inject)"
+    }
+   ],
+   "input_field": "how",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "observer_failure",
+     "args": {
+      "how": "$how"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    },
+    {
+     "id": "callum_response_byte_identical",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "callum_changed"
+     }
+    }
+   ]
+  },
+  {
+   "id": "engines-failing",
+   "persona": "engines failing with every adapter code, refusing, answering ERROR, malformed, crashing, on all calls, half of them, or one engine only",
+   "basis": "ADR 0048 D5 (a failed call is an INCONCLUSIVE row; refusals and failures are excluded from every rate; UNKNOWN never 0%; ENGINE_RUN_STOPPED)",
+   "seeds": [
+    {
+     "literal": [
+      "rate_limited",
+      "unavailable",
+      "protocol",
+      "auth",
+      "budget",
+      "not_connected",
+      "crash",
+      "refusal",
+      "error_answer",
+      "malformed",
+      "all_rate_limited",
+      "all_crash",
+      "all_refusal",
+      "all_protocol",
+      "half_unavailable",
+      "half_refusal",
+      "half_malformed"
+     ],
+     "basis": "answer_adapter.CODES and the probe framework's statuses"
+    }
+   ],
+   "input_field": "kind",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "failing",
+     "args": {
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    },
+    {
+     "id": "failed_calls_never_counted",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_counted"
+     }
+    }
+   ]
+  },
+  {
+   "id": "engines-failing-real-adapters",
+   "persona": "one real adapter (OpenAI, Anthropic, Google, Perplexity on MockTransport) in a 429 / 5xx / timeout / malformed storm while the others answer",
+   "basis": "ADR 0046 A1-A5 through Callum, ADR 0048 D5 (INCONCLUSIVE rows, UNKNOWN never 0%)",
+   "seeds": [
+    {
+     "literal": [
+      "429",
+      "500",
+      "503,500,ok",
+      "timeout",
+      "timeout,timeout,ok",
+      "connect",
+      "not_json",
+      "truncated",
+      "401",
+      "403",
+      "429,ok,500,ok"
+     ],
+     "basis": "storm scripts over the driver's Storm steps"
+    }
+   ],
+   "input_field": "script",
+   "fixed_input": {
+    "failing_engine": "openai"
+   },
+   "params": {
+    "failing_engine": [
+     "openai",
+     "anthropic",
+     "google",
+     "perplexity"
+    ]
+   },
+   "variants_per_seed": 2,
+   "steps": [
+    {
+     "action": "real_adapters",
+     "args": {
+      "script": "$script",
+      "failing_engine": "$failing_engine"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    },
+    {
+     "id": "failed_calls_never_counted",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_counted"
+     }
+    }
+   ]
+  },
+  {
+   "id": "personal-data-beside-candidates",
+   "persona": "an answer quoting someone's email, phone, SSN, card number or IP right beside an emerging candidate",
+   "basis": "ADR 0048 D5 (at most 3 excerpts of 160 characters per candidate, PII-screened: withheld when they look like personal data); seeds: the suite's pinned personal-data prompts",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_perplexity.py",
+      "test": "test_prompt_guard",
+      "parametrize": true,
+      "field": 0,
+      "where": {
+       "1": "email"
+      }
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_perplexity.py",
+      "test": "test_prompt_guard",
+      "parametrize": true,
+      "field": 0,
+      "where": {
+       "1": "number"
+      }
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_perplexity.py",
+      "test": "test_prompt_guard",
+      "parametrize": true,
+      "field": 0,
+      "where": {
+       "1": "ip"
+      }
+     }
+    }
+   ],
+   "input_field": "text",
+   "fixed_input": {
+    "where": "near"
+   },
+   "params": {
+    "where": [
+     "near",
+     "before"
+    ]
+   },
+   "steps": [
+    {
+     "action": "personal_data",
+     "args": {
+      "text": "$text",
+      "where": "$where"
+     }
+    }
+   ],
+   "transforms": [
+    "whitespace_runs",
+    "case_flip"
+   ],
+   "variants_per_seed": 1,
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    },
+    {
+     "id": "every_visibility_run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "vis_ok",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "secret-beside-candidates",
+   "persona": "an engine (or a page it read) putting an API key or a caller / tenant / Andre token beside, before or inside an emerging candidate's name, or in a cited path",
+   "basis": "ADR 0017 W4-5 / ADR 0046 A4 (no key or token in any output) applied to Idris's excerpts and names",
+   "seeds": [
+    {
+     "literal": [
+      "openai:beside",
+      "openai:before",
+      "openai:in_name",
+      "openai:in_cite",
+      "service:beside",
+      "andre:beside",
+      "tenant:beside"
+     ],
+     "basis": "the driver's echo shapes"
+    }
+   ],
+   "input_field": "kind",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "secret_echo",
+     "args": {
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    },
+    {
+     "id": "every_visibility_run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "vis_ok",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "generated-poisoned-answers",
+   "persona": "INVENTED by the war room: random competitor sets and 1-3 runs of hostile answers per engine (markdown, injections promoting a fake brand, client and competitor lookalikes, PSL private and IDN hosts, huge and repeated lists, personal data, failures), with dismissals, confirmations and undismissals between runs (grammar.idris_answers)",
+   "basis": "every MUST above, on inputs nobody listed; terminals from the suite's pinned brand names, injection, personal data and platform URLs",
+   "generator": {
+    "name": "idris_answers",
+    "count": 30,
+    "atoms": {
+     "brands": [
+      {
+       "extract": {
+        "file": "tests/test_idris.py",
+        "test": "test_round_2_recall_brands_named_mid_sentence_are_found",
+        "parametrize": true
+       }
+      }
+     ],
+     "injection": [
+      {
+       "extract": {
+        "file": "tests/test_audits.py",
+        "module": "INJECTION"
+       }
+      }
+     ],
+     "pii": [
+      {
+       "extract": {
+        "file": "tests/test_perplexity.py",
+        "test": "test_prompt_guard",
+        "parametrize": true,
+        "field": 0,
+        "where": {
+         "1": "email"
+        }
+       }
+      }
+     ],
+     "platform_urls": [
+      {
+       "extract": {
+        "file": "tests/test_idris.py",
+        "test": "test_cited_platforms_publishers_and_institutions_are_never_a_candidate",
+        "parametrize": true,
+        "field": 0
+       }
+      }
+     ]
+    }
+   },
+   "input_field": "spec",
+   "steps": [
+    {
+     "action": "generated_answers",
+     "args": {
+      "spec": "$spec"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    }
+   ]
+  },
+  {
+   "id": "generated-reuse-sequences",
+   "persona": "INVENTED by the war room: random sequences of visibility runs (random windows and engines), clock moves (also backwards), set and prompt-set changes and reversals, Callum's own runs, interrupted runs, failing observers, restrictions and another tenant's runs (grammar.idris_reuse)",
+   "basis": "ADR 0048 D2 reuse rules: the driver's oracle predicts every reuse from its own record",
+   "generator": {
+    "name": "idris_reuse",
+    "count": 20,
+    "atoms": {}
+   },
+   "input_field": "spec",
+   "steps": [
+    {
+     "action": "generated_reuse",
+     "args": {
+      "spec": "$spec"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    },
+    {
+     "id": "reuse_follows_the_rules",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "reuse_violations"
+     }
+    }
+   ]
+  },
+  {
+   "id": "generated-dismissal-variants",
+   "persona": "INVENTED by the war room: a dismissed name (pinned or invented) respelt by a random documented or undocumented rule, served on 1-3 later runs, dismissed by the owner, the agent or the tenant (grammar.idris_dismissal)",
+   "basis": "ADR 0048 rounds 1-2 dismissal coverage, judged by the driver's own re-implementation of the documented rule",
+   "generator": {
+    "name": "idris_dismissal",
+    "count": 25,
+    "atoms": {
+     "brands": [
+      {
+       "extract": {
+        "file": "tests/test_idris.py",
+        "test": "test_round_2_recall_brands_named_mid_sentence_are_found",
+        "parametrize": true
+       }
+      }
+     ]
+    }
+   },
+   "input_field": "spec",
+   "steps": [
+    {
+     "action": "generated_dismissal",
+     "args": {
+      "spec": "$spec"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "visibility_run_never_crashes",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "vis_crashed"
+     }
+    },
+    {
+     "id": "emerging_never_in_shares_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_in_shares"
+     }
+    },
+    {
+     "id": "emerging_never_leads_or_headlines_before_confirmation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unconfirmed_leaders"
+     }
+    },
+    {
+     "id": "k_le_n_everywhere",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "rate_violations"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_competitor",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_competitor"
+     }
+    },
+    {
+     "id": "client_lookalike_never_a_client_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_as_client"
+     }
+    },
+    {
+     "id": "competitor_lookalike_never_that_competitors_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "competitor_lookalike_counted"
+     }
+    },
+    {
+     "id": "dismissed_name_never_emerging_again",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_resurfaced"
+     }
+    },
+    {
+     "id": "no_answer_text_beyond_the_documented_excerpts",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "text_retained"
+     }
+    },
+    {
+     "id": "ledger_holds_no_answer_text",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "ledger_text"
+     }
+    },
+    {
+     "id": "no_personal_data_in_an_excerpt",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_key_or_token_in_an_idris_output",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "bounded_work_caps",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "bounds_exceeded"
+     }
+    },
+    {
+     "id": "bounded_work_one_extractor_call_per_usable_answer",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "candidates_calls_over"
+     }
+    },
+    {
+     "id": "bounded_work_one_owner_call_per_citation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "owner_calls_over"
+     }
+    },
+    {
+     "id": "one_span_names_one_brand",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "one_span_two_brands"
+     }
+    },
+    {
+     "id": "dismissed_name_not_on_watch",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "dismissed_on_watch"
+     }
+    },
+    {
+     "id": "injected_or_non_competitor_name_never_emerging",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "non_competitor_emerging"
+     }
+    },
+    {
+     "id": "every_visibility_run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "vis_ok",
+      "value": true
+     }
+    }
+   ]
+  }
+ ]
+}
