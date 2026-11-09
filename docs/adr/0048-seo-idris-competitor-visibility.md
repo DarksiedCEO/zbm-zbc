@@ -22,7 +22,7 @@ provenance and confidence, never 0% for unknown); no paid data.
 ### D1. One job, and what is not Idris's
 
 Idris measures the client's AI share of voice against competitors and detects emerging competitors (`agents/idris.py`,
-rules `idris-rules/2026-11-08.6`, contract `idris.share_of_voice/1`). Registry entry in `svc_manager.REGISTRY`
+rules `idris-rules/2026-11-08.7`, contract `idris.share_of_voice/1`). Registry entry in `svc_manager.REGISTRY`
 (assignment, inputs, outputs; `GET /seo/v1/department`); Idris leaves `NOT_BUILT_AGENTS`; it has its own lifecycle
 state (a restricted Idris is refused 403 `AGENT_RESTRICTED`, and citation runs then record no observations — Callum
 is unaffected). NOT Idris's: asking engines (the adapter and Callum's collection), classifying the client's citations
@@ -413,6 +413,53 @@ experimental option, not a recommended setting.
 My own cited fixtures after this round (self-authored, same caveats as round 4): train 1.000 / 0.981, test 1.000 /
 0.980, rules only.
 
+## War room fixes (WR-F030..WR-F032, the seo-py-idris library of draft PR #58) — changes
+
+Three MUST findings of the war room (ADR 0018) on e34638b3, fixed structurally (rules `idris-rules/2026-11-08.7`).
+Tests: `services/seo-py/tests/test_idris_warroom.py` (seeded property tests, a threaded concurrency test).
+
+- **WR-F030 — a client lookalike became a competitor (98 replays).** A cited domain spelling the client's brand in
+  lookalike letters (`xn--zbstmedia-h0h.com`, homoglyph / mixed-script labels, punycode, `0`/`o` `1`/`l` swaps,
+  hyphens, another TLD, a private suffix such as `.github.io`) became a WATCH candidate, confirm answered 201, and the
+  next run put it in the shares. Cause: the cited host's registrable label was compared as its ASCII A-label, never
+  decoded. Now every comparison of a name or a host against the client goes through `idris.client_like` /
+  `client_like_host`: IDNA A-labels are decoded to U-labels (`unidn`), then `brand_skeleton` — NFKC, invisible
+  characters removed, case folded, the shared lookalike fold, the UTS #39 skeleton from the vendored
+  `agents/confusables.txt` (Unicode-3.0, the same SHA-256 pin as `injection_guard`; no new file, no new dependency),
+  combining marks removed, digit / letter swaps, `rn` read as `m` — compared equal or one edit apart (6+ characters),
+  on the name and on its core (legal suffixes and generic nouns dropped), plus the containing-variant rule. A match is
+  `CLIENT_LOOKALIKE`: excluded at observation (`CLIENT_LOOKALIKE_DOMAIN`), and again in `emerging()` for any earlier
+  observation or confirmation recorded before this fix — listed apart in `facts.emerging.client_lookalikes`
+  (`state: CLIENT_LOOKALIKE`, `signal: impersonation`), never EMERGING / WATCH / CONFIRMED, never promoted into a share.
+  `POST .../competitor-set/confirmations` refuses it: **409 `CANDIDATE_IS_CLIENT_LOOKALIKE`**, for every caller. There
+  is no override path: a real, distinct brand that happens to collide is added to the competitor set, where the same
+  rule applies (a tracked competitor whose domain label is the client's on another TLD or in IDN is refused 422
+  `COMPETITOR_IS_CLIENT`, and excluded at run time as `CLIENT_LOOKALIKE`). Trade-off, stated: one edit at 6+
+  characters means a genuine brand one letter from the client's (`bestmedia.com` against `Z Best Media`) is treated
+  as a lookalike, never a competitor — the documented rule since round 1, now applied to domains as well.
+- **WR-F031 — a key beside a candidate stayed in its excerpt (R0010, R0011).** New `agents/text_redact.py` (local:
+  no shared `secret_guard.py` / `text_redact.py` is on this base; it **consolidates with `secret_guard` after #51 /
+  #53 land**). `secrets()` runs on the RAW answer text before Idris reads any of it (so no candidate name, excerpt or
+  classifier snippet can carry a key), ALWAYS, with no exemption: documented prefixes (AWS `AKIA` / `ASIA` ... and a
+  40-character secret, `sk-` / `sk-proj-` / `sk-ant-`, `ghp_` / `gho_` / `github_pat_`, `sk_live_` / `sk_test_` /
+  `rk_`, `xox?-`, `AIza`, `pplx-`), labelled `key=` / `token=` / `secret=` / `password=` / `api_key:` values,
+  `Authorization:` / `Bearer` values, JWTs, and long opaque tokens (32+ hex; 32+ letters-and-digits; base64 with
+  upper, lower and digits). The excerpt window is redacted again; an excerpt with personal data is still withheld
+  (`personal_data:<kind>`), and e-mail / Luhn-valid card / SSN / phone shapes are redacted in what is kept. Property
+  tests: every key kind at every position (start, beside, inside a bold name, in parentheses, at the window edge, at
+  the end) through `observe()` and `compute()`, and 400 seeded random neighbourhoods.
+- **WR-F032 — replaying an in-flight request id stored FAILED under it (R0009).** The replay found no recorded result,
+  asked Callum with the same request id (the running run), recorded that interrupted run as FAILED under the id, and
+  the original then answered that FAILED record. Now a visibility request is registered in flight (memory only,
+  under the lock) before any work: the same id with the same body while in flight answers **409
+  `VISIBILITY_RUN_IN_PROGRESS`** and writes nothing; with another body 409 `REQUEST_ID_REUSED`; once complete the
+  stored result is answered (unchanged). Only the original records a result under its id. A restart has nothing in
+  flight; a retry after a crash recovers by reuse as before. Tested with real threads (one held inside its engine call,
+  one and six concurrent replays).
+- **War room timing (noted, workflows unchanged).** The seo-py-idris library takes about 8.5 minutes on one worker,
+  close to the war room's 900 s `WORKER_TIMEOUT_S`; a slower runner, more generated cases or a parallel run can reach
+  the timeout and report ERROR. Not changed here (`.github/workflows/**` and the war-room engine are not touched).
+
 ## What is NOT built (deliberately)
 
 - No LLM-based candidate EXTRACTION (the optional classifier only filters; see review round 2).
@@ -420,7 +467,7 @@ My own cited fixtures after this round (self-authored, same caveats as round 4):
 - No verification of an emerging competitor's domain (domain hints are unverified; citation share stays UNKNOWN);
   no "promote to tracked" action (the tenant adds it to the set, within the 20).
 - No scheduler (the near-real-time tier is on demand, `refresh_due` says when), no dashboard pages, no client-report
-  section, no war-room scenarios for Idris.
+  section (the war-room library for Idris is draft PR #58).
 - No paid SEO data, no consumer-app scraping, no prompt volume; no live call, key or spend (Idris adds none).
 - The maintenance pins and the seo image are not re-released (see "Release").
 

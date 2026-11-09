@@ -39,7 +39,7 @@ from agents import domain_match, idris
 from clock import iso, parse_iso
 from envelope import envelope, sha
 from errors import Conflict, Forbidden, Invalid, NotFound
-from ledger import derived_id
+from ledger import derived_id, payload_sha256 as request_sha
 from reasons import R
 
 log = logging.getLogger("seo.competitors")
@@ -111,8 +111,7 @@ class CompetitorsMixin:
     def _not_the_client(self, t: dict, tid: str, content: dict) -> None:
         """Under the lock: no tracked competitor may be the client — its domain (or a lookalike of it, or a parent of
         it) or its brand terms (or a lookalike of them) as configured in the tenant's prompt sets."""
-        client_terms = sorted({x for p in self.prompt_sets.values() if p["tenant_id"] == tid
-                               for x in p["versions"][str(p["current"])]["brand_terms"]})
+        client_terms = self._client_terms(tid)
         if not client_terms:                      # review round 1: nothing to tell the client from a competitor by
             raise Conflict(R("CLIENT_BRAND_TERMS_REQUIRED"))
         labels = {idris.compact(r.split(".")[0]) for r in (idris.registrable(td) for td in t["domains"]) if r}
@@ -121,6 +120,8 @@ class CompetitorsMixin:
                 for td in t["domains"]:
                     if domain_match.match(d, td) is not None or domain_match.on_site(td, d):
                         raise Invalid(R("COMPETITOR_IS_CLIENT"))
+                if any(idris.client_like_host(d, client_terms, lb) for lb in labels or {None}):
+                    raise Invalid(R("COMPETITOR_IS_CLIENT"))          # WR-F030: the brand's label on another TLD / IDN
             for x in c["terms"] + [c["name"]]:
                 if any(idris.client_like(x, client_terms, lb) for lb in labels or {None}):
                     raise Invalid(R("COMPETITOR_IS_CLIENT"))
@@ -262,6 +263,7 @@ class CompetitorsMixin:
         with self.lock:
             self._gate()
             self._get(self.tenants, tid, "TENANT_NOT_FOUND")
+            t = self.tenants[tid]
             self.check_kill(tenant=tid, write=True)
             rk = self.rk("confirm", tid, body)
             if self._idem(actor, rk, body):
@@ -273,11 +275,35 @@ class CompetitorsMixin:
                 raise Conflict(R("CANDIDATE_ALREADY_DISMISSED"))
             if key in self.emerging_confirmations.get(tid, {}):
                 raise Conflict(R("CANDIDATE_ALREADY_CONFIRMED"))
+            if self._client_lookalike(t, tid, key):
+                # WR-F030: the client's own brand in lookalike letters is an impersonation signal, never a competitor;
+                # there is no override (a real, distinct brand is added to the competitor set, where the same rule
+                # refuses a client lookalike too)
+                raise Conflict(R("CANDIDATE_IS_CLIENT_LOOKALIKE"))
             data = {"tenant_id": tid, "key": key, "by": actor, "name": self._candidate_name(tid, key)}
             self._commit("emerging_competitor_confirmed", self._req(data, actor, rk, body, key), actor,
                          evidence=("emerging_competitor_confirmed", f"competitor_set:{tid}",
                                    {"tenant_id": tid, "key_sha256": sha(key), "by": actor}, (actor, rk)))
             return self._confirmation_view(tid, key)
+
+    def _client_terms(self, tid: str) -> list:
+        return sorted({x for p in self.prompt_sets.values() if p["tenant_id"] == tid
+                       for x in p["versions"][str(p["current"])]["brand_terms"]})
+
+    def _client_lookalike(self, t: dict, tid: str, key: str) -> bool:
+        """Under the lock: is the candidate ``key`` (its key, every name it was written as, every domain it was cited
+        on, over the tenant's observations) the client's brand or domain label, or a lookalike of one (WR-F030)?"""
+        names, domains = set(), set()
+        for o in self.competitor_observations.values():
+            if o["tenant_id"] != tid:
+                continue
+            for c in (o["observations"] or {}).get("candidates") or []:
+                if c["key"] == key:
+                    names |= set(c["display"])
+                    domains |= set(c.get("domain_hints") or {})
+        terms = self._client_terms(tid)
+        labels = {idris.client_domain_label(d) for d in t["domains"]} - {None} or {None}
+        return any(idris.client_lookalike_candidate(key, sorted(names), sorted(domains), terms, lb) for lb in labels)
 
     def _a_emerging_competitor_confirmed(self, d, at):
         self.emerging_confirmations.setdefault(d["tenant_id"], {})[d["key"]] = {"by": d["by"], "at": at,
@@ -327,24 +353,44 @@ class CompetitorsMixin:
             prev = self._idem(eff, rk, body)
             if prev:
                 return self.visibility_run_view(tid, prev[1])
+            # WR-F032: a request id whose run is IN FLIGHT is answered 409 VISIBILITY_RUN_IN_PROGRESS (nothing is
+            # written; retry later for the stored result), or 409 REQUEST_ID_REUSED with another body. Only the
+            # original request records a result under its id.
+            flying = self._vis_in_flight()
+            if (eff, rk) in flying:
+                raise Conflict(R("REQUEST_ID_REUSED" if flying[(eff, rk)] != request_sha(body)
+                                 else "VISIBILITY_RUN_IN_PROGRESS"))
             self._visibility_rules(t, tid, body)
             cid = self._reusable(tid, body)
-        source = "reused" if cid is not None else "fresh"
-        if cid is None:
-            cbody = {"request_id": body["request_id"], "domain": body["domain"],
-                     "prompt_set_id": body["prompt_set_id"]}
-            if body.get("engines"):
-                cbody["engines"] = body["engines"]
-            cid = self.request_citation_run(actor, tid, cbody, andre)["citation_run_id"]   # Callum's rules apply
-        classifier = self._idris_classify(tid, cid, derived_id("vis", tid, eff, rk), body)    # optional, outside lock
-        with self.lock:
-            self._gate()
-            t = self._get(self.tenants, tid, "TENANT_NOT_FOUND")
-            prev = self._idem(eff, rk, body)
-            if prev:
-                return self.visibility_run_view(tid, prev[1])
-            self._visibility_rules(t, tid, body)
-            return self._record_visibility(eff, rk, body, tid, cid, source, andre, classifier)
+            flying[(eff, rk)] = request_sha(body)
+        try:
+            source = "reused" if cid is not None else "fresh"
+            if cid is None:
+                cbody = {"request_id": body["request_id"], "domain": body["domain"],
+                         "prompt_set_id": body["prompt_set_id"]}
+                if body.get("engines"):
+                    cbody["engines"] = body["engines"]
+                cid = self.request_citation_run(actor, tid, cbody, andre)["citation_run_id"]   # Callum's rules apply
+            classifier = self._idris_classify(tid, cid, derived_id("vis", tid, eff, rk), body)  # optional, no lock
+            with self.lock:
+                self._gate()
+                t = self._get(self.tenants, tid, "TENANT_NOT_FOUND")
+                prev = self._idem(eff, rk, body)
+                if prev:
+                    return self.visibility_run_view(tid, prev[1])
+                self._visibility_rules(t, tid, body)
+                return self._record_visibility(eff, rk, body, tid, cid, source, andre, classifier)
+        finally:
+            with self.lock:
+                self._vis_in_flight().pop((eff, rk), None)
+
+    def _vis_in_flight(self) -> dict:
+        """Under the lock: (actor, request key) -> request body sha256 of the visibility runs in flight (memory only:
+        a restart has none in flight, and a retry after a crash recovers by reuse, module docstring)."""
+        got = self.__dict__.get("_idris_in_flight")
+        if got is None:
+            got = self.__dict__["_idris_in_flight"] = {}
+        return got
 
     def _idris_classify(self, tid: str, cid: str, vid: str, body: dict) -> dict:
         """The optional classifier (ADR 0048 round 2): OFF unless SEO_IDRIS_CLASSIFIER_ENGINE names an engine; one

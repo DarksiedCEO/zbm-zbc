@@ -77,19 +77,22 @@ often than the client, with the gap in answers and — against the previous comp
 from __future__ import annotations
 
 import bisect
+import codecs
 import functools
+import hashlib
 import re
+import unicodedata
 from pathlib import Path
 from typing import Optional
 
 import lookalikes
-from agents import brand_mention, callum, domain_match, injection_guard
+from agents import brand_mention, callum, domain_match, injection_guard, text_redact
 from agents.probes import MIN_USABLE, _answer_hash, extract_citations, wilson
 from agents.prompt_guard import personal_data
 from envelope import envelope, finding, observed, sha
 
 AGENT, TASK = "idris", "competitor_visibility"
-VERSION = "idris-rules/2026-11-08.6"
+VERSION = "idris-rules/2026-11-08.7"
 CONTRACT = "idris.share_of_voice/1"
 REFRESH_TIER = "near_real_time"
 MAX_TRACKED = 20                       # configured competitors per tenant (the 21st is refused: COMPETITOR_LIMIT)
@@ -371,24 +374,118 @@ def core_name(name: str) -> str:
     return core_key(compact(" ".join(ws)))
 
 
+_A_LABEL = re.compile(r"(?i)(?<![a-z0-9])xn--[a-z0-9-]{1,59}")
+
+
+def _u_label(m: re.Match) -> str:
+    try:
+        return codecs.decode(m.group(0)[4:].lower().encode("ascii"), "punycode")
+    except (UnicodeError, ValueError):
+        return m.group(0)                          # an invalid A-label is read as written
+
+
+@functools.lru_cache(maxsize=8192)
+def unidn(s: str) -> str:
+    """``s`` with every IDNA A-label (``xn--...``) decoded to its Unicode U-label (WR-F030): a punycode host or name is
+    compared as the letters a reader sees, never as its ASCII encoding."""
+    return _A_LABEL.sub(_u_label, s or "") if "xn--" in (s or "").lower() else (s or "")
+
+
+@functools.lru_cache(maxsize=1)
+def _skeleton_map() -> dict:
+    """UTS #39 confusables (the vendored ``confusables.txt``, Unicode-3.0, pinned by SHA-256 exactly as
+    ``injection_guard`` pins it): code point -> its prototype, every single-code-point source (``0`` -> ``O``,
+    ``1`` -> ``l``, ``m`` -> ``rn``, Cyrillic / Greek letters ...)."""
+    raw = injection_guard.CONFUSABLES.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != injection_guard.CONFUSABLES_SHA256:
+        raise RuntimeError("agents/confusables.txt is not the pinned UTS #39 file")
+    out = {}
+    for line in raw.decode("utf-8-sig").splitlines():
+        parts = [p.strip() for p in line.split("#", 1)[0].split(";")]
+        if len(parts) < 2 or not parts[0] or " " in parts[0]:
+            continue
+        out[chr(int(parts[0], 16))] = "".join(chr(int(c, 16)) for c in parts[1].split())
+    return out
+
+
+# after the skeleton: digit-for-letter swaps the confusables table does not make (``zb3stmedia``), and ``i`` / ``l``
+# read as one (``1``, ``I``, ``|`` are ``l`` in the skeleton already)
+_SWAPS = str.maketrans({"2": "z", "3": "e", "4": "a", "5": "s", "6": "g", "7": "t", "8": "b", "9": "g", "i": "l"})
+
+
+@functools.lru_cache(maxsize=8192)
+def brand_skeleton(s: str) -> str:
+    """The comparison key for client-impersonation checks (WR-F030): IDNA A-labels decoded, NFKC, invisible
+    characters removed, case folded, the shared lookalike fold, the UTS #39 skeleton (NFD, confusables prototypes,
+    NFD), combining marks removed, folded again, digit / letter swaps, then only letters and digits. Two strings
+    with the same skeleton look the same to a reader."""
+    t = unicodedata.normalize("NFKC", lookalikes.strip_invisible(unidn(_ws(s)))).casefold()
+    t = _TABLE.fold_cased(t)
+    m = _skeleton_map()
+    t = unicodedata.normalize("NFD", "".join(m.get(ch, ch) for ch in unicodedata.normalize("NFD", t)))
+    t = "".join(ch for ch in t if not unicodedata.combining(ch))
+    t = _TABLE.fold_cased(unicodedata.normalize("NFKC", t).casefold())
+    t = re.sub(r"[\W_]+", "", t).translate(_SWAPS)
+    return t.replace("vv", "w").replace("rn", "m")       # the skeleton's m -> rn read back: one letter, one edit
+
+
+def _skeleton_like(a: str, b: str) -> bool:
+    return bool(a) and bool(b) and (a == b or (min(len(a), len(b)) >= 6 and _within_one(a, b)))
+
+
 def client_like(name: str, client_terms, client_label: Optional[str] = None) -> Optional[str]:
     """``CLIENT_LOOKALIKE`` when ``name`` (or its core, suffixes and generic nouns removed) is a client brand term or
     the client domain's label, or a lookalike of one; ``CLIENT_VARIANT`` when it contains one (whole words, or — for
-    terms of 5+ characters / labels of 6+ — as a compact substring: ``Zbestmedia LLC``); else None."""
+    terms of 5+ characters / labels of 6+ — as a compact substring: ``Zbestmedia LLC``); else None.
+    WR-F030: also on the decoded U-labels and the UTS #39 skeleton (``brand_skeleton``), so an IDN / punycode,
+    mixed-script, digit-for-letter or ``rn``-for-``m`` spelling of the brand is the client's lookalike."""
+    name = unidn(name)
     key, core = compact(name), core_name(name)
+    sk, score = brand_skeleton(name), brand_skeleton(core)
+    label_sk = brand_skeleton(client_label) if client_label else ""
     for c in client_terms:
         cc = compact(c)
         if lookalike_name(name, c) or (core and lookalike_name(core, cc)):
             return "CLIENT_LOOKALIKE"
-    if client_label and (core == client_label or key == client_label):
+        csk = brand_skeleton(c)
+        if _skeleton_like(sk, csk) or _skeleton_like(score, csk):
+            return "CLIENT_LOOKALIKE"
+    if client_label and (core == client_label or key == client_label or label_sk in (sk, score)):
+        return "CLIENT_LOOKALIKE"
+    if client_label and len(client_label) >= 6 and (_skeleton_like(sk, label_sk) or _skeleton_like(score, label_sk)):
         return "CLIENT_LOOKALIKE"
     for c in client_terms:
-        cc = compact(c)
-        if _contains_words(name, c) or (len(cc) >= 5 and cc in key):
+        cc, csk = compact(c), brand_skeleton(c)
+        if _contains_words(name, c) or (len(cc) >= 5 and cc in key) or (len(csk) >= 5 and csk in sk):
             return "CLIENT_VARIANT"
-    if client_label and len(client_label) >= 6 and client_label in key:
+    if client_label and len(client_label) >= 6 and (client_label in key or label_sk in sk):
         return "CLIENT_VARIANT"
     return None
+
+
+def client_domain_label(domain: str) -> Optional[str]:
+    """The compact registrable label of the client's domain (``site`` for ``www.site.test``), or None."""
+    reg = registrable(domain or "")
+    return compact(reg.split(".")[0]) if reg else None
+
+
+def client_like_host(host: str, client_terms, client_label: Optional[str] = None) -> Optional[str]:
+    """``client_like`` of a host's registrable label, decoded (WR-F030: ``xn--zbstmedia-h0h.com``,
+    ``zbestmedia.net``, ``z-best-media.co``, ``zbestmedia.github.io``); None when the host has no registrable
+    name. A TLD swap is the same label, so it is the same answer."""
+    rg = registrable(host or "")
+    if not rg:
+        return None
+    return client_like(unidn(rg.split(".")[0]), client_terms, client_label)
+
+
+def client_lookalike_candidate(key: str, names, domains, client_terms, client_label: Optional[str] = None) -> bool:
+    """A candidate is the client's lookalike (an impersonation signal, never a competitor) when its key, any name it
+    was written as, or any domain it was cited on is the client's brand term or domain label, a lookalike of one, or
+    contains one (``client_like`` / ``client_like_host``)."""
+    if any(client_like(n, client_terms, client_label) for n in [key, *names] if n):
+        return True
+    return any(client_like_host(d, client_terms, client_label) for d in domains or () if d)
 
 
 def overlapping(a: str, b: str) -> bool:
@@ -609,6 +706,8 @@ def brands(competitor_set: dict, prompt_set: dict, domain: str) -> tuple:
         elif any(domain_match.match(d, domain) is not None or domain_match.on_site(domain, d)
                  for d in c.get("domains") or []):
             why = "CLIENT_DOMAIN"
+        elif any(client_like_host(d, client["terms"], label) for d in c.get("domains") or []):
+            why = "CLIENT_LOOKALIKE"                   # WR-F030: the brand's label on another TLD, IDN, ...
         if why:
             excluded.append({"brand_id": c["competitor_id"], "name": c["name"], "excluded": why})
             continue
@@ -1023,13 +1122,16 @@ def _negative_cue(text: str, b: dict) -> bool:
 
 
 def _excerpt(text: str, at: int) -> dict:
-    t = " ".join((text or "").split())
+    """A bounded excerpt around ``at``. WR-F031: keys and tokens are redacted on the whole raw text first (a token
+    cut by the window is still caught), then on the window; an excerpt with personal data is withheld; e-mail, card,
+    SSN and phone shapes are redacted on what is kept as well."""
+    t = " ".join(text_redact.secrets(text or "").split())
     lo = max(0, min(at, len(t)) - 60)
-    span = t[lo:lo + EXCERPT_MAX]
+    span = text_redact.secrets(t[lo:lo + EXCERPT_MAX])
     kind = personal_data(span)
     if kind is not None:
         return {"excerpt": None, "withheld": f"personal_data:{kind}"}
-    return {"excerpt": observed(span, EXCERPT_MAX), "withheld": None}
+    return {"excerpt": observed(text_redact.redact(span), EXCERPT_MAX), "withheld": None}
 
 
 # ---------------------------------------------------------------------------------------------- observation
@@ -1137,7 +1239,9 @@ def observe(engines: dict, resolver, competitor_set: dict, prompt_set: dict, dom
                 k["refusals"] += 1
                 continue
             k["usable"] += 1
-            text = s["text"] or ""
+            # WR-F031: keys, tokens and credentials are redacted on the RAW answer text before Idris reads any of it,
+            # so no candidate name, excerpt or classifier snippet can carry one (no exemption)
+            text = text_redact.secrets(s["text"] or "")
             owners: dict = {}
             hosts: list = []
             for c in extract_citations(a):
@@ -1201,8 +1305,8 @@ def observe(engines: dict, resolver, competitor_set: dict, prompt_set: dict, dom
                 if why is not None:
                     why = "DOMAIN_" + why
                 elif domain_match.match(rg, domain) is not None \
-                        or client_like(rg.split(".")[0], ctx["client_terms"], ctx["client_label"]):
-                    why = "CLIENT_LOOKALIKE_DOMAIN"
+                        or client_like_host(h, ctx["client_terms"], ctx["client_label"]):
+                    why = "CLIENT_LOOKALIKE_DOMAIN"         # WR-F030: decoded U-label, UTS #39 skeleton
                 if why is not None:
                     excluded[why] = excluded.get(why, 0) + 1
                     continue
@@ -1488,10 +1592,12 @@ def dismissed_by(key: str, dismissals: dict, name: Optional[str] = None) -> Opti
 
 
 def emerging(current: dict, history: list, dismissals: dict, tracked_terms: list, client_terms: list,
-             confirmations: Optional[dict] = None, filtered: Optional[set] = None) -> dict:
+             confirmations: Optional[dict] = None, filtered: Optional[set] = None,
+             client_label: Optional[str] = None) -> dict:
     """The emerging-competitor view over the current run's observations and earlier ones (``history``).
     ``confirmations``: key -> record (confirmed by the owner or the tenant: promoted into the shares);
-    ``filtered``: keys the optional classifier said are not brands (it can only remove)."""
+    ``filtered``: keys the optional classifier said are not brands (it can only remove); ``client_label``: the
+    compact registrable label of the client's domain (client lookalikes are listed apart, WR-F030)."""
     confirmations, filtered = confirmations or {}, filtered or set()
     index = DismissalIndex(dismissals)
     agg: dict = {}
@@ -1522,13 +1628,20 @@ def emerging(current: dict, history: list, dismissals: dict, tracked_terms: list
             for ev in c["evidence"]:
                 if len(a["evidence"]) < MAX_EVIDENCE:
                     a["evidence"].append(ev)
-    items, watch, dismissed_seen, confirmed, removed = [], [], [], [], []
+    items, watch, dismissed_seen, confirmed, removed, lookalikes_out = [], [], [], [], [], []
     for key, a in sorted(agg.items()):
         domains = sorted(a["domain_hints"], key=lambda h: (-a["domain_hints"][h], h))
         name = _best(a["display"]) or (domains[0] if domains else key)
         if any(key == compact(t) or _contains_words(name, t) for t in tracked_terms):
             continue                                  # tracked now (the set changed since): not emerging
-        if any(lookalike_name(name, t) for t in client_terms):
+        if client_lookalike_candidate(key, [name, *a["display"]], domains, client_terms, client_label):
+            # WR-F030: the client's own brand in lookalike letters (IDN / punycode, mixed script, digit swaps, hyphens,
+            # another TLD) is an impersonation signal — never EMERGING, WATCH, CONFIRMED or in a share, whatever an
+            # earlier run recorded or a person confirmed
+            if (a["answers_this_run"] or key in confirmations) and len(lookalikes_out) < MAX_WATCH_LISTED:
+                lookalikes_out.append({"key": key, "name": name, "state": "CLIENT_LOOKALIKE",
+                                       "signal": "impersonation", "answers_this_run": a["answers_this_run"],
+                                       "domains": domains[:3], "confirmed_before": key in confirmations})
             continue
         view = {"key": key, "name": name, "answers": a["answers"],
                 "answers_this_run": a["answers_this_run"], "engines": sorted(a["engines"]),
@@ -1590,7 +1703,8 @@ def emerging(current: dict, history: list, dismissals: dict, tracked_terms: list
         it["listed_in_benchmark"] = i < MAX_EMERGING_FOLDED
     return {"rule": EMERGING_RULE, "items": items, "watch": watch[:MAX_WATCH_LISTED],
             "watch_total": len(watch), "dismissed_seen": sorted(dismissed_seen, key=order), "confirmed": confirmed,
-            "classifier_filtered": sorted(removed, key=order), "runs_considered": 1 + len(history)}
+            "classifier_filtered": sorted(removed, key=order), "client_lookalikes": lookalikes_out,
+            "runs_considered": 1 + len(history)}
 
 
 def _best(display: dict) -> str:
@@ -1622,9 +1736,11 @@ def compute(obs: dict, history: list, dismissals: dict, previous: Optional[dict]
     client_terms = next(b["terms"] for b in obs["brands"] if b["origin"] == "client")
     classifier = classifier or {"state": "OFF"}
     em = emerging(obs, history, dismissals, tracked_terms, client_terms, confirmations,
-                  set(classifier.get("not_brand_keys") or ())) if obs.get("emerging_detection") else \
+                  set(classifier.get("not_brand_keys") or ()), client_domain_label(obs["domain"])) \
+        if obs.get("emerging_detection") else \
         {"rule": EMERGING_RULE, "items": [], "watch": [], "watch_total": 0, "dismissed_seen": [], "runs_considered": 0,
-         "confirmed": [], "classifier_filtered": [], "off": "emerging detection is off for this competitor set"}
+         "confirmed": [], "classifier_filtered": [], "client_lookalikes": [],
+         "off": "emerging detection is off for this competitor set"}
     em["classifier"] = {k: v for k, v in classifier.items() if k != "not_brand_keys"}
     # review round 1: emerging competitors are listed in the benchmark with their PRESENCE only and kept OUT of
     # every share denominator (reported apart, ``excluded_from_shares``) until a human tracks them
