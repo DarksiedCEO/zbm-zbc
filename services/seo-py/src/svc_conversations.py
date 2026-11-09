@@ -168,7 +168,7 @@ class ConversationsMixin:
             guard = self.guard(tid)
             topics = fireteam_topics.plan(ps, items)
             plans = {t["topic_key"]: theo.plan_turns(t, items) for t in topics} if topics else {}
-            box = zara.Crosscheck(tid, vid, topics)
+            box = zara.Crosscheck(tid, vid, topics, ps["engines"])
             try:
                 guard(agent="zara")
                 out = self._swarm(vid, tid, domain, ps, items, competitor_terms, guard, topics, plans, box,

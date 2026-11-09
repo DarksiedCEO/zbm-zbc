@@ -156,7 +156,8 @@ def test_every_item_type_is_bounded_and_checked_against_how_priya_builds_it():
 def test_verification_against_priyas_record():
     doc = handoff(item("a", "q one", counts=dict(GSC)))
     h = priya_handoff.canonical_sha(doc)
-    rec = {"run_id": doc["run_id"], "tenant_id": "zbm", "status": "completed", "handoff_sha256": h, "handoff_items": 1}
+    rec = {"run_id": doc["run_id"], "tenant_id": "zbm", "status": "completed", "handoff_sha256": h,
+           "handoff_items": 1, "handoff_record": "priya.handoff_record/1"}
     v = priya_handoff.verify
     assert v(doc, "zbm", doc["run_id"], h, rec) == {"state": "VERIFIED", "reason": None}
     assert v(doc, "zbm", None, None, rec)["state"] == "NOT_VERIFIED"
@@ -181,3 +182,35 @@ def test_wrong_schema_untrusted_flag_and_duplicate_keys_are_refused():
     a = item("a", "q one", counts=dict(GSC))
     assert priya_handoff.validate(handoff(a, dict(a)), "zbm") == ["items[1].key"]
     assert priya_handoff.validate(handoff(item("b", "q two")), "zbm") == ["items[0].volume_status"]   # no counts
+
+
+def test_verification_rejects_a_record_of_another_contract_run_or_item_count():
+    """Review round 9: the record must be Priya's contract, for the claimed run, with a real whole item count."""
+    doc = handoff(item("a", "q one", counts=dict(GSC)))
+    h = priya_handoff.canonical_sha(doc)
+    rec = {"run_id": doc["run_id"], "tenant_id": "zbm", "status": "completed", "handoff_sha256": h,
+           "handoff_items": 1, "handoff_record": "priya.handoff_record/1"}
+    v = priya_handoff.verify
+    assert v(doc, "zbm", doc["run_id"], h, rec)["state"] == "VERIFIED"
+    for bad, reason in (({"handoff_record": "priya.handoff_record/2"}, "RECORD_CONTRACT_MISMATCH"),
+                        ({"handoff_record": None}, "RECORD_CONTRACT_MISMATCH"),
+                        ({"run_id": "seo-kwr-" + "2" * 40}, "RECORD_RUN_ID_MISMATCH"),
+                        ({"handoff_items": True}, "RECORD_ITEMS_MISMATCH"),
+                        ({"handoff_items": 2}, "RECORD_ITEMS_MISMATCH"),
+                        ({"handoff_items": "1"}, "RECORD_ITEMS_MISMATCH")):
+        assert v(doc, "zbm", doc["run_id"], h, {**rec, **bad}) == {"state": "FAILED", "reason": reason}, bad
+    missing = {k: x for k, x in rec.items() if k != "handoff_items"}
+    assert v(doc, "zbm", doc["run_id"], h, missing) == {"state": "FAILED", "reason": "RECORD_ITEMS_MISMATCH"}
+    missing = {k: x for k, x in rec.items() if k != "handoff_record"}
+    assert v(doc, "zbm", doc["run_id"], h, missing)["reason"] == "RECORD_CONTRACT_MISMATCH"
+
+
+def test_validation_rejects_extra_top_level_and_query_keys():
+    doc = handoff(item("a", "q one", counts=dict(GSC)))
+    assert priya_handoff.validate(doc, "zbm") == []
+    assert priya_handoff.validate({**doc, "extra": 1}, "zbm") == ["keys"]
+    short = {k: x for k, x in doc.items() if k != "rule"}
+    assert priya_handoff.validate(short, "zbm") == ["keys"]
+    it = item("a", "q one", counts=dict(GSC))
+    it["query"]["extra"] = "x"
+    assert priya_handoff.validate(handoff(it), "zbm") == ["items[0].query"]

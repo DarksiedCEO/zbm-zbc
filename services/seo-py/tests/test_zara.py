@@ -144,17 +144,19 @@ def test_contradictory_member_outputs_are_held_never_repaired():
     bad_ch = copy.deepcopy(ch)
     bad_ch[k0][0]["complete"] = 99                                        # more complete chains than chains
     bad_vol = copy.deepcopy(vol)
-    bad_vol[k1]["band"] = {"low": 0, "high": 0}                           # UNKNOWN with a band
+    bad_vol[k1]["band"] = {"low": 0, "high": 0, "interval": "garwood_poisson_95", "method": "x"}   # UNKNOWN + band
     r = box_with(t, plans, res, bad_ch, vout, bad_vol)
-    assert [(i["verdict"], i["hold_reason"]) for i in r["items"]] == [("HELD", "THEO_SELF_CONTRADICTION"),
+    assert [(i["verdict"], i["hold_reason"]) for i in r["items"]] == [("HELD", "THEO_PAYLOAD_INVALID"),
                                                                       ("HELD", "NAOMI_SELF_CONTRADICTION")]
     assert all(i["chain"] is None and i["volume"] is None for i in r["items"])
     lie = copy.deepcopy(ch)
     lie[k0][0]["pattern"] = "INVISIBLE_THEN_RECOMMENDED"
-    lie[k0][0]["by_turn"][0]["client_mentioned"]["k"] = 2                 # but visible at turn one
+    lie[k0][0]["by_turn"][0]["client_mentioned"] = theo._rate(2, 3)       # but visible at turn one
     hi = copy.deepcopy(vol)
-    hi[k1].update(status="DIRECTIONAL_PROXY", reliability="STRONG", confidence="MEDIUM", band={"low": 1, "high": 2},
-                  signals=[{"observed_impressions": 5}])                  # STRONG on 5, band without its count
+    sig = naomi._signal({**GSC, "impressions": 5}, item("a", "q", counts={**GSC, "impressions": 5}), True)
+    hi[k1].update(status="DIRECTIONAL_PROXY", reliability="STRONG", confidence="MEDIUM", verified=True,
+                  band={"low": 1, "high": 2, "interval": "garwood_poisson_95", "method": "x"},
+                  signals=[sig])                                          # STRONG on 5, band without its count
     r = box_with(t, plans, res, lie, vout, hi)
     assert [i["hold_reason"] for i in r["items"]] == ["THEO_NATIVE_PATTERN_WITHOUT_BASIS", "NAOMI_SELF_CONTRADICTION"]
     hi[k1].update(confidence="HIGH")                                      # outside Naomi's vocabulary: never HIGH
@@ -198,9 +200,11 @@ def test_engines_disagreeing_and_unstable_chains_are_flagged():
     lose.update(engine="anthropic", pattern="NOT_RECOMMENDED", client_outcome="NOT_RECOMMENDED",
                 final_recommendation={**lose["final_recommendation"],
                                       "recommended": {"client": 0, "competitor": {"RivalCo": 3}}})
-    lose["client_recommended"] = {**lose["client_recommended"], "k": 0}
-    mixed = copy.deepcopy(ch[k][0])
-    mixed.update(engine="google", unstable=True)
+    lose["client_recommended"] = theo._rate(0, 3)
+    mixed = copy.deepcopy(ch[k][0])                                       # honestly unstable: 2 client + 1 RivalCo
+    mixed.update(engine="google", unstable=True, client_recommended=theo._rate(2, 3),
+                 final_recommendation={**mixed["final_recommendation"],
+                                       "recommended": {"client": 2, "competitor": {"RivalCo": 1}}})
     vout, vol = volumes_for(t)
     r = box_with(t, plans, res, {k: ch[k] + [lose, mixed]}, vout, vol)
     assert set(r["items"][0]["conflicts"]) == {"STRONG_CHAIN_UNKNOWN_VOLUME", "UNSTABLE_CHAIN", "ENGINES_DISAGREE"}
@@ -402,3 +406,158 @@ def test_injection_suspected_guards_each_hold():
     assert _hold("injection_suspected", {"_merge": True, "complete": "x"}) == "THEO_PAYLOAD_INVALID"
     assert _hold("injection_suspected", {"_merge": True, "chains": 1, "complete": 2}) == "THEO_PAYLOAD_INVALID"
     assert _hold("injection_suspected", {"_merge": True, "chains": 4, "complete": 3}) == "THEO_PAYLOAD_INVALID"
+
+
+# ---------------------------------------------------------------------------------------------- review round 9
+
+def _verified_one():
+    its = [item("a", PS2["prompts"][0], counts={**GSC, "impressions": 300, "source": "first_party:bing_webmaster"},
+                status="MEASURED_NOT_TIERED")]
+    t, plans = topics(ps={**PS, "prompts": PS2["prompts"][:1]}, items=its)
+    res, ch = chains_for(t, plans)
+    vout, vol = volumes_for(t, its, verified=True)
+    return t, plans, res, ch, vout, vol
+
+
+def _item_after(edit, engines=None, volume_edit=None):
+    t, plans, res, ch, vout, vol = _verified_one()
+    k = t[0]["topic_key"]
+    lie, vl = copy.deepcopy(ch), copy.deepcopy(vol)
+    if edit:
+        edit(lie[k])
+    if volume_edit:
+        volume_edit(vl[k])
+    b = zara.Crosscheck("zbm", RUN, t, engines)
+    for m in ("theo", "naomi"):
+        b.receive(m, k, lie[k] if m == "theo" else vl[k])
+        b.member_contract(m, theo.output("zbm", RUN, t, plans, res, 3) if m == "theo" else vout)
+        b.member_closed(m, "DONE")
+    return b.result()["items"][0]
+
+
+def test_zara_recomputes_stability_and_flags_a_lying_unstable_flag():
+    assert _item_after(None)["verdict"] == "CLEARED"                       # the honest payload clears
+
+    def two_winners(unstable, honest_rate=True):
+        def e(cs):
+            c = cs[0]
+            c["final_recommendation"]["recommended"] = {"client": 2, "competitor": {"RivalCo": 1}}
+            if honest_rate:
+                c["client_recommended"] = theo._rate(2, 3)
+            else:
+                c["client_recommended"]["k"] = 2                           # the reviewer's repro: value left stale
+            c["unstable"] = unstable
+        return e
+    i = _item_after(two_winners(False))
+    assert i["verdict"] == "FLAGGED" and i["conflicts"] == ["UNSTABLE_CHAIN", "UNSTABLE_FLAG_MISMATCH"]
+    assert i["downstream"] == {"passes": True, "decision": "INSUFFICIENT_EVIDENCE", "priority_basis": "volume_only"}
+    i = _item_after(two_winners(True))                                     # honest flag: unstable, no mismatch
+    assert i["verdict"] == "FLAGGED" and i["conflicts"] == ["UNSTABLE_CHAIN"]
+    assert i["downstream"]["priority_basis"] == "chain_and_volume"
+    i = _item_after(two_winners(False, honest_rate=False))
+    assert i["verdict"] == "FLAGGED"
+    assert i["conflicts"] == ["UNSTABLE_CHAIN", "UNSTABLE_FLAG_MISMATCH", "RATE_MISMATCH"]
+
+    def claims_unstable(cs):
+        cs[0]["unstable"] = True                                           # one winner: instability cannot exist
+    i = _item_after(claims_unstable)
+    assert i["verdict"] == "FLAGGED" and i["conflicts"] == ["UNSTABLE_FLAG_MISMATCH"]
+
+
+def test_a_rate_whose_value_disagrees_with_its_counts_is_flagged_never_cleared():
+    def stale(cs):
+        cs[0]["by_turn"][-1]["client_mentioned"]["value"] = 0.5
+    i = _item_after(stale)
+    assert i["verdict"] == "FLAGGED" and i["conflicts"] == ["RATE_MISMATCH"]
+    assert i["downstream"]["priority_basis"] == "volume_only"
+    assert zara.stability({"recommended": {"client": 0, "competitor": {"A": 1}},
+                           "named_first_only": {"client": 0, "competitor": {}}, "none": 1, "unknown": 0}) is True
+    assert zara.stability({"recommended": {"client": 3, "competitor": {"A": 0}},
+                           "named_first_only": {"client": 0, "competitor": {}}, "none": 0, "unknown": 0}) is False
+
+
+def _set(path, value):
+    def e(cs):
+        d = cs[0]
+        for p in path[:-1]:
+            d = d[p]
+        d[path[-1]] = value
+    return e
+
+
+def _held(edit, engines=None, volume_edit=None):
+    i = _item_after(edit, engines, volume_edit)
+    return i["verdict"], i["hold_reason"]
+
+
+def test_extra_keys_are_rejected_in_every_theo_structure():
+    for path in (("divergent_under_history",), ("final_recommendation",), ("by_turn", 0), ("client_recommended",),
+                 ("by_turn", 0, "client_mentioned"), ("final_recommendation", "recommended")):
+        assert _held(_set(path + ("extra",), 1)) == ("HELD", "THEO_PAYLOAD_INVALID"), path
+
+
+def test_bools_and_negatives_are_no_counts_even_when_the_sums_balance():
+    for path, value in ((("loop_stopped",), True), (("final_recommendation", "none"), True),
+                        (("by_turn", 0, "client_mentioned", "k"), True), (("divergent_under_history", "divergent"),
+                                                                         False),
+                        (("divergent_under_history", "checked"), -1)):
+        assert _held(_set(path, value)) == ("HELD", "THEO_PAYLOAD_INVALID"), path
+
+    def balanced(cs):                                 # 4 + (-1) still sums to 3 complete chains
+        cs[0]["final_recommendation"]["recommended"]["client"] = 4
+        cs[0]["final_recommendation"]["none"] = -1
+    assert _held(balanced) == ("HELD", "THEO_PAYLOAD_INVALID")
+
+    def negative_rival(cs):
+        cs[0]["final_recommendation"]["recommended"] = {"client": 4, "competitor": {"RivalCo": -1}}
+    assert _held(negative_rival) == ("HELD", "THEO_PAYLOAD_INVALID")
+
+
+def test_the_divergent_under_history_counts_and_every_note_are_checked():
+    # each guard on its own (review round 9 mutation survivors): a bool count and a non-string note
+    assert _held(_set(("divergent_under_history", "agreed_clean"), False)) == ("HELD", "THEO_PAYLOAD_INVALID")
+    assert _held(_set(("divergent_under_history", "checked"), "0")) == ("HELD", "THEO_PAYLOAD_INVALID")
+    for field in ("divergent_under_history", "injection_suspected", "too_long_to_scan"):
+        for note in (None, 5, ["x"]):
+            assert _held(_set((field, "note"), note)) == ("HELD", "THEO_PAYLOAD_INVALID"), (field, note)
+
+
+def test_engines_must_be_run_engines_and_appear_once():
+    assert _item_after(None, engines=["openai"])["verdict"] == "CLEARED"
+    assert _held(None, engines=["anthropic"]) == ("HELD", "THEO_PAYLOAD_INVALID")
+    assert _held(_set(("engine",), None)) == ("HELD", "THEO_PAYLOAD_INVALID")
+
+    def twice(cs):
+        cs.append(copy.deepcopy(cs[0]))
+    assert _held(twice) == ("HELD", "THEO_PAYLOAD_INVALID")
+
+
+def test_loop_stopped_not_complete_and_turns_planned_are_validated():
+    for path, value in ((("loop_stopped",), 1), (("not_complete",), {"ENGINE_ERROR": 1}),
+                        (("not_complete",), {"ENGINE_ERROR": 0}), (("not_complete",), "x"),
+                        (("turns_planned",), 0), (("turns_planned",), theo.MAX_TURNS + 1),
+                        (("turns_planned",), True), (("plan_flags",), [1]), (("unstable",), 0)):
+        assert _held(_set(path, value)) == ("HELD", "THEO_PAYLOAD_INVALID"), (path, value)
+
+
+def test_bad_types_are_held_never_crash():
+    assert _held(_set(("client_recommended",), "x")) == ("HELD", "THEO_PAYLOAD_INVALID")
+    assert _held(_set(("by_turn",), "x")) == ("HELD", "THEO_PAYLOAD_INVALID")
+    assert _held(_set(("final_recommendation",), [])) == ("HELD", "THEO_PAYLOAD_INVALID")
+    assert _held(None, volume_edit=lambda v: v.update(signals="x")) == ("HELD", "NAOMI_PAYLOAD_INVALID")
+    assert _held(None, volume_edit=lambda v: v.update(flags=None)) == ("HELD", "NAOMI_PAYLOAD_INVALID")
+
+
+def test_naomi_band_and_every_signal_are_strict_and_finite():
+    def band(**kw):
+        return lambda v: v["band"].update(kw)
+
+    def sig(**kw):
+        return lambda v: v["signals"][0].update(kw)
+    assert _item_after(None)["verdict"] == "CLEARED"
+    for e in (band(extra=1), band(low=float("nan")), band(high=float("inf")), band(low=True),
+              sig(extra=1), sig(observed_impressions=True), sig(observed_impressions=-1),
+              sig(band={"low": 0, "high": 1}), sig(band_per_day={"low": float("nan"), "high": 1}),
+              sig(band_per_day={"low": 0, "high": 1, "x": 2}), sig(reliability="HUGE"),
+              sig(reliability_if_verified="HUGE")):
+        assert _held(None, volume_edit=e) == ("HELD", "NAOMI_PAYLOAD_INVALID")

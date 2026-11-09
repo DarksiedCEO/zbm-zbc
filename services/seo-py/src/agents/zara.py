@@ -15,7 +15,10 @@ tenant or run, names a topic nobody planned, or contradicts itself is HELD, neve
   STRONG_CHAIN_THIN_VOLUME     Theo: a STRONG chain on some engine; Naomi: THIN volume
   STRONG_CHAIN_UNKNOWN_VOLUME  Theo: a STRONG chain; Naomi: UNKNOWN (no owned signal)
   VOLUME_WITHOUT_CHAIN         Naomi: a measured proxy; Theo: no complete chain on any engine
-  UNSTABLE_CHAIN               Theo: the complete chains of one engine recommend different entities
+  UNSTABLE_CHAIN               Theo: the complete chains of one engine recommend different entities (recomputed by
+                               Zara from final_recommendation, never taken from Theo's ``unstable`` flag)
+  UNSTABLE_FLAG_MISMATCH       Theo: its ``unstable`` flag disagrees with the stability Zara recomputes
+  RATE_MISMATCH                Theo: a rate's value / ci95 / directional disagree with its own k and n
   ENGINES_DISAGREE             Theo: one engine's chains recommend the client, another's a competitor
   HANDOFF_NOT_VERIFIED         Naomi: the volume rests on a hand-off not verified against Priya's record (BLOCKING:
                                the topic is never CLEARED, never TEST, and volume is never a priority basis)
@@ -34,6 +37,7 @@ the volume reliability and the conflicts (``to_priya``); nothing consumes it yet
 
 from __future__ import annotations
 
+import math
 import threading
 from typing import Optional
 
@@ -45,7 +49,9 @@ VERSION = "zara-rules/2026-11-08.1"
 CONTRACT = "zara.conversation_volume/1"
 VERDICTS = ("CLEARED", "FLAGGED", "PARTIAL", "NOTHING_OBSERVED", "HELD")
 CONFLICTS = ("STRONG_CHAIN_THIN_VOLUME", "STRONG_CHAIN_UNKNOWN_VOLUME", "VOLUME_WITHOUT_CHAIN", "UNSTABLE_CHAIN",
-             "ENGINES_DISAGREE", "HANDOFF_NOT_VERIFIED")
+             "ENGINES_DISAGREE", "HANDOFF_NOT_VERIFIED", "UNSTABLE_FLAG_MISMATCH",
+             "RATE_MISMATCH")
+SELF_CONTRADICTIONS = ("UNSTABLE_FLAG_MISMATCH", "RATE_MISMATCH")   # never a chain ranking basis
 HOLDS = ("THEO_PAYLOAD_INVALID", "NAOMI_PAYLOAD_INVALID", "THEO_SELF_CONTRADICTION", "NAOMI_SELF_CONTRADICTION",
          "TOPIC_NOT_PLANNED", "BOTH_MEMBERS_MISSING", "DUPLICATE_PAYLOAD", "THEO_TENANT_OR_RUN_MISMATCH",
          "NAOMI_TENANT_OR_RUN_MISMATCH",
@@ -53,7 +59,7 @@ HOLDS = ("THEO_PAYLOAD_INVALID", "NAOMI_PAYLOAD_INVALID", "THEO_SELF_CONTRADICTI
          "THEO_STRUCTURAL_CHECKED_EXCEEDS_COMPLETE", "THEO_STRUCTURAL_DIVERGENT_EXCEEDS_CHECKED",
          "THEO_STRUCTURAL_AGREED_EXCEEDS_UNDIVERGED", "THEO_NATIVE_PATTERN_WITHOUT_BASIS",
          # review round 7: an agreeing chain is never a flagged or too-long one
-         "THEO_STRUCTURAL_AGREED_INCLUDES_FLAGGED", "THEO_STRUCTURAL_AGREED_INCLUDES_TOO_LONG")
+         "THEO_STRUCTURAL_AGREED_INCLUDES_FLAGGED", "THEO_STRUCTURAL_AGREED_INCLUDES_TOO_LONG", "CHECK_FAILED")
 _CONTRACTS = {"theo": theo.CONTRACT, "naomi": naomi.CONTRACT}
 MEMBERS = ("theo", "naomi")
 MEMBER_STATES = ("DONE", "FAILED", "RESTRICTED", "KILLED", "TIMED_OUT", "NOT_RUN")
@@ -75,7 +81,129 @@ _VOL_KEYS = {"topic_key", "proxy_for", "estimator", "status", "verified", "relia
 
 
 def _num(x) -> bool:
-    return isinstance(x, (int, float)) and not isinstance(x, bool)
+    return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+
+
+def _nat(x) -> bool:
+    """A whole number >= 0, never a bool."""
+    return isinstance(x, int) and not isinstance(x, bool) and x >= 0
+
+
+_RATE_KEYS = {"value", "k", "n", "ci95", "interval", "directional"}
+_TURN_KEYS = {"turn", "kind", "source", "client_mentioned", "client_mentioned_unconfirmed", "client_cited",
+              "client_cited_unknown", "competitor_mentioned"}
+_FR_KEYS = {"recommended", "named_first_only", "none", "unknown", "basis", "max_confidence"}
+_DV_KEYS = {"checked", "divergent", "agreed_clean", "note"}
+_BAND_KEYS = {"low", "high", "interval", "method"}
+_SIGNAL_KEYS = {"source", "priya_key", "observed_impressions", "window", "window_days", "band", "band_per_day",
+                "reliability", "reliability_if_verified", "unit", "data_class", "provenance"}
+
+
+def _rate_ok(r, n: int) -> bool:
+    """A Wilson rate's STRUCTURE exactly as Theo writes it: strict keys, whole numbers, 0 <= k <= n, n = the expected
+    n, finite numbers. Its derived fields (value / ci95 / directional) are NOT trusted here: Zara recomputes them from
+    k and n, and a disagreement is the RATE_MISMATCH conflict (FLAGGED), see ``rate_mismatch`` (round 9)."""
+    if not isinstance(r, dict) or set(r) != _RATE_KEYS or not _nat(r["k"]) or not _nat(r["n"]):
+        return False
+    if r["n"] != n or r["k"] > r["n"] or not isinstance(r["directional"], bool) or r["interval"] != "wilson_95":
+        return False
+    if r["value"] is not None and not _num(r["value"]):
+        return False
+    ci = r["ci95"]
+    return ci is None or (isinstance(ci, list) and len(ci) == 2 and all(_num(x) for x in ci))
+
+
+def _derived_ok(r: dict) -> bool:
+    """The derived fields equal what Zara recomputes from k and n itself."""
+    return r == theo._rate(r["k"], r["n"])
+
+
+def rate_mismatch(c: dict) -> bool:
+    """Any rate in a (structurally valid) chain summary whose value / ci95 / directional disagree with its counts."""
+    rates = [c["client_recommended"]] + [t[k] for t in c["by_turn"]
+                                         for k in ("client_mentioned", "client_cited", "competitor_mentioned")]
+    return not all(_derived_ok(r) for r in rates)
+
+
+def _box_ok(box) -> bool:
+    return isinstance(box, dict) and set(box) == {"client", "competitor"} and _nat(box["client"]) \
+        and isinstance(box["competitor"], dict) and all(isinstance(k, str) and _nat(v)
+                                                        for k, v in box["competitor"].items())
+
+
+def _theo_shape(c: dict, nc: int, engines) -> Optional[str]:
+    """Round 9: every nested structure of a chain summary, strictly (keys, types, ranges)."""
+    if not isinstance(c.get("engine"), str) or (engines is not None and c["engine"] not in engines):
+        return "THEO_PAYLOAD_INVALID"
+    if c["native_status"] is not None and not isinstance(c["native_status"], str):
+        return "THEO_PAYLOAD_INVALID"
+    if not all(_nat(c[k]) for k in ("chains", "complete", "loop_stopped", "turns_planned")):
+        return "THEO_PAYLOAD_INVALID"
+    if not 1 <= c["turns_planned"] <= theo.MAX_TURNS or c["loop_stopped"] > c["chains"] - nc:
+        return "THEO_PAYLOAD_INVALID"
+    nc_map = c["not_complete"]
+    if not isinstance(nc_map, dict) or not all(isinstance(k, str) and _nat(v) and v > 0 for k, v in nc_map.items()) \
+            or sum(nc_map.values()) != c["chains"] - nc:
+        return "THEO_PAYLOAD_INVALID"
+    if not isinstance(c["plan_flags"], list) or not all(isinstance(x, str) for x in c["plan_flags"]):
+        return "THEO_PAYLOAD_INVALID"
+    if not isinstance(c["unstable"], bool):
+        return "THEO_PAYLOAD_INVALID"
+    dv = c["divergent_under_history"]
+    if not isinstance(dv, dict) or set(dv) != _DV_KEYS or not isinstance(dv["note"], str):
+        return "THEO_PAYLOAD_INVALID"
+    fr = c["final_recommendation"]
+    if not isinstance(fr, dict) or set(fr) != _FR_KEYS or not _box_ok(fr["recommended"]) \
+            or not _box_ok(fr["named_first_only"]) or not _nat(fr["none"]) or not _nat(fr["unknown"]) \
+            or not isinstance(fr["basis"], str) or fr["max_confidence"] != "MEDIUM":
+        return "THEO_PAYLOAD_INVALID"
+    if not _rate_ok(c["client_recommended"], nc):
+        return "THEO_PAYLOAD_INVALID"
+    bt = c["by_turn"]
+    if not isinstance(bt, list) or len(bt) != c["turns_planned"]:
+        return "THEO_PAYLOAD_INVALID"
+    for i, x in enumerate(bt):
+        if not isinstance(x, dict) or set(x) != _TURN_KEYS or x["turn"] != i + 1 or x["kind"] not in theo.TURN_KINDS \
+                or not isinstance(x["source"], str):
+            return "THEO_PAYLOAD_INVALID"
+        if not all(_rate_ok(x[k], nc) for k in ("client_mentioned", "client_cited", "competitor_mentioned")):
+            return "THEO_PAYLOAD_INVALID"
+        if not _nat(x["client_mentioned_unconfirmed"]) or not _nat(x["client_cited_unknown"]) \
+                or x["client_mentioned"]["k"] + x["client_mentioned_unconfirmed"] > nc \
+                or x["client_cited"]["k"] + x["client_cited_unknown"] > nc:
+            return "THEO_PAYLOAD_INVALID"
+    return None
+
+
+def stability(fr: dict) -> bool:
+    """Round 9: whether the complete chains disagree, recomputed from the counts (Theo's rule: one 'winner' per
+    complete chain — the client, a named competitor, or no recommendation — and unstable when more than one)."""
+    winners = (fr["recommended"]["client"] > 0) + sum(1 for v in fr["recommended"]["competitor"].values() if v > 0) \
+        + ((fr["named_first_only"]["client"] + sum(fr["named_first_only"]["competitor"].values()) + fr["none"]) > 0)
+    return winners > 1
+
+
+def _volume_shape(v: dict) -> Optional[str]:
+    """Round 9: Naomi's band and every signal, strictly (keys, finite numbers)."""
+    if not isinstance(v["signals"], list) or not isinstance(v["flags"], list):
+        return "NAOMI_PAYLOAD_INVALID"
+    b = v["band"]
+    if b is not None and (not isinstance(b, dict) or set(b) != _BAND_KEYS or not _num(b["low"])
+                          or not _num(b["high"]) or not isinstance(b["interval"], str)):
+        return "NAOMI_PAYLOAD_INVALID"
+    for sg in v["signals"]:
+        if not isinstance(sg, dict) or set(sg) != _SIGNAL_KEYS or not _nat(sg["observed_impressions"]):
+            return "NAOMI_PAYLOAD_INVALID"
+        sb = sg["band"]
+        if not isinstance(sb, dict) or set(sb) != _BAND_KEYS or not _num(sb["low"]) or not _num(sb["high"]):
+            return "NAOMI_PAYLOAD_INVALID"
+        pd = sg["band_per_day"]
+        if pd is not None and (not isinstance(pd, dict) or set(pd) != {"low", "high"} or not _num(pd["low"])
+                               or not _num(pd["high"])):
+            return "NAOMI_PAYLOAD_INVALID"
+        if sg["reliability"] not in naomi.RELIABILITY or sg["reliability_if_verified"] not in naomi.RELIABILITY:
+            return "NAOMI_PAYLOAD_INVALID"
+    return None
 
 
 def _counts(box) -> Optional[int]:
@@ -88,14 +216,29 @@ def _counts(box) -> Optional[int]:
     return box["client"] + sum(vals)
 
 
-def check_chains(chains, topic_key: str) -> Optional[str]:
+def check_chains(chains, topic_key: str, engines=None) -> Optional[str]:
     """None when Theo's half for a topic is well-formed and consistent; else the hold reason. The pattern, outcome
-    and strength are RE-DERIVED here from the counts with Theo's own rule and must agree (review round 1 MED 4)."""
+    and strength are RE-DERIVED here from the counts with Theo's own rule and must agree (review round 1 MED 4).
+    Round 9: a payload of the wrong types is HELD, never a crash."""
+    try:
+        return _check_chains(chains, topic_key, engines)
+    except Exception:  # noqa: BLE001 - any shape no rule anticipated is invalid, never a crash in the inbox
+        return "THEO_PAYLOAD_INVALID"
+
+
+def _check_chains(chains, topic_key: str, engines=None) -> Optional[str]:
     if not isinstance(chains, list) or not chains:
         return "THEO_PAYLOAD_INVALID"
+    seen_engines: set = set()
     for c in chains:
         if not isinstance(c, dict) or set(c) != _CHAIN_KEYS or c["topic_key"] != topic_key:
             return "THEO_PAYLOAD_INVALID"
+        if not _nat(c["complete"]) or c["engine"] in seen_engines:       # one summary per engine
+            return "THEO_PAYLOAD_INVALID"
+        seen_engines.add(c["engine"])
+        why = _theo_shape(c, c["complete"], engines)
+        if why is not None:
+            return why
         if c["pattern"] not in theo.PATTERNS or c["strength"] not in theo.STRENGTHS \
                 or c["context_mode"] not in theo.CONTEXT_MODES \
                 or c["client_outcome"] not in theo.OUTCOMES + (None,):
@@ -164,9 +307,19 @@ def check_chains(chains, topic_key: str) -> Optional[str]:
 
 
 def check_volume(v, topic_key: str) -> Optional[str]:
-    """None when Naomi's half is well-formed and consistent; else the hold reason."""
+    """None when Naomi's half is well-formed and consistent; else the hold reason (round 9: never a crash)."""
+    try:
+        return _check_volume(v, topic_key)
+    except Exception:  # noqa: BLE001 - any shape no rule anticipated is invalid
+        return "NAOMI_PAYLOAD_INVALID"
+
+
+def _check_volume(v, topic_key: str) -> Optional[str]:
     if not isinstance(v, dict) or set(v) != _VOL_KEYS or v["topic_key"] != topic_key:
         return "NAOMI_PAYLOAD_INVALID"
+    why = _volume_shape(v)
+    if why is not None:
+        return why
     if v["status"] not in naomi.STATUSES or v["reliability"] not in naomi.RELIABILITY \
             or v["confidence"] not in naomi.CONFIDENCE:
         return "NAOMI_PAYLOAD_INVALID"
@@ -201,8 +354,14 @@ def conflicts(chains: list, vol: dict) -> list:
         out.append("STRONG_CHAIN_UNKNOWN_VOLUME")
     if vol["status"] != "UNKNOWN" and not any(c["complete"] for c in chains):
         out.append("VOLUME_WITHOUT_CHAIN")
-    if any(c["unstable"] for c in chains):
+    # round 9: stability is recomputed from the counts, never taken from Theo's flag; a flag that disagrees is
+    # itself a conflict (the payload passes FLAGGED, never CLEARED)
+    if any(stability(c["final_recommendation"]) for c in chains):
         out.append("UNSTABLE_CHAIN")
+    if any(stability(c["final_recommendation"]) != c["unstable"] for c in chains):
+        out.append("UNSTABLE_FLAG_MISMATCH")
+    if any(rate_mismatch(c) for c in chains):
+        out.append("RATE_MISMATCH")                       # a rate whose value / ci95 disagree with its own counts
     pro = any(c["client_outcome"] == "RECOMMENDED" for c in chains)
     con = any(c["complete"] and sum(c["final_recommendation"]["recommended"]["competitor"].values()) * 2 >
               c["complete"] for c in chains)
@@ -217,8 +376,9 @@ class Crosscheck:
     """Zara's inbox and checks. Thread-safe: the members call ``receive`` / ``member_closed`` from their own
     threads; the result is ordered by topic, so it does not depend on arrival order."""
 
-    def __init__(self, tenant_id: str, run_id: str, topics: list):
+    def __init__(self, tenant_id: str, run_id: str, topics: list, engines=None):
         self.tenant_id, self.run_id = tenant_id, run_id
+        self.engines = None if engines is None else frozenset(engines)      # round 9: the run's engines only
         self.topics = {t["topic_key"]: t for t in topics}
         self.order = [t["topic_key"] for t in topics]
         self.halves: dict = {m: {} for m in MEMBERS}
@@ -283,6 +443,13 @@ class Crosscheck:
                 "downstream": {"passes": False, "decision": None, "priority_basis": "none"}}
 
     def _check(self, k: str) -> dict:
+        """Never raises (round 9): a payload no rule anticipated is HELD, the inbox keeps working."""
+        try:
+            return self._check_topic(k)
+        except Exception:  # noqa: BLE001 - fail closed: hold, never crash receive / member_closed / result
+            return self._held(k, "CHECK_FAILED")
+
+    def _check_topic(self, k: str) -> dict:
         ch, vo = self.halves["theo"].get(k), self.halves["naomi"].get(k)
         has_c, has_v = k in self.halves["theo"], k in self.halves["naomi"]
         if not has_c and not has_v:
@@ -291,7 +458,7 @@ class Crosscheck:
             if has and m in self.bad:
                 return self._held(k, self.bad[m])
         if has_c:
-            bad = check_chains(ch, k)
+            bad = check_chains(ch, k, self.engines)
             if bad:
                 return self._held(k, bad)
         if has_v:
@@ -320,7 +487,11 @@ class Crosscheck:
         strong = any(c["strength"] == "STRONG" for c in ch)
         vol_ok = vo["reliability"] in ("MODERATE", "STRONG") and vo["verified"] is True
         vol_usable = vo["status"] != "UNKNOWN" and vo["verified"] is True
-        if cf:
+        if cf and set(cf) & set(SELF_CONTRADICTIONS):    # Theo's summary disagrees with its own counts: the chain
+            item.update(verdict="FLAGGED", conflicts=cf,   # half is not a ranking basis at all
+                        downstream={"passes": True, "decision": "INSUFFICIENT_EVIDENCE",
+                                    "priority_basis": "volume_only" if vol_usable else "none"})
+        elif cf:
             item.update(verdict="FLAGGED", conflicts=cf,
                         downstream={"passes": True, "decision": "INSUFFICIENT_EVIDENCE",
                                     "priority_basis": "chain_only" if any(c["complete"] for c in ch) and not vol_ok

@@ -45,6 +45,8 @@ SCHEMA = "priya-emerging-handoff/1"
 ITEM_KEYS = ("key", "query", "origin", "emerging_kinds", "volume_status", "observed_counts", "evidence",
              "requested_measurements")
 ORIGINS = ("observed", "derived")
+DOC_KEYS = ("schema", "tenant_id", "run_id", "generated_at", "consumers", "items", "rule")   # priya.handoff()
+QUERY_KEYS = ("untrusted", "text", "truncated", "sha256")                               # envelope.observed()
 EMERGING_KINDS = ("question", "conversational", "constraint", "long_tail")
 VOLUME_STATUS = ("BELOW_THRESHOLD", "MEASURED_NOT_TIERED", "UNKNOWN_NOT_MEASURED")
 # review round 6: the exact strings Priya emits (agents/priya.py _gsc_metrics / _bing_metrics, PR #50 at f759ebaa)
@@ -65,7 +67,8 @@ _SHA = re.compile(r"[0-9a-f]{64}")
 # written by ``keyword_ledger_recorded``). PR #50 has every field but the two hand-off ones.
 RECORD_CONTRACT = {
     "contract": "priya.handoff_record/1",
-    "fields": {"run_id": "the run id (seo-<abc>-<40 hex>)", "tenant_id": "the run's tenant",
+    "fields": {"handoff_record": "priya.handoff_record/1 (refused otherwise)",
+               "run_id": "the run id (seo-<abc>-<40 hex>)", "tenant_id": "the run's tenant",
                "status": "completed", "handoff_sha256": "canonical_sha(the priya-emerging-handoff/1 document "
                                                         "exactly as the run returned it)",
                "handoff_items": "len(document['items'])"},
@@ -107,6 +110,8 @@ def validate(doc, tenant_id: str) -> list:
     p: list = []
     if not isinstance(doc, dict) or doc.get("schema") != SCHEMA:
         return ["schema"]
+    if set(doc) != set(DOC_KEYS):                         # round 9: Priya's exact top-level keys, no extra ones
+        return ["keys"]
     for k in ("tenant_id", "run_id", "generated_at"):
         if not isinstance(doc.get(k), str) or not doc[k]:
             p.append(k)
@@ -131,7 +136,8 @@ def validate(doc, tenant_id: str) -> list:
         if it["volume_status"] not in VOLUME_STATUS:
             p.append(f"items[{n}].volume_status")
         q = it["query"]
-        if not isinstance(q, dict) or q.get("untrusted") is not True or not isinstance(q.get("text"), str) \
+        if not isinstance(q, dict) or set(q) != set(QUERY_KEYS) or q.get("untrusted") is not True \
+                or not isinstance(q.get("text"), str) \
                 or not q["text"].strip() or len(q["text"]) > MAX_QUERY_CHARS:
             p.append(f"items[{n}].query")
         ek = it["emerging_kinds"]
@@ -189,9 +195,15 @@ def verify(doc: dict, tenant_id: str, claimed_run_id: Optional[str], claimed_sha
         return {"state": "NOT_VERIFIED", "reason": "PRIYA_RUN_NOT_COMPLETED"}
     if not record.get("handoff_sha256"):
         return {"state": "NOT_VERIFIED", "reason": "PRIYA_RECORD_HAS_NO_HANDOFF_HASH"}
+    # round 9: the record must be Priya's contract, for this run, with a real item count
+    if record.get("handoff_record") != RECORD_CONTRACT["contract"]:
+        return {"state": "FAILED", "reason": "RECORD_CONTRACT_MISMATCH"}
+    if record.get("run_id") != claimed_run_id:
+        return {"state": "FAILED", "reason": "RECORD_RUN_ID_MISMATCH"}
     if record["handoff_sha256"] != claimed_sha:
         return {"state": "FAILED", "reason": "RECORD_HASH_MISMATCH"}
-    if record.get("handoff_items") is not None and record["handoff_items"] != len(doc.get("items") or []):
+    n = record.get("handoff_items")
+    if not isinstance(n, int) or isinstance(n, bool) or n != len(doc.get("items") or []):
         return {"state": "FAILED", "reason": "RECORD_ITEMS_MISMATCH"}
     return {"state": "VERIFIED", "reason": None}
 

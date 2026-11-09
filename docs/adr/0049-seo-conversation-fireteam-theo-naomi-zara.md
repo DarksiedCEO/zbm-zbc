@@ -478,3 +478,36 @@ and a payload is HELD when `agreed_clean > complete − injection_suspected.comp
 (`THEO_STRUCTURAL_AGREED_INCLUDES_TOO_LONG`). One test each; removing each guard makes its test fail (five mutants,
 all killed).
 
+
+## Review round 8 (CONDITIONAL; zara.py only)
+
+The flag shapes (`injection_suspected`, `too_long_to_scan`) are exactly `{chains, complete, note}`, and flagged chains
+counted as incomplete cannot hide inside `agreed_clean` (`x.chains − x.complete ≤ chains − complete`).
+
+## Review round 9 (e861c08b: CONDITIONAL)
+
+1. **Stability is Zara's, not Theo's.** Zara recomputes it from `final_recommendation` (`zara.stability`: more than
+   one entity with a win, a "none / named first only" outcome counting as one) and never reads Theo's `unstable` to
+   decide `UNSTABLE_CHAIN`. A flag that disagrees is `UNSTABLE_FLAG_MISMATCH`; a rate whose value / ci95 /
+   directional disagree with its own k and n is `RATE_MISMATCH` (Zara recomputes `theo._rate(k, n)`). Both are
+   self-contradictions: the topic is FLAGGED (never CLEARED, never TEST) and the chain half is never a ranking basis
+   (`priority_basis` is `volume_only` or `none`). Structural damage (keys, types, ranges) is still HELD.
+2. **Credentials are redacted at Theo's store point.** `agents/text_redact.py` (new, small) runs on the RAW answer
+   text, every rule always, before the excerpt is cut: documented key prefixes (Anthropic, OpenAI, GitHub, Stripe,
+   Slack, Google, GitLab), JWT, PEM private keys (long bodies consumed in bounded steps), AWS access-key ids (also
+   when whitespace sits between characters) and secret keys, bearer tokens and labelled credentials. Zero-width and
+   bidi characters are removed first. Each row records which rules fired (`evidence.redacted`). Every regex is
+   bounded (≤ 4,096). Committed property test (`tests/test_text_redact.py`): every fake key (built from parts, none
+   committed) × start / middle / end / URL query / URL path / quoted / code span / zero-width split (and whitespace
+   split for the AWS key id, the one rule claiming it) never appears in a Theo envelope. **`text_redact` is to be
+   consolidated with `agents/secret_guard.py` once PR #51's rework of that module lands** (not edited here).
+3. **Strict keys everywhere.** Every Theo structure (`divergent_under_history`, `final_recommendation` and its boxes,
+   `by_turn[*]` and its rates, `client_recommended`) and Naomi's band and every `signals[*]` must carry exactly their
+   keys; counts are whole numbers ≥ 0 and never bools (also when sums would balance); numbers are finite; the engine
+   must be one of the run's engines, once; `loop_stopped`, `not_complete` and `turns_planned` are checked against
+   the chain counts.
+4. **Bad types are HELD, never a crash**: any exception while checking a payload is THEO_ / NAOMI_PAYLOAD_INVALID,
+   and a topic whose check fails outright is HELD `CHECK_FAILED`.
+5. **Priya's record**: `verify` refuses (FAILED) a record of another contract string, of another run, or whose
+   `handoff_items` is missing, a bool or not the item count; `validate` refuses extra top-level and query keys.
+Mutation check: each new guard removed makes its own test fail (16 mutants, all killed).

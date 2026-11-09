@@ -68,7 +68,7 @@ import hashlib
 import re
 from typing import Callable, Optional
 
-from agents import brand_mention, domain_match, injection_guard, priya_handoff, split_url
+from agents import brand_mention, domain_match, injection_guard, priya_handoff, split_url, text_redact
 from agents.callum import excerpt
 from agents.probes import MIN_USABLE, REDIRECTOR_HOSTS, _switch_code, extract_citations, wilson
 from agents.prompt_guard import personal_data
@@ -551,8 +551,12 @@ def _one_chain(t, ti, si, n, turns, e, s, guard, cap, ctx, clock, iso, rows) -> 
         s["protocol_run"] = 0
         obs = observe(a, ctx)
         obs.pop("_on_client")
-        ex = excerpt(a.text, ctx["terms"]) if t["source"] == "prompt_set" else \
-            {"basis": None, "excerpt": None, "withheld": "PRIYA_QUERY_CONTEXT"}
+        if t["source"] == "prompt_set":
+            # round 9: credentials redacted on the RAW answer text, every rule, before the excerpt is cut and kept
+            clean, fired = text_redact.redact(a.text)
+            ex = {**excerpt(clean, ctx["terms"]), "redacted": fired}
+        else:
+            ex = {"basis": None, "excerpt": None, "withheld": "PRIYA_QUERY_CONTEXT", "redacted": []}
         label = injection_guard.scan_all(injection_guard.resent_texts(a))
         injected = injected or label == "INJECTION_SUSPECTED"   # one flagged row flags the whole chain (round 3)
         too_long = too_long or label == "TOO_LONG_TO_SCAN"       # round 6: its own label, never "injection"

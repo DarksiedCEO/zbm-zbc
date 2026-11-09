@@ -297,6 +297,7 @@ def test_a_hand_off_verified_against_priyas_record_lifts_the_cap(tmp_path):
     v = h.ok(run(h, psid, **claim), 201)                                    # Priya not installed: NOT_VERIFIED
     assert v["priya_handoff"]["verification"] == {"state": "NOT_VERIFIED", "reason": "PRIYA_NOT_INSTALLED"}
     h.svc.keyword_runs = {doc["run_id"]: {"run_id": doc["run_id"], "tenant_id": "zbm", "status": "completed",
+                                          "handoff_record": "priya.handoff_record/1",
                                           "handoff_sha256": sha, "handoff_items": 1}}
     v = h.ok(run(h, psid, **claim), 201)
     assert v["priya_handoff"]["verification"]["state"] == "VERIFIED"
