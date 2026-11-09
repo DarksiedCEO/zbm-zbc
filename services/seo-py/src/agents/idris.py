@@ -80,10 +80,10 @@ import bisect
 import codecs
 import functools
 import hashlib
+import itertools
 import re
 import unicodedata
 from pathlib import Path
-from typing import Optional
 
 import lookalikes
 from agents import brand_mention, callum, domain_match, injection_guard, text_redact
@@ -92,7 +92,7 @@ from agents.prompt_guard import personal_data
 from envelope import envelope, finding, observed, sha
 
 AGENT, TASK = "idris", "competitor_visibility"
-VERSION = "idris-rules/2026-11-08.7"
+VERSION = "idris-rules/2026-11-08.8"
 CONTRACT = "idris.share_of_voice/1"
 REFRESH_TIER = "near_real_time"
 MAX_TRACKED = 20                       # configured competitors per tenant (the 21st is refused: COMPETITOR_LIMIT)
@@ -115,7 +115,7 @@ SIGNALS = ("LIST_HEAD", "BOLD", "MIXED_CASE", "CORPORATE_SUFFIX", "DOMAIN_BACKED
 EXCLUSIONS = ("INSTRUCTION_LIKE", "GENERIC", "NON_BRAND_TERM", "DATE", "FEATURE", "SENTENCE_INITIAL", "TITLE_RUN",
               "ENGINE_SELF", "PLATFORM_PRODUCT",
               "CLIENT_LOOKALIKE", "CLIENT_VARIANT", "TRACKED", "PUBLISHER", "PLACE", "PERSON_NAME", "TOPIC_TERM",
-              "EXCLUDED_BY_TENANT")
+              "EXCLUDED_BY_TENANT", "IN_URL", "SENSITIVE")
 _TABLE = lookalikes.Table()
 
 # a lexical cue next to a brand name: reported as ``negative_cue``, never a sentiment score and never subtracted
@@ -411,29 +411,130 @@ def _skeleton_map() -> dict:
 # after the skeleton: digit-for-letter swaps the confusables table does not make (``zb3stmedia``), and ``i`` / ``l``
 # read as one (``1``, ``I``, ``|`` are ``l`` in the skeleton already)
 _SWAPS = str.maketrans({"2": "z", "3": "e", "4": "a", "5": "s", "6": "g", "7": "t", "8": "b", "9": "g", "i": "l"})
+# review of 0110a226 M5: letter SEQUENCES that read as one letter (UTS #39 maps the single letter to the sequence:
+# ``m`` -> ``rn``; the others are the Latin multi-letter look-alikes typosquatters use: ``cl`` / ``d``, ``vv`` / ``w``,
+# ``ii`` / ``il`` / ``li`` / ``ll`` / ``u`` — ``i`` is ``l`` by then — ``nn`` / ``m`` is NOT folded: it is too common in
+# real names). Applied to BOTH sides of every comparison, longest first, left to right, after the swaps; the
+# confusables file's own multi-letter prototypes (``ﬁ`` -> ``fi``, ``‖`` -> ``ll``, ``Ꜳ`` -> ``AA`` ...) are applied
+# by the skeleton map before this.
+MULTI_FOLDS = (("rn", "m"), ("cl", "d"), ("vv", "w"), ("ll", "u"))
+_MULTI = re.compile("|".join(re.escape(a) for a, _b in MULTI_FOLDS))
+_MULTI_TO = dict(MULTI_FOLDS)
 
 
 @functools.lru_cache(maxsize=8192)
-def brand_skeleton(s: str) -> str:
-    """The comparison key for client-impersonation checks (WR-F030): IDNA A-labels decoded, NFKC, invisible
-    characters removed, case folded, the shared lookalike fold, the UTS #39 skeleton (NFD, confusables prototypes,
-    NFD), combining marks removed, folded again, digit / letter swaps, then only letters and digits. Two strings
-    with the same skeleton look the same to a reader."""
+def typo_key(s: str) -> str:
+    """The skeleton BEFORE the digit swaps and the multi-letter folds: the form a typo is measured on (S4), so a
+    transposed or mistyped letter is not hidden by a fold (``Refnud Rnagers``: ``rn`` stays ``rn`` here)."""
     t = unicodedata.normalize("NFKC", lookalikes.strip_invisible(unidn(_ws(s)))).casefold()
     t = _TABLE.fold_cased(t)
     m = _skeleton_map()
     t = unicodedata.normalize("NFD", "".join(m.get(ch, ch) for ch in unicodedata.normalize("NFD", t)))
     t = "".join(ch for ch in t if not unicodedata.combining(ch))
     t = _TABLE.fold_cased(unicodedata.normalize("NFKC", t).casefold())
-    t = re.sub(r"[\W_]+", "", t).translate(_SWAPS)
-    return t.replace("vv", "w").replace("rn", "m")       # the skeleton's m -> rn read back: one letter, one edit
+    return re.sub(r"[\W_]+", "", t)
+
+
+@functools.lru_cache(maxsize=8192)
+def brand_skeleton(s: str) -> str:
+    """The comparison key for client-impersonation checks (WR-F030): IDNA A-labels decoded, NFKC, invisible
+    characters removed, case folded, the shared lookalike fold, the UTS #39 skeleton (NFD, confusables prototypes,
+    NFD), combining marks removed, folded again, then only letters and digits (``typo_key``), then the digit / letter
+    swaps and the multi-letter folds (``MULTI_FOLDS``: ``rn`` / ``m``, ``cl`` / ``d``, ``vv`` / ``w``, ``ii`` ``il``
+    ``li`` ``ll`` / ``u``). Two strings with the same skeleton look the same to a reader."""
+    return _MULTI.sub(lambda x: _MULTI_TO[x.group(0)], typo_key(s).translate(_SWAPS))
+
+
+MAX_TYPO_LEN = 80                      # S4: longer names are compared by the one-edit rule only
+
+
+def _typo_edits(a: str, b: str) -> list | None:
+    """The positions (in ``a``) of an optimal-string-alignment edit script of at most two edits (substitution,
+    insertion, deletion, adjacent transposition: each costs 1), or None when more are needed. Plain DP with a
+    backtrace, bounded by ``MAX_TYPO_LEN`` (O(80 x 80) at most)."""
+    la, lb = len(a), len(b)
+    if abs(la - lb) > 2 or la > MAX_TYPO_LEN or lb > MAX_TYPO_LEN:
+        return None
+    d = [[0] * (lb + 1) for _ in range(la + 1)]
+    for i in range(la + 1):
+        d[i][0] = i
+    for j in range(lb + 1):
+        d[0][j] = j
+    for i in range(1, la + 1):
+        for j in range(1, lb + 1):
+            v = min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] != b[j - 1]))
+            if i > 1 and j > 1 and a[i - 1] == b[j - 2] and a[i - 2] == b[j - 1]:
+                v = min(v, d[i - 2][j - 2] + 1)
+            d[i][j] = v
+    if d[la][lb] > 2:
+        return None
+    out, i, j = [], la, lb
+    while i > 0 or j > 0:
+        if i > 1 and j > 1 and a[i - 1] == b[j - 2] and a[i - 2] == b[j - 1] and d[i][j] == d[i - 2][j - 2] + 1 \
+                and a[i - 1] != b[j - 1]:
+            out.append(i - 2)
+            i, j = i - 2, j - 2
+        elif i > 0 and j > 0 and d[i][j] == d[i - 1][j - 1] + (a[i - 1] != b[j - 1]):
+            if a[i - 1] != b[j - 1]:
+                out.append(i - 1)
+            i, j = i - 1, j - 1
+        elif i > 0 and d[i][j] == d[i - 1][j] + 1:
+            out.append(i - 1)
+            i -= 1
+        else:
+            out.append(i)
+            j -= 1
+    return sorted(out)
+
+
+def _typo_distance(a: str, b: str) -> int:
+    """The edit distance when it is at most two (``_typo_edits``), else 3."""
+    e = _typo_edits(a, b)
+    return 3 if e is None else len(e)
+
+
+def _two_typos(a: str, b: str) -> bool:
+    """S4: at most two typo edits, and two edits are SEPARATE slips (3+ characters apart): two edits next to each
+    other replace a short word (``BigCommerce`` / ``BoldCommerce``), which is another name, not a typo."""
+    e = _typo_edits(a, b)
+    return e is not None and (len(e) <= 1 or e[1] - e[0] >= 3)
 
 
 def _skeleton_like(a: str, b: str) -> bool:
-    return bool(a) and bool(b) and (a == b or (min(len(a), len(b)) >= 6 and _within_one(a, b)))
+    """Same skeleton; or, for 6+ characters, one edit apart."""
+    if not a or not b:
+        return False
+    return a == b or (min(len(a), len(b)) >= 6 and _within_one(a, b))
 
 
-def client_like(name: str, client_terms, client_label: Optional[str] = None) -> Optional[str]:
+def _typo_like(name: str, term: str) -> bool:
+    """S4: for 10+ characters, at most two separate typo edits apart (``_two_typos``), on the typo key and on the
+    skeleton."""
+    for x, y in ((typo_key(name), typo_key(term)), (brand_skeleton(name), brand_skeleton(term))):
+        if x and y and min(len(x), len(y)) >= 10 and _two_typos(x, y):
+            return True
+    return False
+
+
+@functools.lru_cache(maxsize=4096)
+def _orders(term: str) -> tuple:
+    """S4: the skeletons of every other ORDER of a 2-4 word term (``Media Best Z``, ``mediazbest`` for ``Z Best
+    Media``); none for one word or more than four."""
+    ws = [w for w in (brand_skeleton(x) for x in _words(term)) if w]
+    if not 2 <= len(ws) <= 4:
+        return ()
+    base = "".join(ws)
+    return tuple(sorted({"".join(p) for p in itertools.permutations(ws)} - {base}))
+
+
+def _reordered(name: str, term: str) -> bool:
+    """``name`` is another order of ALL of the term's words: the same skeleton, or one edit apart for 10+ characters
+    (a dropped word is not a reorder: ``mediabest`` is not ``Z Best Media``)."""
+    sk = brand_skeleton(name)
+    return len(sk) >= 6 and any(sk == o or (min(len(sk), len(o)) >= 10 and _within_one(sk, o)) for o in _orders(term))
+
+
+def client_like(name: str, client_terms, client_label: str | None = None) -> str | None:
     """``CLIENT_LOOKALIKE`` when ``name`` (or its core, suffixes and generic nouns removed) is a client brand term or
     the client domain's label, or a lookalike of one; ``CLIENT_VARIANT`` when it contains one (whole words, or — for
     terms of 5+ characters / labels of 6+ — as a compact substring: ``Zbestmedia LLC``); else None.
@@ -448,7 +549,10 @@ def client_like(name: str, client_terms, client_label: Optional[str] = None) -> 
         if lookalike_name(name, c) or (core and lookalike_name(core, cc)):
             return "CLIENT_LOOKALIKE"
         csk = brand_skeleton(c)
-        if _skeleton_like(sk, csk) or _skeleton_like(score, csk):
+        tcore = brand_skeleton(core_name(c))                  # the term without legal suffix / generic noun
+        if _skeleton_like(sk, csk) or _skeleton_like(score, csk) or (len(tcore) >= 6 and tcore in (sk, score)) \
+                or _typo_like(name, c) or (core and _typo_like(core, c)) or _reordered(name, c) \
+                or (core and _reordered(core, c)):
             return "CLIENT_LOOKALIKE"
     if client_label and (core == client_label or key == client_label or label_sk in (sk, score)):
         return "CLIENT_LOOKALIKE"
@@ -463,23 +567,35 @@ def client_like(name: str, client_terms, client_label: Optional[str] = None) -> 
     return None
 
 
-def client_domain_label(domain: str) -> Optional[str]:
+def client_domain_label(domain: str) -> str | None:
     """The compact registrable label of the client's domain (``site`` for ``www.site.test``), or None."""
     reg = registrable(domain or "")
     return compact(reg.split(".")[0]) if reg else None
 
 
-def client_like_host(host: str, client_terms, client_label: Optional[str] = None) -> Optional[str]:
-    """``client_like`` of a host's registrable label, decoded (WR-F030: ``xn--zbstmedia-h0h.com``,
-    ``zbestmedia.net``, ``z-best-media.co``, ``zbestmedia.github.io``); None when the host has no registrable
-    name. A TLD swap is the same label, so it is the same answer."""
+def client_like_host(host: str, client_terms, client_label: str | None = None) -> str | None:
+    """``client_like`` of a host, decoded (WR-F030: ``xn--zbstmedia-h0h.com``, ``zbestmedia.net``,
+    ``z-best-media.co``, ``zbestmedia.github.io``). Review of 0110a226 M6: EVERY label left of the public suffix is
+    checked, and every run of two to four neighbouring labels read as one (``zbestmedia.attacker.com``,
+    ``login.zbest-media.secure-host.net``, ``z.best.media.example.com``): the client's brand in any label is an
+    impersonation signal. ``www`` is not a label. Any match (a lookalike of, or a label containing, the brand) is
+    ``CLIENT_LOOKALIKE`` for a host: a host is never a "variant" competitor. None when the host has no registrable
+    name or no label matches."""
     rg = registrable(host or "")
     if not rg:
         return None
-    return client_like(unidn(rg.split(".")[0]), client_terms, client_label)
+    h = domain_match._ascii(host or "") or ""
+    suffix = rg.split(".", 1)[1] if "." in rg else ""
+    left = h[:-(len(suffix) + 1)] if suffix and h.endswith("." + suffix) else rg.split(".")[0]
+    labels = [unidn(x) for x in left.split(".") if x and x != "www"][-16:]
+    for i in range(len(labels)):
+        for j in range(i + 1, min(len(labels), i + 4) + 1):
+            if client_like(" ".join(labels[i:j]) if j - i > 1 else labels[i], client_terms, client_label):
+                return "CLIENT_LOOKALIKE"
+    return None
 
 
-def client_lookalike_candidate(key: str, names, domains, client_terms, client_label: Optional[str] = None) -> bool:
+def client_lookalike_candidate(key: str, names, domains, client_terms, client_label: str | None = None) -> bool:
     """A candidate is the client's lookalike (an impersonation signal, never a competitor) when its key, any name it
     was written as, or any domain it was cited on is the client's brand term or domain label, a lookalike of one, or
     contains one (``client_like`` / ``client_like_host``)."""
@@ -500,7 +616,7 @@ def overlapping(a: str, b: str) -> bool:
     return any(wa[-k:] == wb[:k] or wb[-k:] == wa[:k] for k in range(1, min(len(wa), len(wb)) + 1))
 
 
-def registrable(host: str) -> Optional[str]:
+def registrable(host: str) -> str | None:
     """The registrable domain of ``host`` by the vendored Public Suffix List (``acme.co.uk`` for ``www.acme.co.uk``)."""
     h = domain_match._ascii(host or "")
     if h is None:
@@ -592,7 +708,7 @@ search central console manager platform app apps api enterprise premium starter 
 """.split())
 
 
-def platform_product(tokens: list) -> Optional[str]:
+def platform_product(tokens: list) -> str | None:
     """The platform key when a name is a platform's name followed only by product words (``Stripe Billing`` when
     stripe.com is a platform, ``HubSpot Sales Hub``), or is the platform's name alone; word-aligned, so ``Apple Valley
     Dental`` is not Apple's. Round 5: such a name keys to the platform and is never an emerging competitor unless the
@@ -605,7 +721,7 @@ def platform_product(tokens: list) -> Optional[str]:
     return None
 
 
-def non_competitor_domain(host: str) -> Optional[str]:
+def non_competitor_domain(host: str) -> str | None:
     """Why a cited host can never be an emerging competitor on its own (PLATFORM, INSTITUTIONAL, PUBLISHER_LIKE), or
     None. A dict / set lookup per label suffix: linear in the host."""
     h = domain_match._ascii(host or "")
@@ -668,7 +784,7 @@ def _publisher_hosts() -> dict:
     return out
 
 
-def publisher(host: str) -> Optional[str]:
+def publisher(host: str) -> str | None:
     """The publisher's name when ``host`` is on (a subdomain of) a KNOWN_PUBLISHERS host. Review round 3 (perf): a
     dict lookup per label suffix (at most ~127 for a 253-character host), never a scan of the table."""
     h = domain_match._ascii(host or "")
@@ -775,6 +891,11 @@ _PUB_AFTER = re.compile(r"\s+(?:reports?|reported|found|finds|notes|noted|publis
                         r"surveyed|ranks|ranked|estimates|data|survey|study|report|analysis|article|checklist|poll)\b",
                         re.IGNORECASE)
 _MARKUP_BLANK = str.maketrans({c: " " for c in "*_#>`|"})
+# review of 0110a226 M2: text INSIDE a URL (scheme or www., or a host with a path / query) or an e-mail address is
+# never a candidate name: its words are paths, parameters, user names
+_IN_URL = re.compile(r"(?i)(?:\b[a-z][a-z0-9+.\-]{1,20}://|\bwww\.|\bmailto:)[^\s<>\"'`]{1,4000}"
+                     r"|(?<![\w@.\-])[a-z0-9][a-z0-9\-]{0,62}(?:\.[a-z0-9\-]{1,62}){0,8}\.[a-z]{2,24}[/?#][^\s<>\"'`]{0,4000}"
+                     r"|[^\s@<>()\[\]\"'`]{1,64}@[^\s@<>()\[\]\"'`]{1,255}")
 _SENTENCE_END = re.compile(r"[.!?](?:\s|$)|\n")
 
 
@@ -824,7 +945,7 @@ def _product_cues(t: str, start: int, end: int, ends: list, cache: dict) -> bool
     return got
 
 
-def _ner_label(spans: list, starts: list, start: int, end: int) -> Optional[str]:
+def _ner_label(spans: list, starts: list, start: int, end: int) -> str | None:
     """The NER label of the entity that covers the name (overlap of at least half of the name), or None."""
     i = bisect.bisect_right(starts, end) - 1
     best = None
@@ -838,7 +959,7 @@ def _ner_label(spans: list, starts: list, start: int, end: int) -> Optional[str]
     return best
 
 
-def candidates(text: str, ctx: dict, excluded: Optional[dict] = None) -> list:
+def candidates(text: str, ctx: dict, excluded: dict | None = None) -> list:
     """The brand-like names in one answer: ``[{"key", "display", "signals", "at"}]`` (at most
     ``MAX_CANDIDATES_PER_ANSWER``, first occurrence order). ``ctx``: {"client_terms", "client_label", "tracked_terms",
     "exclude_keys", "prompt_words"} and optionally ``cited_labels`` (the compact registrable labels of the hosts this
@@ -887,6 +1008,8 @@ def candidates(text: str, ctx: dict, excluded: Optional[dict] = None) -> list:
             close()
     close()
     hosts = [m for m in _HOST.finditer(t) if registrable(m.group(0))]
+    in_url = [m.span() for m in _IN_URL.finditer(t)]
+    url_starts = [a for a, _b in in_url]
     breaks = [i for i, ch in enumerate(t) if ch == "\n"]
     ends = [m.end() for m in _SENTENCE_END.finditer(t)]
     cited = ctx.get("cited_labels") or set()
@@ -940,6 +1063,13 @@ def candidates(text: str, ctx: dict, excluded: Optional[dict] = None) -> list:
             start, end = ws[0][1], ws[-1][2]
             display = t[start:end]
         key = label if kind == "host" else compact(display)
+        ui = bisect.bisect_right(url_starts, start) - 1
+        if ui >= 0 and start < in_url[ui][1] and not (kind == "host" and start == in_url[ui][0]):
+            bump("IN_URL", key)                         # M2: a word of a URL or an e-mail address is never a name
+            continue
+        if text_redact.sensitive(display):
+            bump("SENSITIVE", key)                      # M2: a key, token or personal datum is never a name
+            continue
         lows = [w.lower().rstrip(".") for w, _s, _e in ws]
         if "_" in display or _injection(raw):
             bump("INSTRUCTION_LIKE", key)           # an injection phrase or a markdown artefact: never a brand
@@ -1002,6 +1132,8 @@ def candidates(text: str, ctx: dict, excluded: Optional[dict] = None) -> list:
             bump("ENGINE_SELF", key)                   # the engine's own name, standalone ("Gemini Refunds" is not)
             continue
         like = client_like(display if kind == "words" else lows[0], ctx["client_terms"], ctx.get("client_label"))
+        if kind == "host" and like != "CLIENT_LOOKALIKE":
+            like = client_like_host(display, ctx["client_terms"], ctx.get("client_label")) or like    # M6: any label
         if like == "CLIENT_LOOKALIKE":
             bump("CLIENT_LOOKALIKE", key)
             seen = ctx.get("lookalikes_seen")
@@ -1122,16 +1254,18 @@ def _negative_cue(text: str, b: dict) -> bool:
 
 
 def _excerpt(text: str, at: int) -> dict:
-    """A bounded excerpt around ``at``. WR-F031: keys and tokens are redacted on the whole raw text first (a token
-    cut by the window is still caught), then on the window; an excerpt with personal data is withheld; e-mail, card,
-    SSN and phone shapes are redacted on what is kept as well."""
+    """A bounded excerpt around ``at``. Two redactions, each with its own job (review of 0110a226 S2, tested
+    directly): (1) keys and tokens on the WHOLE text as written, line breaks kept — a token cut by the window, or
+    broken over two lines, is still caught; (2) keys and tokens on the WINDOW after whitespace is collapsed — a label
+    and its value kept apart by a long whitespace run in the text sit together here. An excerpt with personal data is
+    withheld; e-mail, card, SSN and phone shapes are redacted on what is kept as well."""
     t = " ".join(text_redact.secrets(text or "").split())
     lo = max(0, min(at, len(t)) - 60)
     span = text_redact.secrets(t[lo:lo + EXCERPT_MAX])
     kind = personal_data(span)
     if kind is not None:
         return {"excerpt": None, "withheld": f"personal_data:{kind}"}
-    return {"excerpt": observed(text_redact.redact(span), EXCERPT_MAX), "withheld": None}
+    return {"excerpt": observed(text_redact.personal(span), EXCERPT_MAX), "withheld": None}
 
 
 # ---------------------------------------------------------------------------------------------- observation
@@ -1142,8 +1276,8 @@ class Observer:
 
     def __init__(self, competitor_set: dict, prompt_set: dict, domain: str, run_id: str, ner=None):
         self.cs, self.ps, self.domain, self.run_id, self.ner = competitor_set, prompt_set, domain, run_id, ner
-        self.result: Optional[dict] = None
-        self.error: Optional[BaseException] = None
+        self.result: dict | None = None
+        self.error: BaseException | None = None
 
     def __call__(self, engines: dict, resolver, observed_at: str, refresh_due: str) -> None:
         try:
@@ -1239,9 +1373,10 @@ def observe(engines: dict, resolver, competitor_set: dict, prompt_set: dict, dom
                 k["refusals"] += 1
                 continue
             k["usable"] += 1
-            # WR-F031: keys, tokens and credentials are redacted on the RAW answer text before Idris reads any of it,
-            # so no candidate name, excerpt or classifier snippet can carry one (no exemption)
-            text = text_redact.secrets(s["text"] or "")
+            # WR-F031 / review of 0110a226 M2: the RAW answer text is made safe before Idris reads any of it
+            # (text_redact.prepare: normalised, percent / entity decoded, URL user parts removed, personal data and
+            # keys redacted), so no candidate name, excerpt or classifier snippet can carry one (no exemption)
+            text = text_redact.prepare(s["text"] or "")
             owners: dict = {}
             hosts: list = []
             for c in extract_citations(a):
@@ -1294,7 +1429,7 @@ def observe(engines: dict, resolver, competitor_set: dict, prompt_set: dict, dom
             # review round 4: an answer that holds an injection marks EVERY candidate in it (the whole answer is
             # scanned with the injection guard's pattern families; line breaks and distance do not matter)
             injected = injection_guard.suspected(text)
-            labels, doms = {}, {}
+            labels, doms, like_hosts, like_seen = {}, {}, {}, set()
             for h in hosts:                             # "other" hosts: not the client, tracked, publisher, unresolved
                 rg = registrable(h)
                 if not rg:
@@ -1306,7 +1441,15 @@ def observe(engines: dict, resolver, competitor_set: dict, prompt_set: dict, dom
                     why = "DOMAIN_" + why
                 elif domain_match.match(rg, domain) is not None \
                         or client_like_host(h, ctx["client_terms"], ctx["client_label"]):
-                    why = "CLIENT_LOOKALIKE_DOMAIN"         # WR-F030: decoded U-label, UTS #39 skeleton
+                    why = "CLIENT_LOOKALIKE_DOMAIN"         # WR-F030: decoded U-label, UTS #39 skeleton, any label
+                    # M6: a name that is this host's brand is marked with the host (its candidate is the client's
+                    # lookalike, an impersonation signal); the host itself is listed as a lookalike seen
+                    like_hosts.setdefault(host_key(h), h)
+                    seen = ctx["lookalikes_seen"]
+                    hk = "host:" + host_key(h)
+                    if hk in seen or len(seen) < 10:
+                        seen.setdefault(hk, {"display": h[:120], "answers": 0})
+                        like_seen.add(hk)
                 if why is not None:
                     excluded[why] = excluded.get(why, 0) + 1
                     continue
@@ -1319,8 +1462,11 @@ def observe(engines: dict, resolver, competitor_set: dict, prompt_set: dict, dom
             for f in found:
                 nks = name_keys(f["display"])
                 dk = next((d for d in dom_keys if any(keys_match(nk, d) for nk in nks)), None)
+                lk = next((like_hosts[d] for d in sorted(like_hosts) if any(keys_match(nk, d) for nk in nks)), None)
                 pa = per.setdefault(dk or f["key"], {"display": None, "signals": set(), "named": False,
                                                      "domain": doms.get(dk) if dk else None})
+                if lk is not None:
+                    pa["like"] = lk                     # M6: the client-lookalike host this name stands for
                 pa["display"] = pa["display"] or f["display"]
                 pa["signals"] |= set(f["signals"])
                 pa["named"] = True
@@ -1352,6 +1498,9 @@ def observe(engines: dict, resolver, competitor_set: dict, prompt_set: dict, dom
                 if pa["domain"]:
                     ids["cited"].add(aid)
                     ids["dom"].setdefault(pa["domain"], set()).add(aid)
+                if pa.get("like"):
+                    # M6: kept as a domain hint so every later reading (emerging, confirm) sees the impersonation
+                    ids["dom"].setdefault(pa["like"], set()).add(aid)
                 if client_named:
                     ids["co"].add(aid)
                 if len(c["pointers"]) < MAX_POINTERS and ptr not in c["pointers"]:
@@ -1359,7 +1508,7 @@ def observe(engines: dict, resolver, competitor_set: dict, prompt_set: dict, dom
                 if len(c["evidence"]) < MAX_EVIDENCE:
                     at = _approx_at(text, pa["display"]) if pa["display"] else 0
                     c["evidence"].append({**ptr, **_excerpt(text, at), "cited_domain": pa["domain"]})
-            for key in actx.get("lookalikes_this_answer", ()):
+            for key in set(actx.get("lookalikes_this_answer", ())) | like_seen:
                 ctx["lookalikes_seen"][key]["answers"] += 1
     _merge_names_into_domains(cands)
     for c in cands.values():
@@ -1474,7 +1623,7 @@ def _approx_at(text: str, display: str) -> int:
 STRICT_INVARIANTS = False        # tests set True: an inconsistent count raises instead of being marked (round 5)
 
 
-def _rate(k: int, n: int, unknown: Optional[str] = None) -> dict:
+def _rate(k: int, n: int, unknown: str | None = None) -> dict:
     if not (0 <= k <= n) and n > 0 and unknown is None:
         # k > n can only come from a counting bug: never crash compute (wilson would raise), mark it and exclude it
         if STRICT_INVARIANTS:
@@ -1569,7 +1718,7 @@ class DismissalIndex:
             self.seqs.append((seq, k))
             self.joined.setdefault("".join(seq), k)
 
-    def covers(self, key: str, name: str) -> Optional[str]:
+    def covers(self, key: str, name: str) -> str | None:
         if key in self.d:
             return key
         seq = _norm_tokens(name or key)
@@ -1586,14 +1735,14 @@ class DismissalIndex:
         return None
 
 
-def dismissed_by(key: str, dismissals: dict, name: Optional[str] = None) -> Optional[str]:
+def dismissed_by(key: str, dismissals: dict, name: str | None = None) -> str | None:
     """The dismissal covering ``key`` (``DismissalIndex``; build one index per run where many keys are checked)."""
     return DismissalIndex(dismissals).covers(key, name or key)
 
 
 def emerging(current: dict, history: list, dismissals: dict, tracked_terms: list, client_terms: list,
-             confirmations: Optional[dict] = None, filtered: Optional[set] = None,
-             client_label: Optional[str] = None) -> dict:
+             confirmations: dict | None = None, filtered: set | None = None,
+             client_label: str | None = None) -> dict:
     """The emerging-competitor view over the current run's observations and earlier ones (``history``).
     ``confirmations``: key -> record (confirmed by the owner or the tenant: promoted into the shares);
     ``filtered``: keys the optional classifier said are not brands (it can only remove); ``client_label``: the
@@ -1717,9 +1866,9 @@ ORDER_RULE = ("opportunities ordered by the gap in answers between the most-pres
               "(descending), then prompt index, then engine. An ordering rule, not a score.")
 
 
-def compute(obs: dict, history: list, dismissals: dict, previous: Optional[dict], run: dict, visibility_run_id: str,
-            generated_at: str, source: str, confirmations: Optional[dict] = None,
-            classifier: Optional[dict] = None) -> dict:
+def compute(obs: dict, history: list, dismissals: dict, previous: dict | None, run: dict, visibility_run_id: str,
+            generated_at: str, source: str, confirmations: dict | None = None,
+            classifier: dict | None = None) -> dict:
     """Idris's envelope for one competitor-visibility run. ``obs``: the citation run's recorded observations;
     ``history``: earlier observations of the tenant's domain (look-back); ``dismissals``: key -> record;
     ``previous``: the previous comparable visibility result's facts (or None); ``run``: the citation run (id,
@@ -1857,11 +2006,11 @@ def _rows(obs: dict, folded: list, by_key: dict) -> list:
     return rows
 
 
-def _overlap(a: Optional[list], b: Optional[list]) -> bool:
+def _overlap(a: list | None, b: list | None) -> bool:
     return a is None or b is None or not (a[1] < b[0] or b[1] < a[0])
 
 
-def _opportunities(scopes: list, bl: list, previous: Optional[dict]) -> tuple:
+def _opportunities(scopes: list, bl: list, previous: dict | None) -> tuple:
     prev = {}
     for p in ((previous or {}).get("opportunities") or {}).get("items") or []:
         prev[(p["engine"], p["prompt_id"])] = p
@@ -1997,7 +2146,7 @@ def classifier_prompt(items: list) -> str:
     return CLASSIFIER_INSTRUCTION + "\nDATA\n" + json.dumps(out, ensure_ascii=True)
 
 
-def parse_classifier(text: str, ids: set) -> Optional[dict]:
+def parse_classifier(text: str, ids: set) -> dict | None:
     """{id: class} when the reply is exactly the expected shape — every id once, every class from
     ``CLASSIFIER_CLASSES`` — else None (fail closed: nothing is filtered)."""
     import json

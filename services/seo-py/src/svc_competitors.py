@@ -23,7 +23,12 @@ the tenant has a competitor set and Idris is not restricted; text is never store
   otherwise asks for a FRESH citation run with the request's own request_id and every one of Callum's rules (domain,
   prompt set, Andre + Finance + Compliance for a client tenant, one running run per tenant, budgets, kill switches),
   so one collection serves both agents. A crash between the citation run and the visibility record is recovered by
-  retrying: the retry finds the just-completed run and reuses it.
+  retrying: the retry finds the just-completed run and reuses it. A retry whose earlier citation run never completed
+  with observations (lost to a dead process — ``PROCESS_LOST`` — interrupted, or recorded without observations) is
+  refused 409 ``VISIBILITY_RUN_NEEDS_NEW_REQUEST_ID`` and stores nothing under the id: the caller sends a new request
+  id, which asks for a fresh citation run (review of 0110a226 S1). One still running answers 409
+  ``CITATION_RUN_RUNNING``. In-flight requests are tracked in memory: ONE service process per data directory (ADR
+  0048, the single-process assumption).
 
 A run whose citation run was interrupted, or has no observations, is recorded with no numbers (an honest outcome,
 never zeros). Tenant isolation: another tenant's objects answer the same 404 as missing ones.
@@ -35,11 +40,12 @@ import logging
 from datetime import timedelta
 from typing import Optional
 
-from agents import domain_match, idris
+from agents import domain_match, idris, text_redact
 from clock import iso, parse_iso
 from envelope import envelope, sha
 from errors import Conflict, Forbidden, Invalid, NotFound
-from ledger import derived_id, payload_sha256 as request_sha
+from ledger import derived_id
+from ledger import payload_sha256 as request_sha
 from reasons import R
 
 log = logging.getLogger("seo.competitors")
@@ -198,8 +204,13 @@ class CompetitorsMixin:
             data["failed"] = {"agent": "idris", "where": where, "error_type": type(observer.error).__name__[:60]}
             osha = sha(data["failed"])
         else:
-            data["observations"] = observer.result
-            osha = sha(observer.result)
+            # M4: Idris's observations are redacted and re-checked before they are recorded (fail closed)
+            obs_clean, scrubbed = text_redact.scrub(observer.result)
+            if scrubbed:
+                obs_clean = {**obs_clean, "redaction": {"policy": "text_redact.scrub", **scrubbed}}
+            observer.result = obs_clean
+            data["observations"] = obs_clean
+            osha = sha(obs_clean)
         data["observations_sha256"] = osha
         obs = observer.result or {}
         self._commit("competitor_observations_recorded", data, "seo",
@@ -370,7 +381,11 @@ class CompetitorsMixin:
                          "prompt_set_id": body["prompt_set_id"]}
                 if body.get("engines"):
                     cbody["engines"] = body["engines"]
+                with self.lock:
+                    known = set(self.citation_runs)
                 cid = self.request_citation_run(actor, tid, cbody, andre)["citation_run_id"]   # Callum's rules apply
+                with self.lock:
+                    self._fresh_run_usable(cid, known)
             classifier = self._idris_classify(tid, cid, derived_id("vis", tid, eff, rk), body)  # optional, no lock
             with self.lock:
                 self._gate()
@@ -383,6 +398,21 @@ class CompetitorsMixin:
         finally:
             with self.lock:
                 self._vis_in_flight().pop((eff, rk), None)
+
+    def _fresh_run_usable(self, cid: str, known: set) -> None:
+        """Under the lock (review of 0110a226 S1): the citation run a fresh request answered with is THIS request's
+        (new, whatever its outcome: an honest FAILED / KILLED is recorded), or an earlier attempt's under the same
+        request id. An earlier attempt's run that never completed with observations — lost to a dead process
+        (``PROCESS_LOST``), interrupted, or recorded without Idris's observations — is refused 409
+        ``VISIBILITY_RUN_NEEDS_NEW_REQUEST_ID`` and NOTHING is stored under the id (a retry must not record a
+        permanent FAILED for a run nobody can finish); one still running answers 409 ``CITATION_RUN_RUNNING``."""
+        if cid not in known:
+            return
+        r = self.citation_runs[cid]
+        o = self.competitor_observations.get(cid)
+        if r["status"] == "completed" and o is not None and o["observations"] is not None:
+            return
+        raise Conflict(R("CITATION_RUN_RUNNING" if r["status"] == "running" else "VISIBILITY_RUN_NEEDS_NEW_REQUEST_ID"))
 
     def _vis_in_flight(self) -> dict:
         """Under the lock: (actor, request key) -> request body sha256 of the visibility runs in flight (memory only:
@@ -537,6 +567,9 @@ class CompetitorsMixin:
             env = idris.compute(obs, history, self.emerging_dismissals.get(tid, {}), self._previous(tid, obs, cid),
                                 {"outcome": (r["result"] or {}).get("outcome")}, vid, now, source,
                                 self.emerging_confirmations.get(tid, {}), classifier)
+        env, scrubbed = text_redact.scrub(env)                    # M4: the last check before the log
+        if scrubbed:
+            env = {**env, "redaction": {"policy": "text_redact.scrub", **scrubbed}}
         rsha = sha(env)
         facts = env.get("facts") or {}
         data = {"visibility_run_id": vid, "tenant_id": tid, "domain": body["domain"],

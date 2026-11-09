@@ -9,6 +9,7 @@
 Property tests are seeded (``random.Random``), so every case is reproducible. No network, no key, no elapsed-time
 assertion; the concurrency test interleaves real threads with events."""
 
+# ruff: noqa: RUF001 - the homoglyphs in this file are the test data
 from __future__ import annotations
 
 import codecs
@@ -18,10 +19,10 @@ import random
 import threading
 
 import pytest
-
 import test_idris as ti
-from agents import idris, text_redact
 from helpers import rid
+
+from agents import idris, text_redact
 
 BRANDS = [("Z Best Media", "site.test"), ("Refund Rangers", "refundrangers.test"), ("Acme Recovery", "acme.test"),
           ("Quillbrook Labs", "quillbrook.test"), ("Seller Snap", "sellersnap.test")]
@@ -124,7 +125,7 @@ def test_property_a_lookalike_is_never_a_competitor_end_to_end(brand, domain, ho
     keys = {c["key"] for o in obs for c in o["candidates"]}
     old_keys = {c["key"] for c in old["candidates"]} - keys
     conf = {k: {"by": "dashboard", "at": "2026-10-01T18:00:00Z", "name": k} for k in old_keys}
-    env = idris.compute(obs[-1], obs[:-1] + [old], {}, None, {"outcome": "OK"}, "seo-vis-" + "d" * 40,
+    env = idris.compute(obs[-1], [*obs[:-1], old], {}, None, {"outcome": "OK"}, "seo-vis-" + "d" * 40,
                         "2026-10-09T18:00:00Z", "fresh", conf)
     em = env["facts"]["emerging"]
     for c in em["items"] + em["watch"] + em["confirmed"]:
@@ -166,7 +167,7 @@ def test_a_confirmed_lookalike_from_an_old_observation_is_refused_and_never_in_a
     run lists it as an impersonation signal, never a competitor."""
     lookalike = ti.ans("Options:\n1. **Refund Rangers** - a claims agency.\n2. Z Best Media helps.",
                        ["https://site.test/x", "https://xn--zbstmedia-h0h.com/", "https://www.refundrangers.com/"])
-    h, fakes, psid = ti.svc(tmp_path, openai=[lookalike], anthropic=[lookalike])
+    h, _fakes, psid = ti.svc(tmp_path, openai=[lookalike], anthropic=[lookalike])
     h.ok(ti.comp_set(h), 201)
     monkeypatch.setattr(idris, "client_like_host", lambda *a, **k: None)          # the old, undecoded reading
     h.ok(ti.vis(h, psid), 201)
@@ -192,7 +193,7 @@ def test_a_confirmed_lookalike_from_an_old_observation_is_refused_and_never_in_a
 
 
 def test_a_tracked_competitor_on_the_clients_label_is_refused_or_excluded(tmp_path):
-    h, fakes, psid = ti.svc(tmp_path)
+    h, _fakes, _psid = ti.svc(tmp_path)
     for d in ("zbestmedia.com", "xn--zbstmedia-h0h.com", "z-best-media.net"):
         h.refused(ti.comp_set(h, competitors=[{"name": "Brightline", "domains": [d]}]), 422, "COMPETITOR_IS_CLIENT")
     bl, excluded = idris.brands({"competitors": [{"competitor_id": "cmp-x", "name": "Brightline",
@@ -299,7 +300,9 @@ def test_personal_data_is_redacted(text, gone, placeholder):
     assert gone not in t and placeholder in t
 
 
-@pytest.mark.parametrize("text", ["Key: Refund Rangers leads the list.", "Token economy agencies such as Getida.",
+# review of 0110a226 M1: a credential label followed by any 6+ character value is redacted with no "looks like a
+# token" gate, so "Key: Refund Rangers" / "Token economy" lose the word after the label (test_idris_redaction.py)
+@pytest.mark.parametrize("text", ["Refund Rangers leads the list.", "Agencies such as Getida.",
                                   "Pricing is $49 per month since 2021.", "Card 4111 1111 1111 1112 is not Luhn",
                                   "Refund Rangers (refundrangers.com) helps Amazon sellers."])
 def test_prose_is_left_as_it_is(text):

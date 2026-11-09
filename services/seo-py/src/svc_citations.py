@@ -31,7 +31,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from agents import callum
+from agents import callum, text_redact
 from envelope import sha
 from errors import Conflict, Forbidden, Invalid, NotFound
 from ledger import derived_id
@@ -132,6 +132,12 @@ class CitationsMixin:
                     capability="audit")
                 if stop is not None:
                     return self._interrupt_citation_run(tid, cid, stop)
+                # review of 0110a226 M4: every free-text field of the result (excerpts, cited URLs, titles ...) is
+                # redacted before it is recorded or logged, and any field a key / personal-data detector still fires
+                # on is withheld (text_redact.scrub, fail closed). Callum's engine (agents/callum.py) is unchanged.
+                env, scrubbed = text_redact.scrub(env)
+                if scrubbed:
+                    env = {**env, "redaction": {"policy": "text_redact.scrub", **scrubbed}}
                 rsha = sha(env)
                 facts = env.get("facts") or {}
                 totals = (facts.get("metrics") or {}).get("totals") or {}

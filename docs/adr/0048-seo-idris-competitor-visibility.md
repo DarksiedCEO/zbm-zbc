@@ -22,7 +22,7 @@ provenance and confidence, never 0% for unknown); no paid data.
 ### D1. One job, and what is not Idris's
 
 Idris measures the client's AI share of voice against competitors and detects emerging competitors (`agents/idris.py`,
-rules `idris-rules/2026-11-08.7`, contract `idris.share_of_voice/1`). Registry entry in `svc_manager.REGISTRY`
+rules `idris-rules/2026-11-08.8`, contract `idris.share_of_voice/1`). Registry entry in `svc_manager.REGISTRY`
 (assignment, inputs, outputs; `GET /seo/v1/department`); Idris leaves `NOT_BUILT_AGENTS`; it has its own lifecycle
 state (a restricted Idris is refused 403 `AGENT_RESTRICTED`, and citation runs then record no observations — Callum
 is unaffected). NOT Idris's: asking engines (the adapter and Callum's collection), classifying the client's citations
@@ -459,6 +459,83 @@ Tests: `services/seo-py/tests/test_idris_warroom.py` (seeded property tests, a t
 - **War room timing (noted, workflows unchanged).** The seo-py-idris library takes about 8.5 minutes on one worker,
   close to the war room's 900 s `WORKER_TIMEOUT_S`; a slower runner, more generated cases or a parallel run can reach
   the timeout and report ERROR. Not changed here (`.github/workflows/**` and the war-room engine are not touched).
+
+## Review of 0110a226 (independent certifying review: REJECTED) — changes
+
+Every finding fixed as a CLASS (rules `idris-rules/2026-11-08.8`). Tests: `services/seo-py/tests/test_idris_redaction.py`
+(generated cases per finding; every key-shaped value is derived at run time from a hash, none is written literally).
+`agents/text_redact.py` stays LOCAL and switches to the shared `secret_guard` core when that lands (#51 / #53).
+
+- **M1 labelled credentials.** A credential LABEL — password / passwd / pwd / passcode / passphrase / PIN (capitals) /
+  access code / auth / api key (`api key`, `api-key`, `apikey`, `api_key`) / token / secret / client secret / key and
+  composite names (`OPENAI_API_KEY`, `db.password`), plus common non-English labels (contraseña, mot de passe,
+  passwort, kennwort, senha, wachtwoord, lösenord, hasło, пароль, 密码, パスワード, 비밀번호, clave, jeton, токен ...) —
+  then ANY separator (`:` `=` `->` `→` `=>` ` is ` ` - ` ` — ` or whitespace, up to three in a row), then a value of
+  6+ characters (3+ with a digit) is redacted. No token gate. A password-family label with an explicit separator
+  redacts to the end of its sentence or line (a passphrase has spaces); a quoted value to its closing quote. Bare
+  `key` counts with `:` / `=` only; `pin` in lower case is a verb. Cost, stated: prose right after a label word loses
+  the next word (`token economy`, `password managers`) — see S3.
+- **M2 candidate names.** `text_redact.prepare` runs on the RAW answer before Idris reads any of it: NFKC and
+  invisible characters removed, percent- and HTML-entity-decoded (at most 4 rounds), whitespace runs read as one space
+  (a label and its value are never kept apart by padding), URL user parts (`//user:password@`, `user:pw@host`)
+  removed, then personal data and keys redacted. The extractor refuses any word inside a URL (scheme, `www.`,
+  `mailto:` or a host with a path / query) or an e-mail address (`IN_URL`), and any display a detector fires on
+  (`SENSITIVE`). The final guard (M4) re-checks everything recorded.
+- **M3 token shapes.** Slack `xox[a-z]-` and `xoxe.xox[a-z]-`; AWS ids matched glued to any character; more documented
+  prefixes (`whsec_`, `ya29.`, `GOCSPX-`, `glpat-`, `npm_`, `hf_`, `SG.`, `shp??_`, `dop_v1_`, `xai-`, `gsk_`, `r8_`,
+  Telegram bot tokens, PEM private-key blocks). Every entry point NFKC-normalises and strips format characters
+  (zero-width, bidi, soft hyphen, word joiner). Keys broken over lines (with indentation), written with a space
+  between every character, or percent / entity encoded are matched. Bar: zero strong-key leaks over 600 seeded
+  disguised cases and 16 shapes x 14 disguises.
+- **M4 storage path.** At the point THIS service records them — `citation_run_recorded` (svc_citations.py),
+  `competitor_observations_recorded` and `competitor_visibility_recorded` (svc_competitors.py) — the whole result goes
+  through `text_redact.scrub`: every free-text string and dict key is redacted; then every field (id / hash / code
+  fields included, which are never rewritten) is re-checked with the strong-key and personal-data detectors, and one
+  still firing is replaced by `[redacted:withheld]` (fail closed; an internal error withholds every string). An
+  observed-text blob gets the SHA-256 of its redacted text; the result carries `redaction` counts. Callum's engine
+  files are NOT edited (PR #51).
+- **M5 multi-letter lookalikes.** `brand_skeleton` folds, after the UTS #39 skeleton (which already maps the
+  confusables file's own multi-letter prototypes such as `ﬁ` -> `fi`, `‖` -> `ll`, and `m` -> `rn`), the Latin
+  letter-sequence look-alikes on BOTH sides: `rn` / `m`, `cl` / `d`, `vv` / `w`, and `ii` `il` `li` `ll` / `u` (`i`
+  is `l` after the digit swaps). `nn` / `m` is not folded (too common in real names). `_not_the_client` goes through
+  the same `client_like` / `client_like_host`.
+- **M6 subdomain impersonation.** `client_like_host` checks EVERY label left of the public suffix (and runs of 2-4
+  neighbouring labels read as one: `z.best.media.example.com`), not only the registrable label. A cited host with the
+  client's brand in any label is excluded (`CLIENT_LOOKALIKE_DOMAIN`), listed as a lookalike seen, and a name that
+  stands for that host carries it as a domain hint — so `emerging()` lists it under `client_lookalikes` and confirm
+  answers 409 `CANDIDATE_IS_CLIENT_LOOKALIKE`; the competitor set refuses such a domain 422 `COMPETITOR_IS_CLIENT`.
+  Residual: an observation recorded before this fix kept only the registrable domain as the hint, so an OLD candidate
+  cited only on a client-named subdomain is not recognised from its record; the next run's observation is.
+- **S1 crash retry.** A fresh request answered with an EARLIER attempt's citation run under the same request id that
+  never completed with observations (`PROCESS_LOST`, interrupted, or no observations) is refused **409
+  `VISIBILITY_RUN_NEEDS_NEW_REQUEST_ID`** and stores nothing under the id; one still running answers 409
+  `CITATION_RUN_RUNNING`. The request's OWN run failing is still recorded honestly (FAILED / KILLED).
+- **S2.** `_excerpt` keeps both redactions, each tested directly: the whole-text pass (a key cut by the window) and
+  the window pass after whitespace is collapsed (a label and value apart in the text).
+- **S3 over-redaction.** Weak heuristics (32+ hex, 32+ mixed tokens, base64) exempt runs made only of word-like pieces
+  (slugs, CamelCase hashtags, paths) and a 40 / 64-character lower-case hex commit id in a URL on a code host or after
+  `/commit/`, `/tree/`, `/blob/` ...; strong rules are never exempted. Cards exclude ISBN-13s, UUID groups and Amazon
+  order ids; a phone needs separators, parentheses or `+` (or a phone label). Measured on the corpus in
+  `test_idris_redaction.legit_corpus` (204 legitimate phrases: answer prose about 13 brands, blog slugs, 40 git SHAs
+  in GitHub / GitLab URLs, hashtags, ISBNs, 10-digit ticket / case numbers, Amazon order ids, UUIDs, ASINs, prices,
+  dates): **3 / 204 = 1.47%** changed (all three are a label word followed by prose: `token economy`, `Password
+  managers`, `password policy` — M1's no-gate rule, kept: a leak is worse than over-redaction). Idris's bar is not
+  ruled; Callum's is 2.5%. The word-like exemption lets at most 0.2% of random 32-character tokens through the WEAK
+  rules (measured in the tests).
+- **S4.** A client term of 10+ characters (on the typo key) also matches at two SEPARATE typo edits (insertion,
+  deletion, substitution, adjacent transposition; two edits side by side replace a short word and are another name:
+  `BigCommerce` / `Bold Commerce` stay distinct), on the typo key (before folds) and on the skeleton; and any other
+  ORDER of all of a 2-4 word term's words (`Media Best Z`, `mediabestz`), exactly or one edit apart for 10+.
+- **N1.** No new ruff findings vs e34638b3 (default config: identical; extended UP / I / RUF / B: none new — the
+  UP045 / I001 / RUF059 / RUF005 of 0110a226 fixed; the homoglyph test data is marked `noqa: RUF001`).
+- **N2 single-process assumption.** The in-flight table of visibility requests (WR-F032) is in memory: it holds for
+  ONE service process per data directory (the data-directory lock enforces one writer). Two processes on one data
+  directory are not supported.
+- **N3 (residual, measured).** On 197 real brand names (all ordered pairs), 5 pairs read as client lookalikes (3
+  before): `Bestmedia` / `Z Best Media` (one edit, pre-existing), `Bright Line` / `Brightline` (pre-existing),
+  `Clay` / `Day` (M5 `cl` / `d`: they do look alike), `Bestmedia` / `Media Best` and `Media Best` / `Mediabest` (S4
+  reorder). Fails safe: such a brand is listed as a lookalike, never a competitor; the tenant can track a distinct
+  brand only if it is not the client's lookalike (stated trade-off, unchanged since round 1).
 
 ## What is NOT built (deliberately)
 
