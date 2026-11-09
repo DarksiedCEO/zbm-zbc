@@ -48,10 +48,12 @@ import lookalikes
 from agents import logs as logs_mod
 
 AGENT, TASK = "osei", "search_performance"
-VERSION = "2026-11-08.14"                     # query classes, templating and the aggregation rules below
+VERSION = "2026-11-08.15"                     # query classes, templating and the aggregation rules below
 # 2026-11-08.1 (Priya review round 1, M3): street addresses, unit / apartment numbers, PO boxes, ZIP+4 and a ZIP next
 #    to a US state are pii_suspect (looks_like_address)
 # 2026-11-08.2 (review round 2): the address rule needs address structure (it over-dropped service queries)
+# 2026-11-08.15 (review round 15): STRUCTURAL: card / phone / SSN detectors always run on the raw text with no
+#    exemption; exemptions only touch the generic rules; issuer-prefix check for cards; date + time is one date token
 # 2026-11-08.14 (review round 14): dates are exempt only when they stand alone (never hide a card, phone or SSN);
 #    year-only card windows, ZIP + year, spaced / compact / ranged dates, version numbers and decades kept
 # 2026-11-08.13 (review round 13): one spelled word counts only as a whole word with 9+ real digits, after the
@@ -155,14 +157,16 @@ def longest_digit_run(text: str) -> int:
     and 12. Digits in different runs (``iphone 15 pro 256gb 2024``) are never added up (AEGIS gl-gsc L4). A run with
     two or more year-like groups (19xx / 20xx: ``covid 19 2020 2021``) is a list of years: its year groups do not
     count. A phone number holding one such group (``555 010 2024``) is still caught. Calendar dates that stand alone
-    (``2024-10-24``, ``11/08/2025``; ``isolated_dates_removed``) are taken out first and break a run. A ZIP-sized
-    number next to one year (``90210 2024``) is still counted as nine digits: exempting it would let a 9-digit SSN
-    regrouped 5 + 4 (``12345 2019``) through, so that over-drop is kept and disclosed (round 14)."""
+    (``2024-10-24``, ``11/08/2025``; ``isolated_dates_removed``) are taken out first and break a run; a run of two
+    groups, a year and a number of at most five digits (``90210 2024``), counts the number only. GENERIC rule:
+    since round 15 a real SSN regrouped 5 + 4 (``12345 2019``) is the SSN detector's, which no exemption reaches."""
     best = 0
     for m in _DIGIT_RUN.finditer(isolated_dates_removed(text)):
         groups = re.findall(r"\d+", m.group())
         years = [g for g in groups if _YEAR.fullmatch(g)]
         n = sum(len(g) for g in groups if len(years) < 2 or not _YEAR.fullmatch(g))
+        if len(groups) == 2 and len(years) == 1 and max(len(g) for g in groups if not _YEAR.fullmatch(g)) <= 5:
+            n -= 4                       # ZIP + year: a GENERIC exemption only; the SSN detector is never exempted
         best = max(best, n)
     return best
 
@@ -505,10 +509,24 @@ _SLASH_DATE = re.compile(r"(?<!\d)(?:" + _date_alternatives() + r")(?!\d)")
 _DATE_NEIGHBOURHOOD = 12      # characters either side within which another digit makes a date part of a longer run
 
 
+_TIME_AFTER = re.compile(r"(?:t|\s+(?:at\s+|@\s*)?)(?:(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?:\.\d+)?"
+                         r"(?:\s*(?:am|pm|a\.m\.|p\.m\.))?|(?:1[0-2]|0?[1-9])\s*(?:am|pm|a\.m\.|p\.m\.))"
+                         r"(?:\s*(?:z|utc|gmt|[+-]\d\d:?\d\d))?(?![a-z\d])")
+_TIME_ALONE = re.compile(r"(?<!\d)(?:(?:[01]?\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(?:\s*(?:am|pm|a\.m\.|p\.m\.))?|"
+                         r"(?:1[0-2]|0?[1-9])\s*(?:am|pm|a\.m\.|p\.m\.))(?![a-z\d])")
+
+
 def date_spans(text: str) -> list:
+    """Calendar dates, each with a time right after it (``2025-11-08 10am``, ``2025-11-08T09:30``, ``11/10/2025
+    3:30``; round 15), and times standing on their own (``7pm``, ``09:30``): one date token for the GENERIC rules."""
     spans = [m.span() for m in _ISO_DATE.finditer(text)]
     spans += [m.span() for m in _SLASH_DATE.finditer(text) if not any(a <= m.start() < b for a, b in spans)]
-    return sorted(spans)
+    out = []
+    for a, b in sorted(spans):
+        t = _TIME_AFTER.match(text, b)
+        out.append((a, t.end() if t else b))
+    out += [m.span() for m in _TIME_ALONE.finditer(text) if not any(a <= m.start() < b for a, b in out)]
+    return sorted(out)
 
 
 def isolated_dates_removed(text: str) -> str:
@@ -615,8 +633,8 @@ def homoglyph_digits(folded: str) -> str:
     def letters_ok(w):
         return all(not c.isalpha() or c in _HOMOGLYPH_SET for c in w if c not in "-._/")
 
-    def plural(w):                         # round 14: "1960s", "90s", "2010s" are decades, not "19605"
-        return re.fullmatch(r"\d+'?s", w) is not None
+    def plural(w):                         # round 14: "1960s", "90s", "2010s" are decades, not "19605"; round 15:
+        return re.fullmatch(r"\d+'?s|(?:\d{1,2}:){1,2}\d{2}z?", w) is not None     # a time "10:30:00z" is not "002"
     mapped = [any(c.isdigit() for c in w) and letters_ok(w) and any(c in _HOMOGLYPH_SET for c in w) and not plural(w)
               for w in words]
     seed = [any(c.isdigit() for c in w) and letters_ok(w) and not plural(w) for w in words]
@@ -659,6 +677,8 @@ def filler_digit_run(folded: str) -> int:
         groups = re.findall(r"\d+", m.group())
         years = [g for g in groups if _YEAR.fullmatch(g)]
         n = sum(len(g) for g in groups if len(years) < 2 or not _YEAR.fullmatch(g))
+        if len(groups) == 2 and len(years) == 1 and max(len(g) for g in groups if not _YEAR.fullmatch(g)) <= 5:
+            n -= 4                       # ZIP + year: a GENERIC exemption only; the SSN detector is never exempted
         best = max(best, n)
     return best
 
@@ -667,21 +687,31 @@ def card_like(folded: str) -> bool:
     """A Luhn-valid run of 13-19 digits made of consecutive digit groups, whatever separates the groups (separators
     and at most one filler token of up to three characters: spaces, '-', '/', '.', ' x ', '-ab-') and whatever the
     groups look like (``4000 2019 2020 2021``, ``4539 x 1488 x 0343 x 6467``); every window of consecutive groups is
-    tried. A window made only of year-like groups (``2001 2002 2003 2004``; no card network issues numbers starting
-    19xx / 20xx in that shape) is not a card (round 14); a single non-year group in it makes it one again."""
+    tried. Round 15: the number must also start with a card network's issuer prefix (``card_iin``) — a property of
+    card numbers, not an exemption — so ``2001 2002 2003 2004`` (no network issues 20xx numbers) is not a card while
+    every test card of every network is. A DETECTOR (see ``pii_detectors``): it is never given exempted text."""
     for m in _DIGIT_GROUPS.finditer(folded):
         groups = re.findall(r"\d+", m.group())
         for i in range(len(groups)):
             d = ""
-            used = []
             for g in groups[i:]:
                 d += g
-                used.append(g)
                 if len(d) > 19:
                     break
-                if len(d) >= 13 and _luhn(d) and not all(_YEAR.fullmatch(x) for x in used):
+                if len(d) >= 13 and card_iin(d) and _luhn(d):
                     return True
     return False
+
+
+# issuer prefixes (IIN ranges) of the card networks: Visa 4; Mastercard 51-55, 2221-2720; Amex 34, 37; Discover 6011,
+# 644-649, 65; Diners 300-305, 36, 38, 39; JCB 3528-3589; UnionPay 62, 81; Maestro 50, 56-58, 6304, 67; Mir 2200-2204;
+# RuPay 60, 65, 81, 82, 508; Verve 506, 650; Troy 9792
+_IIN = re.compile(r"4|5[0-8]|2(?:2[2-9]|[3-6]\d|7[01])\d|2720|3[4789]|30[0-5]|35(?:2[89]|[3-8]\d)|6\d|8[12]|220[0-4]|"
+                  r"9792")
+
+
+def card_iin(digits: str) -> bool:
+    return _IIN.match(digits) is not None
 
 
 def _entropy(w: str) -> float:
@@ -770,9 +800,83 @@ def base64_text(cased: str, _depth: int = 0) -> bool:
     return False
 
 
-# round 14: a software / standard version number after its keyword is not an IP address, phone or card
+# ---------------------------------------------------------------- round 15: structural detectors
+# THE RULE (review round 15; ADR 0047): the card (Luhn 13-19 + issuer prefix), phone (NANP and E.164 shapes) and SSN
+# detectors ALWAYS run on the raw normalised text (``folded``: decoded, cleaned, lookalike-folded) and on its
+# de-separated digit runs, with NO exemption of any kind — no date, time, year, version, keyword or ZIP rule ever
+# changes what they see. Exemptions (dates, times, year lists, version numbers, ZIP + year) may ONLY suppress the
+# generic digit-run and token rules. Three rounds in a row an exemption reopened a leak; this split is structural.
+_NANP = re.compile(r"(?<!\d)(?:\+?1[\s.\-]{0,3})?\(?[2-9]\d\d\)?[\s.\-]{0,3}\d{3}[\s.\-]{0,3}\d{4}(?!\d)")
+_E164 = re.compile(r"\+\d(?:[\s.\-()]{0,2}\d){7,14}(?!\d)")
+_SSN = re.compile(r"(?<!\d)(?!000|666|9\d\d)\d{3}[\s.\-]{0,3}(?!00)\d{2}[\s.\-]{0,3}(?!0000)\d{4}(?!\d)")
+
+
+def _valid_ssn(d: str) -> bool:
+    return len(d) == 9 and d[:3] not in ("000", "666") and d[0] != "9" and d[3:5] != "00" and d[5:] != "0000"
+
+
+def _valid_phone(d: str) -> bool:
+    if len(d) == 11 and d[0] == "1":
+        d = d[1:]
+    return len(d) == 10 and d[0] in "23456789"
+
+
+def _explained_spans(text: str) -> list:
+    """Dates (with a time after them), times and year-like numbers: digits that a date, time or year accounts for."""
+    return date_spans(text) + [m.span() for m in _YEAR_WORD.finditer(text)]
+
+
+def _deseparated_hit(text: str) -> bool:
+    """A phone or SSN whose digits are spread over consecutive digit groups ("2025/5/5 0100 2024", "2025 550100
+    2024"): in every run of digit groups joined by separators or short fillers (ordinary words never join numbers),
+    every window of whole consecutive groups is read as one number. Searched in every run that holds at least one
+    digit group a date, time or year does not account for — a run of nothing but dates, times and years cannot
+    spell a number someone chose. Never given exempted text."""
+    text = _FILLER_STOP.sub(" #### ", text)
+    explained = [False] * len(text)
+    for a, b in _explained_spans(text):
+        for i in range(a, min(b, len(text))):
+            explained[i] = True
+    def in_letter_word(pos: int, n: int) -> bool:
+        # a digit inside a mostly-letter word ("y2k", "mp3") is part of that word, not a number group
+        a, b = pos, pos + n
+        while a > 0 and not text[a - 1].isspace():
+            a -= 1
+        while b < len(text) and not text[b].isspace():
+            b += 1
+        w = text[a:b]
+        letters = sum(c.isalpha() for c in w)
+        return text[pos - 1:pos].isalpha() and text[pos + n:pos + n + 1].isalpha() and letters > sum(
+            c.isdigit() for c in w)
+    for m in _DIGIT_GROUPS_STRICT.finditer(text):     # fillers must be set apart: "256gb 2024" never joins
+        groups = [(g.group(), g.start() + m.start()) for g in re.finditer(r"\d+", m.group())]
+        groups = [(g, p) for g, p in groups if not in_letter_word(p, len(g))]
+        if not groups or all(all(explained[p + k] for k in range(len(g))) for g, p in groups):
+            continue
+        nums = [g for g, _ in groups]
+        for i in range(len(nums)):
+            d = ""
+            for g in nums[i:]:
+                d += g
+                if len(d) > 11:
+                    break
+                if _valid_ssn(d) or _valid_phone(d):
+                    return True
+    return False
+
+
+def pii_detectors(raw: str) -> bool:
+    """The structural detectors (THE RULE above): card, phone, SSN on the raw text and its de-separated runs."""
+    return card_like(raw) or bool(_NANP.search(raw) or _E164.search(raw)) or any(
+        _valid_ssn(re.sub(r"\D", "", m.group())) for m in _SSN.finditer(raw)) or _deseparated_hit(raw)
+
+
+# rounds 14-15: a software / standard version number of realistic dotted shape (2-4 parts, each at most 5 digits)
+# after its keyword, and a standard's number ("rfc 9110"). They only ever suppress the GENERIC rules and the IP check;
+# the detectors never see them.
 _VERSION = re.compile(r"\b(version|ver|firmware|fw|build|release|kernel|bios|driver|update|patch|ios|android|rfc|"
-                      r"iso|ieee|ecma|win(?:dows)?|v)\s*\.?\s*v?\d+(?:\.\d+){0,5}(?!\d)")
+                      r"iso|ieee|ecma|win(?:dows)?|v)\s*\.?\s*v?(?:\d{1,5}(?:\.\d{1,5}){1,3})(?![\d.])")
+_RFC_NUMBER = re.compile(r"\b(rfc|iso|ieee|ecma)\s*\d{1,5}(?!\d)")
 
 
 def classify_query(q: str, brands: list, _depth: int = 0) -> str:
@@ -785,11 +889,13 @@ def classify_query(q: str, brands: list, _depth: int = 0) -> str:
         return "pii_suspect"
     folded = _LOOKALIKE.fold_cased(t)
     words = folded.split()
-    versioned = _VERSION.sub(lambda m: m.group(1) + " #", folded)        # round 14: "firmware 2.3.11.4", "rfc 9110"
-    spelled = spelled_digits(versioned)
-    glyphs = homoglyph_digits(versioned)
-    # round 14: only dates that stand alone are exempt (isolated_dates_removed); the card, phone and SSN rules see
-    # every other digit as written
+    # THE RULE (round 15): detectors first, on the raw normalised text and its de-obfuscated views, never exempted
+    spelled = spelled_digits(folded)
+    glyphs = homoglyph_digits(folded)
+    if pii_detectors(folded) or (spelled and pii_detectors(spelled)) or (glyphs and pii_detectors(glyphs)):
+        return "pii_suspect"
+    # exemptions below this line touch ONLY the generic digit-run / token rules (and the IP check)
+    versioned = _RFC_NUMBER.sub(lambda m: m.group(1) + " #", _VERSION.sub(lambda m: m.group(1) + " #", folded))
     undated = isolated_dates_removed(versioned)
     if url_like(versioned) or base64_text(t, _depth) or "@" in folded or logs_mod._EMAIL.search(folded) \
             or logs_mod._AT_WORD.search(folded) \

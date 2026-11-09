@@ -20,13 +20,16 @@ DATE_HIDES_VALUE_DROP = [
     "2025-01-01 0199 555", "0199 2025/5/5", "555 2025-01-01 0199",
 ]
 ROUND14_KEEP = [
-    "2025-11-08/2025-11-09 hotel", "25.12.2024-01.01.2025 urlaub", "2001 2002 2003 2004 2005 honda",
+    "2025-11-08/2025-11-09 hotel", "2001 2002 2003 2004 2005 honda",
     "1960s 1970s music", "2025 01 01 holiday", "20251108 log", "firmware 2.3.11.4 router",
-    "version 10.0.19045.3803", "rfc 9110 2022", "1980s 1990s 2000s hits", "windows 10.0.22631 update",
+    "rfc 9110 2022", "1980s 1990s 2000s hits", "windows 10.0.22631 update",
     "ios 17.1.2 battery", "2024/12/25 2025/01/01 hotel", "2025-12-24/2025-12-26 christmas", "iphone 2023 2024",
 ]
-# disclosed over-drop (privacy first): a ZIP-sized number next to one year has the digits of an SSN regrouped 5 + 4
-ZIP_YEAR_OVERDROP = ["90210 2024 restaurants", "10001 2025 apartments"]
+# round 15: ZIP + year is a GENERIC exemption; the SSN detector (never exempted) decides. "90210 2024" is not a valid
+# SSN (area 902), "10001 2025" is one (100-01-2025): kept and dropped respectively. Structural over-drops, disclosed:
+# a date range or version string whose digits ARE a valid card / SSN (detectors are never exempted).
+ZIP_YEAR_KEPT = ["90210 2024 restaurants"]
+STRUCTURAL_OVERDROP = ["10001 2025 apartments", "version 10.0.19045.3803", "25.12.2024-01.01.2025 urlaub"]
 
 
 @pytest.mark.parametrize("q", DATE_HIDES_VALUE_DROP)
@@ -39,10 +42,15 @@ def test_round14_dates_years_versions_and_decades_are_kept(q):
     assert sp.classify_query(q, ["acme"]) != "pii_suspect", q
 
 
-@pytest.mark.parametrize("q", ZIP_YEAR_OVERDROP)
-def test_zip_plus_year_stays_dropped_because_it_could_be_a_regrouped_ssn(q):
+@pytest.mark.parametrize("q", ZIP_YEAR_KEPT)
+def test_zip_plus_year_is_kept_unless_its_digits_are_a_valid_ssn(q):
+    assert sp.classify_query(q, ["acme"]) != "pii_suspect", q
+    assert sp.classify_query(J(("12345", " ", "2019")), ["acme"]) == "pii_suspect"     # 123-45-2019: a valid SSN
+
+
+@pytest.mark.parametrize("q", STRUCTURAL_OVERDROP)
+def test_structural_overdrops_are_the_disclosed_ones(q):
     assert sp.classify_query(q, ["acme"]) == "pii_suspect", q
-    assert sp.classify_query(J(("12345", " ", "2019")), ["acme"]) == "pii_suspect"
 
 
 def _date_forms(d: str):

@@ -145,7 +145,7 @@ account and developer token: a founder decision, not built.
 
 A query that ADR 0017's classifier calls `pii_suspect` (e-mails in any spelling, one phone-like run of 7+ digits not
 an ISO date, id- or secret-like words, and — added in review round 1, reworked in rounds 2 to 4,
-`search_performance` rules `2026-11-08.14`, so Osei's query classes use it too — address forms and over-long text):
+`search_performance` rules `2026-11-08.15`, so Osei's query classes use it too — address forms and over-long text):
 - an id- or secret-like word (round 4 narrowed this from the log templater's rule, which dropped model numbers, tire
   sizes, decimals and years — `24acc636a003`, `225/65r17`, `3.5`, `2012` — as ids): an e-mail in any spelling, a
   UUID, 16+ hex characters, a JWT-like dotted token, 20+ token characters, anything over 40 characters, a
@@ -255,7 +255,27 @@ an ISO date, id- or secret-like words, and — added in review round 1, reworked
   `20251108 log`) and version numbers after their keyword (`firmware 2.3.11.4`, `version 10.0.19045.3803`, `rfc
   9110 2022`). **Kept as a disclosed over-drop:** a ZIP-sized number next to one year (`90210 2024
   restaurants`, `10001 2025 apartments`) — exempting it would let a 9-digit SSN regrouped 5 + 4 (`12345 2019`)
-  through, and privacy takes precedence. Tests: `tests/test_query_privacy_r14.py`;
+  through, and privacy takes precedence. Tests: `tests/test_query_privacy_r14.py`.
+- **Round 15 — THE RULE (structural).** Three rounds in a row an exemption reopened a leak (round 14's version
+  exemption let `v 4111111111111111`, `build 123456789`, `ios 202.555.0199` through). So: **the card (Luhn 13-19
+  and a card network's issuer prefix), phone (NANP and E.164 shapes) and SSN (valid area / group / serial)
+  detectors ALWAYS run on the raw normalised text and on its de-separated digit runs, with NO exemption of any
+  kind — no date, time, year, version, keyword or ZIP rule ever changes what they see** (`pii_detectors`, called
+  before any exemption is computed). Exemptions — calendar dates and times, year lists, dotted version numbers
+  after their keyword (2-4 parts, each ≤ 5 digits), standards' numbers (`rfc 9110`), ZIP + year — may ONLY
+  suppress the generic digit-run and token rules (and the IP check). The de-separated search reads every window of
+  whole consecutive digit groups in a run as one number (`2025/5/5 0100 2024` → 202-555-0100) whenever the run holds
+  a group that no date, time or year accounts for; a run of nothing but dates, times and years cannot spell a number
+  someone chose, and a digit inside a mostly-letter word (`y2k`) is not a group. Cards need an issuer prefix (a
+  property of card numbers, replacing round 14's year-window rule): `2001 2002 2003 2004` is not a card. Date + time
+  (`11/8/2025 7pm`, `2025-11-08T09:30`, `2025-11-08 09:30 utc`) is one date token for the generic rules.
+  **Disclosed structural over-drops:** a query whose digits ARE a valid card, phone or SSN however they are
+  grouped — `10001 2025 apartments` (100-01-2025), `version 10.0.19045.3803` (190-45-3803), a date range whose 16
+  digits are a Luhn-valid Mastercard-range number (`25.12.2024-01.01.2025`); `90210 2024 restaurants` is kept (902
+  is not an SSN area). A committed property test (`tests/test_query_privacy_r15.py`) writes 10 fake cards / phones /
+  SSNs in 5 formats next to, around and inside 18 exemption shapes (3,650 queries) and behind 12 keywords (1,200
+  queries): every one is dropped. Pre-existing and unrelated (ADR 0017's classifier since gl-gsc): a query with the
+  word ` at ` counts as a spelled-out e-mail, so `meeting at 2pm` is dropped;
   7+ digits in one run stay the digit-run rule's;
 - a street address: a house number (at the start, or after a space not preceded by `top` / `best`), an optional
   direction, 1-3 street-name tokens (none a stop or quantity word such as `near`, `in`, `best`, `hour`, `bedroom`,

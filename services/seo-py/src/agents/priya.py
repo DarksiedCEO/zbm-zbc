@@ -167,8 +167,10 @@ LIMITS = [
     "calendar dates that stand alone ('2023 2024 honda civic', '11/08/2025 hotel', '2025-11-08/2025-11-09'), "
     "version numbers after their keyword ('firmware 2.3.11.4') and spec or model-number queries ('12v 100ah "
     "lifepo4 battery') are kept; a date with other digits next to it is never exempt, so it cannot hide a card, "
-    "phone or SSN. Over-dropped on purpose: a ZIP-sized number next to a year ('90210 2024 restaurants'), which "
-    "has the digits of a regrouped SSN. The rule also drops some non-addresses shaped like '<number> <word> st' "
+    "phone or SSN: card, phone and SSN detection always runs on the query as written, with no exemption of any "
+    "kind, and exemptions only relax the generic digit rules. Over-dropped on purpose: any query whose digits are "
+    "a valid card, phone or SSN number however they are grouped ('10001 2025', 'version 10.0.19045.3803'). The "
+    "rule also drops some non-addresses shaped like '<number> <word> st' "
     "or '<number> <word> court'. Derived "
     "variants are never built from a query with a capitalised word, nor from a frame adding a word outside a "
     "closed vocabulary.",
