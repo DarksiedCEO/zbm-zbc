@@ -45,7 +45,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, ValidationError
 
 from answer_adapter import (MAX_ANSWER_CHARS, MAX_SOURCES, SYSTEM_PROMPT, ApiKey, EngineError, HttpAnswerEngine,
-                            drift_names, strict_json)
+                            drift_names, join_text, strict_json)
 from finance_client import _DnsGate, _Resolver, _system_resolve
 from ports import ProviderAnswer
 
@@ -226,7 +226,8 @@ def parse_response(body: bytes, allowed_models: tuple = MODELS) -> ProviderAnswe
         raise EngineError("ENGINE_PROTOCOL_ERROR",
                           "RESPONSE_" + reason if reason and _REASON.fullmatch(reason) and len(reason) <= 31
                           else "RESPONSE_UNKNOWN")
-    text = "".join(p.text for p in (first.content.parts if first.content else ()) if p.text and not p.thought)
+    # WR-F011: the candidate's non-thought parts, joined without ever gluing a sentence end to the next part
+    text = join_text([[p.text for p in (first.content.parts if first.content else ()) if p.text and not p.thought]])
     if not text.strip():
         raise EngineError("ENGINE_PROTOCOL_ERROR", "NO_ANSWER_TEXT")
     if len(text) > MAX_ANSWER_CHARS:

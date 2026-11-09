@@ -164,6 +164,36 @@ def money(x) -> Optional[str]:
     return str(d) if d >= 0 else None
 
 
+_SENTENCE_END = frozenset(".!?:;")
+_CLOSING = frozenset("'\")]\u2019\u201d")
+
+
+def join_text(groups) -> str:
+    """The answer text from its blocks (WR-F011). ``groups``: lists of text pieces; a group is a run of text blocks
+    with nothing between them (a provider splits one paragraph into several blocks, e.g. around citations), and
+    groups are separated by anything else (a tool call, a search result, another message). Pieces of a group are
+    concatenated, with one space added only where a piece ending a sentence (``.``, ``!``, ``?``, ``:``, ``;``,
+    optionally closing quotes / brackets) would touch the next piece's first character; groups are joined with a
+    paragraph break (``\n\n``, spaces and tabs at the group's ends trimmed), so a block boundary is a line start
+    for brand matching and never glues ``agencies.`` to ``Zoom``. A single group's text is returned unchanged."""
+    out = []
+    for g in groups:
+        acc = ""
+        for piece in g:
+            if not piece:
+                continue
+            if acc and not acc[-1].isspace() and not piece[0].isspace():
+                tail = acc.rstrip("".join(_CLOSING))
+                if tail and tail[-1] in _SENTENCE_END:
+                    acc += " "
+            acc += piece
+        if acc:
+            out.append(acc)
+    if len(out) == 1:
+        return out[0]                                 # one block group: unchanged
+    return "\n\n".join(x.strip(" \t") for x in out)
+
+
 def drift_names(keys, known) -> tuple:
     """The NAMES (never the values) of response keys a parser does not model, sorted and bounded (drift visibility).
     A name that is not a plain identifier is reported as "<other>"."""

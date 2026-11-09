@@ -210,6 +210,65 @@ B8. **Citation runs: the near-real-time tier** (`svc_citations.py`, separate fro
     Tenant isolation: another tenant's run is the same 404 as a missing one. A client tenant's run needs Andre's
     approval, a bound Finance client and Compliance (38)'s current ALLOW (ADR 0024), no override.
 
+B9. **War room fixes (PR #55 findings WR-F011..WR-F014; replays `seo-py-callum/R0001..R0050`).**
+    - **WR-F011** every adapter builds the answer with `answer_adapter.join_text`: adjacent text blocks of one
+      run are concatenated (one space added only where a sentence end would touch the next block), runs separated by
+      anything else (a tool call, a search result, another message item) are joined with a paragraph break, which
+      brand matching reads as a line start. Anthropic: runs split at non-text blocks; OpenAI and Perplexity's Agent
+      API: one run per message item (a Perplexity answer with two message items now reads `one\n\ntwo`, not
+      `onetwo`: its hash changes for such answers); Google: the candidate's parts are one run. A single run is
+      unchanged.
+    - **WR-F012** `agents/secret_guard.py` (documented key prefixes, credential names, JWTs, 16+ hex digits, and
+      high-entropy tokens; standard library) redacts every excerpt BEFORE its span is chosen (`[redacted]`,
+      `secret_redacted: true`) and the engine's chunk-title hints. Rows, the run response and the log carry only
+      redacted text. To unify later with Priya's search-query secret classifier (PR #50), not on this base.
+    - **WR-F013** a cited URL path segment that looks like a secret is stored as `{secret}` (`withheld:
+      SECRET_REDACTED`, row flag `SECRET_REDACTED`); query and fragment were already dropped. A URL whose path,
+      query, fragment or user part carries a secret is NEVER fetched: with resolution on it is INCONCLUSIVE
+      (`CITED_URL_NOT_FETCHED`), with resolution off classified by its host as any URL. Cost: a path segment of 16+
+      hex digits (a commit SHA, a content hash) is redacted too; the host still classifies. The host itself is kept.
+    - **WR-F014** the fetcher records a redirect whose `Location` httpx refuses to parse or encode (a raw-Unicode or
+      invalid IDNA host) as `refused_redirect` {status, location} on the FetchResult (never fetched; `redirects`,
+      `final_url` and `summary()` unchanged for every other reader). Callum adds every followed hop, the host where a
+      failed chain stopped and a refused target to `hop_hosts`, and a client URL whose chain stopped is never a
+      credit: through a lookalike → `LOOKALIKE_URL` (`LOOKALIKE_HOP`, `REDIRECT_TARGET_REFUSED`,
+      `REDIRECTED_OFF_CLIENT`); stopped off the client or refused by URL rules → INCONCLUSIVE
+      (`REDIRECT_NOT_RESOLVED`); a client landing page answering 4xx/5xx → INCONCLUSIVE (`LANDING_PAGE_ERROR`). A
+      failure with no redirect seen (timeout, DNS) still falls back to the cited host.
+    - **Redaction precision (re-certification review).** The hex rule needs letters AND digits (a tweet's status id
+      or a 16-digit item id is not a secret); a credential label (`password`, `token`, `secret`, `api-key`,
+      `authorization`, `bearer`) counts only when followed by `:`, `=` or whitespace and a token-shaped value (letters
+      and digits), so `/password-reset-guide` and "password protection" stay; allowed URL shapes: commit / tree / blob
+      SHAs on github.com, gitlab.com, bitbucket.org, codeberg.org, hashed asset names (`main.8f14e45fceea167a.css`),
+      any path on Google Docs / Drive / Sheets / Slides and on known link shorteners; known tracking parameters
+      (`gclid`, `fbclid`, `msclkid`, `utm_*`, ...) are never secrets and are dropped before a fetch (the stored URL
+      drops the whole query anyway). Under-redaction fixed: text and URL parts are also checked percent-decoded
+      (`Bearer%20<token>`), and the 40-character AWS secret-key format is a rule of its own (both cases, a digit / `/`
+      / `+`, entropy ≥ 4 bits, no run of 6+ lower-case letters; checked across path segments, since such a key holds
+      `/`). Tests: a table of 43 ordinary URLs that are kept and fetchable, and the documented fake example values
+      (AWS's `AKIAIOSFODNN7EXAMPLE` and its example secret key, built at run time) dropped from paths, queries,
+      fragments and text. A long digit run in a path may still be withheld as possible personal data (the prompt
+      guard's pre-existing rule): the stored path is shortened, the URL is still fetched.
+    - **Structural rule (final review).** The STRONG detectors — documented key prefixes, labelled credentials, JWTs,
+      the AWS secret format — run on EVERY URL path segment, query key and value (tracking and id parameters
+      included), fragment and user part, and on all text, with NO host or URL-shape exemption. Host and shape
+      exemptions (Google Docs / Drive / Sheets / Slides, link shorteners, fonts.gstatic.com, open.spotify.com,
+      notion.so / *.notion.site, figma.com, code-host SHAs, hashed asset names, id query parameters such as Indeed
+      `jk` or YouTube `v`) may only suppress the WEAK generic heuristics (mixed hex runs, high entropy), and a 48+
+      mixed hex run (a derived key) is exempted only by the code-SHA and asset shapes. The rule is stated in
+      `secret_guard.url_secret_segments` and pinned by a committed property test: every fake key × every allowed,
+      code and attacker host × ten path / query / fragment placements is redacted and never fetched (round-1 of this
+      review found 81 leaks through a host exemption that switched every detector off).
+    - **Personal data in paths (final review).** Only the offending segment is withheld (`{withheld}`); a date or a
+      numeric / alphanumeric id (DOI, arXiv, eBay / Walmart / Etsy item ids, TikTok / Vimeo / Pinterest ids,
+      StackOverflow question ids, news date paths, status ids) is not personal data unless it is shaped like a phone
+      number, an SSN or a payment card (13-19 digits passing Luhn; a bare digit run only at 15 or 16 digits); an
+      e-mail or IP address still withholds its segment. A phone number split across segments is not detected.
+      `cited_instead` is keyed on a hash of the original URL (query and fragment dropped) and shows the redacted URL,
+      so two different articles whose stored forms look alike never merge.
+    - The war room's fake web now encodes chains without hex digits (the reviewer's path fix for PR #55), so its
+      redirect cases are fetched and exercise the resolution logic.
+
 ## Founder-pending defaults (added by this ADR)
 
 - (27) every new engine OFF; every budget, including the per-run caps, 0;

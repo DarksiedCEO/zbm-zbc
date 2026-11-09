@@ -6,7 +6,9 @@ in-process fixture server. No elapsed-time assertion."""
 
 from __future__ import annotations
 
+import copy
 import json
+import urllib.parse
 import os
 
 import httpx
@@ -405,7 +407,7 @@ def test_an_excerpt_or_a_path_that_looks_like_personal_data_is_withheld():
     assert "555 010 0199" not in dumped and "jane@example.com" not in dumped
     row = r["rows"][0]
     assert row["evidence"]["excerpt"] is None and row["evidence"]["withheld"].startswith("personal_data:")
-    assert row["chain"]["cited"]["withheld"] == "PERSONAL_DATA" and row["url"] == "https://competitor.test/{withheld}"
+    assert row["chain"]["cited"]["withheld"] == "PERSONAL_DATA" and row["url"] == "https://competitor.test/users/{withheld}/profile"
 
 
 def test_rows_are_bounded():
@@ -1103,3 +1105,292 @@ def test_underscore_emphasis_is_a_boundary_but_identifiers_stay_whole():
     assert bm.mentioned("*Acme* and **Acme**", ["Acme"])
     assert not bm.mentioned("call foo_acme_bar()", ["Acme"]) and not bm.mentioned("acme_corp", ["Acme"])
     assert not bm.mentioned("my_acme", ["Acme"]) and not bm.mentioned("Acmes", ["Acme"])
+
+
+# ---------------------------------------------------------------------------------------------- war room WR-F011..14
+
+def test_wr_f011_block_boundaries_are_line_starts_in_every_adapter():
+    # Anthropic: the pre-search text block and the answer block are separated by the tool blocks
+    b = te.fixture("anthropic")
+    b["content"][3]["text"] = "Zoom in on the map to see it."
+    b["content"] = b["content"][:4]
+    a = te.MODS["anthropic"].parse_response(json.dumps(b).encode())
+    assert a.text == "I'll search for revenue recovery agencies.\n\nZoom in on the map to see it."
+    assert callum.brand_mention.mention(a.text, ["Zoom"])["confidence"] == "LOW"
+    # adjacent blocks of one paragraph are concatenated; a sentence end never touches the next block
+    assert aa.join_text([["Acme recovers", " revenue."]]) == "Acme recovers revenue."
+    assert aa.join_text([["agencies.", "Zoom in"]]) == "agencies. Zoom in"
+    assert aa.join_text([["agencies.", "- [x] Zoom"], ["Then"]]) == "agencies. - [x] Zoom\n\nThen"
+    assert aa.join_text([["one"]]) == "one" and aa.join_text([["x "]]) == "x "
+    # OpenAI: two message items; Google: two parts; Perplexity Agent API: two message items
+    o = te.fixture("openai")
+    msg = copy.deepcopy(o["output"][1])
+    msg["content"][0]["text"], msg["content"][0]["annotations"] = "Zoom in on the map.", []
+    o["output"][1]["content"][0]["text"] = "Searching agencies."
+    o["output"].append(msg)
+    oa_text = te.MODS["openai"].parse_response(json.dumps(o).encode()).text
+    assert "agencies.\n\nZoom in" in oa_text
+    g = te.fixture("google")
+    g["candidates"][0]["content"]["parts"] = [{"text": "Agencies."}, {"text": "Zoom in on the map."}]
+    assert te.MODS["google"].parse_response(json.dumps(g).encode()).text == "Agencies. Zoom in on the map."
+    for text in (oa_text, "Agencies. Zoom in on the map."):
+        assert callum.brand_mention.mention(text, ["Zoom"])["confidence"] == "LOW"
+
+
+def _synthetic_jwt() -> str:
+    """A JWT-SHAPED string built at run time (no token literal in the source): three base64url parts."""
+    import base64
+    part = lambda b: base64.urlsafe_b64encode(b).decode().rstrip("=")  # noqa: E731
+    return ".".join(part(x) for x in (b'{"alg":"none","typ":"JWT"}', b'{"sub":"synthetic-test"}', b"not-a-signature"))
+
+
+def test_wr_f012_a_secret_in_the_answer_text_is_redacted_from_every_excerpt():
+    key = te.KEYS["openai"]
+    for secret in (key, "sk-proj-" + "Ab3dE5gH7jK9mN1pQ3sT5vX7", "AKIA" + "ABCDEFGHIJKLMNOP",
+                   _synthetic_jwt()):
+        text = f"Z Best Media is listed. Authorization: Bearer {secret} and more."
+        r = classify(collected(*[(0, answer(text=text, cites=["https://competitor.test/a"]))] * 3))
+        dumped = json.dumps(r)
+        assert secret not in dumped and secret[:12] not in dumped, secret
+        ev = [x["evidence"] for x in r["rows"] if x.get("evidence")]
+        assert ev and all(e.get("secret_redacted") for e in ev) and "[redacted]" in ev[0]["excerpt"]["text"]
+    assert callum.secret_guard.redact("Z Best Media helps with revenue-recovery-agency-2026 work.")[1] == 0
+
+
+def test_wr_f013_a_secret_in_a_cited_url_is_redacted_and_never_fetched():
+    key = te.KEYS["openai"]
+    url = f"https://site.test/{key}/page?token={key}"
+    res = resolver({}, enabled=True)
+    r = classify(collected((0, answer(cites=[url]))), res)
+    dumped = json.dumps(r)
+    assert key not in dumped and res.fetcher.fetched == []                        # never fetched
+    row = r["rows"][0]
+    assert row["url"] == "https://site.test/{secret}/page" and "SECRET_REDACTED" in row["flags"]
+    assert row["chain"]["cited"]["withheld"] == "SECRET_REDACTED" and row["evidence"]["url"] == row["url"]
+    assert row["class"] == "INCONCLUSIVE" and row["reason"] == "CITED_URL_NOT_FETCHED"   # resolution on: unknown
+    off_row = classify(collected((0, answer(cites=[url]))))["rows"][0]                  # resolution off: by host
+    assert off_row["class"] == "STRENGTH_URL" and off_row["url"] == "https://site.test/{secret}/page"
+    assert callum.stored_url("https://github.com/o/r/blob/main/README.md")["withheld"] is None
+
+
+@pytest.mark.parametrize("location", ["https://аcme.com/go", "https://a‍cme.com/go"])
+def test_wr_f014_a_client_url_redirecting_to_an_unfollowable_lookalike_is_never_a_strength(location):
+    # the REAL fetcher (primitives/fetch.py) on a mock transport: the refused redirect is recorded, its target host
+    # checked with the lookalike fold (raw Unicode included)
+    from primitives import fetch as fetch_mod
+
+    class Body(httpx.SyncByteStream):                  # streamed, as a real server's (the fetcher reads raw)
+        def __init__(self, b):
+            self.b = b
+
+        def __iter__(self):
+            yield self.b
+
+    def handler(req):
+        if req.url.path == "/robots.txt":
+            return httpx.Response(200, headers={"content-type": "text/plain"}, stream=Body(b"User-agent: *\nAllow: /\n"))
+        if req.headers["host"] == "acme.com":
+            return httpx.Response(301, headers=[(b"location", location.encode())], stream=Body(b""))
+        return httpx.Response(200, headers={"content-type": "text/html"}, stream=Body(b"<html></html>"))
+    fe = fetch_mod.Fetcher(resolver=lambda host, port: ["93.184.216.34"], transport=httpx.MockTransport(handler))
+    fr = fe.fetch("https://acme.com/x", honor_robots=False)
+    res = callum.Resolver(fe, lambda **k: None, True, 5)
+    out = res.resolve("https://acme.com/x")
+    assert out["state"] in ("FAILED", "RESOLVED"), out
+    cl = callum.classify_citation("https://acme.com/x", "acme.com", [], out)
+    assert cl["class"] == "LOOKALIKE_URL", (fr, out, cl)
+    if out["state"] == "FAILED":
+        assert "LOOKALIKE_HOP" in cl["flags"] and fr.summary() == fe.fetch("https://acme.com/x",
+                                                                          honor_robots=False).summary()
+
+
+def test_wr_f014_a_refused_redirect_with_no_readable_target_is_inconclusive_never_strength():
+    u = "https://acme.com/x"
+    refused = FetchResult(url=u, state="REFUSED_URL", final_url=u, detail="the redirect target is not a valid URL")
+    cl = callum.classify_citation(u, "acme.com", [], callum.Resolver(ScriptedFetcher({u: refused}), lambda **k: None,
+                                                                      True, 5).resolve(u))
+    assert cl["class"] == "INCONCLUSIVE" and cl["reason"] == "REDIRECT_NOT_RESOLVED"
+    off_site = FetchResult(url=u, state="DNS_FAILED", final_url="https://parked.test/",
+                           redirects=[{"url": u, "status": 301}])
+    cl2 = callum.classify_citation(u, "acme.com", [], callum.Resolver(ScriptedFetcher({u: off_site}),
+                                                                       lambda **k: None, True, 5).resolve(u))
+    assert cl2["class"] == "INCONCLUSIVE" and "REDIRECTED_OFF_CLIENT" in cl2["flags"]
+    timeout = FetchResult(url=u, state="TIMEOUT", final_url=u)                     # no redirect seen: by host
+    assert callum.classify_citation(u, "acme.com", [], callum.Resolver(ScriptedFetcher({u: timeout}),
+                                                                        lambda **k: None, True, 5).resolve(u)
+                                    )["class"] == "STRENGTH_URL"
+
+
+def test_wr_f014_a_client_chain_refused_after_hops_or_ending_on_an_error_page_is_never_a_strength():
+    u = "https://acme.com/x"
+    later = FetchResult(url=u, state="REFUSED_URL", final_url="https://blog.acme.com/y",
+                        redirects=[{"url": u, "status": 301}], detail="the target or redirect target is not a valid URL")
+    res = callum.Resolver(ScriptedFetcher({u: later}), lambda **k: None, True, 5).resolve(u)
+    assert callum.classify_citation(u, "acme.com", [], res)["reason"] == "REDIRECT_NOT_RESOLVED"
+    err = FetchResult(url=u, state="OK", final_url=u, status=404, content_type="text/html", body=b"<html></html>")
+    res2 = callum.Resolver(ScriptedFetcher({u: err}), lambda **k: None, True, 5).resolve(u)
+    cl = callum.classify_citation(u, "acme.com", [], res2)
+    assert cl["class"] == "INCONCLUSIVE" and cl["reason"] == "LANDING_PAGE_ERROR"
+
+
+# ---------------------------------------------------------------------------------------------- redaction precision
+
+KEEP_URLS = [
+    "https://x.com/acme/status/1852960912345678901", "https://twitter.com/acme/status/1795000000000000000",
+    "https://www.aliexpress.com/item/1005006123456789.html", "https://www.aliexpress.us/item/3256805123456789.html",
+    "https://github.com/acme/site/commit/8f14e45fceea167a5a36dedd4bea2543c1b2d3e4",
+    "https://github.com/acme/site/tree/3f2a9c1b7e4d5a6f8e9d0c1b2a3f4e5d6c7b8a9f/docs",
+    "https://gitlab.com/acme/site/-/commit/9d4e1e23bd5b727046a9e3b4b7db57bd8d6ee684",
+    "https://bitbucket.org/acme/site/commits/aa4f3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a",
+    "https://cdn.site.test/static/main.8f14e45fceea167a.css", "https://cdn.site.test/js/app-3f2a9c1b7e4d5a6f.js",
+    "https://site.test/assets/vendor.9d4e1e23bd5b7270.chunk.js", "https://site.test/password-reset-guide",
+    "https://site.test/blog/how-to-choose-a-password-manager", "https://site.test/token-economy-explained",
+    "https://site.test/secret-menu-items-2026", "https://site.test/api-key-best-practices",
+    "https://site.test/authorization-letter-template", "https://site.test/?gclid=Cj0KCQiA6Ou5BhCrARIsAPoTxrB8x1",
+    "https://site.test/landing?fbclid=IwAR3x9Kq2Zp7Lm4Nv8Bc1Df6Gh0Jk5Rs9Tu2Wx4Yz",
+    "https://site.test/p?utm_source=newsletter&utm_campaign=fall2026&msclkid=4f8a2b9c1d7e3f6a",
+    "https://docs.google.com/document/d/1A2b3C4d5E6f7G8h9I0jK1lM2nO3pQ4rS5tU6vW7xY8z/edit",
+    "https://drive.google.com/file/d/1Zx9Yw8Vu7Ts6Rq5Po4Nm3Lk2Ji1Hg0Fe/view",
+    "https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit",
+    "https://t.co/Ab3dE5gH7j", "https://bit.ly/3xYz9AbC", "https://youtu.be/dQw4w9WgXcQ",
+    "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "https://www.amazon.com/dp/B0C1234567",
+    "https://site.test/blog/2026/11/08/revenue-recovery", "https://site.test/products/12345678901234567890",
+    "https://site.test/items/550e8400-e29b-41d4-a716-446655440000",
+    "https://en.wikipedia.org/wiki/Revenue_recovery", "https://www.reddit.com/r/FulfillmentByAmazon/comments/1abc2de/x/",
+    "https://medium.com/@acme/how-we-recovered-revenue-3f2a9c1b7e4d", "https://news.site.test/article/2026-11-08",
+    "https://site.test/search?q=password+protection", "https://site.test/en-us/pricing", "https://site.test/",
+    "https://www.linkedin.com/company/acme-corp/", "https://site.test/case-studies/acme-2026-q3-results",
+    "https://stackoverflow.com/questions/12345678/how-to-store-an-api-key",
+    "https://site.test/guides/bearer-token-vs-api-key",
+]
+
+
+def _drop_values():
+    """Documented FAKE example values only, assembled at run time (no literal key in the source)."""
+    aws_id = "AKIA" + "IOSFODNN7" + "EXAMPLE"                                    # AWS docs' example access key id
+    aws_secret = "wJalrXUtnFEMI" + "/K7MDENG/" + "bPxRfiCY" + "EXAMPLEKEY"       # AWS docs' example secret key
+    return [te.KEYS["openai"], aws_id, aws_secret, "sk-proj-" + "Ab3dE5gH7jK9mN1pQ3sT5vX7", _synthetic_jwt()]
+
+
+def test_ordinary_cited_urls_are_kept_and_fetchable():
+    assert len(KEEP_URLS) >= 40
+    for u in KEEP_URLS:
+        assert not callum.url_has_secret(u), u
+        s = callum.stored_url(u)
+        # never a secret (a long digit run may still be withheld as possible personal data: a pre-existing rule
+        # that only shortens the stored path; the URL is fetched)
+        assert s["withheld"] in (None, "PERSONAL_DATA") and "{secret}" not in (s["url"] or ""), (u, s)
+    assert callum.secret_guard.fetch_url(KEEP_URLS[18]) == "https://site.test/landing"     # tracking dropped
+    assert callum.secret_guard.fetch_url("https://site.test/?q=a&b=1") == "https://site.test/?q=a&b=1"
+
+
+def test_secret_values_in_paths_queries_and_text_are_dropped():
+    for v in _drop_values():
+        for u in (f"https://site.test/{v}/page", f"https://site.test/p?key={v}", f"https://site.test/p?x=1#{v}",
+                  "https://site.test/p?auth=Bearer%20" + v):
+            assert callum.url_has_secret(u), u
+            assert v not in json.dumps(callum.stored_url(u)), u
+        for text in (f"Authorization: Bearer {v}", f"key {v} here", f"curl -H 'x-api-key: {v}'",
+                     f"See https://site.test/p?h=Bearer%20{v} now", f"aws_secret_access_key={v}"):
+            red, n = callum.secret_guard.redact(text)
+            assert n and v not in red and v[:12] not in red, (text, red)
+
+
+@pytest.mark.parametrize("text", [
+    "Use password protection on every account.", "A secret menu and token rewards.", "Reset your password-reset link.",
+    "The bearer of this card.", "Order 1005006123456789 shipped; tweet 1852960912345678901.",
+    "Commit 8f14e45fceea167a5a36dedd4bea2543c1b2d3e4 on github.com/acme/site is public.",
+    "Z Best Media recovers revenue for 2026 sellers.",
+])
+def test_ordinary_prose_is_not_redacted(text):
+    red, n = callum.secret_guard.redact(text)
+    if "Commit" in text:
+        assert n <= 1                                       # a bare 40-hex SHA in prose may be redacted: no leak cost
+    else:
+        assert n == 0 and red == text, red
+
+
+# ---------------------------------------------------------------------------------------------- final review
+
+def _fake_keys():
+    """Documented FAKE example values only, assembled at run time (no key literal in the source)."""
+    ex = "EXAMPLE"
+    return {"aws_id": "AKIA" + "IOSFODNN7" + ex, "aws_secret": "wJalrXUtnFEMI" + "/K7MDENG/" + "bPxRfiCY" + ex + "KEY",
+            "openai": "sk-proj-" + ex + "Ab3dE5gH7jK9mN1p", "anthropic": "sk-ant-api03-" + ex + "Ab3dE5gH7jK9mN1p",
+            "github": "ghp_" + ex + "Ab3dE5gH7jK9mN1pQ3sT5", "perplexity": "pplx-" + ex + "Ab3dE5gH7jK9mN",
+            "stripe": "sk_test_" + ex + "Ab3dE5gH7j", "jwt": _synthetic_jwt(), "test_key": te.KEYS["openai"]}
+
+
+PROPERTY_HOSTS = sorted(callum.secret_guard.ID_HOSTS | callum.secret_guard.CODE_HOSTS
+                        | callum.secret_guard.ID_PATH_HOSTS) + ["x.notion.site", "site.test", "evil.test",
+                                                                "sіte.test", "competitor.test", "indeed.com"]
+
+
+def _placements(host, v):
+    q = urllib.parse.quote(v, safe="")
+    return [f"https://{host}/{v}", f"https://{host}/d/{v}/edit", f"https://{host}/org/repo/commit/{v}",
+            f"https://{host}/p?key={q}", f"https://{host}/p?gclid={q}", f"https://{host}/p?jk={q}",
+            f"https://{host}/p?v={q}", f"https://{host}/p#{v}", f"https://{host}/p?auth=Bearer%20{q}",
+            f"https://{host}/p?x=1#token={q}"]
+
+
+def test_property_every_fake_key_on_every_host_in_every_url_part_is_redacted_and_never_fetched():
+    # final review: the strong detectors run with NO host or shape exemption
+    keys = _fake_keys()
+    checked = 0
+    for name, v in keys.items():
+        for host in PROPERTY_HOSTS:
+            for u in _placements(host, v):
+                assert callum.url_has_secret(u), (name, u)
+                stored = json.dumps(callum.stored_url(u))
+                assert v not in stored and urllib.parse.quote(v, safe="") not in stored, (name, u, stored)
+                checked += 1
+    assert checked == len(keys) * len(PROPERTY_HOSTS) * 10
+    # and through a real classification: never fetched, never stored, with resolution on
+    res = resolver({}, enabled=True)
+    urls = [_placements(h, v)[0] for h in ("docs.google.com", "t.co", "github.com") for v in keys.values()]
+    r = classify(collected((0, answer(cites=urls))), res)
+    dumped = json.dumps(r)
+    assert res.fetcher.fetched == [] and not any(v in dumped for v in keys.values())
+    assert all("SECRET_REDACTED" in x["flags"] for x in r["rows"] if x.get("url"))
+
+
+@pytest.mark.parametrize("url", [
+    "https://fonts.gstatic.com/s/inter/v13/UcCO3FwrK3iLTeHuS_fvQtMwCp50KnMw2boKoduKmMEVuLyfAZ9hiA.woff2",
+    "https://open.spotify.com/episode/4rOoJ6Egrf8K2IrywzwOMk", "https://www.notion.so/acme/Plan-2026-8f3a9c1b7e4d5a6f8e9d0c1b2a3f4e5d",
+    "https://acme.notion.site/Roadmap-3f2a9c1b7e4d5a6f8e9d0c1b2a3f4e5d", "https://www.figma.com/file/Ab3dE5gH7jK9mN1pQ3sT5v/Design",
+    "https://www.figma.com/design/Ab3dE5gH7jK9mN1pQ3sT5v/Site", "https://www.indeed.com/viewjob?jk=3f2a9c1b7e4d5a6f",
+])
+def test_over_redaction_leftovers_are_kept(url):
+    assert not callum.url_has_secret(url), url
+    assert callum.stored_url(url)["withheld"] is None
+
+
+@pytest.mark.parametrize("url", [
+    "https://doi.org/10.1145/3290605.3300857", "https://arxiv.org/abs/2401.12345", "https://www.ebay.com/itm/195812345678",
+    "https://www.walmart.com/ip/1234567890", "https://www.etsy.com/listing/1523456789/rug", "https://vimeo.com/876543210",
+    "https://www.tiktok.com/@acme/video/7301234567890123456", "https://www.pinterest.com/pin/1234567890123456789/",
+    "https://stackoverflow.com/questions/12345678/x", "https://news.site.test/2026/11/08/revenue-story",
+    "https://x.com/acme/status/1852960912345678901",
+])
+def test_dates_and_ids_in_paths_are_not_personal_data(url):
+    s = callum.stored_url(url)
+    assert s["withheld"] is None and "{withheld}" not in s["url"], (url, s)
+
+
+def test_personal_data_withholds_only_the_offending_segment():
+    for seg, kind in (("call-555-010-0199", "phone"), ("123-45-6789", "ssn"), ("4111-1111-1111-1111", "card"),
+                      ("4111111111111111", "card")):
+        s = callum.stored_url(f"https://site.test/contact/{seg}/info")
+        assert s["url"] == "https://site.test/contact/{withheld}/info" and s["withheld"] == "PERSONAL_DATA", (kind, s)
+    assert callum.stored_url("https://site.test/u/jane@example.com/p")["url"] == "https://site.test/u/{withheld}/p"
+
+
+def test_cited_instead_never_merges_different_articles_on_one_host():
+    a = "https://news.test/contact/call-555-010-0199/one"
+    b = "https://news.test/contact/call-555-010-0188/two"
+    r = classify(collected((0, answer(cites=[a])), (0, answer(cites=[b]))))
+    items = r["mnc_priority"]["items"]
+    assert len(items) == 1 and len(items[0]["cited_instead"]) == 2
+    assert {x["url"] for x in items[0]["cited_instead"]} == {"https://news.test/contact/{withheld}/one",
+                                                            "https://news.test/contact/{withheld}/two"}

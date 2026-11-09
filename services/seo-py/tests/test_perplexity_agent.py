@@ -156,7 +156,9 @@ def test_the_answer_joins_every_output_text_part_of_every_message_item_in_order(
     b = agent_body(text="one ")
     b["output"].append({"type": "message", "id": "m2", "status": "completed", "role": "assistant",
                         "content": [{"type": "output_text", "text": "two "}, {"type": "output_text", "text": "three"}]})
-    assert parse(b).text == "one two three"
+    # WR-F011: message items are separate blocks, so they are joined with a paragraph break (a line start for brand
+    # matching), never glued; the parts of one message are concatenated
+    assert parse(b).text == "one\n\ntwo three"
 
 
 @pytest.mark.parametrize("status", ["failed", "incomplete", "in_progress", "queued", "cancelled"])
