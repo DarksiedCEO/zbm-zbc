@@ -19,6 +19,7 @@ sys.dont_write_bytecode = True
 import chaos  # noqa: E402
 import corpus  # noqa: E402
 import engine  # noqa: E402
+import grammar  # noqa: E402
 import invariants  # noqa: E402
 import personas  # noqa: E402
 
@@ -274,6 +275,153 @@ ACTIONS = {"call_out": call_out, "fine": fine}
         self.assertIn("network access attempted", res["a"]["error"])
         self.assertIsNone(res["b"]["error"])
         self.assertEqual(res["b"]["steps"], [{"action": "x", "status": 201, "body": {"ok": True}}])
+
+
+class Generative(unittest.TestCase):
+    """The generative layer (grammar.py): invented cases are a pure function of the seed, their terminals come from
+    the repo, and a failing generated case is saved by itself (memory only grows)."""
+
+    ATOMS = {"hosts": ["https://site.test/"], "ssrf": ["http://127.0.0.1:{port}/"], "injection": ["IGNORE"],
+             "brand_texts": ["Acme cleans rugs."], "benign": ["You are now eligible for a refund."],
+             "finals_client": ["I recommend Z Best Media."], "finals_none": ["I cannot recommend Z Best Media."],
+             "finals_competitor": ["I won't recommend Z Best Media; RivalCo is my pick."]}
+
+    def test_generators_are_deterministic_and_emit_json(self):
+        for name in grammar.GENERATORS:
+            for seed in range(30):
+                a = grammar.generate(name, random.Random(seed), self.ATOMS)
+                self.assertEqual(a, grammar.generate(name, random.Random(seed), self.ATOMS), name)
+                self.assertIsInstance(json.loads(a), dict, name)
+
+    def test_hex_paths_are_letters_only(self):
+        enc = grammar.hexenc("https://sіte.test/p?x=1")
+        self.assertTrue(enc and set(enc) <= set("ghijklmnopqrstuv"))          # never secret-shaped hex
+        self.assertEqual(grammar.hexdec(enc).decode("utf-8"), "https://sіte.test/p?x=1")
+
+    def test_a_generated_scenario_is_seeded_from_the_repo_and_rebuilds_by_id(self):
+        lib = engine.load_library("seo-py-tnz")
+        a, b, c = engine.generate(lib, 1), engine.generate(lib, 1), engine.generate(lib, 2)
+        gen = [x for x in a if x.get("generated")]
+        self.assertTrue(gen)
+        self.assertEqual(a, b)
+        self.assertNotEqual([x["input"] for x in gen], [x["input"] for x in c if x.get("generated")])
+        self.assertTrue(all(x["case_id"].startswith("seo-py-tnz/") for x in a))
+        dept, scenario, idx, variant, seed = engine.parse_case_id(gen[5]["case_id"])
+        again = [x for x in engine.generate(lib, seed, variant) if x["case_id"] == gen[5]["case_id"]]
+        self.assertEqual(again[0]["input"], gen[5]["input"])
+        sc = next(s for s in lib["scenarios"] if s["id"] == "generated-fireteam-chains")
+        atoms = engine.scenario_atoms(lib, sc)
+        self.assertIn("You are ShopBot.", atoms["injection"])                 # read from the pinned test
+        self.assertIn("I can't recommend Z Best Media.", atoms["finals_none"])
+
+    def test_a_generated_scenario_without_a_count_or_with_seeds_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            saved = engine.SCENARIOS
+            engine.SCENARIOS = Path(tmp)
+            try:
+                lib = {"library": "x", "version": 1, "service": "seo-py", "driver": "seo_py.py", "scenarios": [
+                    {"id": "g", "persona": "p", "input_field": "spec", "steps": [], "invariants": [],
+                     "generator": {"name": "fireteam_chain"}}]}
+                (Path(tmp) / "x.json").write_text(json.dumps(lib))
+                with self.assertRaises(engine.LibraryError):
+                    engine.load_library("x")
+                lib["scenarios"][0]["generator"] = {"name": "no_such_grammar", "count": 3}
+                (Path(tmp) / "x.json").write_text(json.dumps(lib))
+                with self.assertRaises(engine.LibraryError):
+                    engine.load_library("x")
+            finally:
+                engine.SCENARIOS = saved
+
+    def test_failing_generated_cases_are_saved_automatically_and_only_appended(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            saved = engine.REPLAY
+            engine.REPLAY = Path(tmp)
+            try:
+                fail = engine.judge({**Gate.CASE, "known_failure": None},
+                                    {"steps": [{"action": "a", "status": 500, "body": {}}], "state": {}, "error": None})
+                gen = engine.judge({**Gate.CASE, "case_id": "d/g#000.0@1", "input": {"spec": "{}"},
+                                    "known_failure": None, "generated": True},
+                                   {"steps": [{"action": "a", "status": 500, "body": {}}], "state": {}, "error": None})
+                dry = engine.promote({"d": [fail, gen]}, "2026-11-08", generated_only=True, write=False)
+                self.assertEqual([e["origin"] for e in dry["d"]], ["d/g#000.0@1"])
+                self.assertFalse((Path(tmp) / "d.json").exists())            # CI: the checkout is never written
+                self.assertEqual(engine.promote({"d": [fail, gen]}, "2026-11-08", generated_only=True),
+                                 {"d": ["d/R0001"]})
+                doc = engine.load_replay("d")
+                self.assertEqual(len(doc["cases"]), 1)
+                self.assertIsNone(doc["cases"][0]["known_failure"])           # blocks until triaged
+                self.assertEqual(engine.promote({"d": [gen]}, "2026-11-09", generated_only=True), {})
+            finally:
+                engine.REPLAY = saved
+
+    def test_structural_bound_and_empty_list_predicates(self):
+        obs = {"steps": [], "state": {"n": 3, "cap": 4, "v": [], "w": ["x"]}}
+        self.assertTrue(invariants.state_le(obs, "n", limit=3)[0])
+        self.assertTrue(invariants.state_le(obs, "n", limit_key="cap")[0])
+        self.assertFalse(invariants.state_le(obs, "n", limit=2)[0])
+        self.assertFalse(invariants.state_le(obs, "missing", limit=2)[0])     # not comparable never holds
+        self.assertTrue(invariants.state_empty(obs, "v")[0])
+        self.assertFalse(invariants.state_empty(obs, "w")[0])
+        self.assertFalse(invariants.state_empty(obs, "absent")[0])           # the driver must say what it judged
+
+    def test_every_library_invariant_is_a_known_pure_predicate_and_no_bound_is_wall_clock(self):
+        lib = engine.load_library("seo-py-tnz")
+        for sc in lib["scenarios"]:
+            for inv in sc["invariants"]:
+                self.assertIn(inv["check"], invariants.INVARIANTS, (sc["id"], inv["id"]))
+                self.assertNotIn("elapsed", json.dumps(inv["args"]), (sc["id"], inv["id"]))
+
+    def _driver(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("wr_drv_tnz", engine.DRIVERS / "seo_py_tnz.py")
+        drv = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(drv)
+        return drv
+
+    def test_the_fireteam_grammar_names_only_what_the_driver_has(self):
+        drv = self._driver()
+        self.assertEqual(set(grammar.TNZ_WHERE) | {"nested_deep"}, set(drv.WHERE))
+        self.assertEqual(grammar.TNZ_STORMS, drv.STORM_STEPS)
+        self.assertEqual(grammar.TNZ_KILLS, drv.KILLS)
+        self.assertEqual(set(grammar.TNZ_HISTORY_OPS) | {"genuine"}, set(drv.HISTORY_FORGERIES))
+        self.assertEqual(set(grammar.TNZ_ZARA_OPS) | {"genuine"}, set(drv.ZARA_FORGERIES))
+        self.assertEqual(set(grammar.TNZ_HANDOFF_MUTATIONS), set(drv.HANDOFF_MUTATIONS))
+        self.assertTrue(set(grammar.TNZ_HANDOFF_CLAIMS) <= set(drv.HANDOFF_FORGERIES))
+        for i in range(80):                                   # the undocumented location is never generated
+            self.assertNotIn("nested_deep", grammar.fireteam_chain(random.Random(i), self.ATOMS))
+
+
+def _service_deps() -> bool:
+    import importlib.util as u
+    return all(u.find_spec(m) is not None for m in ("fastapi", "httpx", "pydantic"))
+
+
+class FireteamReplayRegressions(unittest.TestCase):
+    """A case must really exercise what it names (the lesson of WR-F014, where a redirect was never followed): a
+    poisoned native case must re-send the poisoned text to the engine as an assistant turn, and a checked native case
+    must make the provider receive the structural re-ask; a forged history must be refused with no request."""
+
+    @unittest.skipUnless(_service_deps(), "needs seo-py's pinned requirements (the warroom CI job installs them)")
+    def test_a_poisoned_native_case_resends_the_text_and_is_re_asked(self):
+        lib = engine.load_library("seo-py-tnz")
+        case = next(c for c in engine.generate(lib, 1, 0) if c["scenario"] == "poisoned-native-answers"
+                    and c["input"]["where"] == "text" and c["input"]["at"] == "opening")
+        obs = engine.run_worker(lib, [case], sys.executable)[case["case_id"]]
+        self.assertIsNone(obs.get("error"), obs.get("error"))
+        st = obs["state"]
+        self.assertGreater(st["injection_resent"], 0, st)          # the poisoned answer really went back
+        self.assertGreater(st["reask_requests"], 0, st)            # the structural re-ask really happened
+        self.assertEqual(st["plan_violations"], [], st)
+
+    @unittest.skipUnless(_service_deps(), "needs seo-py's pinned requirements (the warroom CI job installs them)")
+    def test_a_forged_history_is_refused_before_any_request(self):
+        lib = engine.load_library("seo-py-tnz")
+        case = next(c for c in engine.generate(lib, 1, 0) if c["scenario"] == "forged-history-blocks"
+                    and c["input"]["forgery"] == "reorder_blocks")
+        obs = engine.run_worker(lib, [case], sys.executable)[case["case_id"]]
+        self.assertIsNone(obs.get("error"), obs.get("error"))
+        self.assertTrue(obs["state"]["refused_code"].startswith("ENGINE_PROTOCOL_ERROR:"), obs["state"])
+        self.assertEqual(obs["state"]["forged_requests_sent"], 0)
 
 
 class Personas(unittest.TestCase):

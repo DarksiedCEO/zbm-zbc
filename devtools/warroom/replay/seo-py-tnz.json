@@ -1,0 +1,2171 @@
+{
+ "library": "seo-py-tnz",
+ "cases": [
+  {
+   "replay_id": "seo-py-tnz/R0001",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#006.0@1",
+   "chain": [],
+   "seed_value": "turn_one_negative_k",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"checked\": true}",
+    "forgery": "turn_one_negative_k"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_negative_k'], 'chain': ['counts_not_whole_numbers'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]",
+    "native_pattern_never_passes_without_its_basis: state.native_pattern_passed_without_basis = [{'ops': ['turn_one_negative_k'], 'chain': ['counts_not_whole_numbers']}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0002",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#006.2@1",
+   "chain": [
+    "base={\"chains\": 3, \"complete\": 3, \"wins\": 3, \"tl\": 1, \"checked\": true, \"verified\": true}"
+   ],
+   "seed_value": "turn_one_negative_k",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"tl\": 1, \"checked\": true, \"verified\": true}",
+    "forgery": "turn_one_negative_k"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_negative_k'], 'chain': ['counts_not_whole_numbers'], 'volume': [], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'TEST'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0003",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#006.4@1",
+   "chain": [
+    "base={\"chains\": 3, \"complete\": 3, \"wins\": 3, \"verified\": true, \"impressions\": 5000, \"checked\": true}"
+   ],
+   "seed_value": "turn_one_negative_k",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"verified\": true, \"impressions\": 5000, \"checked\": true}",
+    "forgery": "turn_one_negative_k"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_negative_k'], 'chain': ['counts_not_whole_numbers'], 'volume': [], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'TEST'}]",
+    "native_pattern_never_passes_without_its_basis: state.native_pattern_passed_without_basis = [{'ops': ['turn_one_negative_k'], 'chain': ['counts_not_whole_numbers']}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0004",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#007.3@1",
+   "chain": [
+    "base={\"chains\": 5, \"complete\": 3, \"wins\": 2, \"mention\": true, \"inj\": 1, \"checked\": true}"
+   ],
+   "seed_value": "turn_one_k_over_n",
+   "input": {
+    "base": "{\"chains\": 5, \"complete\": 3, \"wins\": 2, \"mention\": true, \"inj\": 1, \"checked\": true}",
+    "forgery": "turn_one_k_over_n"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_k_over_n'], 'chain': ['by_turn_counts'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0005",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#008.0@1",
+   "chain": [],
+   "seed_value": "turn_one_n_not_complete",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"checked\": true}",
+    "forgery": "turn_one_n_not_complete"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_n_not_complete'], 'chain': ['by_turn_counts'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]",
+    "native_pattern_never_passes_without_its_basis: state.native_pattern_passed_without_basis = [{'ops': ['turn_one_n_not_complete'], 'chain': ['by_turn_counts']}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0006",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#008.1@1",
+   "chain": [
+    "base={\"chains\": 3, \"complete\": 3, \"wins\": 3, \"verified\": true, \"impressions\": 5000, \"checked\": true}"
+   ],
+   "seed_value": "turn_one_n_not_complete",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"verified\": true, \"impressions\": 5000, \"checked\": true}",
+    "forgery": "turn_one_n_not_complete"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_n_not_complete'], 'chain': ['by_turn_counts'], 'volume': [], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'TEST'}]",
+    "native_pattern_never_passes_without_its_basis: state.native_pattern_passed_without_basis = [{'ops': ['turn_one_n_not_complete'], 'chain': ['by_turn_counts']}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0007",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#008.2@1",
+   "chain": [
+    "base={\"chains\": 3, \"complete\": 3, \"wins\": 3, \"tl\": 1, \"checked\": true, \"verified\": true}"
+   ],
+   "seed_value": "turn_one_n_not_complete",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"tl\": 1, \"checked\": true, \"verified\": true}",
+    "forgery": "turn_one_n_not_complete"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_n_not_complete'], 'chain': ['by_turn_counts'], 'volume': [], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'TEST'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0008",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#008.4@1",
+   "chain": [
+    "base={\"chains\": 4, \"complete\": 4, \"wins\": 0, \"mode\": \"stacked\", \"volume\": \"none\"}"
+   ],
+   "seed_value": "turn_one_n_not_complete",
+   "input": {
+    "base": "{\"chains\": 4, \"complete\": 4, \"wins\": 0, \"mode\": \"stacked\", \"volume\": \"none\"}",
+    "forgery": "turn_one_n_not_complete"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_n_not_complete'], 'chain': ['by_turn_counts'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0009",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#014.0@1",
+   "chain": [],
+   "seed_value": "string_count",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"checked\": true}",
+    "forgery": "string_count"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F017",
+   "failed": [
+    "zara_never_raises_on_a_payload: state.zara_exceptions = ['TypeError']"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0010",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#014.1@1",
+   "chain": [
+    "base={\"chains\": 5, \"complete\": 3, \"wins\": 2, \"mention\": true, \"inj\": 1, \"checked\": true}"
+   ],
+   "seed_value": "string_count",
+   "input": {
+    "base": "{\"chains\": 5, \"complete\": 3, \"wins\": 2, \"mention\": true, \"inj\": 1, \"checked\": true}",
+    "forgery": "string_count"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F017",
+   "failed": [
+    "zara_never_raises_on_a_payload: state.zara_exceptions = ['TypeError']"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0011",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#014.2@1",
+   "chain": [
+    "base={\"chains\": 3, \"complete\": 3, \"wins\": 3, \"verified\": true, \"impressions\": 5000, \"checked\": true}"
+   ],
+   "seed_value": "string_count",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"verified\": true, \"impressions\": 5000, \"checked\": true}",
+    "forgery": "string_count"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F017",
+   "failed": [
+    "zara_never_raises_on_a_payload: state.zara_exceptions = ['TypeError']"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0012",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#014.4@1",
+   "chain": [
+    "base={\"chains\": 3, \"complete\": 3, \"wins\": 3, \"tl\": 1, \"checked\": true, \"verified\": true}"
+   ],
+   "seed_value": "string_count",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"tl\": 1, \"checked\": true, \"verified\": true}",
+    "forgery": "string_count"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F017",
+   "failed": [
+    "zara_never_raises_on_a_payload: state.zara_exceptions = ['TypeError']"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0013",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#025.0@1",
+   "chain": [],
+   "seed_value": "naomi_signal_claimed_but_verified",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"checked\": true}",
+    "forgery": "naomi_signal_claimed_but_verified"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_signal_claimed_but_verified'], 'chain': [], 'volume': ['signal_reliability', 'signal_verification'], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'TEST'}]",
+    "unverified_volume_never_cleared_or_test: state.unverified_volume_passed = [{'ops': ['naomi_signal_claimed_but_verified'], 'verdict': 'CLEARED', 'decision': 'TEST', 'reliability': 'MODERATE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0014",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#027.0@1",
+   "chain": [],
+   "seed_value": "naomi_signal_reliability_mismatch",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"checked\": true}",
+    "forgery": "naomi_signal_reliability_mismatch"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_signal_reliability_mismatch'], 'chain': [], 'volume': ['signal_reliability'], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0015",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#027.1@1",
+   "chain": [
+    "base={\"chains\": 5, \"complete\": 3, \"wins\": 2, \"mention\": true, \"inj\": 1, \"checked\": true}"
+   ],
+   "seed_value": "naomi_signal_reliability_mismatch",
+   "input": {
+    "base": "{\"chains\": 5, \"complete\": 3, \"wins\": 2, \"mention\": true, \"inj\": 1, \"checked\": true}",
+    "forgery": "naomi_signal_reliability_mismatch"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_signal_reliability_mismatch'], 'chain': [], 'volume': ['signal_reliability'], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0016",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#027.2@1",
+   "chain": [
+    "base={\"chains\": 3, \"complete\": 3, \"wins\": 3, \"verified\": true, \"impressions\": 5000, \"checked\": true}"
+   ],
+   "seed_value": "naomi_signal_reliability_mismatch",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"verified\": true, \"impressions\": 5000, \"checked\": true}",
+    "forgery": "naomi_signal_reliability_mismatch"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_signal_reliability_mismatch'], 'chain': [], 'volume': ['signal_reliability'], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'TEST'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0017",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#027.3@1",
+   "chain": [
+    "base={\"chains\": 3, \"complete\": 3, \"wins\": 3, \"tl\": 1, \"checked\": true, \"verified\": true}"
+   ],
+   "seed_value": "naomi_signal_reliability_mismatch",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"tl\": 1, \"checked\": true, \"verified\": true}",
+    "forgery": "naomi_signal_reliability_mismatch"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_signal_reliability_mismatch'], 'chain': [], 'volume': ['signal_reliability'], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'TEST'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0018",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#028.0@1",
+   "chain": [],
+   "seed_value": "naomi_band_not_signal_band",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"checked\": true}",
+    "forgery": "naomi_band_not_signal_band"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_band_not_signal_band'], 'chain': [], 'volume': ['band_not_signal_band'], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0019",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#028.2@1",
+   "chain": [
+    "base={\"chains\": 3, \"complete\": 3, \"wins\": 3, \"tl\": 1, \"checked\": true, \"verified\": true}"
+   ],
+   "seed_value": "naomi_band_not_signal_band",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"tl\": 1, \"checked\": true, \"verified\": true}",
+    "forgery": "naomi_band_not_signal_band"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_band_not_signal_band'], 'chain': [], 'volume': ['band_not_signal_band'], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'TEST'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0020",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#029.0@1",
+   "chain": [],
+   "seed_value": "client_recommended_k_mismatch",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"checked\": true}",
+    "forgery": "client_recommended_k_mismatch"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['client_recommended_k_mismatch'], 'chain': ['client_recommended'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0021",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#029.1@1",
+   "chain": [
+    "base={\"chains\": 3, \"complete\": 3, \"wins\": 3, \"tl\": 1, \"checked\": true, \"verified\": true}"
+   ],
+   "seed_value": "client_recommended_k_mismatch",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"tl\": 1, \"checked\": true, \"verified\": true}",
+    "forgery": "client_recommended_k_mismatch"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['client_recommended_k_mismatch'], 'chain': ['client_recommended'], 'volume': [], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'TEST'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0022",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#029.2@1",
+   "chain": [
+    "base={\"chains\": 5, \"complete\": 3, \"wins\": 2, \"mention\": true, \"inj\": 1, \"checked\": true}"
+   ],
+   "seed_value": "client_recommended_k_mismatch",
+   "input": {
+    "base": "{\"chains\": 5, \"complete\": 3, \"wins\": 2, \"mention\": true, \"inj\": 1, \"checked\": true}",
+    "forgery": "client_recommended_k_mismatch"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['client_recommended_k_mismatch'], 'chain': ['client_recommended'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0023",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#033.0@1",
+   "chain": [],
+   "seed_value": "loop_stopped_over_incomplete",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"checked\": true}",
+    "forgery": "loop_stopped_over_incomplete"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['loop_stopped_over_incomplete'], 'chain': ['loop_stopped>incomplete'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0024",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#033.1@1",
+   "chain": [
+    "base={\"chains\": 5, \"complete\": 3, \"wins\": 2, \"mention\": true, \"inj\": 1, \"checked\": true}"
+   ],
+   "seed_value": "loop_stopped_over_incomplete",
+   "input": {
+    "base": "{\"chains\": 5, \"complete\": 3, \"wins\": 2, \"mention\": true, \"inj\": 1, \"checked\": true}",
+    "forgery": "loop_stopped_over_incomplete"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['loop_stopped_over_incomplete'], 'chain': ['loop_stopped>incomplete'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0025",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#033.2@1",
+   "chain": [
+    "base={\"chains\": 3, \"complete\": 3, \"wins\": 3, \"tl\": 1, \"checked\": true, \"verified\": true}"
+   ],
+   "seed_value": "loop_stopped_over_incomplete",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"tl\": 1, \"checked\": true, \"verified\": true}",
+    "forgery": "loop_stopped_over_incomplete"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['loop_stopped_over_incomplete'], 'chain': ['loop_stopped>incomplete'], 'volume': [], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'TEST'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0026",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#033.3@1",
+   "chain": [
+    "base={\"chains\": 3, \"complete\": 3, \"wins\": 3, \"verified\": true, \"impressions\": 5000, \"checked\": true}"
+   ],
+   "seed_value": "loop_stopped_over_incomplete",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"verified\": true, \"impressions\": 5000, \"checked\": true}",
+    "forgery": "loop_stopped_over_incomplete"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['loop_stopped_over_incomplete'], 'chain': ['loop_stopped>incomplete'], 'volume': [], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'TEST'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0027",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#034.0@1",
+   "chain": [],
+   "seed_value": "turns_planned_mismatch",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"checked\": true}",
+    "forgery": "turns_planned_mismatch"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turns_planned_mismatch'], 'chain': ['by_turn_len'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0028",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#034.2@1",
+   "chain": [
+    "base={\"chains\": 3, \"complete\": 3, \"wins\": 3, \"verified\": true, \"impressions\": 5000, \"checked\": true}"
+   ],
+   "seed_value": "turns_planned_mismatch",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"verified\": true, \"impressions\": 5000, \"checked\": true}",
+    "forgery": "turns_planned_mismatch"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turns_planned_mismatch'], 'chain': ['by_turn_len'], 'volume': [], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'TEST'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0029",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#025.0@1",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 6, \"complete\": 2, \"wins\": 0, \"mention\": false, \"inj\": 0, \"tl\": 1, \"checked\": true, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 9000000, \"verified\": true, \"engine\": \"openai\"}, \"ops\": [\"string_count\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F017",
+   "failed": [
+    "zara_never_raises_on_a_payload: state.zara_exceptions = ['TypeError']"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0030",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#026.0@1",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 2, \"complete\": 1, \"wins\": 0, \"mention\": false, \"inj\": 0, \"tl\": 1, \"checked\": false, \"div\": 0, \"mode\": \"native\", \"volume\": \"none\", \"impressions\": 1000, \"verified\": false, \"engine\": \"openai\"}, \"ops\": [\"turn_one_n_not_complete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_n_not_complete'], 'chain': ['by_turn_counts'], 'volume': [], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'WATCH'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0031",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#043.0@1",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 4, \"complete\": 3, \"wins\": 2, \"mention\": false, \"inj\": 0, \"tl\": 0, \"checked\": true, \"div\": 0, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 300, \"verified\": false, \"engine\": \"anthropic\"}, \"ops\": [\"naomi_band_not_signal_band\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_band_not_signal_band'], 'chain': [], 'volume': ['band_not_signal_band'], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0032",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#058.0@1",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 5, \"complete\": 4, \"wins\": 0, \"mention\": false, \"inj\": 0, \"tl\": 1, \"checked\": true, \"div\": 0, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 300, \"verified\": false, \"engine\": \"openai\"}, \"ops\": [\"naomi_signal_claimed_but_verified\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_signal_claimed_but_verified'], 'chain': [], 'volume': ['signal_reliability', 'signal_verification'], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'TEST'}]",
+    "unverified_volume_never_cleared_or_test: state.unverified_volume_passed = [{'ops': ['naomi_signal_claimed_but_verified'], 'verdict': 'CLEARED', 'decision': 'TEST', 'reliability': 'MODERATE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0033",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#063.0@1",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 3, \"complete\": 1, \"wins\": 1, \"mention\": false, \"inj\": 1, \"tl\": 0, \"checked\": true, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 20, \"verified\": false, \"engine\": \"openai\"}, \"ops\": [\"string_count\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F017",
+   "failed": [
+    "zara_never_raises_on_a_payload: state.zara_exceptions = ['TypeError']"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0034",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#071.0@1",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 3, \"complete\": 2, \"wins\": 0, \"mention\": true, \"inj\": 1, \"tl\": 0, \"checked\": true, \"div\": 0, \"mode\": \"stacked\", \"volume\": \"none\", \"impressions\": 9000000, \"verified\": false, \"engine\": \"anthropic\"}, \"ops\": [\"turns_planned_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turns_planned_mismatch'], 'chain': ['by_turn_len'], 'volume': [], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'WATCH'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0035",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#083.0@1",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 1, \"complete\": 0, \"wins\": 0, \"mention\": false, \"inj\": 0, \"tl\": 0, \"checked\": false, \"div\": 1, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 3, \"verified\": true, \"engine\": \"openai\"}, \"ops\": [\"turn_one_n_not_complete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_n_not_complete'], 'chain': ['by_turn_counts'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0036",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#087.0@1",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 6, \"complete\": 0, \"wins\": 0, \"mention\": false, \"inj\": 6, \"tl\": 1, \"checked\": true, \"div\": 1, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 20, \"verified\": false, \"engine\": \"anthropic\"}, \"ops\": [\"client_recommended_k_mismatch\", \"naomi_signal_claimed_but_verified\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['client_recommended_k_mismatch', 'naomi_signal_claimed_but_verified'], 'chain': ['client_recommended'], 'volume': ['signal_reliability', 'signal_verification'], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]",
+    "unverified_volume_never_cleared_or_test: state.unverified_volume_passed = [{'ops': ['client_recommended_k_mismatch', 'naomi_signal_claimed_but_verified'], 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE', 'reliability': 'MODERATE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0037",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#098.0@1",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 6, \"complete\": 2, \"wins\": 2, \"mention\": false, \"inj\": 1, \"tl\": 0, \"checked\": true, \"div\": 1, \"mode\": \"stacked\", \"volume\": \"none\", \"impressions\": 9000000, \"verified\": true, \"engine\": \"openai\"}, \"ops\": [\"turn_one_n_not_complete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_n_not_complete'], 'chain': ['by_turn_counts'], 'volume': [], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'WATCH'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0038",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#111.0@1",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 1, \"complete\": 0, \"wins\": 0, \"mention\": false, \"inj\": 1, \"tl\": 0, \"checked\": false, \"div\": 1, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 3, \"verified\": true, \"engine\": \"anthropic\"}, \"ops\": [\"naomi_band_not_signal_band\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_band_not_signal_band'], 'chain': [], 'volume': ['band_not_signal_band'], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0039",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#112.0@1",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 4, \"complete\": 1, \"wins\": 0, \"mention\": false, \"inj\": 0, \"tl\": 1, \"checked\": true, \"div\": 1, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 19, \"verified\": false, \"engine\": \"openai\"}, \"ops\": [\"naomi_signal_claimed_but_verified\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_signal_claimed_but_verified'], 'chain': [], 'volume': ['signal_verification'], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'WATCH'}]",
+    "unverified_volume_never_cleared_or_test: state.unverified_volume_passed = [{'ops': ['naomi_signal_claimed_but_verified'], 'verdict': 'CLEARED', 'decision': 'WATCH', 'reliability': 'THIN'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0040",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#006.1@2",
+   "chain": [
+    "base={\"chains\": 4, \"complete\": 4, \"wins\": 0, \"mode\": \"stacked\", \"volume\": \"none\"}"
+   ],
+   "seed_value": "turn_one_negative_k",
+   "input": {
+    "base": "{\"chains\": 4, \"complete\": 4, \"wins\": 0, \"mode\": \"stacked\", \"volume\": \"none\"}",
+    "forgery": "turn_one_negative_k"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_negative_k'], 'chain': ['counts_not_whole_numbers'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0041",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#008.4@2",
+   "chain": [
+    "base={\"chains\": 5, \"complete\": 3, \"wins\": 2, \"mention\": true, \"inj\": 1, \"checked\": true}"
+   ],
+   "seed_value": "turn_one_n_not_complete",
+   "input": {
+    "base": "{\"chains\": 5, \"complete\": 3, \"wins\": 2, \"mention\": true, \"inj\": 1, \"checked\": true}",
+    "forgery": "turn_one_n_not_complete"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_n_not_complete'], 'chain': ['by_turn_counts'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0042",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#033.1@2",
+   "chain": [
+    "base={\"chains\": 4, \"complete\": 4, \"wins\": 0, \"mode\": \"stacked\", \"volume\": \"none\"}"
+   ],
+   "seed_value": "loop_stopped_over_incomplete",
+   "input": {
+    "base": "{\"chains\": 4, \"complete\": 4, \"wins\": 0, \"mode\": \"stacked\", \"volume\": \"none\"}",
+    "forgery": "loop_stopped_over_incomplete"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['loop_stopped_over_incomplete'], 'chain': ['loop_stopped>incomplete'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0043",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#034.1@2",
+   "chain": [
+    "base={\"chains\": 3, \"complete\": 3, \"wins\": 3, \"tl\": 1, \"checked\": true, \"verified\": true}"
+   ],
+   "seed_value": "turns_planned_mismatch",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"tl\": 1, \"checked\": true, \"verified\": true}",
+    "forgery": "turns_planned_mismatch"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turns_planned_mismatch'], 'chain': ['by_turn_len'], 'volume': [], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'TEST'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0044",
+   "scenario": "generated-history-forgeries",
+   "origin": "seo-py-tnz/generated-history-forgeries#022.0@2",
+   "chain": [
+    "generator=history_forgery"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"engine\": \"google\", \"ops\": [\"swap_turns\", \"swap_turns\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": null,
+   "failed": [
+    "forged_history_never_sent: state.forged_history_sent = [['swap_turns', 'swap_turns']]",
+    "forged_history_refused: state.forged_history_not_refused = [['swap_turns', 'swap_turns']]"
+   ],
+   "fixed": "WR-F018"
+  },
+  {
+   "replay_id": "seo-py-tnz/R0045",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#013.0@2",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 1, \"complete\": 1, \"wins\": 1, \"mention\": false, \"inj\": 1, \"tl\": 0, \"checked\": false, \"div\": 1, \"mode\": \"stacked\", \"volume\": \"none\", \"impressions\": 20, \"verified\": false, \"engine\": \"google\"}, \"ops\": [\"turn_one_n_not_complete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_n_not_complete'], 'chain': ['by_turn_counts'], 'volume': [], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'WATCH'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0046",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#021.0@2",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 3, \"complete\": 2, \"wins\": 0, \"mention\": true, \"inj\": 0, \"tl\": 0, \"checked\": true, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 9000000, \"verified\": false, \"engine\": \"google\"}, \"ops\": [\"turns_planned_mismatch\", \"unplanned_topic\", \"naomi_signal_claimed_but_verified\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turns_planned_mismatch', 'unplanned_topic', 'naomi_signal_claimed_but_verified'], 'chain': ['by_turn_len'], 'volume': ['signal_reliability', 'signal_verification'], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'WATCH'}]",
+    "unverified_volume_never_cleared_or_test: state.unverified_volume_passed = [{'ops': ['turns_planned_mismatch', 'unplanned_topic', 'naomi_signal_claimed_but_verified'], 'verdict': 'CLEARED', 'decision': 'WATCH', 'reliability': 'STRONG'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0047",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#022.0@2",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 2, \"complete\": 1, \"wins\": 1, \"mention\": false, \"inj\": 0, \"tl\": 1, \"checked\": true, \"div\": 1, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 3, \"verified\": false, \"engine\": \"openai\"}, \"ops\": [\"client_recommended_k_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['client_recommended_k_mismatch'], 'chain': ['client_recommended'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0048",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#033.0@2",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 4, \"complete\": 1, \"wins\": 0, \"mention\": true, \"inj\": 4, \"tl\": 1, \"checked\": false, \"div\": 0, \"mode\": \"stacked\", \"volume\": \"none\", \"impressions\": 19, \"verified\": false, \"engine\": \"openai\"}, \"ops\": [\"turn_one_k_over_n\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_k_over_n'], 'chain': ['by_turn_counts'], 'volume': [], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'WATCH'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0049",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#044.0@2",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 6, \"complete\": 1, \"wins\": 1, \"mention\": false, \"inj\": 0, \"tl\": 1, \"checked\": true, \"div\": 0, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 999, \"verified\": false, \"engine\": \"google\"}, \"ops\": [\"loop_stopped_over_incomplete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['loop_stopped_over_incomplete'], 'chain': ['loop_stopped>incomplete'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0050",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#053.0@2",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 4, \"complete\": 2, \"wins\": 2, \"mention\": false, \"inj\": 1, \"tl\": 1, \"checked\": true, \"div\": 0, \"mode\": \"stacked\", \"volume\": \"none\", \"impressions\": 20, \"verified\": false, \"engine\": \"google\"}, \"ops\": [\"turn_one_negative_k\", \"naomi_signal_claimed_but_verified\", \"naomi_band_not_signal_band\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_negative_k', 'naomi_signal_claimed_but_verified', 'naomi_band_not_signal_band'], 'chain': ['counts_not_whole_numbers'], 'volume': [], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'WATCH'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0051",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#056.0@2",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 2, \"complete\": 2, \"wins\": 2, \"mention\": false, \"inj\": 0, \"tl\": 0, \"checked\": false, \"div\": 1, \"mode\": \"native\", \"volume\": \"none\", \"impressions\": 3, \"verified\": true, \"engine\": \"anthropic\"}, \"ops\": [\"naomi_signal_claimed_but_verified\", \"string_count\", \"unplanned_topic\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F017",
+   "failed": [
+    "zara_never_raises_on_a_payload: state.zara_exceptions = ['TypeError']"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0052",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#059.0@2",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 5, \"complete\": 0, \"wins\": 0, \"mention\": false, \"inj\": 0, \"tl\": 0, \"checked\": false, \"div\": 1, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 20, \"verified\": false, \"engine\": \"google\"}, \"ops\": [\"naomi_band_not_signal_band\", \"turn_one_n_not_complete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_band_not_signal_band', 'turn_one_n_not_complete'], 'chain': ['by_turn_counts'], 'volume': ['band_not_signal_band'], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0053",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#069.0@2",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 5, \"complete\": 0, \"wins\": 0, \"mention\": true, \"inj\": 0, \"tl\": 1, \"checked\": true, \"div\": 0, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 300, \"verified\": true, \"engine\": \"anthropic\"}, \"ops\": [\"loop_stopped_over_incomplete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['loop_stopped_over_incomplete'], 'chain': ['loop_stopped>incomplete'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0054",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#076.0@2",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 4, \"complete\": 4, \"wins\": 3, \"mention\": true, \"inj\": 4, \"tl\": 0, \"checked\": false, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 20, \"verified\": true, \"engine\": \"google\"}, \"ops\": [\"turns_planned_mismatch\", \"turns_planned_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turns_planned_mismatch', 'turns_planned_mismatch'], 'chain': ['by_turn_len'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0055",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#078.0@2",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 1, \"complete\": 0, \"wins\": 0, \"mention\": false, \"inj\": 1, \"tl\": 0, \"checked\": true, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 999, \"verified\": true, \"engine\": \"anthropic\"}, \"ops\": [\"client_recommended_k_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['client_recommended_k_mismatch'], 'chain': ['client_recommended'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0056",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#083.0@2",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 6, \"complete\": 5, \"wins\": 0, \"mention\": false, \"inj\": 0, \"tl\": 0, \"checked\": false, \"div\": 1, \"mode\": \"native\", \"volume\": \"none\", \"impressions\": 19, \"verified\": false, \"engine\": \"google\"}, \"ops\": [\"client_recommended_k_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['client_recommended_k_mismatch'], 'chain': ['client_recommended'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0057",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#084.0@2",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 3, \"complete\": 2, \"wins\": 2, \"mention\": true, \"inj\": 0, \"tl\": 0, \"checked\": false, \"div\": 1, \"mode\": \"native\", \"volume\": \"none\", \"impressions\": 3, \"verified\": true, \"engine\": \"openai\"}, \"ops\": [\"loop_stopped_over_incomplete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['loop_stopped_over_incomplete'], 'chain': ['loop_stopped>incomplete'], 'volume': [], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'WATCH'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0058",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#086.0@2",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 1, \"complete\": 0, \"wins\": 0, \"mention\": false, \"inj\": 0, \"tl\": 0, \"checked\": false, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 999, \"verified\": false, \"engine\": \"anthropic\"}, \"ops\": [\"naomi_signal_claimed_but_verified\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_signal_claimed_but_verified'], 'chain': [], 'volume': ['signal_reliability', 'signal_verification'], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]",
+    "unverified_volume_never_cleared_or_test: state.unverified_volume_passed = [{'ops': ['naomi_signal_claimed_but_verified'], 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE', 'reliability': 'MODERATE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0059",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#095.0@2",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 4, \"complete\": 4, \"wins\": 2, \"mention\": false, \"inj\": 0, \"tl\": 1, \"checked\": true, \"div\": 1, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 300, \"verified\": false, \"engine\": \"openai\"}, \"ops\": [\"string_count\", \"naomi_high_confidence\", \"naomi_strong_unverified\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F017",
+   "failed": [
+    "zara_never_raises_on_a_payload: state.zara_exceptions = ['TypeError']"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0060",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#097.0@2",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 6, \"complete\": 4, \"wins\": 4, \"mention\": false, \"inj\": 0, \"tl\": 0, \"checked\": false, \"div\": 1, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 9000000, \"verified\": false, \"engine\": \"openai\"}, \"ops\": [\"turns_planned_mismatch\", \"naomi_signal_reliability_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turns_planned_mismatch', 'naomi_signal_reliability_mismatch'], 'chain': ['by_turn_len'], 'volume': ['signal_reliability'], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0061",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#101.0@2",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 6, \"complete\": 2, \"wins\": 1, \"mention\": false, \"inj\": 0, \"tl\": 0, \"checked\": false, \"div\": 1, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 3, \"verified\": false, \"engine\": \"anthropic\"}, \"ops\": [\"client_recommended_k_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['client_recommended_k_mismatch'], 'chain': ['client_recommended'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0062",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#118.0@2",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 3, \"complete\": 2, \"wins\": 2, \"mention\": false, \"inj\": 0, \"tl\": 1, \"checked\": true, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 20, \"verified\": true, \"engine\": \"anthropic\"}, \"ops\": [\"loop_stopped_over_incomplete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['loop_stopped_over_incomplete'], 'chain': ['loop_stopped>incomplete'], 'volume': [], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'WATCH'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0063",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#028.1@3",
+   "chain": [
+    "base={\"chains\": 3, \"complete\": 3, \"wins\": 3, \"verified\": true, \"impressions\": 5000, \"checked\": true}"
+   ],
+   "seed_value": "naomi_band_not_signal_band",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"verified\": true, \"impressions\": 5000, \"checked\": true}",
+    "forgery": "naomi_band_not_signal_band"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_band_not_signal_band'], 'chain': [], 'volume': ['band_not_signal_band'], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'TEST'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0064",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#029.2@3",
+   "chain": [
+    "base={\"chains\": 3, \"complete\": 3, \"wins\": 3, \"verified\": true, \"impressions\": 5000, \"checked\": true}"
+   ],
+   "seed_value": "client_recommended_k_mismatch",
+   "input": {
+    "base": "{\"chains\": 3, \"complete\": 3, \"wins\": 3, \"verified\": true, \"impressions\": 5000, \"checked\": true}",
+    "forgery": "client_recommended_k_mismatch"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['client_recommended_k_mismatch'], 'chain': ['client_recommended'], 'volume': [], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'TEST'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0065",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#034.1@3",
+   "chain": [
+    "base={\"chains\": 4, \"complete\": 4, \"wins\": 0, \"mode\": \"stacked\", \"volume\": \"none\"}"
+   ],
+   "seed_value": "turns_planned_mismatch",
+   "input": {
+    "base": "{\"chains\": 4, \"complete\": 4, \"wins\": 0, \"mode\": \"stacked\", \"volume\": \"none\"}",
+    "forgery": "turns_planned_mismatch"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turns_planned_mismatch'], 'chain': ['by_turn_len'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0066",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#000.0@3",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 6, \"complete\": 6, \"wins\": 6, \"mention\": false, \"inj\": 1, \"tl\": 1, \"checked\": true, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 3, \"verified\": false, \"engine\": \"google\"}, \"ops\": [\"string_count\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F017",
+   "failed": [
+    "zara_never_raises_on_a_payload: state.zara_exceptions = ['TypeError']"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0067",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#001.0@3",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 2, \"complete\": 2, \"wins\": 1, \"mention\": true, \"inj\": 1, \"tl\": 0, \"checked\": true, \"div\": 0, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 1000, \"verified\": false, \"engine\": \"openai\"}, \"ops\": [\"turn_one_negative_k\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_negative_k'], 'chain': ['counts_not_whole_numbers'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0068",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#003.0@3",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 5, \"complete\": 0, \"wins\": 0, \"mention\": false, \"inj\": 1, \"tl\": 0, \"checked\": false, \"div\": 0, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 300, \"verified\": false, \"engine\": \"anthropic\"}, \"ops\": [\"turn_one_n_not_complete\", \"bool_counts\", \"naomi_signal_claimed_but_verified\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_n_not_complete', 'bool_counts', 'naomi_signal_claimed_but_verified'], 'chain': ['by_turn_counts'], 'volume': ['signal_reliability', 'signal_verification'], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]",
+    "unverified_volume_never_cleared_or_test: state.unverified_volume_passed = [{'ops': ['turn_one_n_not_complete', 'bool_counts', 'naomi_signal_claimed_but_verified'], 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE', 'reliability': 'MODERATE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0069",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#010.0@3",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 2, \"complete\": 2, \"wins\": 2, \"mention\": true, \"inj\": 0, \"tl\": 1, \"checked\": false, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 9000000, \"verified\": false, \"engine\": \"anthropic\"}, \"ops\": [\"turn_one_n_not_complete\", \"client_recommended_k_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_n_not_complete', 'client_recommended_k_mismatch'], 'chain': ['by_turn_counts', 'client_recommended'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0070",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#016.0@3",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 5, \"complete\": 2, \"wins\": 1, \"mention\": false, \"inj\": 1, \"tl\": 0, \"checked\": true, \"div\": 1, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 1000, \"verified\": false, \"engine\": \"google\"}, \"ops\": [\"naomi_signal_reliability_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_signal_reliability_mismatch'], 'chain': [], 'volume': ['signal_reliability'], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0071",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#024.0@3",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 4, \"complete\": 3, \"wins\": 1, \"mention\": true, \"inj\": 1, \"tl\": 0, \"checked\": true, \"div\": 0, \"mode\": \"native\", \"volume\": \"none\", \"impressions\": 300, \"verified\": false, \"engine\": \"google\"}, \"ops\": [\"turn_one_negative_k\", \"naomi_strong_unverified\", \"turns_planned_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_negative_k', 'naomi_strong_unverified', 'turns_planned_mismatch'], 'chain': ['counts_not_whole_numbers'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0072",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#030.0@3",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 4, \"complete\": 4, \"wins\": 2, \"mention\": false, \"inj\": 1, \"tl\": 0, \"checked\": false, \"div\": 1, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 300, \"verified\": true, \"engine\": \"anthropic\"}, \"ops\": [\"turn_one_n_not_complete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_n_not_complete'], 'chain': ['by_turn_counts'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0073",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#033.0@3",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 4, \"complete\": 0, \"wins\": 0, \"mention\": true, \"inj\": 0, \"tl\": 0, \"checked\": true, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 999, \"verified\": true, \"engine\": \"anthropic\"}, \"ops\": [\"client_recommended_k_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['client_recommended_k_mismatch'], 'chain': ['client_recommended'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0074",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#036.0@3",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 4, \"complete\": 4, \"wins\": 3, \"mention\": false, \"inj\": 1, \"tl\": 0, \"checked\": true, \"div\": 1, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 19, \"verified\": true, \"engine\": \"openai\"}, \"ops\": [\"unplanned_topic\", \"turn_one_negative_k\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['unplanned_topic', 'turn_one_negative_k'], 'chain': ['counts_not_whole_numbers'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0075",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#042.0@3",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 5, \"complete\": 2, \"wins\": 1, \"mention\": true, \"inj\": 5, \"tl\": 0, \"checked\": true, \"div\": 0, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 3, \"verified\": false, \"engine\": \"google\"}, \"ops\": [\"naomi_high_confidence\", \"naomi_signal_claimed_but_verified\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_high_confidence', 'naomi_signal_claimed_but_verified'], 'chain': [], 'volume': ['signal_verification'], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0076",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#053.0@3",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 4, \"complete\": 4, \"wins\": 0, \"mention\": true, \"inj\": 4, \"tl\": 0, \"checked\": true, \"div\": 0, \"mode\": \"native\", \"volume\": \"none\", \"impressions\": 999, \"verified\": false, \"engine\": \"openai\"}, \"ops\": [\"client_recommended_k_mismatch\", \"naomi_strong_unverified\", \"loop_stopped_over_incomplete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['client_recommended_k_mismatch', 'naomi_strong_unverified', 'loop_stopped_over_incomplete'], 'chain': ['loop_stopped>incomplete', 'client_recommended'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0077",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#057.0@3",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 1, \"complete\": 0, \"wins\": 0, \"mention\": true, \"inj\": 0, \"tl\": 0, \"checked\": true, \"div\": 1, \"mode\": \"stacked\", \"volume\": \"none\", \"impressions\": 9000000, \"verified\": true, \"engine\": \"anthropic\"}, \"ops\": [\"naomi_verified_flag_mismatch\", \"turn_one_n_not_complete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_verified_flag_mismatch', 'turn_one_n_not_complete'], 'chain': ['by_turn_counts'], 'volume': [], 'foreign': False, 'verdict': 'NOTHING_OBSERVED', 'decision': None}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0078",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#060.0@3",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 3, \"complete\": 1, \"wins\": 1, \"mention\": false, \"inj\": 0, \"tl\": 1, \"checked\": true, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 19, \"verified\": false, \"engine\": \"anthropic\"}, \"ops\": [\"turns_planned_mismatch\", \"string_count\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F017",
+   "failed": [
+    "zara_never_raises_on_a_payload: state.zara_exceptions = ['TypeError']"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0079",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#061.0@3",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 4, \"complete\": 1, \"wins\": 0, \"mention\": false, \"inj\": 4, \"tl\": 0, \"checked\": false, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 300, \"verified\": true, \"engine\": \"openai\"}, \"ops\": [\"loop_stopped_over_incomplete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['loop_stopped_over_incomplete'], 'chain': ['loop_stopped>incomplete'], 'volume': [], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'WATCH'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0080",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#067.0@3",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 3, \"complete\": 3, \"wins\": 1, \"mention\": false, \"inj\": 0, \"tl\": 0, \"checked\": false, \"div\": 1, \"mode\": \"native\", \"volume\": \"none\", \"impressions\": 9000000, \"verified\": false, \"engine\": \"google\"}, \"ops\": [\"naomi_band_not_signal_band\", \"naomi_unknown_with_band\", \"loop_stopped_over_incomplete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_band_not_signal_band', 'naomi_unknown_with_band', 'loop_stopped_over_incomplete'], 'chain': ['loop_stopped>incomplete'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0081",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#081.0@3",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 6, \"complete\": 4, \"wins\": 0, \"mention\": false, \"inj\": 1, \"tl\": 0, \"checked\": false, \"div\": 0, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 9000000, \"verified\": false, \"engine\": \"google\"}, \"ops\": [\"naomi_signal_claimed_but_verified\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_signal_claimed_but_verified'], 'chain': [], 'volume': ['signal_reliability', 'signal_verification'], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'TEST'}]",
+    "unverified_volume_never_cleared_or_test: state.unverified_volume_passed = [{'ops': ['naomi_signal_claimed_but_verified'], 'verdict': 'CLEARED', 'decision': 'TEST', 'reliability': 'STRONG'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0082",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#092.0@3",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 5, \"complete\": 4, \"wins\": 4, \"mention\": false, \"inj\": 0, \"tl\": 0, \"checked\": true, \"div\": 0, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 19, \"verified\": false, \"engine\": \"openai\"}, \"ops\": [\"turn_one_n_not_complete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_n_not_complete'], 'chain': ['by_turn_counts'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0083",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#101.0@3",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 6, \"complete\": 1, \"wins\": 0, \"mention\": false, \"inj\": 6, \"tl\": 0, \"checked\": true, \"div\": 0, \"mode\": \"native\", \"volume\": \"none\", \"impressions\": 300, \"verified\": true, \"engine\": \"openai\"}, \"ops\": [\"turns_planned_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turns_planned_mismatch'], 'chain': ['by_turn_len'], 'volume': [], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'WATCH'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0084",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#110.0@3",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 6, \"complete\": 4, \"wins\": 3, \"mention\": false, \"inj\": 0, \"tl\": 1, \"checked\": true, \"div\": 0, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 999, \"verified\": true, \"engine\": \"anthropic\"}, \"ops\": [\"naomi_band_not_signal_band\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_band_not_signal_band'], 'chain': [], 'volume': ['band_not_signal_band'], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0085",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#112.0@3",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 3, \"complete\": 1, \"wins\": 0, \"mention\": false, \"inj\": 0, \"tl\": 0, \"checked\": true, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 3, \"verified\": false, \"engine\": \"google\"}, \"ops\": [\"loop_stopped_over_incomplete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['loop_stopped_over_incomplete'], 'chain': ['loop_stopped>incomplete'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0086",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#119.0@3",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 2, \"complete\": 2, \"wins\": 0, \"mention\": false, \"inj\": 2, \"tl\": 0, \"checked\": true, \"div\": 1, \"mode\": \"native\", \"volume\": \"none\", \"impressions\": 300, \"verified\": true, \"engine\": \"openai\"}, \"ops\": [\"turn_one_negative_k\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_negative_k'], 'chain': ['counts_not_whole_numbers'], 'volume': [], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'WATCH'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0087",
+   "scenario": "generated-handoff-forgeries",
+   "origin": "seo-py-tnz/generated-handoff-forgeries#030.0@3",
+   "chain": [
+    "generator=handoff_forgery"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"claim\": \"genuine_claim_priya_absent\", \"mutations\": [\"query_513\", \"query_512\"], \"engines\": \"anthropic\"}"
+   },
+   "added": "2026-11-08",
+   "known_failure": null,
+   "failed": [
+    "handoff_outcome_as_documented: state.handoff_outcome_not_as_documented = [{'expected': '422:HANDOFF_INVALID', 'got': '422:HANDOFF_VERIFICATION_FAILED', 'note': 'refused, but not as documented'}]"
+   ],
+   "fixed": "WR-F018"
+  },
+  {
+   "replay_id": "seo-py-tnz/R0088",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#014.2@4",
+   "chain": [
+    "base={\"chains\": 4, \"complete\": 4, \"wins\": 0, \"mode\": \"stacked\", \"volume\": \"none\"}"
+   ],
+   "seed_value": "string_count",
+   "input": {
+    "base": "{\"chains\": 4, \"complete\": 4, \"wins\": 0, \"mode\": \"stacked\", \"volume\": \"none\"}",
+    "forgery": "string_count"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F017",
+   "failed": [
+    "zara_never_raises_on_a_payload: state.zara_exceptions = ['TypeError']"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0089",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#025.2@4",
+   "chain": [
+    "base={\"chains\": 5, \"complete\": 3, \"wins\": 2, \"mention\": true, \"inj\": 1, \"checked\": true}"
+   ],
+   "seed_value": "naomi_signal_claimed_but_verified",
+   "input": {
+    "base": "{\"chains\": 5, \"complete\": 3, \"wins\": 2, \"mention\": true, \"inj\": 1, \"checked\": true}",
+    "forgery": "naomi_signal_claimed_but_verified"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_signal_claimed_but_verified'], 'chain': [], 'volume': ['signal_reliability', 'signal_verification'], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]",
+    "unverified_volume_never_cleared_or_test: state.unverified_volume_passed = [{'ops': ['naomi_signal_claimed_but_verified'], 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE', 'reliability': 'MODERATE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0090",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#029.1@4",
+   "chain": [
+    "base={\"chains\": 4, \"complete\": 4, \"wins\": 0, \"mode\": \"stacked\", \"volume\": \"none\"}"
+   ],
+   "seed_value": "client_recommended_k_mismatch",
+   "input": {
+    "base": "{\"chains\": 4, \"complete\": 4, \"wins\": 0, \"mode\": \"stacked\", \"volume\": \"none\"}",
+    "forgery": "client_recommended_k_mismatch"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['client_recommended_k_mismatch'], 'chain': ['client_recommended'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0091",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#034.1@4",
+   "chain": [
+    "base={\"chains\": 5, \"complete\": 3, \"wins\": 2, \"mention\": true, \"inj\": 1, \"checked\": true}"
+   ],
+   "seed_value": "turns_planned_mismatch",
+   "input": {
+    "base": "{\"chains\": 5, \"complete\": 3, \"wins\": 2, \"mention\": true, \"inj\": 1, \"checked\": true}",
+    "forgery": "turns_planned_mismatch"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turns_planned_mismatch'], 'chain': ['by_turn_len'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0092",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#003.0@4",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 3, \"complete\": 1, \"wins\": 0, \"mention\": false, \"inj\": 3, \"tl\": 1, \"checked\": true, \"div\": 1, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 3, \"verified\": true, \"engine\": \"openai\"}, \"ops\": [\"naomi_signal_reliability_mismatch\", \"turn_one_n_not_complete\", \"client_recommended_k_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_signal_reliability_mismatch', 'turn_one_n_not_complete', 'client_recommended_k_mismatch'], 'chain': ['by_turn_counts', 'client_recommended'], 'volume': ['signal_reliability'], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'WATCH'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0093",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#019.0@4",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 3, \"complete\": 2, \"wins\": 2, \"mention\": true, \"inj\": 0, \"tl\": 0, \"checked\": false, \"div\": 0, \"mode\": \"native\", \"volume\": \"none\", \"impressions\": 9000000, \"verified\": true, \"engine\": \"openai\"}, \"ops\": [\"string_count\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F017",
+   "failed": [
+    "zara_never_raises_on_a_payload: state.zara_exceptions = ['TypeError']"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0094",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#020.0@4",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 3, \"complete\": 2, \"wins\": 2, \"mention\": true, \"inj\": 1, \"tl\": 0, \"checked\": true, \"div\": 1, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 19, \"verified\": false, \"engine\": \"google\"}, \"ops\": [\"turn_one_k_over_n\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_k_over_n'], 'chain': ['by_turn_counts'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0095",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#030.0@4",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 3, \"complete\": 3, \"wins\": 3, \"mention\": false, \"inj\": 1, \"tl\": 0, \"checked\": false, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 999, \"verified\": true, \"engine\": \"google\"}, \"ops\": [\"naomi_signal_reliability_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_signal_reliability_mismatch'], 'chain': [], 'volume': ['signal_reliability'], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'TEST'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0096",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#032.0@4",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 3, \"complete\": 0, \"wins\": 0, \"mention\": true, \"inj\": 1, \"tl\": 0, \"checked\": true, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 3, \"verified\": false, \"engine\": \"openai\"}, \"ops\": [\"client_recommended_k_mismatch\", \"turn_one_n_not_complete\", \"turns_planned_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['client_recommended_k_mismatch', 'turn_one_n_not_complete', 'turns_planned_mismatch'], 'chain': ['by_turn_len', 'by_turn_counts', 'client_recommended'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0097",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#055.0@4",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 6, \"complete\": 4, \"wins\": 4, \"mention\": true, \"inj\": 1, \"tl\": 1, \"checked\": true, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 19, \"verified\": false, \"engine\": \"anthropic\"}, \"ops\": [\"turn_one_n_not_complete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_n_not_complete'], 'chain': ['by_turn_counts'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0098",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#059.0@4",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 5, \"complete\": 0, \"wins\": 0, \"mention\": false, \"inj\": 0, \"tl\": 0, \"checked\": true, \"div\": 0, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 999, \"verified\": false, \"engine\": \"openai\"}, \"ops\": [\"naomi_signal_reliability_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_signal_reliability_mismatch'], 'chain': [], 'volume': ['signal_reliability'], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0099",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#070.0@4",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 5, \"complete\": 0, \"wins\": 0, \"mention\": false, \"inj\": 1, \"tl\": 1, \"checked\": true, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 1000, \"verified\": false, \"engine\": \"openai\"}, \"ops\": [\"client_recommended_k_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['client_recommended_k_mismatch'], 'chain': ['client_recommended'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0100",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#074.0@4",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 1, \"complete\": 1, \"wins\": 1, \"mention\": true, \"inj\": 0, \"tl\": 1, \"checked\": true, \"div\": 1, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 300, \"verified\": false, \"engine\": \"anthropic\"}, \"ops\": [\"string_count\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F017",
+   "failed": [
+    "zara_never_raises_on_a_payload: state.zara_exceptions = ['TypeError']"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0101",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#079.0@4",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 1, \"complete\": 0, \"wins\": 0, \"mention\": false, \"inj\": 1, \"tl\": 0, \"checked\": true, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 1000, \"verified\": false, \"engine\": \"google\"}, \"ops\": [\"naomi_signal_reliability_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_signal_reliability_mismatch'], 'chain': [], 'volume': ['signal_reliability'], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0102",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#082.0@4",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 5, \"complete\": 4, \"wins\": 4, \"mention\": false, \"inj\": 0, \"tl\": 1, \"checked\": true, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 20, \"verified\": false, \"engine\": \"anthropic\"}, \"ops\": [\"turn_one_n_not_complete\", \"loop_stopped_over_incomplete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_n_not_complete', 'loop_stopped_over_incomplete'], 'chain': ['loop_stopped>incomplete', 'by_turn_counts'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0103",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#083.0@4",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 6, \"complete\": 2, \"wins\": 0, \"mention\": true, \"inj\": 1, \"tl\": 1, \"checked\": true, \"div\": 1, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 300, \"verified\": false, \"engine\": \"google\"}, \"ops\": [\"naomi_band_not_signal_band\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_band_not_signal_band'], 'chain': [], 'volume': ['band_not_signal_band'], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0104",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#100.0@4",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 6, \"complete\": 6, \"wins\": 4, \"mention\": false, \"inj\": 1, \"tl\": 0, \"checked\": true, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 300, \"verified\": false, \"engine\": \"openai\"}, \"ops\": [\"turns_planned_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turns_planned_mismatch'], 'chain': ['by_turn_len'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0105",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#101.0@4",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 6, \"complete\": 2, \"wins\": 2, \"mention\": false, \"inj\": 0, \"tl\": 0, \"checked\": false, \"div\": 0, \"mode\": \"native\", \"volume\": \"none\", \"impressions\": 20, \"verified\": false, \"engine\": \"anthropic\"}, \"ops\": [\"naomi_band_not_signal_band\", \"string_count\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F017",
+   "failed": [
+    "zara_never_raises_on_a_payload: state.zara_exceptions = ['TypeError']"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0106",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#106.0@4",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 4, \"complete\": 1, \"wins\": 1, \"mention\": true, \"inj\": 4, \"tl\": 0, \"checked\": false, \"div\": 0, \"mode\": \"native\", \"volume\": \"none\", \"impressions\": 20, \"verified\": true, \"engine\": \"google\"}, \"ops\": [\"loop_stopped_over_incomplete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['loop_stopped_over_incomplete'], 'chain': ['loop_stopped>incomplete'], 'volume': [], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'WATCH'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0107",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#109.0@4",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 3, \"complete\": 2, \"wins\": 1, \"mention\": false, \"inj\": 3, \"tl\": 0, \"checked\": true, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 300, \"verified\": false, \"engine\": \"openai\"}, \"ops\": [\"loop_stopped_over_incomplete\", \"turn_one_negative_k\", \"naomi_band_not_signal_band\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['loop_stopped_over_incomplete', 'turn_one_negative_k', 'naomi_band_not_signal_band'], 'chain': ['counts_not_whole_numbers'], 'volume': ['band_not_signal_band'], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0108",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#116.0@4",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 1, \"complete\": 1, \"wins\": 0, \"mention\": false, \"inj\": 0, \"tl\": 0, \"checked\": true, \"div\": 1, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 19, \"verified\": false, \"engine\": \"openai\"}, \"ops\": [\"loop_stopped_over_incomplete\", \"string_count\", \"turn_one_n_not_complete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F017",
+   "failed": [
+    "zara_never_raises_on_a_payload: state.zara_exceptions = ['TypeError']"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0109",
+   "scenario": "zara-payload-forgery",
+   "origin": "seo-py-tnz/zara-payload-forgery#028.1@5",
+   "chain": [
+    "base={\"chains\": 5, \"complete\": 3, \"wins\": 2, \"mention\": true, \"inj\": 1, \"checked\": true}"
+   ],
+   "seed_value": "naomi_band_not_signal_band",
+   "input": {
+    "base": "{\"chains\": 5, \"complete\": 3, \"wins\": 2, \"mention\": true, \"inj\": 1, \"checked\": true}",
+    "forgery": "naomi_band_not_signal_band"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_band_not_signal_band'], 'chain': [], 'volume': ['band_not_signal_band'], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0110",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#000.0@5",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 6, \"complete\": 5, \"wins\": 4, \"mention\": false, \"inj\": 0, \"tl\": 1, \"checked\": true, \"div\": 0, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 9000000, \"verified\": true, \"engine\": \"openai\"}, \"ops\": [\"turns_planned_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turns_planned_mismatch'], 'chain': ['by_turn_len'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0111",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#002.0@5",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 1, \"complete\": 0, \"wins\": 0, \"mention\": true, \"inj\": 0, \"tl\": 0, \"checked\": true, \"div\": 0, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 1000, \"verified\": true, \"engine\": \"openai\"}, \"ops\": [\"bool_counts\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['bool_counts'], 'chain': ['counts_not_whole_numbers'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0112",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#013.0@5",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 3, \"complete\": 1, \"wins\": 1, \"mention\": false, \"inj\": 3, \"tl\": 0, \"checked\": true, \"div\": 0, \"mode\": \"native\", \"volume\": \"none\", \"impressions\": 20, \"verified\": true, \"engine\": \"openai\"}, \"ops\": [\"naomi_band_not_signal_band\", \"string_count\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F017",
+   "failed": [
+    "zara_never_raises_on_a_payload: state.zara_exceptions = ['TypeError']"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0113",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#018.0@5",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 3, \"complete\": 3, \"wins\": 3, \"mention\": false, \"inj\": 3, \"tl\": 0, \"checked\": false, \"div\": 1, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 19, \"verified\": true, \"engine\": \"anthropic\"}, \"ops\": [\"client_recommended_k_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['client_recommended_k_mismatch'], 'chain': ['client_recommended'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0114",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#020.0@5",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 3, \"complete\": 1, \"wins\": 1, \"mention\": true, \"inj\": 3, \"tl\": 1, \"checked\": true, \"div\": 1, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 999, \"verified\": false, \"engine\": \"google\"}, \"ops\": [\"client_recommended_k_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['client_recommended_k_mismatch'], 'chain': ['client_recommended'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0115",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#025.0@5",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 3, \"complete\": 2, \"wins\": 1, \"mention\": false, \"inj\": 3, \"tl\": 0, \"checked\": true, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 1000, \"verified\": true, \"engine\": \"anthropic\"}, \"ops\": [\"turn_one_n_not_complete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_n_not_complete'], 'chain': ['by_turn_counts'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0116",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#038.0@5",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 2, \"complete\": 0, \"wins\": 0, \"mention\": true, \"inj\": 2, \"tl\": 0, \"checked\": true, \"div\": 1, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 20, \"verified\": false, \"engine\": \"openai\"}, \"ops\": [\"naomi_signal_claimed_but_verified\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_signal_claimed_but_verified'], 'chain': [], 'volume': ['signal_reliability', 'signal_verification'], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]",
+    "unverified_volume_never_cleared_or_test: state.unverified_volume_passed = [{'ops': ['naomi_signal_claimed_but_verified'], 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE', 'reliability': 'MODERATE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0117",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#046.0@5",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 6, \"complete\": 1, \"wins\": 1, \"mention\": true, \"inj\": 0, \"tl\": 0, \"checked\": false, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 9000000, \"verified\": false, \"engine\": \"openai\"}, \"ops\": [\"naomi_signal_claimed_but_verified\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F016",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_signal_claimed_but_verified'], 'chain': [], 'volume': ['signal_reliability', 'signal_verification'], 'foreign': False, 'verdict': 'CLEARED', 'decision': 'WATCH'}]",
+    "unverified_volume_never_cleared_or_test: state.unverified_volume_passed = [{'ops': ['naomi_signal_claimed_but_verified'], 'verdict': 'CLEARED', 'decision': 'WATCH', 'reliability': 'STRONG'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0118",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#054.0@5",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 3, \"complete\": 3, \"wins\": 0, \"mention\": true, \"inj\": 0, \"tl\": 1, \"checked\": false, \"div\": 0, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 1000, \"verified\": false, \"engine\": \"openai\"}, \"ops\": [\"turn_one_n_not_complete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_n_not_complete'], 'chain': ['by_turn_counts'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0119",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#062.0@5",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 2, \"complete\": 0, \"wins\": 0, \"mention\": false, \"inj\": 0, \"tl\": 0, \"checked\": false, \"div\": 0, \"mode\": \"native\", \"volume\": \"observed\", \"impressions\": 3, \"verified\": false, \"engine\": \"google\"}, \"ops\": [\"turns_planned_mismatch\", \"turn_one_n_not_complete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turns_planned_mismatch', 'turn_one_n_not_complete'], 'chain': ['by_turn_len', 'by_turn_counts'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0120",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#063.0@5",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 4, \"complete\": 4, \"wins\": 4, \"mention\": false, \"inj\": 0, \"tl\": 1, \"checked\": false, \"div\": 1, \"mode\": \"native\", \"volume\": \"none\", \"impressions\": 19, \"verified\": true, \"engine\": \"anthropic\"}, \"ops\": [\"naomi_band_not_signal_band\", \"loop_stopped_over_incomplete\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['naomi_band_not_signal_band', 'loop_stopped_over_incomplete'], 'chain': ['loop_stopped>incomplete'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0121",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#087.0@5",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 6, \"complete\": 4, \"wins\": 1, \"mention\": false, \"inj\": 6, \"tl\": 1, \"checked\": false, \"div\": 0, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 9000000, \"verified\": true, \"engine\": \"google\"}, \"ops\": [\"bool_counts\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['bool_counts'], 'chain': ['counts_not_whole_numbers'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0122",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#101.0@5",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 5, \"complete\": 5, \"wins\": 1, \"mention\": false, \"inj\": 1, \"tl\": 0, \"checked\": true, \"div\": 0, \"mode\": \"native\", \"volume\": \"none\", \"impressions\": 19, \"verified\": true, \"engine\": \"anthropic\"}, \"ops\": [\"turn_one_n_not_complete\", \"unplanned_topic\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turn_one_n_not_complete', 'unplanned_topic'], 'chain': ['by_turn_counts'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0123",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#103.0@5",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 6, \"complete\": 4, \"wins\": 0, \"mention\": false, \"inj\": 0, \"tl\": 0, \"checked\": false, \"div\": 0, \"mode\": \"stacked\", \"volume\": \"observed\", \"impressions\": 3, \"verified\": true, \"engine\": \"anthropic\"}, \"ops\": [\"turns_planned_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['turns_planned_mismatch'], 'chain': ['by_turn_len'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0124",
+   "scenario": "generated-zara-payloads",
+   "origin": "seo-py-tnz/generated-zara-payloads#106.0@5",
+   "chain": [
+    "generator=zara_payload"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"base\": {\"chains\": 5, \"complete\": 5, \"wins\": 2, \"mention\": false, \"inj\": 5, \"tl\": 0, \"checked\": true, \"div\": 0, \"mode\": \"native\", \"volume\": \"none\", \"impressions\": 300, \"verified\": false, \"engine\": \"anthropic\"}, \"ops\": [\"client_recommended_k_mismatch\"]}"
+   },
+   "added": "2026-11-08",
+   "known_failure": "WR-F015",
+   "failed": [
+    "zara_holds_any_inconsistent_payload: state.unheld_inconsistent = [{'ops': ['client_recommended_k_mismatch'], 'chain': ['client_recommended'], 'volume': [], 'foreign': False, 'verdict': 'FLAGGED', 'decision': 'INSUFFICIENT_EVIDENCE'}]"
+   ]
+  },
+  {
+   "replay_id": "seo-py-tnz/R0125",
+   "scenario": "generated-handoff-forgeries",
+   "origin": "seo-py-tnz/generated-handoff-forgeries#039.0@5",
+   "chain": [
+    "generator=handoff_forgery"
+   ],
+   "seed_value": null,
+   "input": {
+    "spec": "{\"claim\": \"record_without_hash\", \"mutations\": [\"start_after_end\", \"derived_clean\", \"derived_clean\"], \"engines\": \"anthropic\"}"
+   },
+   "added": "2026-11-08",
+   "known_failure": null,
+   "failed": [
+    "handoff_outcome_as_documented: state.handoff_outcome_not_as_documented = [{'expected': '422:HANDOFF_INVALID', 'got': '422:HANDOFF_VERIFICATION_FAILED', 'note': 'refused, but not as documented'}]"
+   ],
+   "fixed": "WR-F018"
+  }
+ ]
+}

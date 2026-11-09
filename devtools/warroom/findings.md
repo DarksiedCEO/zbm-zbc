@@ -165,6 +165,43 @@ Found on branch `warroom-redteam-gate` (based on 2cedde8), seeds 1 and 2.
   (seed 2), `seo-py/R0012`, `seo-py/R0014`, `seo-py/R0015` (seed 3).
 - Status: FIXED (seo-py war room fixes, ADR 0017 W3-3; commit `be9093c` on branch `seo-dept-02-wave1`): Delia reads every crawled URL through `agents.split_url` / `host_of`, which answer None for a URL `urlsplit` cannot read. Defence in depth for all three: a run that raises anyway is closed `interrupted` `RUN_FAILED` at once (`svc_audits._execute_audit`), never a 500 left `running`. Tests: `services/seo-py/tests/test_warroom_fixes.py`. The replay cases pass and stay as regression cases.
 
+## WR-F015 — seo-py: Zara does not validate Theo's per-turn and bookkeeping counts, so a forged payload (the native pattern included) passes downstream
+
+- Department: Search & Answer Intelligence (2), `services/seo-py/src/agents/zara.py` `check_chains` (reads `by_turn[0].client_mentioned.k` and `client_mentioned_unconfirmed` with no type, sign or bound check; never checks `by_turn[*].n`, `len(by_turn) == turns_planned`, `loop_stopped <= chains - complete` or `client_recommended.n == complete`).
+- What happens: a Theo chain payload with turn-one `client_mentioned.k = -1` and `client_mentioned_unconfirmed = 1` makes "any mention at turn one" 0, so Zara re-derives `INVISIBLE_THEN_RECOMMENDED` and passes it (CLEARED / TEST with verified volume, FLAGGED otherwise) although the counts say the client WAS named at turn one. Turn-one `n` different from `complete`, `k > n`, a `by_turn` list shorter / longer than `turns_planned`, `loop_stopped` above the incomplete chains and `client_recommended.n` off are all accepted as consistent.
+- Minimal repro: `python3 devtools/warroom/run.py --replay seo-py-tnz/R0001` (base: 3 complete, 3 client wins, re-asked and agreed; forgery `turn_one_negative_k`: the item is not HELD and carries `INVISIBLE_THEN_RECOMMENDED`).
+- Why it is a MUST failure: ADR 0049 §6 / rounds 6-7 (Zara re-derives outcome / pattern / strength from the counts and HOLDS any invalid or contradictory payload; the native pattern never passes without its basis). Reached only through Zara's member contract (the in-process Theo does not emit such counts): defence in depth at the boundary the ADR says is checked.
+- Replay: `seo-py-tnz/R0001`, `seo-py-tnz/R0002`, `seo-py-tnz/R0003`, `seo-py-tnz/R0004`, `seo-py-tnz/R0005`, `seo-py-tnz/R0006`, `seo-py-tnz/R0007`, `seo-py-tnz/R0008`, `seo-py-tnz/R0020`, `seo-py-tnz/R0021`, `seo-py-tnz/R0022`, `seo-py-tnz/R0023`, `seo-py-tnz/R0024`, `seo-py-tnz/R0025`, `seo-py-tnz/R0026`, `seo-py-tnz/R0027`, `seo-py-tnz/R0028`, `seo-py-tnz/R0030`, `seo-py-tnz/R0034`, `seo-py-tnz/R0035`, `seo-py-tnz/R0036`, `seo-py-tnz/R0037`, `seo-py-tnz/R0040`, `seo-py-tnz/R0041`, `seo-py-tnz/R0042`, `seo-py-tnz/R0043`, `seo-py-tnz/R0045`, `seo-py-tnz/R0046`, `seo-py-tnz/R0047`, `seo-py-tnz/R0048`, `seo-py-tnz/R0049`, `seo-py-tnz/R0050`, `seo-py-tnz/R0052`, `seo-py-tnz/R0053`, `seo-py-tnz/R0054`, `seo-py-tnz/R0055`, `seo-py-tnz/R0056`, `seo-py-tnz/R0057`, `seo-py-tnz/R0060`, `seo-py-tnz/R0061`, `seo-py-tnz/R0062`, `seo-py-tnz/R0064`, `seo-py-tnz/R0065`, `seo-py-tnz/R0067`, `seo-py-tnz/R0068`, `seo-py-tnz/R0069`, `seo-py-tnz/R0071`, `seo-py-tnz/R0072`, `seo-py-tnz/R0073`, `seo-py-tnz/R0074`, `seo-py-tnz/R0076`, `seo-py-tnz/R0077`, `seo-py-tnz/R0079`, `seo-py-tnz/R0080`, `seo-py-tnz/R0082`, `seo-py-tnz/R0083`, `seo-py-tnz/R0085`, `seo-py-tnz/R0086`, `seo-py-tnz/R0090`, `seo-py-tnz/R0091`, `seo-py-tnz/R0092`, `seo-py-tnz/R0094`, `seo-py-tnz/R0096`, `seo-py-tnz/R0097`, `seo-py-tnz/R0099`, `seo-py-tnz/R0102`, `seo-py-tnz/R0104`, `seo-py-tnz/R0106`, `seo-py-tnz/R0107`, `seo-py-tnz/R0110`, `seo-py-tnz/R0111`, `seo-py-tnz/R0113`, `seo-py-tnz/R0114`, `seo-py-tnz/R0115`, `seo-py-tnz/R0118`, `seo-py-tnz/R0119`, `seo-py-tnz/R0120`, `seo-py-tnz/R0121`, `seo-py-tnz/R0122`, `seo-py-tnz/R0123`, `seo-py-tnz/R0124`. (Cases that also break a Naomi rule are marked WR-F015 and listed under WR-F016 too.)
+- Suggested fix (for the department): validate every count in `by_turn` (whole numbers >= 0, `n == complete`, `k + unconfirmed <= n`, cited / competitor the same), `len(by_turn) == turns_planned`, `loop_stopped <= chains - complete`, `client_recommended == {k: recommended.client, n: complete}`.
+- Status: OPEN (not fixed by the war room).
+
+## WR-F016 — seo-py: Zara does not check Naomi's signal against the estimate, so a payload whose signal is a claim can be CLEARED / TEST
+
+- Department: Search & Answer Intelligence (2), `services/seo-py/src/agents/zara.py` `check_volume` (checks the top-level `verified`, `reliability`, flag and band against `signals[0].observed_impressions` only).
+- What happens: an estimate whose top level says `verified: true`, `MODERATE` (no `HANDOFF_NOT_VERIFIED`) while its signal says `data_class: claimed`, `reliability: THIN`, `provenance.verified_against_priya_record: false` is accepted; with a STRONG chain it is CLEARED with decision TEST and `priority_basis: chain_and_volume`. A signal reliability different from the estimate's, and a band different from the signal's band, are accepted too.
+- Minimal repro: `python3 devtools/warroom/run.py --replay seo-py-tnz/R0013` (forgery `naomi_signal_claimed_but_verified`).
+- Why it is a MUST failure: ADR 0049 §4-§6 (unverified volume capped THIN, never CLEARED / TEST, never a priority basis; Zara holds a contradictory payload). As WR-F015, reached only through the member contract (Naomi's own estimator is consistent; the route path holds: no route case promoted unverified volume).
+- Replay: `seo-py-tnz/R0013`, `seo-py-tnz/R0014`, `seo-py-tnz/R0015`, `seo-py-tnz/R0016`, `seo-py-tnz/R0017`, `seo-py-tnz/R0018`, `seo-py-tnz/R0019`, `seo-py-tnz/R0031`, `seo-py-tnz/R0032`, `seo-py-tnz/R0036`, `seo-py-tnz/R0038`, `seo-py-tnz/R0039`, `seo-py-tnz/R0046`, `seo-py-tnz/R0052`, `seo-py-tnz/R0058`, `seo-py-tnz/R0060`, `seo-py-tnz/R0063`, `seo-py-tnz/R0068`, `seo-py-tnz/R0070`, `seo-py-tnz/R0075`, `seo-py-tnz/R0081`, `seo-py-tnz/R0084`, `seo-py-tnz/R0089`, `seo-py-tnz/R0092`, `seo-py-tnz/R0095`, `seo-py-tnz/R0098`, `seo-py-tnz/R0101`, `seo-py-tnz/R0103`, `seo-py-tnz/R0107`, `seo-py-tnz/R0109`, `seo-py-tnz/R0116`, `seo-py-tnz/R0117`.
+- Suggested fix: require `signals[0].reliability == reliability`, `signals[0].data_class == ("measured" if verified else "claimed")`, `signals[0].provenance.verified_against_priya_record == verified`, `band == signals[0].band`, `window == signals[0].window`.
+- Status: OPEN.
+
+## WR-F017 — seo-py: a mistyped count in a Theo payload makes Zara raise instead of holding it
+
+- Department: Search & Answer Intelligence (2), `services/seo-py/src/agents/zara.py` `check_chains` -> `theo.pattern_of(outcome, vis, vis + low, ...)` with `vis` a string (`TypeError`).
+- What happens: a payload with turn-one `client_mentioned.k = "0"` raises `TypeError` out of `Crosscheck.receive`. In the service that call is Theo's `emit`, so the exception would end the Theo member (FAILED, PARTIAL) instead of holding one topic `THEO_PAYLOAD_INVALID`.
+- Minimal repro: `python3 devtools/warroom/run.py --replay seo-py-tnz/R0009` (forgery `string_count`).
+- Why it is a MUST failure: ADR 0049 §6 (a payload that fails its contract's shape check is HELD, never repaired; nothing raises past Zara).
+- Replay: `seo-py-tnz/R0009`, `seo-py-tnz/R0010`, `seo-py-tnz/R0011`, `seo-py-tnz/R0012`, `seo-py-tnz/R0029`, `seo-py-tnz/R0033`, `seo-py-tnz/R0051`, `seo-py-tnz/R0059`, `seo-py-tnz/R0066`, `seo-py-tnz/R0078`, `seo-py-tnz/R0088`, `seo-py-tnz/R0093`, `seo-py-tnz/R0100`, `seo-py-tnz/R0105`, `seo-py-tnz/R0108`, `seo-py-tnz/R0112`.
+- Suggested fix: the same whole-number checks as WR-F015 before any arithmetic, answering `THEO_PAYLOAD_INVALID`.
+- Status: OPEN.
+
+## WR-F018 — war room (seo-py-tnz driver): three oracle false positives, fixed in the driver (not a service finding)
+
+`seo-py-tnz/R0044` (two `swap_turns` restore the genuine history), `seo-py-tnz/R0087` and `seo-py-tnz/R0125` (a later hand-off
+mutation of the same field replaced an earlier invalid one) failed only because the driver's own oracle was wrong. The
+oracle was fixed in `drivers/seo_py_tnz.py`; the three cases now pass and stay as regression cases (`fixed: WR-F018`).
+- Status: FIXED (war room driver only; no service code changed).
+
 ## AEGIS round 2 (review of the WR-F006 / WR-F007 fixes)
 
 - **N-H1 (High) — service-py: the WR-F006 fold made long non-Latin messages slow under the service lock.** A
