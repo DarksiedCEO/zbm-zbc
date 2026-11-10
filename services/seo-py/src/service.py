@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import threading
@@ -35,6 +36,7 @@ from config import Settings
 from errors import Conflict, NotFound, Unavailable
 from ledger import DEPARTMENT, LedgerConflict, LedgerQueryFailed, LedgerRecordError, Recorder, derived_id, payload_sha256
 from reasons import R
+import sink_guard
 from store import DISCARDED_NAME, PENDING_NAME, DataDirBusy, RecordLog, StoreCorrupt, StoreWriteError, verify_lines
 from svc_audits import AuditsMixin
 from svc_citations import CitationsMixin
@@ -243,20 +245,31 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
             # anchored log is visible as ``attempted`` (never ``committed``) in /audit/evidence.
             seq = len(self.log) + 1
             rk = data.get("request_id") or f"{INTERNAL}|{kind}"
-            named = []
+            named, events = [], []
             for event_type, subject_id, payload, id_parts in (evidence if isinstance(evidence, list) else
                                                               [evidence] if evidence is not None else []):
                 payload = {**payload, "rk": rk, "seq": seq}
-                # AEGIS round 5: the id is the request key PLUS the payload hash — a retry with the same payload
+                # AEGIS round 5: the id is the request key PLUS the payload hash - a retry with the same payload
                 # dedupes on the ledger, a retry after the state changed gets a new id (never a lasting 409)
                 eid = derived_id("evd", event_type, *id_parts, payload_sha256(payload))
+                events.append((eid, event_type, subject_id, payload))
+                named.append({"event_id": eid, "event_type": event_type, "subject_id": subject_id, "payload": payload})
+            if named:
+                data["evidence"] = named
+            # sink job A: the line and every evidence payload hold machine values only, checked BEFORE anything is
+            # written (no ledger event, no pending line). A path outside the legacy list refuses the whole commit.
+            try:
+                sink_guard.enforce(kind, data)
+                for _eid, event_type, _subject, payload in events:
+                    sink_guard.enforce(sink_guard.LEDGER + str(event_type), payload)
+            except sink_guard.SinkViolation as exc:
+                logging.getLogger("seo.sink").error("commit refused by the sink guard: %s", exc)
+                raise Unavailable(R("SINK_REFUSED")) from None
+            for eid, event_type, subject_id, payload in events:
                 try:
                     self._record_twice(eid, event_type, actor, subject_id, payload, f"{event_type} {subject_id}")
                 except LedgerRecordError:
                     raise Unavailable(R("LEDGER_UNAVAILABLE")) from None
-                named.append({"event_id": eid, "event_type": event_type, "subject_id": subject_id, "payload": payload})
-            if named:
-                data["evidence"] = named
             rec, line = self.log.prepare(kind, at, data)
             if rec["seq"] != seq:                           # the log moved under us: never anchor a mislabelled line
                 raise Unavailable(R("STORE_UNAVAILABLE"))

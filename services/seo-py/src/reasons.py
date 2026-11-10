@@ -58,6 +58,9 @@ CODES = frozenset({
     # generic
     "REQUEST_ID_REUSED", "LEDGER_UNAVAILABLE", "STORE_UNAVAILABLE", "INTEGRITY_UNVERIFIED", "SERVICE_CLOSED",
     "JOB_UNKNOWN", "JOB_RUNNING", "INVALID", "FORBIDDEN_FIELD",
+    # sink job A (sink_guard.py): a record bound for the log or the ledger held something that is not a machine value;
+    # nothing was written
+    "SINK_REFUSED",
 })
 
 

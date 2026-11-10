@@ -294,6 +294,75 @@ def parse_ref(text) -> Optional[str]:
     return m.group(1)
 
 
+# Sink job A: a BLOB is one JSON value of any size kept as several ordinary encrypted lines: its chunks (raw slices of
+# the encoded JSON, each under ``BLOB_CHUNK_BYTES``) and, LAST, a manifest (the chunk line ids in order, the byte count
+# and the SHA-256 of the whole plaintext), all appended in one write with one fsync. The log names a blob by
+# ``blob_ref(blob_id)`` = ``seo-blb-`` + the 32-hex blob id + 8 hex check (a machine value for sink_guard). A chunk's
+# associated data binds the tenant, the blob id, the chunk's index, the chunk count and the key id, and the manifest's
+# binds the tenant, the blob id and the key id, each under its own tag: a chunk cannot be read as a record, moved to
+# another position, another blob or another tenant, and a blob with a chunk missing or changed is not found.
+BLOB_REF_PREFIX = "seo-blb-"
+BLOB_CHUNK_BYTES = 192 * 1024            # under MAX_RECORD_BYTES
+BLOB_MAX_CHUNKS = 4096                   # 768 MiB; its manifest stays under MAX_RECORD_BYTES
+BLOB_VERSION = 1
+_BLOB_REF = re.compile(r"seo-blb-([0-9a-f]{32})([0-9a-f]{8})")
+_BLOB_CHUNK_TAG = b"seo-citation-vault/v1/blob-chunk"
+_BLOB_MANIFEST_TAG = b"seo-citation-vault/v1/blob-manifest"
+_BLOB_FIELDS = frozenset(("v", "n", "bytes", "sha256", "chunks"))
+_SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+
+
+def _blob_check(blob_id: str) -> str:
+    return hashlib.sha256(b"blob:" + blob_id.encode("ascii")).hexdigest()[:8]
+
+
+def blob_ref(blob_id: str) -> str:
+    if not isinstance(blob_id, str) or not VAULT_ID.fullmatch(blob_id):
+        raise VaultRecordInvalid("not a blob id")
+    return BLOB_REF_PREFIX + blob_id + _blob_check(blob_id)
+
+
+def parse_blob_ref(text) -> Optional[str]:
+    """The blob id a blob ref names, or None (malformed, or the check does not match)."""
+    m = _BLOB_REF.fullmatch(text) if isinstance(text, str) else None
+    if m is None or _blob_check(m.group(1)) != m.group(2):
+        return None
+    return m.group(1)
+
+
+def _blob_chunk_aad(tenant_id: str, blob_id: str, index: int, count: int, key_id: str) -> bytes:
+    # closed alphabets without NUL (decimal numbers), so the NUL separator is unambiguous
+    return b"\x00".join((_BLOB_CHUNK_TAG, tenant_id.encode("ascii"), blob_id.encode("ascii"),
+                         str(int(index)).encode("ascii"), str(int(count)).encode("ascii"), key_id.encode("ascii")))
+
+
+def _blob_manifest_aad(tenant_id: str, blob_id: str, key_id: str) -> bytes:
+    return b"\x00".join((_BLOB_MANIFEST_TAG, tenant_id.encode("ascii"), blob_id.encode("ascii"),
+                         key_id.encode("ascii")))
+
+
+def _blob_manifest(plaintext: Optional[bytes]) -> Optional[dict]:
+    """A decrypted manifest, strictly shaped, or None."""
+    if plaintext is None:
+        return None
+    try:
+        obj = json.loads(plaintext.decode("ascii"), object_pairs_hook=_no_duplicates)
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        return None
+    if type(obj) is not dict or set(obj) != _BLOB_FIELDS or type(obj["v"]) is not int or obj["v"] != BLOB_VERSION:
+        return None
+    n, size, digest, chunks = obj["n"], obj["bytes"], obj["sha256"], obj["chunks"]
+    if type(n) is not int or not 1 <= n <= BLOB_MAX_CHUNKS or type(size) is not int \
+            or not (n - 1) * BLOB_CHUNK_BYTES < max(size, 1) <= n * BLOB_CHUNK_BYTES:
+        return None
+    if not isinstance(digest, str) or not _SHA256_HEX.fullmatch(digest) or type(chunks) is not list \
+            or len(chunks) != n or len(set(map(str, chunks))) != n:
+        return None
+    if not all(isinstance(c, str) and VAULT_ID.fullmatch(c) for c in chunks):
+        return None
+    return obj
+
+
 def _b64(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
@@ -716,6 +785,120 @@ class CitationVault:
                 self._index[vid] = (offset, len(line))
                 offset += len(line) + 1
             self._size = offset
+
+    @staticmethod
+    def _sealed_line(material: _Material, tenant_id: str, vault_id: str, plaintext: bytes, aad: bytes) -> bytes:
+        nonce = _new_nonce()
+        ct = material._aead.encrypt(nonce, plaintext, aad)
+        return json.dumps({"v": VERSION, "id": _b64(bytes.fromhex(vault_id)), "t": _b64(material.tenant_tag(tenant_id)),
+                           "k": _b64(material.key_id.encode("ascii")), "n": _b64(nonce), "c": _b64(ct)},
+                          sort_keys=True, separators=(",", ":")).encode("ascii")
+
+    def put_blob(self, tenant_id: str, obj) -> str:
+        """Encrypt ``obj`` (a JSON object or array of any size up to ``BLOB_MAX_CHUNKS`` chunks) for ``tenant_id`` as
+        chunk lines plus a manifest line, appended together (one write, one fsync; all or nothing); returns its blob
+        ref. While ``collecting`` is active on this thread the lines join that batch instead."""
+        key = self._key
+        if key is None:
+            raise VaultUnavailable("the citation vault has no key configured: nothing is stored (fail closed)")
+        if not isinstance(tenant_id, str) or not TENANT_ID.fullmatch(tenant_id):
+            raise VaultRecordInvalid("the tenant id is not a valid tenant id")
+        if type(obj) not in (dict, list):
+            raise VaultRecordInvalid("a blob is a JSON object or array")
+        plaintext = _encode(obj)
+        if plaintext is None:
+            raise VaultRecordInvalid("the blob is not encodable as strict JSON")
+        count = max(1, -(-len(plaintext) // BLOB_CHUNK_BYTES))
+        if count > BLOB_MAX_CHUNKS:
+            plaintext = None
+            raise VaultRecordInvalid(f"the blob is larger than {BLOB_MAX_CHUNKS} chunks; refused")
+        material = key._cur
+        blob_id = secrets.token_bytes(16).hex()
+        chunk_ids = [secrets.token_bytes(16).hex() for _ in range(count)]
+        if len(set(chunk_ids + [blob_id])) != count + 1:      # 2**-128; never two lines under one id
+            raise VaultWriteError("vault id collision; nothing written")
+        lines = []
+        for i, vid in enumerate(chunk_ids):
+            part = plaintext[i * BLOB_CHUNK_BYTES:(i + 1) * BLOB_CHUNK_BYTES]
+            lines.append((vid, self._sealed_line(material, tenant_id, vid, part,
+                                                 _blob_chunk_aad(tenant_id, blob_id, i, count, material.key_id))))
+        manifest = _encode({"v": BLOB_VERSION, "n": count, "bytes": len(plaintext),
+                            "sha256": hashlib.sha256(plaintext).hexdigest(), "chunks": chunk_ids})
+        plaintext = None
+        lines.append((blob_id, self._sealed_line(material, tenant_id, blob_id, manifest,
+                                                 _blob_manifest_aad(tenant_id, blob_id, material.key_id))))
+        slot = getattr(_COLLECT, "slot", None)
+        if slot is not None and slot[0] is self:
+            slot[1].lines.extend(lines)                     # written by write_batch (or discarded)
+        else:
+            batch = VaultBatch()
+            batch.lines = lines
+            self.write_batch(batch)
+        return blob_ref(blob_id)
+
+    def get_blob(self, tenant_id: str, ref_text: str):
+        """The blob, only for the tenant that stored it. Every failure (a wrong tenant, an unknown or malformed ref, a
+        missing, moved or changed chunk, a record's id) is the same ``VaultNotFound``."""
+        key = self._key
+        if key is None:
+            raise VaultUnavailable("the citation vault has no key configured: nothing can be read (fail closed)")
+        found, obj = self._open_blob(key, tenant_id, ref_text)
+        if not found:
+            raise VaultNotFound(NOT_FOUND)    # raised outside every except block: no chained context
+        return obj
+
+    def _unseal(self, key: VaultKey, tenant_id: str, vault_id: str, aad_of) -> Optional[tuple]:
+        """(plaintext, key id) of the line stored under ``vault_id`` when it decrypts for ``tenant_id`` under the
+        associated data ``aad_of(key id)``; else None."""
+        line = self._read_line(vault_id)
+        parsed = _parse_line(line) if line is not None else None
+        if parsed is None or parsed["vault_id"] != vault_id:
+            _tenant_matches(key._cur, tenant_id, b"\0" * 32)
+            return None
+        material = key._material(parsed["key_id"])
+        if material is None or not _tenant_matches(material, tenant_id, parsed["tag"]):
+            return None
+        try:
+            return material._aead.decrypt(parsed["nonce"], parsed["ct"], aad_of(material.key_id)), material.key_id
+        except (InvalidTag, ValueError):
+            return None
+
+    def _blob_chunk(self, key: VaultKey, tenant_id: str, blob_id: str, index: int, count: int, vault_id: str,
+                    key_id: str) -> Optional[bytes]:
+        """Chunk ``index`` of ``count`` of blob ``blob_id``, read from the line ``vault_id``; None unless it was
+        written as exactly that chunk of that blob for that tenant under the manifest's key."""
+        got = self._unseal(key, tenant_id, vault_id,
+                           lambda kid: _blob_chunk_aad(tenant_id, blob_id, index, count, kid))
+        if got is None or got[1] != key_id:
+            return None
+        return got[0]
+
+    def _open_blob(self, key: VaultKey, tenant_id, ref_text) -> tuple:
+        blob_id = parse_blob_ref(ref_text)
+        if blob_id is None or not isinstance(tenant_id, str) or not TENANT_ID.fullmatch(tenant_id):
+            return False, None
+        got = self._unseal(key, tenant_id, blob_id, lambda kid: _blob_manifest_aad(tenant_id, blob_id, kid))
+        manifest = _blob_manifest(got[0]) if got is not None else None
+        if manifest is None:
+            return False, None
+        count, digest = manifest["n"], hashlib.sha256()
+        parts, total = [], 0
+        for i, vid in enumerate(manifest["chunks"]):
+            part = self._blob_chunk(key, tenant_id, blob_id, i, count, vid, got[1])
+            if part is None or len(part) > BLOB_CHUNK_BYTES or (i < count - 1 and len(part) != BLOB_CHUNK_BYTES):
+                return False, None
+            digest.update(part)
+            total += len(part)
+            parts.append(part)
+        if total != manifest["bytes"] or not hmac.compare_digest(digest.hexdigest(), manifest["sha256"]):
+            return False, None
+        obj = None
+        try:
+            obj = json.loads(b"".join(parts).decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, RecursionError):
+            return False, None
+        parts = None
+        return (True, obj) if type(obj) in (dict, list) else (False, None)
 
     def _append(self, line: bytes) -> None:
         """store.RecordLog's rules: the file must be exactly what this process wrote, the write is fsynced, a failed

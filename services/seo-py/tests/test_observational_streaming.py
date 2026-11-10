@@ -8,7 +8,7 @@ from helpers import Harness
 def large(tmp_path):
     h=Harness(tmp_path,data_dir=str(tmp_path/'data'))
     try:
-        h.svc._commit('tenant_created',{'tenant_id':'large','kind':'own','padding':'x'*(2*65536+17)},'seo')
+        h.svc._commit('tenant_created',{'tenant_id':'large','kind':'own','padding':[7]*(65536+9)},'seo')
         assert max(map(len,h.svc.log._lines))>2*65536
         yield h
     finally:h.client.close();h.svc.close()

@@ -60,6 +60,42 @@ def _no_network(request, monkeypatch):
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "local_http: the test talks to an in-process HTTP fixture on 127.0.0.1")
+    config.addinivalue_line("markers", "sink_last: runs after every other test (it reads what the whole run wrote)")
+
+
+# Sink job A: every record the suite commits is observed by the sink guard. ``SINK_SEEN`` keeps, for the whole run, the
+# sinks whose records passed and the legacy (sink, path) pairs that were actually used; tests/test_sink_guard.py reads
+# it LAST and fails when a legacy entry was never needed (so sink jobs B-D must shrink the list). Paths and sink names
+# only: never a value.
+SINK_SEEN = {"passed": set(), "legacy_used": set(), "full_run": False}
+
+
+def _sink_observer(kind, found, bad):
+    if not bad:
+        SINK_SEEN["passed"].add(kind)
+        SINK_SEEN["legacy_used"].update((kind, p) for p, _ in found)
+
+
+def _install_sink_observer():
+    import sink_guard
+    sink_guard.OBSERVER = _sink_observer
+
+
+_install_sink_observer()
+
+
+def pytest_collection_modifyitems(session, config, items):
+    last = [i for i in items if i.get_closest_marker("sink_last")]
+    if last:
+        items[:] = [i for i in items if not i.get_closest_marker("sink_last")] + last
+    files = {Path(str(i.fspath)).name for i in items}
+    every = {p.name for p in TESTS.glob("test_*.py")}
+    opt = config.option
+    SINK_SEEN["full_run"] = bool(
+        files >= every and not getattr(opt, "keyword", "") and not getattr(opt, "markexpr", "")
+        and not getattr(opt, "lf", False) and not getattr(opt, "failedfirst", False)
+        and not getattr(opt, "maxfail", 0) and not getattr(opt, "deselect", None)
+        and not getattr(opt, "numprocesses", None) and not hasattr(config, "workerinput"))
 
 
 @pytest.fixture
