@@ -378,7 +378,7 @@ def test_b64_decoding_stays_bounded():
     edges = [v for v in out if sg._EDGE_JOIN in v]
     assert len(edges) <= 1 and all(v.count(sg._EDGE_JOIN) < sg.DECODE_EDGES_MAX for v in edges)
     assert sg._printable(b"\xff\xfe\xfd" + b"x" * 40 + b"\xff\xfe\xfd") == "x" * 40
-    assert sg._printable(b"\xff" * 4 + b"x" * 40) is None
+    assert sg._printable(b"\xff" * (sg.DECODE_TRIM + 1) + b"x" * 40) is None     # c0c09bd1 MUST 4: TRIM is 6
     assert sg._printable(b"x" * 20 + b"\xff" + b"x" * 20) is None
 
 
@@ -462,7 +462,12 @@ def test_the_plain_spelled_form_is_shown_and_every_other_form_stays_masked():
 
 def test_a_price_is_never_an_e_mail_local_part_in_the_client_view():
     texts = _prices(random.Random(SEED + 13))
-    assert sum(1 for t in texts if sg.client_view_findings(t)) == 0
+    # c0c09bd1 MUST 5 (tightened): only a REAL price (currency sign and / or two decimals) before the PLAIN spelled
+    # " at " is exempt; a price before a spelled "dot" domain, a bare count ("2 at") and "@" are masked
+    shown = [t for t in texts if "$" in t and " dot " not in t]
+    masked = [t for t in texts if t not in shown]
+    assert sum(1 for t in shown if sg.client_view_findings(t)) == 0
+    assert sum(1 for t in masked if "email" not in sg.client_view_findings(t)) == 0
     assert all(sg.check(t) is not None for t in texts)                   # the strict lane may keep withholding
 
 
@@ -646,12 +651,13 @@ def test_prompt_set_text_failing_the_strict_check_is_refused_and_nothing_is_writ
     ]
     for b in bodies:
         h.refused(h.post("/tenants/zbm/prompt-sets", b), 422, "PROMPT_SECRET")
-    loc, dom = r6._mail(rng)
-    h.refused(h.post("/tenants/zbm/prompt-sets", _ps_body(brand_term_rules=[
-        {"term": "Z Best Media", "context_terms": [f"{loc} at {dom} dot com"]}])), 422, "PROMPT_PERSONAL_DATA")
     assert len(h.svc.log) == n_log and h.svc.prompt_sets == {}
-    assert _no_trace(h, {**vals, "loc": loc}) == []
+    # c0c09bd1 (design change, Option B): personal data in a context term is no longer refused: it is vaulted
+    loc, dom = r6._mail(rng)
     h.ok(h.post("/tenants/zbm/prompt-sets", _ps_body(brand_term_rules=[
+        {"term": "Z Best Media", "context_terms": [f"{loc} at {dom} dot com"]}])), 201)
+    assert _no_trace(h, {**vals, "loc": loc}) == []
+    h.ok(h.post("/tenants/zbm/prompt-sets", _ps_body(name="core2", brand_term_rules=[
         {"term": "Z Best Media", "context_terms": ["marketplace"]}])), 201)    # an ordinary set is created
 
 
@@ -661,10 +667,12 @@ def test_the_prompt_set_strict_check_is_load_bearing(tmp_path, monkeypatch):
     k = _key(rng)
     h = vw.harness(tmp_path)
     vw.start(h, vw.synthetic())
+    body = _ps_body(brand_term_rules=[{"term": "Z Best Media", "context_terms": [k[:40]]}])
+    h.refused(h.post("/tenants/zbm/prompt-sets", body), 422, "PROMPT_SECRET")
     monkeypatch.setattr(svc_audits, "_strict_prompt_set", lambda body: None)   # mutation: the check removed
-    h.ok(h.post("/tenants/zbm/prompt-sets", _ps_body(brand_term_rules=[
-        {"term": "Z Best Media", "context_terms": [k[:40]]}])), 201)
-    assert _no_trace(h, {"key": k[:40]}) == ["key"]                   # the credential reached the log
+    # c0c09bd1: the key is then accepted (and would be sent to an engine); the log still holds only its stub
+    h.ok(h.post("/tenants/zbm/prompt-sets", {**body, "request_id": rid()}), 201)
+    assert _no_trace(h, {"key": k[:40]}) == []
 
 
 def test_the_mnc_priority_prompt_goes_through_the_strict_check(monkeypatch):
@@ -963,9 +971,10 @@ def test_each_operator_text_check_is_load_bearing(monkeypatch):
     with pytest.raises(Invalid) as ei:
         svc_entity.validate_field("name", data)
     assert ei.value.reason == "ENTITY_VALUE_WITHHELD"
-    monkeypatch.setattr(svc_audits, "path_withheld", lambda scheme, domain, path: False)     # mutation
-    svc_audits._check_paths([f"/reset/{k}"], 10, "https", vw.DOMAIN)                       # would be logged
-    monkeypatch.setattr(svc_entity.secret_guard, "check", lambda t, waive=frozenset(): None)   # mutation
+    # c0c09bd1: the refusal is the operator rule (a strong key / PEM / user info), not the strict check
+    monkeypatch.setattr(svc_audits, "path_refused", lambda scheme, domain, path: False)     # mutation
+    svc_audits._check_paths([f"/reset/{k}"], 10, "https", vw.DOMAIN)                       # would be fetched
+    monkeypatch.setattr(svc_entity.secret_guard, "operator_refusal", lambda t: None)       # mutation
     svc_entity.validate_field("name", data)
 
 
@@ -978,9 +987,9 @@ def test_the_gsc_property_check_is_load_bearing(tmp_path, monkeypatch):
     with pytest.raises(Exception) as ei:
         h.svc.set_gsc_property("zbm", body)
     assert getattr(ei.value, "reason", None) == "GSC_PROPERTY_INVALID"
-    monkeypatch.setattr(sg, "_url_verdict", lambda u: None)                                # mutation
-    h.svc.set_gsc_property("zbm", {**body, "request_id": rid()})
-    assert vw.found(vw.written(h), {"key": k}) == ["key"]                                  # it reached the log
+    monkeypatch.setattr(sg, "operator_url_refusal", lambda u: None)                        # mutation (c0c09bd1)
+    h.svc.set_gsc_property("zbm", {**body, "request_id": rid()})                           # accepted: it would be
+    assert vw.found(vw.written(h), {"key": k}) == []                                       # queried; vaulted, not logged
 
 
 def test_the_per_family_prefix_scan_never_finds_less_than_the_combined_one():

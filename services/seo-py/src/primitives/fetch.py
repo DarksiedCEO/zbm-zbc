@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import logging
 import re
 import socket
 import ssl
@@ -44,6 +45,11 @@ import httpx
 
 from primitives import Killed
 from primitives import robots as robots_mod
+
+# review c0c09bd1: a fetched URL (an operator's audit path, a cited URL) is never written to a log line: httpx /
+# httpcore log every request URL at INFO / DEBUG, so their loggers are held at WARNING
+for _name in ("httpx", "httpcore"):
+    logging.getLogger(_name).setLevel(logging.WARNING)
 
 PRODUCT_TOKEN = "ZBM-SEO-Audit"
 VERSION = "0.1"

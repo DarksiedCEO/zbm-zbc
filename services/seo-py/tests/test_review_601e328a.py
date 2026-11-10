@@ -477,8 +477,9 @@ BITES = {
                        ("strict", "spaced_spelled_email"), "both"),
     "cv_filler_bridge": (lambda mp: mp.setattr(sg, "_unbridged_fillers", lambda v, sep: v),
                          ("client", "word_bridged_numbers"), "client"),
-    "cv_double_dash": (lambda mp: mp.setattr(sg, "_CV_NANP", re.compile(
-        r"(?<![0-9])(?:\+?1[ .\-]?)?(?:\(\d{3}\) ?\d{3}-\d{4}|\d{3}-\d{3}-\d{4}|\d{3}\.\d{3}\.\d{4})(?![0-9])")),
+    # c0c09bd1: the labelled-phone rule (MUST 8) also reads these probes; it is disabled with the rule under test
+    "cv_double_dash": (lambda mp: (mp.setattr(sg, "_cv_labelled_phone", lambda m: False), mp.setattr(sg, "_CV_NANP", re.compile(
+        r"(?<![0-9])(?:\+?1[ .\-]?)?(?:\(\d{3}\) ?\d{3}-\d{4}|\d{3}-\d{3}-\d{4}|\d{3}\.\d{3}\.\d{4})(?![0-9])"))),
         ("client", "double_dash"), "client"),
     "cv_nospace_label": (lambda mp: mp.setattr(sg, "_cv_label_nospace", lambda v: False),
                          ("client", "spaced_or_b64_label"), "client"),

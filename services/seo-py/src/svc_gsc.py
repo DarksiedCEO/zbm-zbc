@@ -34,6 +34,7 @@ from errors import Conflict, Invalid, Unavailable
 from gsc_client import ALLOWED_HOSTS, SCOPE, GscError, property_host
 from primitives import Killed
 from reasons import R
+from svc_optext import url_flag
 
 log = logging.getLogger("seo.gsc")
 AGENT, TASK = sp.AGENT, sp.TASK
@@ -61,6 +62,14 @@ def _site(d: str) -> str:
     return d.removeprefix("www.")
 
 
+def kept_property(prop):
+    """What the log and a report keep of a property (review c0c09bd1): a Domain property as is; a URL-prefix property
+    as the strict lane's kept form (scheme, host and only the parts that pass; ``safe_url``)."""
+    if not isinstance(prop, str) or not prop.startswith("http"):
+        return prop
+    return secret_guard.safe_url(prop) if url_flag(prop) is not None else prop
+
+
 def binding_ok(tenant: dict, prop: str | None) -> bool:
     host = property_host(prop or "")
     return host is not None and _site(host) in {_site(d) for d in tenant["domains"]}
@@ -76,12 +85,17 @@ class GscMixin:
             self.check_kill(tenant=tid, write=True)
             t = self._get(self.tenants, tid, "TENANT_NOT_FOUND")
             rk = self.rk("gsc_property", tid, body)
-            if self._idem("andre", rk, body):
+            url_prefix = prop is not None and prop.startswith("http")
+            if url_prefix:
+                self._optext_key_check()
+            # review c0c09bd1: a URL-prefix property is vaulted; the idempotency body and the log carry its HMAC
+            hbody = {**body, "property": self._optext_hmac(tid, "gsc_property", prop)} if url_prefix else body
+            if self._idem("andre", rk, hbody):
                 return self.tenant_view(tid)
             if prop is not None:
-                # review c13529af MUST 5: the property is written to the log in plaintext; a URL-prefix property whose
-                # path / query the strict URL rules withhold is refused
-                if not binding_ok(t, prop) or (prop.startswith("http") and secret_guard._url_verdict(prop) is not None):
+                # review c0c09bd1: refused only for a key / PEM / user info or a credential query key (it is queried);
+                # every other URL-prefix property is accepted and vaulted (the log keeps its host and stub)
+                if not binding_ok(t, prop) or (url_prefix and secret_guard.operator_url_refusal(prop) is not None):
                     raise Invalid(R("GSC_PROPERTY_INVALID"))
                 mine = _site(property_host(prop))
                 for other, o in self.tenants.items():
@@ -90,14 +104,25 @@ class GscMixin:
                         h = _site(property_host(theirs) or "")
                         if h == mine or h.endswith("." + mine) or mine.endswith("." + h):
                             raise Conflict(R("GSC_PROPERTY_TAKEN"))
-            data = {"tenant_id": tid, "property": prop}
-            ev = {"tenant_id": tid, "property_sha256": None if prop is None else sha(prop), "bound": prop is not None}
-            self._commit("tenant_gsc_property_set", self._req(data, "andre", rk, body, tid), "andre",
-                         evidence=("tenant_gsc_property_set", f"tenant:{tid}", ev, ("andre", rk)))
+            if url_prefix:
+                stub = self._optext_seal(tid, "gsc_property", [prop], [url_flag(prop)])[0]
+                data = {"tenant_id": tid, "property": stub, "property_host": property_host(prop)}
+                psha = sha(stub["hmac"])
+            else:
+                data = {"tenant_id": tid, "property": prop}
+                psha = None if prop is None else sha(prop)
+            ev = {"tenant_id": tid, "property_sha256": psha, "bound": prop is not None}
+            try:
+                self._commit("tenant_gsc_property_set", self._req(data, "andre", rk, hbody, tid), "andre",
+                             evidence=("tenant_gsc_property_set", f"tenant:{tid}", ev, ("andre", rk)))
+            except BaseException:
+                self._optext_orphaned()
+                raise
+            self._optext_committed()
             return self.tenant_view(tid)
 
     def _a_tenant_gsc_property_set(self, d, at):
-        self.tenants[d["tenant_id"]]["gsc_property"] = d["property"]
+        self.tenants[d["tenant_id"]]["gsc_property"] = self._optext_open(d["tenant_id"], d["property"])
 
     # ------------------------------------------------------------------ budget
 
@@ -152,7 +177,7 @@ class GscMixin:
             hosts = set()
             for d in t["domains"]:
                 hosts |= {_site(d), "www." + _site(d)}
-            ent = self.entity_for_tenant(tid)
+            ent = self.entity_for_tenant(tid, raw=True)
             brands = sp.brand_tokens(t["domains"], ((ent or {}).get("fields") or {}).get("name", {}).get("value")
                                      if isinstance(ent, dict) else None)
         try:
@@ -164,11 +189,13 @@ class GscMixin:
                 return env("BLOCKED", "GSC_BUDGET_EXHAUSTED", {"state": "BUDGET_EXHAUSTED",
                                                                "reads_per_day": self.settings.gsc_reads_per_day})
             start, end = sp.window(self.now(), self.settings.gsc_window_days)
-            data = {"tenant_id": tid, "audit_id": aid, "property": prop, "window_start": start, "window_end": end}
+            data = {"tenant_id": tid, "audit_id": aid, "property": kept_property(prop), "window_start": start,
+                    "window_end": end}
             try:
                 self._commit("gsc_read_started", data, "seo",
                              evidence=("gsc_read_started", f"audit:{aid}",
-                                       {"tenant_id": tid, "audit_id": aid, "property_sha256": sha(prop),
+                                       {"tenant_id": tid, "audit_id": aid,
+                                        "property_sha256": sha(kept_property(prop)),
                                         "window_start": start, "window_end": end}, ("gsc", aid)))
             except Unavailable as exc:                     # record-first: no record, no request
                 return env("BLOCKED", exc.reason, {"state": "NOT_RECORDED"})
@@ -191,7 +218,8 @@ class GscMixin:
                                                          "error_type": type(exc).__name__[:60],
                                                          "requests": rd.requests,
                                                          "window": {"start": start, "end": end}})
-        box["section"] = section
+        box["section"] = {**section, "property": kept_property(section.get("property"))} \
+            if isinstance(section, dict) and "property" in section else section
         return env("OK", None, {"state": "OK", "requests": rd.requests, "window": section["window"],
                                 "totals": section["totals"], "section_in": "report.search_performance"})
 

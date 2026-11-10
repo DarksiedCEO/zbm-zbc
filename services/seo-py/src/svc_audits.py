@@ -30,12 +30,13 @@ from agents import secret_guard
 from agents.prompt_guard import personal_data
 from clock import iso
 from envelope import CAPABILITIES, DATA_CLASSES, DECISIONS, EFFECT_CLASSES, envelope, sha, worst_outcome
-from errors import Conflict, Forbidden, Invalid, NotFound
+from errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from ledger import derived_id
 from primitives import Killed
 from primitives import diff as diff_mod
 from primitives.parse import SCHEMA_RULES_VERSION
 from reasons import R
+from svc_optext import path_view, text_view, url_flag
 
 log = logging.getLogger("seo.audits")
 REPORT_VERSION = "seo-audit-report/1"
@@ -96,21 +97,43 @@ def _strings(x) -> list:
 
 
 def _strict_prompt_set(body: dict) -> None:
-    """Review c13529af MUST 5: a prompt set is written to the log in plaintext and its prompts / brand-term rules are
-    sent to answer engines, so EVERY string field of it (name, brand terms, competitor domains, prompts, engines, every
-    brand-term rule field) must pass the shared core's STRICT check (secret_guard.check): a credential is refused
-    ``PROMPT_SECRET``, personal data ``PROMPT_PERSONAL_DATA``. 422, nothing written. The request id is a UUID
-    (models.REQUEST_ID) and is not free text."""
-    for s in _strings({k: v for k, v in body.items() if k != "request_id"}):
+    """The prompt set's IDENTIFIER fields (name, brand terms, competitor domains, engines, a rule's term) are written to
+    the log in plaintext and must pass the shared core's STRICT check (review c13529af MUST 5; a credential is refused
+    ``PROMPT_SECRET``, personal data ``PROMPT_PERSONAL_DATA``). Review c0c09bd1: the FREE TEXT (prompts, a rule's
+    context / negative terms) is no longer refused for failing the strict check (it is vaulted; see svc_optext.py):
+    only a strong-key prefix, a PEM / PGP block or URL user info in it is refused ``PROMPT_SECRET``."""
+    ids = {k: v for k, v in body.items() if k not in ("request_id", "prompts", "brand_term_rules")}
+    ids["rule_terms"] = [r.get("term") for r in body.get("brand_term_rules") or []]
+    for s in _strings(ids):
         name = secret_guard.check(s)
         if name is not None:
             raise Invalid(R("PROMPT_PERSONAL_DATA" if name in _PERSONAL_CHECKS else "PROMPT_SECRET"))
+    for d in [body.get("name")] + list(body.get("competitor_domains") or []):
+        if isinstance(d, str) and globals()["_identifier_refused"](d):
+            raise Invalid(R("IDENTIFIER_WITHHELD"))
+    free = list(body.get("prompts") or []) + [w for r in body.get("brand_term_rules") or []
+                                               for k in ("context_terms", "negative_terms") for w in r.get(k) or []]
+    if any(globals()["_operator_refused"](t) for t in free):
+        raise Invalid(R("PROMPT_SECRET"))
 
 
-def path_withheld(scheme: str, domain: str, path: str) -> bool:
-    """An audit / schedule path (written to the log in plaintext) that the strict URL rules withhold (a credential or
-    personal data in a segment or the query: review c13529af MUST 5)."""
-    return secret_guard._url_verdict(f"{scheme}://{domain}{path}") is not None
+def _operator_refused(text: str) -> bool:
+    return secret_guard.operator_refusal(text) is not None
+
+
+def _identifier_refused(text: str) -> bool:
+    return secret_guard.identifier_refusal(text) is not None
+
+
+def path_refused(scheme: str, domain: str, path: str) -> bool:
+    """An audit / schedule path (fetched) holding a strong key / PEM / user info, or a value under a credential query
+    key: refused (review c0c09bd1). Every other path is accepted and vaulted (svc_optext.py)."""
+    return secret_guard.operator_url_refusal(f"{scheme}://{domain}{path}") is not None
+
+
+def _rules_hashed(rules: list, h) -> list:
+    return [{**r, "context_terms": [h(w) for w in r["context_terms"]],
+             "negative_terms": [h(w) for w in r["negative_terms"]]} for r in rules]
 
 
 class AuditsMixin:
@@ -126,47 +149,104 @@ class AuditsMixin:
             raise Invalid(R("PROMPT_SET_INVALID"))
         if any(personal_data(p) for p in prompts):         # W4-3: prompts sent to an engine carry no personal data
             raise Invalid(R("PROMPT_PERSONAL_DATA"))
-        _strict_prompt_set(body)                            # review c13529af MUST 5: nothing written, nothing sent
-        content = {"name": body["name"], "brand_terms": terms, "competitor_domains": sorted(body["competitor_domains"]),
-                   "prompts": prompts, "engines": sorted(set(body["engines"]))}
+        _strict_prompt_set(body)                            # review c0c09bd1: identifiers strict, free text vaulted
         rules = _brand_term_rules(body.get("brand_term_rules") or [], terms)
-        if rules:                                      # absent when none: an existing set's content hash is unchanged
-            content["brand_term_rules"] = rules
         with self.lock:
             self._gate()
             self._get(self.tenants, tid, "TENANT_NOT_FOUND")
             self.check_kill(tenant=tid, capability="prompt_sets", write=True)
+            self._optext_key_check()
+
+            def hp(t):
+                return self._optext_hmac(tid, "prompt", t)
+
+            def hr(t):
+                return self._optext_hmac(tid, "brand_term", t)
+            # review c0c09bd1: the idempotency body and the content hash carry the HMACs of the free text, never it
+            hbody = {**body, "prompts": [hp(" ".join(p.split())) for p in body["prompts"]]}
+            if body.get("brand_term_rules"):
+                hbody["brand_term_rules"] = [{**r, "context_terms": [hr(" ".join(w.split())) for w in r.get(
+                    "context_terms") or []], "negative_terms": [hr(" ".join(w.split())) for w in r.get(
+                        "negative_terms") or []]} for r in body["brand_term_rules"]]
+            hashed = {"name": body["name"], "brand_terms": terms, "competitor_domains": sorted(body["competitor_domains"]),
+                      "prompts": [hp(p) for p in prompts], "engines": sorted(set(body["engines"]))}
+            if rules:                                  # absent when none: an existing set's content hash is unchanged
+                hashed["brand_term_rules"] = _rules_hashed(rules, hr)
             rk = self.rk("prompt_set", tid, body)
-            prev = self._idem(actor, rk, body)
+            prev = self._idem(actor, rk, hbody)
             if prev:
                 return self.prompt_set_view(tid, prev[1])
             psid = derived_id("pst", tid, body["name"])
             cur = self.prompt_sets.get(psid)
-            csha = sha(content)
+            csha = sha(hashed)
             if cur is not None and cur["versions"][str(cur["current"])]["sha256"] == csha:
                 raise Conflict(R("PROMPT_SET_EXISTS"))
             version = 1 if cur is None else cur["current"] + 1
+            ctx = [w for r in rules for k in ("context_terms", "negative_terms") for w in r[k]]
+            stubs = self._optext_seal(tid, "prompt", prompts)
+            rstubs = iter(self._optext_seal(tid, "brand_term", ctx))
+            content = {**hashed, "prompts": stubs}
+            if rules:
+                content["brand_term_rules"] = [{**r, "context_terms": [next(rstubs) for _ in r["context_terms"]],
+                                                "negative_terms": [next(rstubs) for _ in r["negative_terms"]]}
+                                               for r in rules]
             data = {"prompt_set_id": psid, "tenant_id": tid, "version": version, "content": content, "sha256": csha}
-            self._commit("prompt_set_version", self._req(data, actor, rk, body, psid), actor,
-                         evidence=("prompt_set_version", f"prompt_set:{psid}",
-                                   {"prompt_set_id": psid, "tenant_id": tid, "version": version, "sha256": csha},
-                                   (actor, rk)))
+            try:
+                self._commit("prompt_set_version", self._req(data, actor, rk, hbody, psid), actor,
+                             evidence=("prompt_set_version", f"prompt_set:{psid}",
+                                       {"prompt_set_id": psid, "tenant_id": tid, "version": version, "sha256": csha},
+                                       (actor, rk)))
+            except BaseException:
+                self._optext_orphaned()
+                raise
+            self._optext_committed()
             return self.prompt_set_view(tid, psid)
 
     def _a_prompt_set_version(self, d, at):
         ps = self.prompt_sets.setdefault(d["prompt_set_id"], {"prompt_set_id": d["prompt_set_id"],
                                                               "tenant_id": d["tenant_id"], "versions": {}})
-        ps["versions"][str(d["version"])] = {**d["content"], "version": d["version"], "sha256": d["sha256"],
-                                             "created_at": at}
+        c = d["content"]
+        cache: dict = {}
+        tid = d["tenant_id"]
+        prompts = [self._optext_open(tid, x, cache) for x in c["prompts"]]
+        rules = [{**r, "context_terms": [self._optext_open(tid, x, cache) for x in r.get("context_terms") or []],
+                  "negative_terms": [self._optext_open(tid, x, cache) for x in r.get("negative_terms") or []]}
+                 for r in c.get("brand_term_rules") or []]
+        texts = prompts + [w for r in rules for w in r["context_terms"] + r["negative_terms"]]
+        v = {**c, "prompts": [p if p is not None else "" for p in prompts], "version": d["version"],
+             "sha256": d["sha256"], "created_at": at}
+        if "brand_term_rules" in c:
+            v["brand_term_rules"] = [{**r, "context_terms": [w for w in r["context_terms"] if w is not None],
+                                      "negative_terms": [w for w in r["negative_terms"] if w is not None]}
+                                     for r in rules]
+        if any(t is None for t in texts):
+            v["vault_unavailable"] = True              # review c0c09bd1: the set's text cannot be read: never used
+        ps["versions"][str(d["version"])] = v
         ps["current"] = d["version"]
 
     def prompt_set_view(self, tid: str, psid: str) -> dict:
+        """The owner's view (review c0c09bd1): the free text decrypted for the owning tenant, shown through the
+        client-view masker; a masked text is listed in ``masked`` (its index), never shown."""
         with self.lock:
             ps = self.prompt_sets.get(psid)
             if ps is None or ps["tenant_id"] != tid:
                 raise NotFound(R("PROMPT_SET_NOT_FOUND"))
-            out = {"prompt_set_id": psid, "tenant_id": tid, "current": ps["current"],
-                   "versions": {k: {**v, "prompts": list(v["prompts"])} for k, v in ps["versions"].items()}}
+            versions = {}
+            for k, v in ps["versions"].items():
+                shown = [text_view(p) for p in v["prompts"]]
+                out_v = {**v, "prompts": [x[0] for x in shown]}
+                masked = [i for i, x in enumerate(shown) if x[1]]
+                if v.get("brand_term_rules"):
+                    out_v["brand_term_rules"] = [{**r, **{f: [text_view(w)[0] for w in r[f]]
+                                                          for f in ("context_terms", "negative_terms")}}
+                                                 for r in v["brand_term_rules"]]
+                    if any(text_view(w)[1] for r in v["brand_term_rules"]
+                           for f in ("context_terms", "negative_terms") for w in r[f]):
+                        out_v["rules_masked"] = True
+                if masked:
+                    out_v["masked"] = masked
+                versions[k] = out_v
+            out = {"prompt_set_id": psid, "tenant_id": tid, "current": ps["current"], "versions": versions}
             cur = ps["versions"][str(ps["current"])]
             common = brand_mention.warnings(cur["brand_terms"], cur.get("brand_term_rules"))
             if common:                                 # round 3: shown on create and on every read, never silent
@@ -176,6 +256,50 @@ class AuditsMixin:
                                               "negative_terms or case_sensitive, or common_word: false"}
                                    for t in common]
             return out
+
+    # ------------------------------------------------------------------ operator paths (review c0c09bd1)
+
+    def _paths_hbody(self, tid: str, body: dict) -> dict:
+        """The request body for idempotency and the log's request hash: each path as its keyed HMAC."""
+        self._optext_key_check()
+        return {**body, "paths": [self._optext_hmac(tid, "audit_path", p) for p in body["paths"]]}
+
+    def _seal_paths(self, tid: str, scheme: str, domain: str, paths: list) -> list:
+        """The paths in the tenant's vault (one record); a stub each, flagged with the strict URL verdict."""
+        return self._optext_seal(tid, "audit_path", paths, [url_flag(f"{scheme}://{domain}{p}") for p in paths])
+
+    @staticmethod
+    def _report_paths_kept(report: dict, body: dict) -> dict:
+        """The report as kept (log, ledger hash, memory): every flagged path (the strict URL verdict fails) and its full
+        URL replaced, wherever they appear (keys and values), by the strict lane's kept form (``safe_url``)."""
+        scheme, domain = body["scheme"], body["domain"]
+        swap = {}
+        for p in body["paths"]:
+            full = f"{scheme}://{domain}{p}"
+            if url_flag(full) is None:
+                continue
+            kept = secret_guard.safe_url(full)
+            path = kept.split(domain, 1)[1] if kept.startswith(f"{scheme}://{domain}") else secret_guard.WITHHELD
+            swap[full] = kept
+            swap[p] = path or "/"
+        if not swap:
+            return report
+        order = sorted(swap, key=len, reverse=True)
+
+        def fix(x):
+            if isinstance(x, str):
+                for k in order:
+                    if k in x:
+                        x = x.replace(k, swap[k])
+                return x
+            if isinstance(x, dict):
+                return {fix(k): fix(v) for k, v in x.items()}
+            if isinstance(x, list):
+                return [fix(v) for v in x]
+            if isinstance(x, tuple):
+                return [fix(v) for v in x]
+            return x
+        return fix(report)
 
     # ------------------------------------------------------------------ audits
 
@@ -187,7 +311,8 @@ class AuditsMixin:
             self.check_kill(tenant=tid, capability="audit", write=True)
             actor = "andre" if andre else actor
             rk = self.rk("audit", tid, body)
-            prev = self._idem(actor, rk, body)
+            hbody = self._paths_hbody(tid, body)          # review c0c09bd1: the paths' HMACs, never the paths
+            prev = self._idem(actor, rk, hbody)
             if prev:
                 return self.audit_view(tid, prev[1])
             aid = derived_id("aud", tid, actor, rk)
@@ -197,11 +322,11 @@ class AuditsMixin:
         with self.lock:
             self._gate()
             self.check_kill(tenant=tid, capability="audit", write=True)
-            prev = self._idem(actor, rk, body)
+            prev = self._idem(actor, rk, hbody)
             if prev:
                 return self.audit_view(tid, prev[1])
             self._recheck_invoice(plan)
-            ps = self._open_audit(actor, tid, rk, body, andre, aid, request=body, verification=verification)
+            ps = self._open_audit(actor, tid, rk, body, andre, aid, request=hbody, verification=verification)
         return self._execute_audit(aid, tid, body, ps)
 
     def _open_audit(self, actor: str, tid: str, rk: str, body: dict, andre: bool, aid: str,
@@ -217,9 +342,12 @@ class AuditsMixin:
             if p is None or p["tenant_id"] != tid:
                 raise NotFound(R("PROMPT_SET_NOT_FOUND"))
             ps = {"prompt_set_id": p["prompt_set_id"], **p["versions"][str(p["current"])]}
+            if ps.get("vault_unavailable"):
+                raise Unavailable(R("VAULT_UNAVAILABLE"))   # review c0c09bd1: its text cannot be read: never used
         if any(a["tenant_id"] == tid and a["audit_id"] in self.running_audits for a in self.audits.values()):
             raise Conflict(R("AUDIT_RUNNING"))
-        paths = list(body["paths"])
+        # review c0c09bd1: the log keeps the host (``domain``) and each path's vault stub (id, HMAC, strict flag)
+        paths = self._seal_paths(tid, body["scheme"], body["domain"], list(body["paths"]))
         data = {"audit_id": aid, "tenant_id": tid, "tenant_kind": t["kind"], "domain": body["domain"],
                 "scheme": body["scheme"], "paths": paths, "invoice_id": body.get("invoice_id"),
                 "prompt_set": None if ps is None else {"prompt_set_id": ps["prompt_set_id"],
@@ -229,7 +357,7 @@ class AuditsMixin:
             data.update(schedule_id=schedule["schedule_id"], slot=schedule["slot"])
         ev = [("audit_requested", f"audit:{aid}",
                {"audit_id": aid, "tenant_id": tid, "kind": t["kind"], "domain_sha256": sha(body["domain"]),
-                "paths_sha256": sha(paths), "invoice_id": body.get("invoice_id"),
+                "paths_sha256": sha([x["hmac"] for x in paths]), "invoice_id": body.get("invoice_id"),
                 "schedule_id": None if schedule is None else schedule["schedule_id"]}, (actor, rk))]
         if andre and schedule is None:
             ev.append(("audit_approved_by_andre", f"audit:{aid}",
@@ -237,7 +365,12 @@ class AuditsMixin:
         ev += self._invoice_evidence(verification, f"audit:{aid}", {"audit_id": aid}, body.get("invoice_id"), actor,
                                      rk)
         line = self._req(data, actor, rk, request, aid) if request is not None else {**data, "actor": actor}
-        self._commit("audit_requested", line, actor, evidence=ev)
+        try:
+            self._commit("audit_requested", line, actor, evidence=ev)
+        except BaseException:
+            self._optext_orphaned()
+            raise
+        self._optext_committed()
         self.running_audits.add(aid)
         return ps
 
@@ -272,6 +405,7 @@ class AuditsMixin:
                                  evidence=("audit_interrupted", f"audit:{aid}", {"audit_id": aid, "reason": stop},
                                            ("interrupted", aid)))
                     return self.audit_view(tid, aid)
+                report = self._report_paths_kept(report, body)   # review c0c09bd1: a flagged path never kept
                 rsha = sha(report)
                 self._commit("audit_completed", {"audit_id": aid, "report": report, "report_sha256": rsha},
                              "seo", evidence=[("audit_report_recorded", f"audit:{aid}",
@@ -284,10 +418,15 @@ class AuditsMixin:
                 self.running_audits.discard(aid)
 
     def _a_audit_requested(self, d, at):
+        cache: dict = {}
+        paths = [self._optext_open(d["tenant_id"], x, cache) for x in d["paths"]]
         self.audits[d["audit_id"]] = {**{k: v for k, v in d.items() if k not in ("actor", "request_id",
                                                                                   "request_sha", "_obj", "evidence")},
+                                      "paths": [x for x in paths if x is not None],
                                       "status": "running", "requested_at": at, "requested_by": d["actor"],
                                       "completed_at": None, "report": None, "report_sha256": None}
+        if any(x is None for x in paths):
+            self.audits[d["audit_id"]]["vault_unavailable"] = True
         if d.get("schedule_id"):
             self.schedules[d["schedule_id"]]["slots"][str(d["slot"])] = {"status": "requested",
                                                                          "audit_id": d["audit_id"], "at": at}
@@ -322,7 +461,7 @@ class AuditsMixin:
                         if ctx.robots is not None else _skipped("delia", "sitemaps_and_llms_txt", s_env))
             envs.append(_step(ctx, "roman", "content_structure", lambda: roman.run(ctx, pages)))
         envs.append(_step(ctx, "entity_check", "on_site_entity_consistency",
-                          lambda: entity_check.run(ctx, pages, self.entity_for_tenant(tid))))
+                          lambda: entity_check.run(ctx, pages, self.entity_for_tenant(tid, raw=True))))
         envs.append(_step(ctx, "callum", "citation_sources",
                           lambda: probes.run_callum(self.ports.engines, ps, body["domain"],
                                                     self.settings.probe_samples, ctx.guard, o,
@@ -380,6 +519,8 @@ class AuditsMixin:
             if a is None or a["tenant_id"] != tid:
                 raise NotFound(R("AUDIT_NOT_FOUND"))
             out = {k: v for k, v in a.items() if k != "report"}
+            # review c0c09bd1: the owner's view of the audit config: each path through the client-view URL masker
+            out["paths"] = [path_view(a["scheme"], a["domain"], x) for x in a["paths"]]
             if a["status"] == "running" and aid not in self.running_audits:
                 out["status"] = "running_elsewhere_or_interrupted"
             if full:
@@ -493,8 +634,8 @@ def _check_paths(paths: list, max_pages: int, scheme: str = "https", domain: str
     if not paths or len(set(paths)) != len(paths) or any(
             not _PATH_OK.fullmatch(p) or p.startswith("//") or "#" in p or "\\" in p for p in paths):
         raise Invalid(R("PAGES_INVALID"))
-    if any(path_withheld(scheme, domain, p) for p in paths):
-        raise Invalid(R("PATH_WITHHELD"))
+    if any(path_refused(scheme, domain, p) for p in paths):
+        raise Invalid(R("PATH_WITHHELD"))         # review c0c09bd1: only a key / PEM / user info / credential query
 
 
 def _skipped(agent: str, task: str, selene_env: dict) -> dict:

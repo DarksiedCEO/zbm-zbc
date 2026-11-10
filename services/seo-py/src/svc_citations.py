@@ -41,7 +41,7 @@ from typing import Optional
 import vault as vault_mod
 from agents import callum
 from envelope import sha
-from errors import Conflict, Forbidden, Invalid, NotFound
+from errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from ledger import derived_id
 from primitives import Killed
 from reasons import R
@@ -111,6 +111,8 @@ class CitationsMixin:
         p = self.prompt_sets.get(body["prompt_set_id"])
         if p is None or p["tenant_id"] != tid:
             raise NotFound(R("PROMPT_SET_NOT_FOUND"))
+        if p["versions"][str(p["current"])].get("vault_unavailable"):
+            raise Unavailable(R("VAULT_UNAVAILABLE"))       # review c0c09bd1: its text cannot be read: never sent
         if t["kind"] != "client":
             return None
         if not andre:

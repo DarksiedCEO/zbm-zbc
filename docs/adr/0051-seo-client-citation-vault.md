@@ -233,6 +233,37 @@ service, adds a dependency and a network hop the department does not otherwise n
     skipped / memoised where they cannot change the answer (equivalence-tested). Measured worst case at 64 KB on the
     adversarial repeats: see the review report; both lanes are linear.
 
+## Review c0c09bd1: operator text vaulted, identifiers validated, scoped rules
+
+29. **Operator text is VAULTED, not refused (supersedes the refusals of decision 27; design change, Option B).**
+    Refusing operator text that failed the strict check refused 20-30 % of legitimate input. Prompt-set prompts and
+    brand-term context / negative terms, entity values and provenance, audit / schedule paths (with their queries) and
+    URL-prefix Search Console properties are stored in the tenant's vault (`svc_optext.py`: one AES-GCM record per
+    request, the citation evidence's mechanism); the log record keeps per text only a stub (vault id, index, key id,
+    keyed HMAC bound to tenant + field, the strict check's flag). Content hashes, request hashes (idempotency) and
+    ledger evidence are computed over the HMACs. The apply handler opens the stubs (live and on replay); a text that
+    cannot be opened makes its prompt set / schedule / audit unusable (`VAULT_UNAVAILABLE`). No key: the request is
+    refused 503 `VAULT_UNAVAILABLE` (never kept in plaintext). Refused before anything is written or sent: a strong-key
+    prefix, a PEM / PGP block, URL user info with a password (`secret_guard.operator_refusal`) and, in a fetched /
+    queried URL, a value under a credential query key by exact name (`operator_url_refusal`). Prompts still go to the
+    engines as typed (W4-3's personal-data rule for prompts is unchanged). A report keeps a flagged path / its URL only
+    in the strict lane's kept form (`safe_url`); the fetch and Search Console reads use the full text from memory.
+    Owner reads (prompt set, entity, audit / schedule config, tenant) decrypt for the owning tenant and apply the
+    client-view masker (a business telephone value is shown). httpx / httpcore loggers are held at WARNING (a fetched
+    URL is never a log line).
+30. **Identifiers are validated, not vaulted.** Tenant id, tenant domains, Finance client id, prompt-set name,
+    competitor domains and an entity's source keep their formats and are refused (`IDENTIFIER_WITHHELD`) when they hold a
+    strong key / PEM / user info, a run of 9+ digits, an e-mail form, or fail the strict check.
+31. **Scoped rules (both lanes unless noted).** A log-ingest segment with a label finding is kept only when it is the
+    label word alone after decoding (`secret_guard.label_only`); the segment after such a segment is withheld (strict
+    `safe_url` / `stored_url`, never the fetch decision) and masked (client view) unless it is an action word. The S1
+    price exemption (client view) covers only a real price (currency sign and / or two decimals, thousands commas)
+    before the PLAIN spelled " at "; decision 22 is for prose only (never inside a URL); a code / model number
+    (2-12 upper-case letters and digits, both present) before the plain " at " is prose in the client view. The
+    variant view joins spaces around "-" / "_" only next to an at / dot variant word. "at symbol", "at at" and the
+    e-mail emoji read as "@"; decoded base64 runs are trimmed up to 6 bytes at each end. The client view reads number
+    words as SSNs / phones and labelled unformatted phones (the strict lane's phone words within 16 characters).
+
 ## Threat model
 
 | Threat | What stops it | What does not |

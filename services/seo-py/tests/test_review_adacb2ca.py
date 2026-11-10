@@ -196,9 +196,8 @@ def test_a_spelled_email_in_a_url_is_withheld_by_safe_url_and_stored_url():
         assert f"{loc}%20at%20{dom}" not in sg.safe_url(u)
         st = callum.stored_url(u)
         assert st["withheld"] and loc not in json.dumps(st)
-        # c13529af (decision 22): the plain form in a path segment is shown to the owner (PERSONAL until c13529af);
-        # the spelled " dot " form is still masked there
-        assert sg.client_view_url(u)[1] is None
+        # c0c09bd1 (decision 22 is for PROSE only): the plain form in a path segment is masked again (tightened back)
+        assert sg.client_view_url(u)[1] == sg.PERSONAL
         assert sg.client_view_url(u.replace(".com/x", "%20dot%20com/x"))[1] == sg.PERSONAL
 
 
@@ -349,6 +348,7 @@ def test_each_client_gap_rule_is_load_bearing(monkeypatch, attr, value, cls):
     probes = [p for p in client_cases()[cls] if "Authorization" not in p]      # that label is its own rule
     assert probes and all(sg.client_view_findings(p) for p in probes), attr
     monkeypatch.setattr(sg, attr, value)
+    monkeypatch.setattr(sg, "_cv_labelled_phone", lambda m: False)     # c0c09bd1: MUST 8 also reads labelled phones
     assert all(not sg.client_view_findings(p) for p in probes), attr
 
 
@@ -510,12 +510,15 @@ def test_the_service_lock_is_not_held_while_rows_are_encrypted_or_decrypted(tmp_
     h.ok(h.post("/tenants/zbm/domains", {"request_id": vw.rid(), "domains": [vw.DOMAIN]}, andre=True))
     appends = []
     real_append = vault.CitationVault._append
-    monkeypatch.setattr(vault.CitationVault, "_append", lambda self, line: (appends.append(1), real_append(self, line))[1])
+    # c0c09bd1: only the CITATION vault is counted (operator text has its own vault file, written with the prompt set)
+    monkeypatch.setattr(vault.CitationVault, "_append", lambda self, line: (
+        appends.append(1) if self is h.svc.vault else None, real_append(self, line))[1])
     held_during_put = []
     real_put = vault.CitationVault.put
 
     def put(self, tid, record):
-        held_during_put.append(h.svc.lock._is_owned() if hasattr(h.svc.lock, "_is_owned") else None)
+        if self is h.svc.vault:
+            held_during_put.append(h.svc.lock._is_owned() if hasattr(h.svc.lock, "_is_owned") else None)
         return real_put(self, tid, record)
     monkeypatch.setattr(vault.CitationVault, "put", put)
     run = vw.citation_run(h)
@@ -540,7 +543,11 @@ def test_a_failed_batch_write_leaves_nothing_and_closes_run_failed(tmp_path, mon
     h = vw.harness(tmp_path)
     vw.start(h, v)
 
+    real_append = vault.CitationVault._append
+
     def boom(self, line):
+        if self is not h.svc.vault:                  # c0c09bd1: the operator-text vault (the prompt set) writes
+            return real_append(self, line)
         raise vault.VaultWriteError("forced")
     monkeypatch.setattr(vault.CitationVault, "_append", boom)
     run = vw.citation_run(h)

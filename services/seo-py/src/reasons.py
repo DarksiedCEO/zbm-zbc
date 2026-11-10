@@ -44,6 +44,10 @@ CODES = frozenset({
     # MUST 5): a prompt-set field holding a credential; an audit / schedule path or an entity field holding a
     # credential or personal data
     "PROMPT_SECRET", "PATH_WITHHELD", "ENTITY_VALUE_WITHHELD",
+    # review c0c09bd1: operator free text is vaulted, not refused (refused only for a strong key / PEM / user info, or a
+    # credential query key in a fetched URL); an identifier (tenant id, domain, Finance client id, prompt-set name,
+    # competitor domain, entity source) that holds a key, a 9+ digit run, an e-mail form or fails the strict check
+    "IDENTIFIER_WITHHELD",
     # answer-engine adapters (Wave 4; perplexity.py): the closed set an engine run reports
     "ENGINE_AUTH_REFUSED", "ENGINE_RATE_LIMITED", "ENGINE_UNAVAILABLE", "ENGINE_PROTOCOL_ERROR",
     "ENGINE_BUDGET_EXHAUSTED", "ENGINE_KILLED", "ENGINE_NOT_CONNECTED",

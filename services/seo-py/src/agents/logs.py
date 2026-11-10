@@ -85,9 +85,12 @@ def _segment(seg: str) -> str:
     if kind is not None:
         return kind
     # review c13529af MUST 5: a kept segment is written to the log in the ingest report, so it must also pass the
-    # shared core's STRICT check (a credential or personal value these rules miss becomes a placeholder); a label word
-    # alone ("reset-password") is kept: its value, if any, is another segment and is judged on its own
-    if secret_guard.check(seg) not in (None, "a_label"):
+    # shared core's STRICT check (a credential or personal value these rules miss becomes a placeholder). Review
+    # c0c09bd1 MUST 2: a label finding is kept ONLY when the segment is the label word alone after decoding
+    # ("reset-password"; secret_guard.label_only); a segment that also carries the value ("token-<v>",
+    # "**Password:**%20<v>", "password%20is%20<v>", a markdown-table label) becomes {token}
+    name = secret_guard.check(seg)
+    if name is not None and not (name == "a_label" and secret_guard.label_only(seg)):
         return "{token}"
     return _DIGITS.sub("{id}", seg)[:40]
 
@@ -122,6 +125,8 @@ def template_path(target: str) -> Optional[str]:
     p = lookalikes.strip_invisible(unicodedata.normalize("NFKC", p)).translate(_FOLD)
     segs = p.split("/")[1:]
     out = [_segment(s) for s in segs]
+    # review c0c09bd1 SHOULD: the segment after a label word alone carries its value ("/token/<v>")
+    out = ["{token}" if o == segs[i][:40] and secret_guard.after_label(segs, i) else o for i, o in enumerate(out)]
     # digits split over several short numeric segments (/123/45/6789) count together
     i = 0
     while i < len(segs):

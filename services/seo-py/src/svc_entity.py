@@ -19,6 +19,7 @@ from agents import secret_guard
 from clock import parse_iso
 from errors import Conflict, Invalid
 from reasons import R
+from svc_optext import text_view
 
 ZBM_ENTITY = "ent-zbm"
 FIELDS = ("name", "street_address", "locality", "region", "telephone")
@@ -48,11 +49,38 @@ def validate_field(field: str, data: dict) -> None:
         raise Invalid(R("ENTITY_VALUE_INVALID"))
     if field == "telephone" and len(phone_digits(value)) != 10:
         raise Invalid(R("ENTITY_VALUE_INVALID"))
-    # review c13529af MUST 5: the value and its provenance are written to the log in plaintext, so both must pass the
-    # shared core's STRICT check (a business telephone number is the one waiver: check (e) on the telephone value)
-    waive = frozenset(("e_digits",)) if field == "telephone" else frozenset()
-    if secret_guard.check(value, waive) is not None or secret_guard.check(data["provenance"]) is not None:
+    # review c0c09bd1: the value and its provenance are VAULTED (svc_optext.py), not refused for failing the strict
+    # check; refused only for a strong-key prefix, a PEM / PGP block or URL user info. The source is an identifier
+    # (``SOURCE``): refused when it fails the identifier rules
+    if secret_guard.operator_refusal(value) is not None or secret_guard.operator_refusal(data["provenance"]) is not None:
         raise Invalid(R("ENTITY_VALUE_WITHHELD"))
+    if secret_guard.identifier_refusal(data["source"]) is not None:
+        raise Invalid(R("IDENTIFIER_WITHHELD"))
+
+
+def value_flag(field: str, value: str):
+    """The strict flag kept with an entity value's stub. A business telephone number is the one waiver (check (e) on
+    the telephone field ONLY: a card / SSN typed into any other field is flagged)."""
+    return secret_guard.check(value, globals()["_waiver"](field))
+
+
+def _waiver(field: str) -> frozenset:
+    return frozenset(("e_digits",)) if field == "telephone" else frozenset()
+
+
+def _shown(f: dict, field: str) -> dict:
+    """The owner's view of an entity field (review c0c09bd1): value and provenance through the client-view masker (a
+    business telephone number is shown: it is the field's purpose); a value that cannot be read is None."""
+    out = dict(f)
+    for k in ("value", "provenance"):
+        if k == "value" and field == "telephone" and isinstance(f.get("value"), str) \
+                and len(phone_digits(f["value"])) == 10:
+            continue                                       # the business telephone number is the field's purpose
+        shown, alert = text_view(f.get(k))
+        out[k] = shown
+        if alert:
+            out[f"{k}_masked"] = True
+    return out
 
 
 class EntityMixin:
@@ -72,9 +100,13 @@ class EntityMixin:
         return payload_sha256(fields)
 
     def _a_entity_created(self, d, at):
+        cache: dict = {}
+        tid = d["tenant_id"]
         self.entities[d["entity_id"]] = {
-            "entity_id": d["entity_id"], "tenant_id": d["tenant_id"], "version": 1,
-            "fields": {k: {**f, "observed_at": at, "history": []} for k, f in d["fields"].items()}}
+            "entity_id": d["entity_id"], "tenant_id": tid, "version": 1,
+            "fields": {k: {**f, "value": self._optext_open(tid, f["value"], cache),
+                           "provenance": self._optext_open(tid, f["provenance"], cache),
+                           "observed_at": at, "history": []} for k, f in d["fields"].items()}}
 
     def create_entity(self, tid: str, body: dict) -> dict:
         supplied = body["fields"]
@@ -98,17 +130,36 @@ class EntityMixin:
             # The route tenant is validated and at most40 characters; this is an existing entity-ID shape.
             eid = f"ent-{tid}"
             rk = self.rk("entity_create", tid, body)
-            if self._idem("andre", rk, body):
+            self._optext_key_check()
+            hashed = {f: self._entity_hashed(tid, v) for f, v in fields.items()}
+            hbody = {**body, "fields": [{**v, **self._entity_hashed(tid, v)} for v in supplied]}
+            if self._idem("andre", rk, hbody):
                 return self.entity_view(eid)
             if eid in self.entities or any(e["tenant_id"] == tid for e in self.entities.values()):
                 raise Conflict(R("ENTITY_EXISTS"))
+            order = list(fields)
+            texts = [fields[f][k] for f in order for k in ("value", "provenance")]
+            flags = [value_flag(f, fields[f]["value"]) if k == "value" else secret_guard.check(fields[f][k])
+                     for f in order for k in ("value", "provenance")]
+            stubs = iter(self._optext_seal(tid, "entity", texts, flags))
             data = {"entity_id": eid, "tenant_id": tid,
-                    "fields": {field: dict(value) for field, value in fields.items()}}
-            self._commit("entity_created", self._req(data, "andre", rk, body, eid), "andre",
-                         evidence=("entity_created", f"entity:{eid}",
-                                   {"entity_id": eid, "tenant_id": tid,
-                                    "fields_sha256": self._fields_sha(fields)}, ("andre", rk)))
+                    "fields": {f: {**fields[f], "value": next(stubs), "provenance": next(stubs)} for f in order}}
+            try:
+                self._commit("entity_created", self._req(data, "andre", rk, hbody, eid), "andre",
+                             evidence=("entity_created", f"entity:{eid}",
+                                       {"entity_id": eid, "tenant_id": tid,
+                                        "fields_sha256": self._fields_sha(hashed)}, ("andre", rk)))
+            except BaseException:
+                self._optext_orphaned()
+                raise
+            self._optext_committed()
             return self.entity_view(eid)
+
+    def _entity_hashed(self, tid: str, v: dict) -> dict:
+        """An entity field with its value and provenance as keyed HMACs (review c0c09bd1)."""
+        return {**{k: v[k] for k in ("source", "authority") if k in v},
+                "value": self._optext_hmac(tid, "entity", v["value"]),
+                "provenance": self._optext_hmac(tid, "entity", v["provenance"])}
 
     def update_entity_field(self, entity_id: str, body: dict) -> dict:
         field, value = body["field"], body["value"]
@@ -118,16 +169,27 @@ class EntityMixin:
             e = self._get(self.entities, entity_id, "ENTITY_NOT_FOUND")
             self.check_kill(tenant=e["tenant_id"], capability="entity_write", write=True)
             rk = self.rk("entity", entity_id, body)
-            if self._idem("andre", rk, body):
+            tid = e["tenant_id"]
+            self._optext_key_check()
+            h = self._entity_hashed(tid, body)
+            hbody = {**body, **h}
+            if self._idem("andre", rk, hbody):
                 return self.entity_view(entity_id)
             if body["expected_version"] != e["version"]:
                 raise Conflict(R("ENTITY_VERSION_STALE"))
-            data = {"entity_id": entity_id, "field": field, "value": value, "source": body["source"],
-                    "provenance": body["provenance"], "authority": body["authority"], "version": e["version"] + 1}
-            self._commit("entity_field_set", self._req(data, "andre", rk, body, entity_id), "andre",
-                         evidence=("entity_field_set", f"entity:{entity_id}",
-                                   {"entity_id": entity_id, "field": field, "version": data["version"],
-                                    "value_sha256": self._fields_sha({"v": value})}, ("andre", rk)))
+            sv, sp = self._optext_seal(tid, "entity", [value, body["provenance"]],
+                                       [value_flag(field, value), secret_guard.check(body["provenance"])])
+            data = {"entity_id": entity_id, "field": field, "value": sv, "source": body["source"],
+                    "provenance": sp, "authority": body["authority"], "version": e["version"] + 1}
+            try:
+                self._commit("entity_field_set", self._req(data, "andre", rk, hbody, entity_id), "andre",
+                             evidence=("entity_field_set", f"entity:{entity_id}",
+                                       {"entity_id": entity_id, "field": field, "version": data["version"],
+                                        "value_sha256": self._fields_sha({"v": h["value"]})}, ("andre", rk)))
+            except BaseException:
+                self._optext_orphaned()
+                raise
+            self._optext_committed()
             return self.entity_view(entity_id)
 
     def _a_entity_field_set(self, d, at):
@@ -135,11 +197,16 @@ class EntityMixin:
         old = e["fields"].get(d["field"])
         hist = (old.get("history", []) + [{k: v for k, v in old.items() if k != "history"} | {"replaced_at": at}]
                 if old else [])
-        e["fields"][d["field"]] = {"value": d["value"], "source": d["source"], "provenance": d["provenance"],
+        cache: dict = {}
+        e["fields"][d["field"]] = {"value": self._optext_open(e["tenant_id"], d["value"], cache),
+                                   "source": d["source"],
+                                   "provenance": self._optext_open(e["tenant_id"], d["provenance"], cache),
                                    "authority": d["authority"], "observed_at": at, "history": hist}
         e["version"] = d["version"]
 
-    def entity_view(self, entity_id: str, tenant: str | None = None) -> dict:
+    def entity_view(self, entity_id: str, tenant: str | None = None, raw: bool = False) -> dict:
+        """The owner's view (review c0c09bd1: values and provenance through the client-view masker); ``raw`` (the
+        service's own comparisons only, never a response) keeps the decrypted values."""
         with self.lock:
             e = self._get(self.entities, entity_id, "ENTITY_NOT_FOUND")
             if tenant is not None and e["tenant_id"] != tenant:
@@ -148,14 +215,15 @@ class EntityMixin:
             fields = {}
             for k, f in e["fields"].items():
                 age = now - parse_iso(f["observed_at"])
-                fields[k] = {**f, "history": [dict(h) for h in f["history"]],
+                fields[k] = {**(dict(f) if raw else _shown(f, k)),
+                             "history": [dict(h) if raw else _shown(h, k) for h in f["history"]],
                              "freshness": "fresh" if age <= timedelta(days=FRESH_DAYS) else "stale"}
             return {"entity_id": e["entity_id"], "tenant_id": e["tenant_id"], "version": e["version"],
                     "fields": fields, "fresh_days": FRESH_DAYS}
 
-    def entity_for_tenant(self, tenant: str):
+    def entity_for_tenant(self, tenant: str, raw: bool = False):
         with self.lock:
             for e in self.entities.values():
                 if e["tenant_id"] == tenant:
-                    return self.entity_view(e["entity_id"])
+                    return self.entity_view(e["entity_id"], raw=raw)
         return None

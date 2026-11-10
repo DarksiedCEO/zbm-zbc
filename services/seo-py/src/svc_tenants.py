@@ -22,11 +22,12 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from agents import domain_match
+from agents import domain_match, secret_guard
 from config import CAPABILITY_SWITCHES, PROVIDER_SWITCHES, TENANT_ID
 from errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from primitives import Killed
 from reasons import R
+from svc_optext import url_view
 
 TENANT_KINDS = ("own", "client")
 DOMAIN = re.compile(r"(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}")
@@ -40,6 +41,12 @@ def valid_domain(d) -> bool:
     return isinstance(d, str) and bool(DOMAIN.fullmatch(d)) and not d.endswith((".local", ".internal", ".localhost",
                                                                                 ".arpa", ".invalid")) \
         and not domain_match.is_public_suffix(d)
+
+
+def identifier_refused(x) -> bool:
+    """Review c0c09bd1: an identifier (tenant id, domain, Finance client id) holding a key, a 9+ digit run, an e-mail
+    form, or failing the strict check (secret_guard.identifier_refusal)."""
+    return secret_guard.identifier_refusal(x) is not None
 
 
 def _site(d: str) -> str:
@@ -178,6 +185,8 @@ class TenantsMixin:
         tid, kind = body["tenant_id"], body["kind"]
         if kind not in TENANT_KINDS:
             raise Invalid(R("TENANT_KIND_INVALID"))
+        if identifier_refused(tid):                       # review c0c09bd1: an identifier, not prose
+            raise Invalid(R("IDENTIFIER_WITHHELD"))
         with self.lock:
             self._gate()
             self.check_kill(write=True)
@@ -202,6 +211,8 @@ class TenantsMixin:
             raise Invalid(R("DOMAIN_LIMIT"))
         if not all(valid_domain(d) for d in domains) or len(set(domains)) != len(domains):
             raise Invalid(R("DOMAIN_INVALID"))
+        if any(identifier_refused(d) for d in domains):   # review c0c09bd1: a registrable host name, not prose
+            raise Invalid(R("IDENTIFIER_WITHHELD"))
         with self.lock:
             self._gate()
             self.check_kill(tenant=tid, write=True)
@@ -227,6 +238,8 @@ class TenantsMixin:
         """Andre binds a client tenant to its Finance (31) client id (Legal's party reference at Finance), so a paid
         run can check that the invoice is this client's (ADR 0017 W3-2). Re-binding is allowed and recorded; the
         id is never read from a page, an invoice or a caller other than Andre."""
+        if identifier_refused(body["finance_client_id"]):  # review c0c09bd1: an identifier, not prose
+            raise Invalid(R("IDENTIFIER_WITHHELD"))
         with self.lock:
             self._gate()
             self.check_kill(tenant=tid, write=True)
@@ -247,8 +260,15 @@ class TenantsMixin:
     def tenant_view(self, tid: str) -> dict:
         with self.lock:
             t = self._get(self.tenants, tid, "TENANT_NOT_FOUND")
-            return {**t, "domains": list(t["domains"]),
-                    "audits": sum(1 for a in self.audits.values() if a["tenant_id"] == tid)}
+            out = {**t, "domains": list(t["domains"]),
+                   "audits": sum(1 for a in self.audits.values() if a["tenant_id"] == tid)}
+            prop = t.get("gsc_property")
+            if isinstance(prop, str) and prop.startswith("http"):
+                shown, alert = url_view(prop)             # review c0c09bd1: the owner's view, client-view masked
+                out["gsc_property"] = shown
+                if alert:
+                    out["gsc_property_masked"] = True
+            return out
 
     def tenants_view(self) -> list:
         with self.lock:

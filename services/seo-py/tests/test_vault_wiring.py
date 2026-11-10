@@ -309,13 +309,16 @@ def test_a_data_directory_without_a_key_fails_the_run_closed_and_writes_nothing(
     h = harness(tmp_path, SEO_VAULT_KEY_FILE=None)
     assert h.settings.vault_key is None and not h.svc.vault.key_configured
     port = start(h, v)
-    run = citation_run(h)
-    assert run["status"] == "interrupted" and run["interrupted_reason"] == "RUN_FAILED"
-    assert run["failure"]["code"] == "VAULT_UNAVAILABLE" and run["result"] is None
+    # c0c09bd1: the prompt set's free text is vaulted too, so without a key the prompt set itself is refused (503
+    # VAULT_UNAVAILABLE, nothing written): no citation run can reach an engine
+    r = h.post("/tenants/zbm/prompt-sets", {"request_id": rid(), "name": "core", "brand_terms": ["Z Best Media"],
+                                            "competitor_domains": ["competitor.test"],
+                                            "prompts": ["who recovers marketplace revenue"], "engines": ["openai"]})
+    assert r.status_code == 503 and r.json()["detail"] == "VAULT_UNAVAILABLE"
     assert port.asked == 0                                           # no engine asked, nothing spent
     assert not os.path.exists(os.path.join(h.settings.data_dir, vault.VAULT_NAME))
+    assert not os.path.exists(os.path.join(h.settings.data_dir, vault.OPERATOR_VAULT_NAME))
     assert h.ledger.of_type("citation_run_recorded") == []
-    assert h.ledger.of_type("citation_run_interrupted")[0]["_payload"]["code"] == "VAULT_UNAVAILABLE"
     blob = written(h, caplog)
     assert found(blob, v) == [] and MARK not in blob
 

@@ -182,11 +182,14 @@ _B64_RUN = re.compile(r"[A-Za-z0-9+/_\-]{12,}={0,2}")
 _HEX_RUN = re.compile(r"(?:[0-9a-fA-F]{2}){8,}")
 
 
-DECODE_TRIM = 3                          # bytes trimmed at each end of a decoded run (review 08eea6e1 / c13529af MUST 4)
+DECODE_TRIM = 6                          # bytes trimmed at each end of a decoded run (review 08eea6e1 / c13529af MUST 4;
+#                                          c0c09bd1 MUST 4: up to six bytes, so a glued junk suffix / prefix of 6-8
+#                                          base64 characters is trimmed off; bounded: (TRIM+1)^2 windows per run)
 B64_OFFSETS = 9                          # a base64 run is decoded from offsets 0..B64_OFFSETS-1 (and its boundaries)
 DECODE_EDGE = 128                        # characters of each trimmed / shifted edge kept in a run's edge view
-DECODE_EDGES_MAX = 8                     # edge pieces kept per run
+DECODE_EDGES_MAX = 16                    # edge pieces kept per run (c0c09bd1: room for every head and tail trim)
 DECODE_EDGE_TOTAL = 16384                # edge characters kept per decoded view (bounded; past it, main readings only)
+DECODE_EDGE_MIN = 6                      # an edge piece shorter than this is not read (no finding fits in it)
 # between two edge pieces: a 12-letter word (no digit run, filler-word bridge, number word or label crosses it)
 _EDGE_JOIN = " qzqzqzqzqzqz "
 
@@ -343,7 +346,9 @@ def _decoded_runs(t: str) -> list:
         kept: list = []
         for e in edges:
             c = _clean(e)
-            if c and c not in kept and len(kept) < DECODE_EDGES_MAX and budget[0] >= len(c):
+            if len(c) < DECODE_EDGE_MIN:
+                continue                                   # c0c09bd1: a few junk characters carry no value
+            if c not in kept and len(kept) < DECODE_EDGES_MAX and budget[0] >= len(c):
                 budget[0] -= len(c)
                 kept.append(c)
         if kept:
@@ -504,6 +509,10 @@ _JOINED = (
     "recoveryphrase", "mnemonic", "credential", "connectionstring", "accountkey", "refreshtoken", "bearertoken",
     "sharedaccesssignature", "contrasena", "motdepasse", "passwort", "kennwort", "senha", "wachtwoord", "losenord",
     "adgangskode", "salasana", "haslo", "katasandi", "matkhau", "parolasi", "heslo", "jelszo", "lozinka",
+    # review c0c09bd1 MUST 9: multi-word labels written with an apostrophe / hyphen (Italian "parola d'ordine",
+    # Portuguese "palavra-passe", Catalan "contrasenya", French "phrase de passe"): read on the letters-only view, so
+    # the letter-spaced, XML-tag and JSON-key forms read as the label too
+    "paroladordine", "palavrapasse", "contrasenya", "phrasedepasse",
 )
 _PIECES = frozenset((
     "pass", "pwd", "pw", "pin", "secret", "secrets", "token", "tokens", "auth", "authorization", "authorisation",
@@ -682,6 +691,53 @@ def _label_hit(v: str) -> bool:
         return True
     raw_letters = letters if v.isascii() else _alpha(v.lower())
     return any(s.replace(" ", "") in raw_letters or s.replace(" ", "") in letters for s in _SCRIPT)
+
+
+# Review c0c09bd1 MUST 2 / SHOULD: a URL path segment that is a credential LABEL WORD ALONE ("password", "api-key",
+# "reset-password", "mot-de-passe"): after decoding, its letter pieces are only label words and the closed list of
+# action words below, with no digit. Such a segment carries no value itself (it may be kept); the segment AFTER it
+# carries the label's value ("/token/<v>", "/account/password/<v>") and is withheld unless it is an action word.
+LABEL_ACTION_WORDS = frozenset((
+    "reset", "forgot", "forgotten", "change", "changed", "update", "new", "lost", "recover", "recovery", "my", "your",
+    "create", "manage", "setup", "set", "generate", "rotate", "revoke", "view", "show", "edit", "confirm", "verify",
+    "settings", "help", "request", "send", "sent", "success", "done", "expired", "invalid", "required", "policy",
+    "strength", "rules", "requirements", "index", "html", "htm", "php", "aspx", "the", "a", "an", "of", "and", "or",
+))
+_LABEL_WORDS = frozenset(_JOINED) | _PIECES | frozenset(("apikey", "apikeys", "accesstokens", "authtokens"))
+_LABEL_PIECE = re.compile(r"[a-z]+")
+
+
+def label_only(seg, min_label: int = 1) -> bool:
+    """``seg`` (a path segment, percent-decoded up to ``PERCENT_ROUNDS`` times) is a credential label word alone (its
+    label part at least ``min_label`` letters)."""
+    if not isinstance(seg, str) or not seg or len(seg) > 200:
+        return False
+    t = seg
+    for _ in range(PERCENT_ROUNDS):
+        u = unquote(t)
+        if u == t:
+            break
+        t = u
+    t = _fold_piece_slow(t).lower() if not t.isascii() else t.lower()
+    if _ANY_DIGIT.search(t):
+        return False
+    pieces = _LABEL_PIECE.findall(t)
+    if not pieces or len(pieces) > 6 or "".join(pieces) != "".join(c for c in t if c.isalpha()):
+        return False
+    rest = "".join(p for p in pieces if p not in LABEL_ACTION_WORDS)
+    return len(rest) >= max(1, min_label) and rest in globals()["_LABEL_WORDS"]
+
+
+AFTER_LABEL_MIN = 5                      # a short label ("pin", "sid", "auth", "pass") is too often a route word
+
+
+def after_label(segs: list, i: int) -> bool:
+    """Segment ``i`` of a path follows a label-word-alone segment and is not itself an action word or a label word
+    alone: it carries the label's value and is withheld (the strict lane) / masked (the client view)."""
+    if i < 1 or not segs[i] or not label_only(segs[i - 1], AFTER_LABEL_MIN):
+        return False
+    low = unquote(segs[i]).lower()
+    return low not in LABEL_ACTION_WORDS and not label_only(segs[i])
 
 
 # ------------------------------------------------------------------------------------------------ 2b. URL userinfo
@@ -1413,15 +1469,19 @@ def _defanged(v: str) -> str:
 # local-at-domain-dot-tld (hyphens or underscores), " _at_ " / " _dot_ ", "at sign" / "at-sign", "period" for dot,
 # Spanish "arroba" / "punto", French "arobase" / "point", a literal "@" (so "name@domain dot com" reads as spelled), and
 # the glued "localATdomainDOTtld" (anchored on a case boundary: a lower-case letter or digit on both sides)
-_AT_WORDS = r"(?:at[- ]?sign|at|arroba|arobase)"
+# Review c0c09bd1 MUST 3: "at symbol" / "at-symbol" (as "at sign"), a doubled "at at", and the common e-mail emoji
+# (U+1F4E7 e-mail, U+2709 envelope, U+1F4E9 envelope with arrow) read as "@" (both lanes: the shared e-mail views)
+EMAIL_EMOJI = "\U0001F4E7\u2709\U0001F4E9"
+_AT_WORDS = r"(?:at[- ]?(?:sign|symbol)|at|arroba|arobase)"
 _DOT_WORDS = r"(?:dot|period|punto|point)"
-_VAR_AT = re.compile(r"(?i)(?<=[a-z0-9])[-_]%s[-_](?=[a-z0-9])|(?<![^ ])_%s_(?![^ ])|(?<![a-z])(?:at[- ]sign|arroba"
-                     r"|arobase)(?![a-z])| ?@ ?" % (_AT_WORDS, _AT_WORDS))
+_VAR_AT = re.compile(r"(?i)(?<=[a-z0-9])[-_]%s[-_](?=[a-z0-9])|(?<![^ ])_%s_(?![^ ])|(?<![a-z])(?:at[- ](?:sign|symbol)"
+                     r"|at at|arroba|arobase)(?![a-z])| ?[@%s] ?" % (_AT_WORDS, _AT_WORDS, EMAIL_EMOJI))
 _VAR_DOT = re.compile(r"(?i)(?<=[a-z0-9])[-_]%s[-_](?=[a-z0-9])|(?<![^ ])_%s_(?![^ ])|(?<![a-z])(?:period|punto"
                       r"|point)(?![a-z])" % (_DOT_WORDS, _DOT_WORDS))
 _GLUED_AT = re.compile(r"(?<=[a-z0-9])AT(?=[a-z0-9])")
 _GLUED_DOT = re.compile(r"(?<=[a-z0-9])DOT(?=[a-z0-9])")
-_VARIANT_HINTS = ("_at", "-at", "at_", "at-", "sign", "arroba", "arobase", "period", "punto", "point", "_dot", "-dot")
+_VARIANT_HINTS = ("_at", "-at", "at_", "at-", "sign", "arroba", "arobase", "period", "punto", "point", "_dot", "-dot",
+                  "symbol", "at at") + tuple(EMAIL_EMOJI)
 
 
 # review c13529af MUST 1: a variant WRAPPED at a natural point (a line break, read as a space, before / after a hyphen
@@ -1429,7 +1489,29 @@ _VARIANT_HINTS = ("_at", "-at", "at_", "at-", "sign", "arroba", "arobase", "peri
 # variant view, spaces next to "-" / "_" are removed first; a Spanish / French spelled word split by a line break
 # (``arro\nba``, ``pun\nto``) is re-joined when its halves form the word
 _WRAP_SEP = re.compile(r" ?([-_]) ?")
+# review c0c09bd1 MUST 6: the spaces around a "-" / "_" are removed ONLY next to an at / dot variant word (the word
+# right before or right after the separator is one of these), so prose neighbours of an ordinary " - " are never glued
+# onto an address
+_WRAP_WORDS = frozenset(("at", "dot", "period", "punto", "point", "arroba", "arobase", "sign", "symbol"))
+_WRAP_BEFORE = re.compile(r"[A-Za-z]{1,8}$")
+_WRAP_AFTER = re.compile(r"[A-Za-z]{1,8}(?![A-Za-z])")
 _SPLIT_WORDS = ("arroba", "arobase", "punto", "point", "period")
+
+
+def _wrap_join(v: str) -> str:
+    """``v`` with " - " / " _ " joined (spaces removed) only where the word touching the separator is an at / dot
+    variant word (``_WRAP_WORDS``). Linear: each separator reads at most eight letters on each side."""
+    def repl(m: re.Match) -> str:
+        a, b = m.span()
+        before = _WRAP_BEFORE.search(v, max(0, a - 8), a)
+        after = _WRAP_AFTER.match(v, b)
+        words = globals()["_WRAP_WORDS"]
+        if (before is not None and before.group(0).lower() in words and (before.start() == 0 or not
+                                                                          v[before.start() - 1].isalpha())) \
+                or (after is not None and after.group(0).lower() in words):
+            return m.group(1)
+        return m.group(0)
+    return _WRAP_SEP.sub(repl, v)
 
 
 _SPLIT_VARIANT = _split_rx(_SPLIT_WORDS)
@@ -1441,7 +1523,7 @@ def _spelled_variants(v: str) -> str:
     if " " in v:
         if "-" in v or "_" in v:
             v0 = v
-            v = _WRAP_SEP.sub(r"\1", v)
+            v = _wrap_join(v)
         else:
             v0 = v
         v = _rejoin(_SPLIT_VARIANT, v)
@@ -1601,6 +1683,87 @@ def check(text, waive=frozenset()) -> str | None:
         return _check(text, frozenset(waive) & WAIVABLE)
     except Exception:  # noqa: BLE001 - fail closed: an input the checks cannot read is withheld
         return "error"
+
+
+# Review c0c09bd1 (design change, Option B for operator text): operator free text (prompt-set prompts and context /
+# negative terms, entity values / provenance, audit / schedule paths and queries, URL-prefix Search Console properties)
+# is NOT refused for failing the strict check: it is stored in the tenant's vault and the log keeps only its vault id,
+# a keyed HMAC and the strict check's flag. It is refused ONLY for what is never legitimate in it: a strong-key prefix,
+# a PEM / PGP block, URL user info with a password (both lanes' rules on every view), and, in a URL that is fetched or
+# queried, a value under a credential query key (``OPERATOR_QUERY_KEYS``, exact names).
+OPERATOR_QUERY_KEYS = frozenset(("token", "key", "api_key", "apikey", "api-key", "secret", "sig", "signature",
+                                 "password", "pwd", "passwd", "auth", "access_token", "client_secret", "id_token",
+                                 "refresh_token", "sid", "sessionid", "session_id", "jsessionid", "phpsessid"))
+
+
+def operator_refusal(text) -> str | None:
+    """``c_prefix`` (a strong-key prefix or a PEM / PGP block), ``b_userinfo`` (``scheme://user:password@``), ``cap`` /
+    ``type`` / ``error`` (fail closed), or None. Never raises."""
+    if text is None:
+        return None
+    if not isinstance(text, str):
+        return "type"
+    if not text:
+        return None
+    if len(text) > MAX_INPUT:
+        return "cap"
+    try:
+        for v, _folded in _tagged_views(text):
+            if not v:
+                continue
+            if globals()["_userinfo_hit"](v):
+                return "b_userinfo"
+            if globals()["_prefix_hit"](v):
+                return "c_prefix"
+        cv = client_view_findings(text)
+        if "strong_key" in cv:
+            return "c_prefix"
+        if "userinfo" in cv:
+            return "b_userinfo"
+        if {"cap", "error", "type"} & set(cv):
+            return "error"
+        return None
+    except Exception:  # noqa: BLE001 - fail closed
+        return "error"
+
+
+def operator_url_refusal(url) -> str | None:
+    """``operator_refusal`` on the URL (and its decoded query values), plus ``url_credential`` for a non-empty value
+    under a credential query key (exact name, case-insensitive). Never raises."""
+    r = operator_refusal(url)
+    if r is not None:
+        return r
+    try:
+        q = urlsplit(url).query
+        for k, v in parse_qsl(q or "", keep_blank_values=True):
+            if v and k.strip().lower() in OPERATOR_QUERY_KEYS:
+                return "url_credential"
+            r = operator_refusal(k) or operator_refusal(v)
+            if r is not None:
+                return r
+        return None
+    except Exception:  # noqa: BLE001 - fail closed
+        return "error"
+
+
+# Review c0c09bd1: an IDENTIFIER (tenant id, tenant domain, Finance client id, prompt-set name, competitor domain, an
+# entity's source) is not prose: besides its own format it is refused when it holds a strong-key prefix / PEM / user
+# info, a run of 9+ digits, an e-mail form, or fails the strict check at all.
+_ID_DIGITS = re.compile(r"[0-9]{9,}")
+
+
+def identifier_refusal(text) -> str | None:
+    """The reason an identifier is refused (a check name), or None. Never raises."""
+    if not isinstance(text, str) or not text:
+        return "type"
+    r = globals()["operator_refusal"](text)
+    if r is not None:
+        return r
+    if _ID_DIGITS.search(text):
+        return "e_digits"
+    if "@" in text or _email_hit(text):
+        return "f_email"
+    return check(text)
 
 
 def is_clearly_safe(text) -> bool:
@@ -1863,15 +2026,21 @@ def _inspect(url, urls: bool, fetch: bool = False) -> dict | None:
         if seg and any(_host_in(ch, (h,)) and seg in w for h, w in STRUCTURAL_SEGMENTS.items()):
             verdicts.append((seg, None))
             continue
-        k = _kind(chk(seg, POSITION_WAIVE if waived[i] else frozenset()))
+        name = chk(seg, POSITION_WAIVE if waived[i] else frozenset())
+        if name == "a_label" and not fetch and globals()["label_only"](seg):
+            name = None                                    # review c0c09bd1: a label word alone carries no value
+        k = _kind(name)
         if k is None and waived[i] and chk(seg) is not None:
             dependent = True
         if redirect and not fetch and i >= 2 and seg:
             k = k or PERSONAL                              # a grounding redirect id is never kept
+        if k is None and not fetch and globals()["after_label"](segs, i):
+            k = CREDENTIAL                                 # review c0c09bd1 SHOULD: the value after its label segment
         verdicts.append((seg, k))
     # a key or a number split across segments: the segments that passed alone (outside a disclosed position) read
     # together as one text; if that fails, every one of them holding a digit or an upper-case letter is withheld
-    kept = [unquote(s) for i, (s, k) in enumerate(verdicts) if s and k is None and not waived[i]]
+    lone = [bool(s) and not fetch and globals()["label_only"](s) for s in segs]   # c0c09bd1: read apart
+    kept = [unquote(s) for i, (s, k) in enumerate(verdicts) if s and k is None and not waived[i] and not lone[i]]
     if kept:
         cross = chk("/".join(kept)) or ("d_token" if _token_hit(_masked(_clean(" ".join(kept)))) else None)
         if cross is not None:
@@ -1881,7 +2050,7 @@ def _inspect(url, urls: bool, fetch: bool = False) -> dict | None:
     # checks (a)-(c) on the WHOLE path glued (a URI or prefix key spread over segments; a segment already withheld
     # for a credential is left out, one withheld for personal data is kept in): if that fails, every segment is
     # withheld, a disclosed position too
-    glued = "".join(s if k != CREDENTIAL else " " for s, k in verdicts if s)
+    glued = "".join(s if k != CREDENTIAL and not lone[i] else " " for i, (s, k) in enumerate(verdicts) if s)
     if glued.strip() and _abc(unquote(glued)):
         verdicts = [(s, CREDENTIAL if s else k) for s, k in verdicts]   # exempt positions included (rule (c))
     query = []
@@ -2170,7 +2339,8 @@ CV_URL_PARTS_MAX = 256                   # query pairs read per URL; more: the w
 
 
 def _cv_letters(w: str) -> str:
-    return "[ _.\\-]{0,2}".join(f"[{c}{c.upper()}]" for c in w)
+    # review c0c09bd1 MUST 9: an apostrophe (straight or curly) may sit between a label's letters ("parola d'ordine")
+    return "[ _.\\-'\u2019]{0,2}".join(f"[{c}{c.upper()}]" for c in w)
 
 
 def _cv_label_rx() -> re.Pattern:
@@ -2493,32 +2663,68 @@ def _cv_unprose_at(v: str) -> str:
 # ``CV_PRONOUNS_BEFORE_RETAILER``, ``_cv_unprose_at``) are now INERT: kept (tests still read them) but no rule calls
 # them. The strict lane is unchanged (it withholds every one of these forms).
 _CV_TOKEN_SEP = re.compile(r"(?<![A-Za-z0-9._%+\-])([A-Za-z0-9._%+\-]++)(?:([ \t\n]{1,3})([Aa][Tt])(?=[ \t\n])|( ?)@)")
-_CV_PRICE = re.compile(r"[0-9.]*[0-9][0-9.]*")
+# Review c0c09bd1 MUST 5: the S1 price exemption is scoped. Only the PLAIN spelled " at " (never "@", "[at]", "(at)",
+# "at sign", nor a domain written with a spelled / defanged dot) after a REAL price is exempt: a currency sign before
+# it and / or a decimal part of exactly two digits, thousands commas allowed ("$12.99 at x.com", "$1,299 at x.com",
+# "12.99 at x.com"); a bare count ("2 at x.com"), a digit-only local part before "@" and every other form are masked.
+_CV_PRICE = re.compile(r"(?:[$\u00a2\u00a3\u00a5\u20ac] ?)?[0-9]{1,3}(?:,[0-9]{3})++(?:\.[0-9]{2})?|"
+                       r"(?:[$\u00a2\u00a3\u00a5\u20ac] ?)?[0-9]++(?:\.[0-9]{2})?")
+_CV_CURRENCY = frozenset("$\u00a2\u00a3\u00a5\u20ac")
+CV_PRICE_READ = 24
 _CV_WORD = re.compile(r"[A-Za-z]+")
+# review c0c09bd1 SHOULD (owner view utility): a code / model number before the plain " at " ("use code SAVE10 at
+# brand.com", "the X200 at amazon.com"): 2-12 characters of upper-case letters and digits, at least one of each, no
+# lower case. A lower-case handle with digits ("jsmith42") stays masked.
+_CV_CODE = re.compile(r"(?=[A-Z0-9]*[A-Z])(?=[A-Z0-9]*[0-9])[A-Z0-9]{2,12}")
 _CV_PLAIN_HOST = re.compile(r"[ \t\n]{1,3}[A-Za-z0-9\-]{1,63}+(?:\.[A-Za-z0-9\-]{1,63}+)++(?![A-Za-z0-9\-])")
 _CV_HOST_GOES_ON = re.compile(r"(?i) ?[\[\(\{<] ?(?:d ?o ?t|\.|period|punto|point) ?[\]\)\}>]"
                               r"| ?(?:dot|period|punto|point)(?![a-z]) ?[a-z0-9]")
 
 
+def _cv_real_price(v: str, s0: int, e0: int) -> bool:
+    """The digits ``v[s0:e0]`` (a local-part token) end a real price: read back at most ``CV_PRICE_READ`` characters,
+    the price must end exactly at ``e0``, start at a non-price character, and carry a currency sign or a two-digit
+    decimal part."""
+    a = max(0, s0 - CV_PRICE_READ)
+    best = None
+    for m in _CV_PRICE.finditer(v, a, e0):
+        if m.end() == e0 and (m.start() == 0 or not (v[m.start() - 1].isalnum() or v[m.start() - 1] in ".,")):
+            best = m
+            break
+    if best is None:
+        return False
+    t = best.group(0)
+    return t[0] in _CV_CURRENCY or (len(t) > 3 and t[-3] == "." and t[-2:].isdigit())
+
+
 def _cv_plain_at(v: str) -> str:
-    """``v`` with every "at" / "@" the client view does not read as an e-mail blanked to NULs (decision 22): " at "
-    after one letters-only word (not letter-spaced) before a plainly dotted domain, and " at " / "@" after a price.
-    Linear: a token starts only at the start of its run and is read possessively; each host read is bounded."""
-    if "t" not in v and "T" not in v and "@" not in v:
+    """``v`` with every "at" the client view does not read as an e-mail blanked to NULs (decision 22, PROSE only: never
+    inside a URL, review c0c09bd1): " at " after one letters-only word (not letter-spaced) or a code / model number
+    before a plainly dotted domain, and the plain " at " after a real price (``_cv_real_price``). Linear: a token starts
+    only at the start of its run and is read possessively; each host / price read is bounded."""
+    if getattr(_CV_MEMO, "url", False):
+        return v                                           # a URL part is never prose (review c0c09bd1 SHOULD)
+    if "t" not in v and "T" not in v:
         return v
 
     def repl(m: re.Match) -> str:
         tok = m.group(1)
-        if _CV_PRICE.fullmatch(tok):
-            return tok + (m.group(2) + "\x00\x00" if m.group(3) else m.group(4) + "\x00")       # S1: a price
-        if not m.group(3) or not _CV_WORD.fullmatch(tok):
-            return m.group(0)
+        if not m.group(3):
+            return m.group(0)                              # "@": never exempt
         s0 = m.start(1)
-        if len(tok) == 1 and s0 >= 2 and v[s0 - 1] == " " and v[s0 - 2] != " " and (s0 < 3 or v[s0 - 3] == " "):
-            return m.group(0)                              # a letter-spaced local part ("j o h n at ...")
         h = _CV_PLAIN_HOST.match(v, m.end(), m.end() + CV_HOST_READ)
         if h is None or _CV_HOST_GOES_ON.match(v, h.end()):
+            return m.group(0)                              # not a plainly dotted domain after it
+        if tok.replace(".", "").replace(",", "").isdigit():
+            if globals()["_cv_real_price"](v, s0, m.end(1)):
+                return tok + m.group(2) + "\x00\x00"       # S1 (scoped): a real price
             return m.group(0)
+        if globals()["_CV_CODE"].fullmatch(tok):
+            return tok + m.group(2) + "\x00\x00"           # a code / model number
+        if not _CV_WORD.fullmatch(tok):
+            return m.group(0)
+        if len(tok) == 1 and s0 >= 2 and v[s0 - 1] == " " and v[s0 - 2] != " " and (s0 < 3 or v[s0 - 3] == " "):
+            return m.group(0)                              # a letter-spaced local part ("j o h n at ...")
         return tok + m.group(2) + "\x00\x00"
     return _CV_TOKEN_SEP.sub(repl, v)
 
@@ -2538,7 +2744,7 @@ def _cv_email(v: str) -> bool:
             if n > EMAIL_AT_MAX:
                 return True                                # fail closed
             tail = _CV_DOT.sub(".", u[m.end():m.end() + 300])
-            if _CV_DOMAIN.match(tail):
+            if _CV_DOMAIN.match(tail) or globals()["_cv_wrapped_domain"](tail):
                 return True
     d = _defanged(u)                                       # review 08eea6e1 MUST 1: "@" with defanged dots
     if d != u and "@" in d and _cv_at_email(d):
@@ -2557,6 +2763,20 @@ def _cv_email(v: str) -> bool:
         if _spaced_join(w, CV_JOIN_STOP) and _spaced_spelled_email(w):
             return True                                    # letter-spaced / split words (review 601e328a MUST 3)
     return False
+
+
+def _cv_wrapped_domain(tail: str) -> bool:
+    """Review c0c09bd1 MUST 6 (client view): the domain after a bracketed "[at]" / "(at)" / "{at}" / "[a t]" written with
+    a mid-word line break or NBSP (read as a space): the next words joined with no space one at a time (the strict
+    lane's ``_joins_to_domain``, stopped at a common English word) until they read as a domain with a common top-level
+    domain and a dot. Bounded: ``JOIN_WORDS`` words / 255 characters."""
+    words: list = []
+    for t in tail.lstrip(" ").split(" ")[:JOIN_WORDS]:
+        if t.lower().strip(".,;:!?)]}>\"'") in CV_JOIN_STOP:
+            break
+        words.append(t)
+    n = _joins_to_domain(words)
+    return n > 1 and "." in "".join(words[:n])
 
 
 def _cv_at_email(v: str) -> bool:
@@ -2683,7 +2903,35 @@ def _cv_numbers(v: str) -> set:
     nw = _number_word_view(v)                              # review 08eea6e1 NIT: number words read as digits
     if nw != v:
         out |= _cv_numbers_on(nw)
+        out |= globals()["_cv_number_words"](v)
     return out
+
+
+def _cv_number_words(v: str) -> set:
+    """Review c0c09bd1 MUST 7: a run of number words (the strict lane's ``_NUMBER_WORD_RUN``, split words re-joined)
+    read as ONE number whatever separates its words (the digit view loses the spoken grouping): nine digits that are a
+    valid SSN, ten that are a NANP number (or eleven with a leading 1)."""
+    out: set = set()
+    w = _rejoin(globals()["_SPLIT_NUMBER"], v)
+    for m in _NUMBER_WORD_RUN.finditer(w):
+        d = "".join(NUMBER_WORDS[x.lower()] for x in _NW_EACH.findall(m.group(0)))
+        if len(d) == 9 and _cv_ssn_ok(d):
+            out.add("ssn")
+        n = d[1:] if len(d) == 11 and d[0] == "1" else d
+        if len(n) == 10 and n[0] in "23456789" and n[3] in "23456789":
+            out.add("phone")
+    return out
+
+
+_NW_EACH = re.compile(r"(?i)" + _NW)
+# review c0c09bd1 MUST 8: an unformatted phone number (10-15 digits, at most two of " .-()" between digits) with one
+# of the strict lane's phone words ("call", "tel:", "phone", "mobile", "cell", "whatsapp", "text", "sms"...;
+# ``_PHONE_BEFORE``) within ``PHONE_CONTEXT`` characters before it
+_CV_PHONE_RUN = re.compile(r"(?<![0-9])\+?[0-9](?:[ .\-()]{0,2}[0-9]){9,14}(?![0-9])")
+
+
+def _cv_labelled_phone(m: str) -> bool:
+    return any(_phone_context(m, x.start()) for x in _CV_PHONE_RUN.finditer(m))
 
 
 def _cv_numbers_on(v: str) -> set:
@@ -2693,6 +2941,8 @@ def _cv_numbers_on(v: str) -> set:
     m = _masked(v)
     if any(_cv_ssn_ok(x.group("d")) for x in _CV_SSN_LABEL.finditer(m)):
         out.add("ssn")                                     # "SSN" and nine bare digits (review adacb2ca SHOULD 3)
+    if globals()["_cv_labelled_phone"](m):
+        out.add("phone")                                   # review c0c09bd1 MUST 8: a labelled unformatted phone
     for w in (m, m.replace(" ", "")) if " " in m else (m,):
         # review adacb2ca MUST 2: filler words between digit groups ("then", "followed by", "and", "plus", "next")
         # bridged as the strict lane bridges them (review 601e328a MUST 2: groups of 2-6 digits). The card rule (a
@@ -2890,6 +3140,8 @@ def _cv_url(url: str) -> tuple:
             return None, k                                 # a host carrying a value: the whole URL is masked
     segs = (p.path or "").split("/")
     seg_f = [_cv_seg_findings(s) if s else [] for s in segs]
+    # review c0c09bd1 SHOULD: the segment after a label-word-alone segment carries the label's value
+    seg_f = [f or (["label_value"] if after_label(segs, i) else []) for i, f in enumerate(seg_f)]
     kept = [CLIENT_HIDDEN if f else s for s, f in zip(segs, seg_f)]
     for f in seg_f:
         if f:
@@ -2947,7 +3199,11 @@ def client_view_url(url) -> tuple:
         return None, CREDENTIAL
     if not url:
         return url, None
+    prev = getattr(_CV_MEMO, "url", False)
+    _CV_MEMO.url = True                    # review c0c09bd1 SHOULD: decision 22 (and the price rule) is for PROSE only
     try:
         return _cv_url(url)
     except Exception:  # noqa: BLE001 - fail closed
         return None, CREDENTIAL
+    finally:
+        _CV_MEMO.url = prev

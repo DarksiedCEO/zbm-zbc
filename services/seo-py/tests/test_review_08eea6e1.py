@@ -305,7 +305,8 @@ def test_decoding_stays_bounded_per_run():
     run = "-".join(["AAAA"] * 40)
     assert len(sg._b64_starts(run)) <= sg.B64_OFFSETS + sg.DECODE_BOUNDARIES_MAX
     assert sg._printable(b"\xff\xfe\xfd" + b"x" * 40 + b"\xff\xfe\xfd") == "x" * 40
-    assert sg._printable(b"\xff" * 4 + b"x" * 40) is None              # a fourth garbage byte is not trimmed
+    # c0c09bd1 MUST 4: up to DECODE_TRIM (6) bytes are trimmed; one more garbage byte is not
+    assert sg._printable(b"\xff" * (sg.DECODE_TRIM + 1) + b"x" * 40) is None
     assert sg._printable(b"x" * 20 + b"\xff" + b"x" * 20) is None       # nor a bad byte inside the body
 
 

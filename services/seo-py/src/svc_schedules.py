@@ -32,6 +32,7 @@ from errors import Conflict, Forbidden, NotFound, SeoError
 from ledger import derived_id
 from reasons import R
 from svc_audits import _authorize, _check_paths
+from svc_optext import path_view
 
 
 class SchedulesMixin:
@@ -43,7 +44,8 @@ class SchedulesMixin:
             self.check_kill(tenant=tid, capability="schedules", write=True)
             actor = "andre" if andre else actor
             rk = self.rk("schedule", tid, body)
-            prev = self._idem(actor, rk, body)
+            hbody = self._paths_hbody(tid, body)          # review c0c09bd1: the paths' HMACs, never the paths
+            prev = self._idem(actor, rk, hbody)
             if prev:
                 return self.schedule_view(tid, prev[1])
             _authorize(t, body, andre)
@@ -58,13 +60,14 @@ class SchedulesMixin:
             self._gate()
             t = self._get(self.tenants, tid, "TENANT_NOT_FOUND")
             self.check_kill(tenant=tid, capability="schedules", write=True)
-            prev = self._idem(actor, rk, body)
+            prev = self._idem(actor, rk, hbody)
             if prev:
                 return self.schedule_view(tid, prev[1])
             _authorize(t, body, andre)
             self._recheck_invoice(plan)
+            paths = self._seal_paths(tid, body["scheme"], body["domain"], list(body["paths"]))
             data = {"schedule_id": sid, "tenant_id": tid, "domain": body["domain"], "scheme": body["scheme"],
-                    "paths": list(body["paths"]), "prompt_set_id": body.get("prompt_set_id"),
+                    "paths": paths, "prompt_set_id": body.get("prompt_set_id"),
                     "every_days": body["every_days"], "invoice_id": body.get("invoice_id"),
                     "andre_approved": bool(andre), "start_at": iso(self.now()), "invoice_verification": verification}
             ev = [("schedule_created", f"schedule:{sid}",
@@ -75,14 +78,24 @@ class SchedulesMixin:
                            {"schedule_id": sid, "invoice_id": body.get("invoice_id")}, ("andre", rk)))
             ev += self._invoice_evidence(verification, f"schedule:{sid}", {"schedule_id": sid},
                                          body.get("invoice_id"), actor, rk)
-            self._commit("schedule_created", self._req(data, actor, rk, body, sid), actor, evidence=ev)
+            try:
+                self._commit("schedule_created", self._req(data, actor, rk, hbody, sid), actor, evidence=ev)
+            except BaseException:
+                self._optext_orphaned()
+                raise
+            self._optext_committed()
             return self.schedule_view(tid, sid)
 
     def _a_schedule_created(self, d, at):
+        cache: dict = {}
+        paths = [self._optext_open(d["tenant_id"], x, cache) for x in d["paths"]]
         self.schedules[d["schedule_id"]] = {**{k: v for k, v in d.items() if k not in ("actor", "request_id",
                                                                                         "request_sha", "_obj",
                                                                                         "evidence")},
+                                            "paths": [x for x in paths if x is not None],
                                             "status": "active", "created_at": at, "slots": {}, "drifts": []}
+        if any(x is None for x in paths):
+            self.schedules[d["schedule_id"]]["vault_unavailable"] = True
 
     def set_schedule_status(self, actor: str, tid: str, sid: str, body: dict, andre: bool) -> dict:
         with self.lock:
@@ -116,6 +129,7 @@ class SchedulesMixin:
         with self.lock:
             s = self._schedule(tid, sid)
             out = {k: v for k, v in s.items() if k not in ("slots", "drifts")}
+            out["paths"] = [path_view(s["scheme"], s["domain"], x) for x in s["paths"]]   # review c0c09bd1
             out["slots"] = {k: {**v, "status": self.audits[v["audit_id"]]["status"]} if v.get("audit_id") else dict(v)
                             for k, v in sorted(s["slots"].items(), key=lambda kv: int(kv[0]))}
             out["current_slot"] = self._slot(s)
@@ -164,6 +178,9 @@ class SchedulesMixin:
                     self._commit("schedule_slot_skipped", data, "scheduler",
                                  evidence=("schedule_slot_skipped", f"schedule:{sid}", data, ("skip", sid, slot)))
                     summary["budget_exhausted"] += 1
+                    continue
+                if s.get("vault_unavailable"):
+                    summary["refused"] += 1                # review c0c09bd1: its paths cannot be read: never run
                     continue
                 body = {"domain": s["domain"], "scheme": s["scheme"], "paths": list(s["paths"]),
                         "invoice_id": s["invoice_id"], "prompt_set_id": s["prompt_set_id"]}

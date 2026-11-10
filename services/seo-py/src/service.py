@@ -44,6 +44,7 @@ from svc_gsc import GscMixin
 from svc_invoices import InvoicesMixin
 from svc_logs import LogsMixin
 from svc_manager import ManagerMixin
+from svc_optext import OperatorTextMixin
 from svc_reports import ReportsMixin
 from svc_schedules import SchedulesMixin
 from svc_tenants import TenantsMixin, OWN_TENANT
@@ -74,7 +75,7 @@ def request_sha(body: dict) -> str:
 
 
 class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixin, SchedulesMixin, ManagerMixin,
-                 GscMixin, EnginesMixin, ReportsMixin, CitationsMixin):
+                 GscMixin, EnginesMixin, ReportsMixin, CitationsMixin, OperatorTextMixin):
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, ports=None,
                  clock: Optional[Clock] = None, lock_token: Optional[str] = None, *,
                  observe_existing_on_start: bool = False):
@@ -129,6 +130,8 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
                                   "stale, another instance's, or already adopted); refusing to start")
         try:
             self.vault = self._open_vault(settings, repair=not observe_existing_on_start)
+            # review c0c09bd1: operator free text (svc_optext.py) in its own vault file, same key and scheme
+            self.optext_vault = self._open_vault(settings, repair=not observe_existing_on_start, operator=True)
             import client_report
             if not isinstance(getattr(settings, "report_branding", None), client_report.Branding):
                 # AEGIS L-8: refuse to start rather than answer the client-report route with a 500
@@ -166,7 +169,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
             clear()
 
     @staticmethod
-    def _open_vault(settings, repair: bool = True):
+    def _open_vault(settings, repair: bool = True, operator: bool = False):
         """ADR 0051 (job 2): the client citation vault. With a data directory: ``citation_vault.jsonl`` there, under
         the configured key (no key: every citation run fails closed, VAULT_UNAVAILABLE). Without one (in-memory,
         non-production): the in-memory backend, same encryption, under the configured key or a random key held in
@@ -174,7 +177,8 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
         import vault
         key = getattr(settings, "vault_key", None)
         if settings.data_dir:
-            return vault.CitationVault(settings.data_dir, key, repair=repair)
+            name = vault.OPERATOR_VAULT_NAME if operator else vault.VAULT_NAME
+            return vault.CitationVault(settings.data_dir, key, repair=repair, name=name)
         return vault.MemoryCitationVault(key if key is not None else vault.ephemeral_vault_key())
 
     def close(self) -> None:

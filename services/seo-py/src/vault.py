@@ -44,6 +44,7 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from config import TENANT_ID
 
 VAULT_NAME = "citation_vault.jsonl"
+OPERATOR_VAULT_NAME = "operator_text_vault.jsonl"   # review c0c09bd1: operator free text (svc_optext.py), same scheme
 MAX_RECORD_BYTES = 256 * 1024          # the encoded JSON of one record; above it the record is refused unread
 _MAX_LINE_BYTES = 4 * (MAX_RECORD_BYTES + 16) // 3 + 1024   # base64 of the largest ciphertext plus the other fields
 # review 08eea6e1 SHOULD 1 / 2: a torn final line is cut only when it is a fragment of ONE record; the cut bytes go to
@@ -394,7 +395,7 @@ class CitationVault:
     """Per-tenant encrypted, append-only store under the service's data directory. Thread-safe (one re-entrant lock,
     as ``service.Service`` and ``store.RecordLog``); one process per data directory (the data-directory flock)."""
 
-    def __init__(self, data_dir: str, key: Optional[VaultKey], repair: bool = True):
+    def __init__(self, data_dir: str, key: Optional[VaultKey], repair: bool = True, name: str = VAULT_NAME):
         if not isinstance(data_dir, str) or not os.path.isabs(data_dir):
             raise ValueError("the citation vault needs an absolute data directory")
         if key is not None and type(key) is not VaultKey:
@@ -402,7 +403,9 @@ class CitationVault:
         self._key = key
         self.lock = threading.RLock()
         self.data_dir = data_dir
-        self.path = os.path.join(data_dir, VAULT_NAME)
+        if name not in (VAULT_NAME, OPERATOR_VAULT_NAME):
+            raise ValueError("unknown vault file")
+        self.path = os.path.join(data_dir, name)
         self._index: dict[str, tuple[int, int]] = {}    # vault id -> (offset, length) of its line
         self._size = 0
         self.bad_lines = 0                               # lines that do not parse (never served; counted)
