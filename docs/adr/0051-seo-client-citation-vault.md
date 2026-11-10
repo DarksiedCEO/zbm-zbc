@@ -35,9 +35,10 @@ service, adds a dependency and a network hop the department does not otherwise n
    under the tag sub-key), key id, nonce, ciphertext; every value base64url without padding. No plaintext field: not
    the tenant id, not the URL, not the title. Each append follows `store.RecordLog`: the file must be exactly the
    size this process wrote (else refused), `pwrite` then `fsync`, the directory fsynced when the file is created, a
-   failed or short write cut back to the old size (or every later write refuses). A torn tail, a symlink, a file not
-   owned by the service user or open to group/others refuses to open. Malformed or duplicate lines are counted
-   (`bad_lines`) and never served.
+   failed or short write cut back to the old size (or every later write refuses). A symlink, a file not owned by the
+   service user or open to group/others refuses to open; a torn final line is cut at open (decision 20), a torn final
+   line together with any other bad line refuses. Malformed or duplicate lines are counted (`bad_lines`) and never
+   served.
 5. **Reads.** `get(tenant_id, vault_id)` returns the record only for the tenant that stored it. The tenant tag is
    compared (constant time) before any decryption, so a wrong tenant never reaches the key; the associated data
    binds tenant, id and key id a second time. A wrong tenant, an unknown or malformed id, a tampered line, an
@@ -106,10 +107,12 @@ service, adds a dependency and a network hop the department does not otherwise n
       Diners, JCB, UnionPay ranges: 14-19). Stricter than "any Luhn number" on purpose: 13-19 digit social / order
       ids starting 1, 7, 8, 9 are never cards;
     - `ssn`: 3-2-4 groups (separators `-` `.` space) with a valid area (not 000, 666, 900-999), group and serial;
-    - `phone`: E.164 (`+` then 8-15 digits) or NANP `(xxx) xxx-xxxx`, `xxx-xxx-xxxx`, `xxx.xxx.xxxx` (and `(xxx)` then
-      seven digits however grouped);
+    - `phone`: E.164 (`+` then 8-15 digits) or NANP `(xxx) xxx-xxxx`, `xxx-xxx-xxxx`, `xxx.xxx.xxxx` (one or two
+      separators; and `(xxx)` then seven digits however grouped), also across listed filler words (decision 19);
     - `email`: an address (the strict lane's plain and space-split forms), `name [at] domain [dot] tld` (a dot part
-      required) or `name at domain dot tld`;
+      required), `name at domain dot tld` / `name at domain.tld` and their letter-spaced / split-word forms; the
+      spelled " at " forms are not an e-mail only before a listed retailer domain AND after an ordinary prose word
+      (decision 18);
     - fail closed: over `MAX_INPUT`, a non-string, more than `CV_GROUPS_MAX` digit groups, an internal error.
 
     An excerpt is judged on its span AND the strict lane's margins (a value cut by the span edge is found whole); the
@@ -143,6 +146,45 @@ service, adds a dependency and a network hop the department does not otherwise n
     `callum.split_evidence` without a hasher refuses a run with evidence: no plain per-field SHA-256 is written any
     more. Content-integrity hashes that are existing contracts stay plain SHA-256 (`result_sha256`, `prompt_set_sha256`,
     `domain_sha256`, the log chain).
+
+## Review 601e328a: views, retailer key, linear excerpt path, vault hardening
+
+16. **Storage write and lock scope (review adacb2ca SHOULD 1, recorded here).** The split (encryption into a pending
+    `VaultBatch`, keyed hashes) and the `guard_record` sweep run OUTSIDE the service lock; under it only, in this
+    order: the integrity gate, the kill re-check (`ai_probe` for the tenant, then `audit`; a kill here discards the
+    batch and nothing is written), ONE `write_batch` (one append, one fsync; a duplicate id inside the batch or one
+    already in the index refuses the whole batch, nothing written), then the commit. The owner's view takes a snapshot
+    under the lock and decrypts / masks outside it; an idempotent replay of the POST returns that view after leaving
+    the lock (review 601e328a SHOULD 1).
+17. **Orphaned records (SHOULD 2).** When the commit fails after `write_batch`, the run is closed `RUN_FAILED` and its
+    records stay in the vault, encrypted under the tenant's key and referenced by nothing (never served: no recorded
+    row holds their refs). They are counted (`CitationVault.orphans`, `health().citation_vault.orphaned_records`,
+    counts only, this process). A purge job is NOT built now; it would drop index entries no recorded run refers to.
+18. **Retailer-keyed " at " exemption (owner decision).** The spelled " at " e-mail forms are shown as prose only when
+    the domain after "at" is in the CLOSED list `secret_guard.CV_RETAILER_HOSTS` (large retailers, marketplaces and
+    platforms with their regional top-level domains, about 130 hosts; a subdomain of one counts) AND the word before
+    "at" is on `CV_PROSE_BEFORE_AT`, from which every role-mailbox word and pronoun (`CV_ROLE_WORDS`: sales, support,
+    info, shop, store, deals, offers, shipping, order, sale, us, me, you, our, ...) was removed. Measured: role
+    mailboxes on non-retailer domains 1000 / 1000 masked (50 role words x 10 domains x 2 forms), role words before
+    retailer domains 150 / 150 masked, prose words before other domains masked, retailer shop prose 0 / 384 masked.
+19. **Client view on the strict lane's views.** The client rules read the same views as the strict lane: the
+    markdown-only view (no tag strip) and the markup-stripped view where only real tags without an address are
+    removed; every percent round of a decoded base64 / hex run; the filler-word bridge (2-6 digit groups: any word
+    for the card rule, which has Luhn; the listed filler words `CV_FILLER_WORDS` for the SSN and phone rules); the
+    letter-spaced view for labels (`a p i _ k e y = value`). Recall on the review's corpus (every required class x
+    the strict lane's disguise set and this review's disguises, 3380 cases): 100%; unlabelled random tokens remain
+    the residual of decision 14.
+20. **Torn final line (SHOULD 3).** At open, if ONLY the final line is torn (no trailing newline) and every earlier
+    line parses, the torn bytes are cut (`ftruncate` + `fsync`), the cut is counted (`tail_repair`: torn lines,
+    bytes removed, records kept; never content) and recorded once as the typed ledger event
+    `citation_vault_tail_repaired` (counts only; a ledger that cannot take it leaves `recorded: false` in health).
+    A torn line with any other bad line, a symlink, a foreign owner or open permissions still refuse to open; an
+    observe-only start (`observe_existing_on_start`) repairs nothing and refuses a torn line as before.
+21. **Linear excerpt path.** `callum._excerpt_window` widens to whole words by at most `EXCERPT_WORD_MAX` (1024)
+    characters past each margin edge (an answer with no whitespace made the window the whole text). The prompt
+    guard's e-mail patterns start only at the start of a local-part run and are possessive, the spelled-words form is
+    decided by a linear scan that finds the same matches, and the year-range pattern is written without nested
+    whitespace runs: the same accept / reject (fuzz-tested against the previous patterns), 64 KB in under 0.2 s.
 
 ## Threat model
 

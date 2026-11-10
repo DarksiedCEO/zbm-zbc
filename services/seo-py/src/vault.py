@@ -380,7 +380,7 @@ class CitationVault:
     """Per-tenant encrypted, append-only store under the service's data directory. Thread-safe (one re-entrant lock,
     as ``service.Service`` and ``store.RecordLog``); one process per data directory (the data-directory flock)."""
 
-    def __init__(self, data_dir: str, key: Optional[VaultKey]):
+    def __init__(self, data_dir: str, key: Optional[VaultKey], repair: bool = True):
         if not isinstance(data_dir, str) or not os.path.isabs(data_dir):
             raise ValueError("the citation vault needs an absolute data directory")
         if key is not None and type(key) is not VaultKey:
@@ -393,6 +393,9 @@ class CitationVault:
         self._size = 0
         self.bad_lines = 0                               # lines that do not parse (never served; counted)
         self.fault: Optional[str] = None                 # a failed append could not be cut back: writes refuse
+        self.orphans = 0                                 # records written whose run commit then failed (counted)
+        self.tail_repair: Optional[dict] = None          # counts of a torn final line cut at open (no content)
+        self._repair = repair                            # False: a torn final line refuses (observe-only start)
         os.makedirs(data_dir, mode=0o700, exist_ok=True)
         self._load()
 
@@ -448,17 +451,51 @@ class CitationVault:
         finally:
             os.close(fd)
         raw = b"".join(chunks)
-        if raw and not raw.endswith(b"\n"):
-            raise VaultCorrupt("the vault file ends with a torn line; refusing to open (inspect it)")
+        torn = bool(raw) and not raw.endswith(b"\n")
+        body = raw[:raw.rfind(b"\n") + 1] if torn else raw
         offset = 0
-        for line in raw.split(b"\n")[:-1] if raw else []:
+        for line in body.split(b"\n")[:-1] if body else []:
             parsed = _parse_line(line)
             if parsed is None or parsed["vault_id"] in self._index:
                 self.bad_lines += 1
             else:
                 self._index[parsed["vault_id"]] = (offset, len(line))
             offset += len(line) + 1
-        self._size = len(raw)
+        if torn:
+            # review 601e328a SHOULD 3: ONLY the final line is torn (a write cut by a crash: no newline): it is cut
+            # off and the cut recorded (counts, never content); a torn line with any other bad line still refuses
+            if self.bad_lines or not self._repair:
+                self._index, self.bad_lines = {}, 0
+                raise VaultCorrupt("the vault file ends with a torn line (and holds another bad line, or this start "
+                                   "repairs nothing); refusing to open (inspect it)")
+            self._cut_tail(len(raw), len(body))
+            self.tail_repair = {"torn_lines": 1, "bytes_removed": len(raw) - len(body), "records_kept": len(self._index)}
+        self._size = len(body)
+
+    def _cut_tail(self, size: int, keep: int) -> None:
+        try:
+            fd = os.open(self.path, os.O_WRONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0))
+        except OSError:
+            raise VaultCorrupt("the vault file's torn line cannot be cut (open failed); refusing") from None
+        try:
+            if os.fstat(fd).st_size != size:
+                raise VaultCorrupt("the vault file changed while it was opened; refusing")
+            os.ftruncate(fd, keep)
+            os.fsync(fd)
+        except OSError:
+            raise VaultCorrupt("the vault file's torn line cannot be cut; refusing") from None
+        finally:
+            os.close(fd)
+
+    def note_orphans(self, n: int) -> None:
+        with self.lock:
+            self.orphans += max(0, int(n))
+
+    def status(self) -> dict:
+        """Counts only: records, unreadable lines, orphaned records (written, run not recorded), torn-tail repair."""
+        with self.lock:
+            return {"records": len(self._index), "bad_lines": self.bad_lines, "orphaned_records": self.orphans,
+                    "tail_repair": dict(self.tail_repair) if self.tail_repair else None}
 
     def put(self, tenant_id: str, record: dict) -> str:
         """Encrypt ``record`` for ``tenant_id`` and append it; returns its vault id (128 random bits, hex)."""
@@ -660,6 +697,8 @@ class MemoryCitationVault(CitationVault):
         self._buf = bytearray()
         self.bad_lines = 0
         self.fault = None
+        self.orphans = 0
+        self.tail_repair = None
 
     def __repr__(self) -> str:
         return f"MemoryCitationVault(records={len(self._index)}, key={'set' if self._key is not None else 'unset'})"

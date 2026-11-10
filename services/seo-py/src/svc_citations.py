@@ -57,41 +57,48 @@ class CitationsMixin:
             actor = "andre" if andre else actor
             rk = self.rk("citation_run", tid, body)
             prev = self._idem(actor, rk, body)
-            if prev:
-                return self.citation_run_view(tid, prev[1])
-            client = self._citation_rules(t, tid, body, andre)
+            if not prev:
+                client = self._citation_rules(t, tid, body, andre)
+        if prev:                                     # review 601e328a SHOULD 1: the replay's view outside the lock
+            return self.citation_run_view(tid, prev[1])
         cmp_ = self._verify_compliance(client) if client is not None else None     # ADR 0024, outside the lock
         with self.lock:
             self._gate()
             t = self._get(self.tenants, tid, "TENANT_NOT_FOUND")
             prev = self._idem(actor, rk, body)
-            if prev:
-                return self.citation_run_view(tid, prev[1])
-            if self._citation_rules(t, tid, body, andre) != client:
-                raise Conflict(R("TENANT_FINANCE_CLIENT_CHANGED"))
-            if any(r["tenant_id"] == tid and r["citation_run_id"] in self.running_citation_runs
-                   for r in self.citation_runs.values()):
-                raise Conflict(R("CITATION_RUN_RUNNING"))
-            p = self.prompt_sets[body["prompt_set_id"]]
-            ps = {"prompt_set_id": p["prompt_set_id"], **p["versions"][str(p["current"])]}
-            wanted = body.get("engines")
-            ps["engines"] = sorted(set(ps["engines"]) & set(wanted)) if wanted else list(ps["engines"])
-            if not ps["engines"]:                        # narrowing to nothing would report "not connected": refuse
-                raise Invalid(R("INVALID"), field="engines")
-            cid = derived_id("cit", tid, actor, rk)
-            ref = {"prompt_set_id": ps["prompt_set_id"], "version": ps["version"], "sha256": ps["sha256"]}
-            data = {"citation_run_id": cid, "tenant_id": tid, "tenant_kind": t["kind"], "domain": body["domain"],
-                    "prompt_set": ref, "engines": ps["engines"], "andre_approved": bool(andre),
-                    "compliance": None if cmp_ is None else {"ruling_id": cmp_.get("ruling_id"),
-                                                             "verdict": cmp_.get("verdict")}}
-            ev = [("citation_run_requested", f"citation_run:{cid}",
-                   {"citation_run_id": cid, "tenant_id": tid, "kind": t["kind"], "domain_sha256": sha(body["domain"]),
-                    "prompt_set_id": ref["prompt_set_id"], "prompt_set_version": ref["version"],
-                    "prompt_set_sha256": ref["sha256"], "engines": ps["engines"], "andre_approved": bool(andre)},
-                   (actor, rk))]
-            self._commit("citation_run_requested", self._req(data, actor, rk, body, cid), actor, evidence=ev)
-            self.running_citation_runs.add(cid)
+            if not prev:
+                if self._citation_rules(t, tid, body, andre) != client:
+                    raise Conflict(R("TENANT_FINANCE_CLIENT_CHANGED"))
+                cid, ps = self._begin_citation_run(t, tid, actor, rk, body, andre, cmp_)
+        if prev:                                     # review 601e328a SHOULD 1: the replay's view outside the lock
+            return self.citation_run_view(tid, prev[1])
         return self._execute_citation_run(cid, tid, body["domain"], ps)
+
+    def _begin_citation_run(self, t: dict, tid: str, actor: str, rk: str, body: dict, andre: bool, cmp_) -> tuple:
+        """Under the lock: refuse a second running run, record the request, mark it running. Returns (cid, ps)."""
+        if any(r["tenant_id"] == tid and r["citation_run_id"] in self.running_citation_runs
+               for r in self.citation_runs.values()):
+            raise Conflict(R("CITATION_RUN_RUNNING"))
+        p = self.prompt_sets[body["prompt_set_id"]]
+        ps = {"prompt_set_id": p["prompt_set_id"], **p["versions"][str(p["current"])]}
+        wanted = body.get("engines")
+        ps["engines"] = sorted(set(ps["engines"]) & set(wanted)) if wanted else list(ps["engines"])
+        if not ps["engines"]:                        # narrowing to nothing would report "not connected": refuse
+            raise Invalid(R("INVALID"), field="engines")
+        cid = derived_id("cit", tid, actor, rk)
+        ref = {"prompt_set_id": ps["prompt_set_id"], "version": ps["version"], "sha256": ps["sha256"]}
+        data = {"citation_run_id": cid, "tenant_id": tid, "tenant_kind": t["kind"], "domain": body["domain"],
+                "prompt_set": ref, "engines": ps["engines"], "andre_approved": bool(andre),
+                "compliance": None if cmp_ is None else {"ruling_id": cmp_.get("ruling_id"),
+                                                         "verdict": cmp_.get("verdict")}}
+        ev = [("citation_run_requested", f"citation_run:{cid}",
+               {"citation_run_id": cid, "tenant_id": tid, "kind": t["kind"], "domain_sha256": sha(body["domain"]),
+                "prompt_set_id": ref["prompt_set_id"], "prompt_set_version": ref["version"],
+                "prompt_set_sha256": ref["sha256"], "engines": ps["engines"], "andre_approved": bool(andre)},
+               (actor, rk))]
+        self._commit("citation_run_requested", self._req(data, actor, rk, body, cid), actor, evidence=ev)
+        self.running_citation_runs.add(cid)
+        return cid, ps
 
     def _citation_rules(self, t: dict, tid: str, body: dict, andre: bool) -> Optional[str]:
         """Under the lock: the authorisation rules. Returns the Finance client a client tenant is bound to."""
@@ -191,16 +198,24 @@ class CitationsMixin:
     def _record_citation_result(self, tid: str, cid: str, env, pending) -> Optional[dict]:
         """Under the lock: the pending vault records in one append (one fsync), then the commit. Returns None when
         committed. Anything that raises is caught by the caller and closes the run RUN_FAILED."""
+        written = len(pending)
         self.vault.write_batch(pending)
         rsha = sha(env)
         facts = env.get("facts") or {}
         totals = (facts.get("metrics") or {}).get("totals") or {}
-        self._commit("citation_run_recorded", {"citation_run_id": cid, "result": env, "result_sha256": rsha},
-                     "seo", evidence=("citation_run_recorded", f"citation_run:{cid}",
-                                      {"citation_run_id": cid, "result_sha256": rsha,
-                                       "outcome": env["outcome"], "rows": len(facts.get("rows") or []),
-                                       "mentioned_not_cited": totals.get("mnc"),
-                                       "strength_answers": totals.get("strength")}, ("result", cid)))
+        try:
+            self._commit("citation_run_recorded", {"citation_run_id": cid, "result": env, "result_sha256": rsha},
+                         "seo", evidence=("citation_run_recorded", f"citation_run:{cid}",
+                                          {"citation_run_id": cid, "result_sha256": rsha,
+                                           "outcome": env["outcome"], "rows": len(facts.get("rows") or []),
+                                           "mentioned_not_cited": totals.get("mnc"),
+                                           "strength_answers": totals.get("strength")}, ("result", cid)))
+        except BaseException:
+            # review 601e328a SHOULD 2: the records are in the vault but no recorded run refers to them (ciphertext
+            # under the tenant's key, never served: nothing holds their refs). Counted in health; no purge job yet
+            # (ADR 0051)
+            self.vault.note_orphans(written)
+            raise
         return None
 
     def _interrupt_citation_run(self, tid: str, cid: str, reason: str, failure: Optional[dict] = None) -> dict:

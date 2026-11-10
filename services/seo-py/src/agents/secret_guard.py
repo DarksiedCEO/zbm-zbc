@@ -5,7 +5,8 @@ names, URL hosts / path segments / query pairs, any string swept by ``guard_reco
 
   1. NORMALISED for inspection (``views``): NFKC; Cf / Cc / Mn / Me / Co / Cn code points, variation selectors, tag
      characters and Hangul fillers removed; every Unicode space or line / paragraph separator read as one space;
-     markdown emphasis, backticks and tags stripped; bounded decoding (percent up to ``PERCENT_ROUNDS`` rounds, HTML
+     markdown emphasis, backticks and escapes removed (a view of its own) and real tags holding no address stripped
+     (review 601e328a); bounded decoding (percent up to ``PERCENT_ROUNDS`` rounds, HTML
      entities, ``\\uXXXX`` / ``\\xXX`` escapes, base64- and hex-looking runs) for INSPECTION ONLY;
   2. SAFE-CHECKED on every view (``check``): (a) no credential label word from the closed multilingual list,
      (b) no ``scheme://user:pass@``, (c) no known strong-key prefix, (d) no long random-looking token, (e) no run of
@@ -125,13 +126,27 @@ def normalise(text: str) -> str:
     return _clean(text or "")
 
 
-_TAG = re.compile(r"<[^<>]{0,256}>")
+# review 601e328a MUST 1: only a REAL tag (``<`` then a letter, ``/`` or ``!``) is stripped, and never one holding an
+# ``@`` or an "at" word (``<name@domain.com>``, ``<name at domain dot com>`` are addresses, not tags); markdown is
+# removed first, so ``<**name**@domain\.com>`` reads as an address. The markdown-only view (no tag strip) is a view of
+# its own as well.
+_TAG = re.compile(r"<[A-Za-z/!][^<>]{0,255}>")
+_TAG_KEEP = re.compile(r"(?i)@|(?<![a-z])at(?![a-z])")
 _MD = re.compile(r"[*`~\\]")
 
 
+def _strip_md(t: str) -> str:
+    """Markdown emphasis / backticks / strike / escapes removed, tags kept (inspection only)."""
+    return _MD.sub("", t) if ("*" in t or "`" in t or "~" in t or "\\" in t) else t
+
+
+def _strip_tags(t: str) -> str:
+    return _TAG.sub(lambda m: m.group(0) if _TAG_KEEP.search(m.group(0)) else "", t) if "<" in t else t
+
+
 def _strip_markup(t: str) -> str:
-    """Markdown emphasis / backticks / escapes and HTML-like tags removed (inspection only)."""
-    return _MD.sub("", _TAG.sub("", t)) if ("<" in t or "*" in t or "`" in t or "~" in t or "\\" in t) else t
+    """Markdown removed, then the real tags that hold no address (inspection only)."""
+    return _strip_tags(_strip_md(t))
 
 
 _ESC = re.compile(r"\\u([0-9a-fA-F]{4})|\\x([0-9a-fA-F]{2})")
@@ -224,6 +239,7 @@ def _tagged_views(text: str) -> list:
         if v not in seen:
             seen.add(v)
             out.append(v)
+    add(_strip_md(base))
     add(_strip_markup(base))
     cur = base
     for _ in range(PERCENT_ROUNDS):
@@ -231,12 +247,20 @@ def _tagged_views(text: str) -> list:
         if nxt == cur:
             break
         add(nxt)
+        add(_strip_md(nxt))
         add(_strip_markup(nxt))
         cur = nxt
     for v in out.copy():
         for d in _decoded_runs(v):
             add(d)
-            add(_strip_markup(_clean(_entities(_percent(d)))))
+            cur = d
+            for _ in range(PERCENT_ROUNDS):               # review 601e328a MUST 5: every round, as for the text
+                nxt = _clean(_entities(_percent(cur)))
+                if nxt == cur:
+                    break
+                cur = nxt
+            add(_strip_md(cur))
+            add(_strip_markup(cur))
     tagged = [(v, False) for v in out]
     for v in out.copy():
         if not v.isascii():
@@ -391,6 +415,37 @@ def _pair_has_separator(v: str, w: str, nxt: str, at: int = 0, end: int | None =
     return re.search(re.escape(w) + r"\W{1,3}" + re.escape(nxt) + r"\s{0,3}[:=]", win) is not None
 
 
+def _single(t: str) -> bool:
+    """A token of one character (a trailing ``:`` / ``=`` allowed), or of ``:`` / ``=`` only."""
+    return len(t.rstrip(":=")) == 1 or (t != "" and not t.strip(":="))
+
+
+def _singles_view(v: str) -> str:
+    """``v`` with each run of single-character tokens (``_single``) joined; every other token keeps its spaces."""
+    out: list = []
+    run: list = []
+    for t in v.split(" "):
+        if _single(t):
+            run.append(t)
+            continue
+        if run:
+            out.append("".join(run))
+            run = []
+        out.append(t)
+    if run:
+        out.append("".join(run))
+    return " ".join(out)
+
+
+def _spaced_label(v: str) -> bool:
+    """Review 601e328a: a label spelled one character at a time with its own separator (``D B _ P A S S:``): the
+    single characters (``_single``) joined, then read as pieces at the separator."""
+    if "_" not in v and "-" not in v:
+        return False
+    chars = "".join(t if _single(t) else " " for t in v.split(" "))
+    return any(_fold_piece(x) in _PIECES for x in _LETTER_RUN.findall(chars) if len(x) >= 3)
+
+
 def _label_hit(v: str) -> bool:
     if _SIG_RX.search(v) or _KEY_VALUE.search(v):
         return True
@@ -426,6 +481,8 @@ def _label_hit(v: str) -> bool:
     # a label spelled one letter at a time (``t o k e n``)
     singles = "".join(w if len(w) == 1 else " " for w in words)
     if any(_fold_piece(x) in _PIECES for x in singles.split() if len(x) >= 3):
+        return True
+    if globals()["_spaced_label"](v):
         return True
     letters = _letters_view(v)
     if _JOINED_RX.search(letters):
@@ -783,23 +840,46 @@ _DIGIT_RUN = re.compile(r"[0-9](?:[^\W\d_]{0,%d}[0-9])*" % DIGIT_LETTER_BRIDGE)
 _ASCII_DIGITS = "0123456789"
 
 
-# review adacb2ca MUST 2: between two digit groups of 3-4 digits, up to WORD_BRIDGE_WORDS letter-only words of at most
+# review adacb2ca MUST 2: between two digit groups, up to WORD_BRIDGE_WORDS letter-only words of at most
 # WORD_BRIDGE_LETTERS letters each (with a little punctuation / space around them) are read as filler too:
-# ``1234 then 5678``, ``1234 followed by 5678``, ``1234then5678``. Linear: every part of the pattern is bounded and a
-# match starts only at the first digit of a group.
+# ``1234 then 5678``, ``1234 followed by 5678``, ``1234then5678``. Review 601e328a MUST 2: a group is 2-6 digits
+# (``WORD_BRIDGE_GROUP``), so an SSN written 3-2-4 and an Amex written 4-6-5 with filler words are bridged; the card /
+# SSN / 9+ digit rules then decide. Linear: every part of the pattern is bounded and a match starts only at the first
+# digit of a group.
 WORD_BRIDGE_WORDS = 2
 WORD_BRIDGE_LETTERS = 10
+WORD_BRIDGE_GROUP = (2, 6)
 _BRIDGE_FILL = r"(?:[^\w\ue000]|_){0,4}"
-_WORD_BRIDGE = re.compile(r"(?<![0-9])([0-9]{3,4})" + _BRIDGE_FILL
-                          + r"(?:[^\W\d_]{1,%d}" % WORD_BRIDGE_LETTERS
-                          + r"(?:[^\w\ue000]|_){1,4}){0,%d}" % (WORD_BRIDGE_WORDS - 1)
-                          + r"[^\W\d_]{1,%d}" % WORD_BRIDGE_LETTERS + _BRIDGE_FILL
-                          + r"(?=[0-9]{3,4}(?![0-9]))")
+
+
+def _bridge_rx(word: str) -> re.Pattern:
+    """Two digit groups of ``WORD_BRIDGE_GROUP`` digits with up to ``WORD_BRIDGE_WORDS`` words matching ``word``
+    between them (and a little punctuation / space around them)."""
+    return re.compile(r"(?<![0-9])([0-9]{%d,%d})" % WORD_BRIDGE_GROUP + _BRIDGE_FILL
+                      + r"(?:" + word + r"(?:[^\w\ue000]|_){1,4}){0,%d}" % (WORD_BRIDGE_WORDS - 1)
+                      + word + _BRIDGE_FILL + r"(?=[0-9]{%d,%d}(?![0-9]))" % WORD_BRIDGE_GROUP)
+
+
+_WORD_BRIDGE = _bridge_rx(r"[^\W\d_]{1,%d}" % WORD_BRIDGE_LETTERS)          # the strict lane: any letter-only word
+# the client view's SSN and phone rules (no check digit) bridge only these filler words (review 601e328a MUST 2 / 5)
+CV_FILLER_WORDS = ("then", "next", "plus", "dash", "hyphen", "space", "followed", "by", "and", "comma", "dot", "slash",
+                   "minus", "after")
+_CV_WORD_BRIDGE = _bridge_rx(r"(?i:" + "|".join(CV_FILLER_WORDS) + r")(?![^\W\d_])")
+
+
+def _bridge_sub(rx: re.Pattern, v: str, sep: str) -> str:
+    return rx.sub(lambda m: m.group(1) + sep, v) if any(c.isalpha() for c in v) else v
 
 
 def _unbridged(v: str, sep: str) -> str:
     """``v`` with every filler-word bridge between two digit groups replaced by ``sep``."""
-    return _WORD_BRIDGE.sub(lambda m: m.group(1) + sep, v) if any(c.isalpha() for c in v) else v
+    return _bridge_sub(globals()["_WORD_BRIDGE"], v, sep)
+
+
+def _unbridged_fillers(v: str, sep: str) -> str:
+    """``v`` with every bridge of listed filler words (``CV_FILLER_WORDS``) between two digit groups replaced by
+    ``sep``: the same bridge, a closed word list (client view: the rules without a check digit)."""
+    return _bridge_sub(globals()["_CV_WORD_BRIDGE"], v, sep)
 
 
 def _digits_hit(v: str) -> bool:
@@ -900,6 +980,75 @@ def _at_word_email(v: str) -> bool:
     return any(_AT_DOMAIN.match(w, m.end()) for m in _AT_WORD.finditer(w))
 
 
+# review 601e328a MUST 3: an address spelled with letters spaced out (``l o c a l a t d o m a i n . c o m``) or with
+# its words split mid-word (``dom ain DOT com``) is read on the NO-SPACE view anchored on the "at" / "dot" words: the
+# text is read as words and anchors (a word "at" or "dot", also spelled one letter at a time, ``a t`` / ``d o t``);
+# after each "at" anchor that follows a local-part character, the next words are joined with NO space (a "dot" anchor
+# read as ".") one at a time, exactly as the split-"@" rule joins them (``_joins_to_domain``), until they read as a
+# domain with a common top-level domain. The join stops at the next "at" anchor and at a sentence end (a word ending
+# in "." before a capital), so a later sentence is not glued to the one before. Linear: one pass over the words, and
+# each join reads at most ``JOIN_WORDS`` words / 255 characters.
+JOIN_WORDS = 40
+_ANCHORS = {"at": "at", "dot": "dot"}
+
+
+def _joins_to_domain(words) -> int:
+    """How many of the next words (at most ``JOIN_WORDS``, 255 characters), joined one at a time, first read as a
+    domain with a common top-level domain (trailing punctuation ignored); 0 when they never do."""
+    acc = ""
+    for n, tok in enumerate(words[:JOIN_WORDS], 1):
+        acc += tok
+        if len(acc) > 255:
+            return 0
+        if _DOMAIN_END.fullmatch(acc.rstrip(".,;:!?)]}>\"'")):
+            return n
+    return 0
+
+
+def _anchor_items(v: str) -> list:
+    """``v`` as (kind, word) items: "at" / "dot" anchors, "end" (a sentence end) and "w" words."""
+    toks = v.split(" ")
+    out: list = []
+    i, n = 0, len(toks)
+    while i < n:
+        t = toks[i]
+        k = t.lower()
+        a = _ANCHORS.get(k)
+        if a is None and len(t) == 1 and i + 1 < n:
+            if k == "a" and toks[i + 1].lower() == "t":
+                a, i = "at", i + 1
+            elif k == "d" and i + 2 < n and toks[i + 1].lower() == "o" and toks[i + 2].lower() == "t":
+                a, i = "dot", i + 2
+        if a is not None:
+            out.append((a, t))
+        elif t:
+            if out and out[-1][0] == "w" and out[-1][1].endswith(".") and t[:1].isupper():
+                out.append(("end", ""))
+            out.append(("w", t))
+        i += 1
+    return out
+
+
+def _spaced_spelled_email(v: str) -> bool:
+    low = f" {v.lower()} "
+    if " at " not in low and " a t " not in low:
+        return False
+    items = _anchor_items(v)
+    for i, (k, t) in enumerate(items):
+        if k != "at" or i == 0 or items[i - 1][0] != "w" or not _LOCAL_CHAR.fullmatch(items[i - 1][1][-1]):
+            continue
+        words: list = []
+        for k2, t2 in items[i + 1:i + 1 + JOIN_WORDS]:
+            if k2 in ("at", "end"):
+                break
+            words.append("." if k2 == "dot" else t2)
+        n = globals()["_joins_to_domain"](words)
+        # only what the other spelled rules cannot read: a letter-spaced "a t", or two words glued (``dom ain``)
+        if n and (len(t) == 1 or any(_ALNUM.search(a) and _ALNUM.search(b) for a, b in zip(words[:n - 1], words[1:n]))):
+            return True
+    return False
+
+
 def _email_hit(v: str) -> bool:
     if "@" in v:
         w = re.sub(r" ?@ ?", "@", v)
@@ -918,19 +1067,16 @@ def _email_hit(v: str) -> bool:
                 i -= 1                                     # bounded look-back over spaces
             if i < 0 or not _LOCAL_CHAR.fullmatch(v[i]):
                 continue
-            acc = ""
-            for tok in v[m.end():m.end() + 1024].lstrip(" ").split(" ")[:40]:
-                acc += tok
-                if len(acc) > 255:
-                    break
-                if _DOMAIN_END.fullmatch(acc.rstrip(".,;:!?)]}>\"'")):
-                    return True
+            if _joins_to_domain(v[m.end():m.end() + 1024].lstrip(" ").split(" ")):
+                return True
     low = v.lower()
     if (("at" in low or "@" in v) and ("[" in v or "(" in v or "{" in v or "<" in v)) and _EMAIL_BRACKET.search(v):
         return True
     if _at_word_email(v):
         return True
-    return " at " in low and "dot" in low and _spelled_email(v)
+    if " at " in low and "dot" in low and _spelled_email(v):
+        return True
+    return globals()["_spaced_spelled_email"](v)
 
 
 # ------------------------------------------------------------------------------------------------ the check
@@ -1592,6 +1738,7 @@ def guard_record(obj):
 
 CLIENT_HIDDEN = "{hidden}"
 CV_PERSONAL = frozenset(("card", "ssn", "phone", "email"))
+CV_NUMBER_KINDS = ("card", "ssn", "phone")
 CV_GROUPS_MAX = 2048                     # digit groups read per view; more: the field is masked (fail closed)
 CV_URL_PARTS_MAX = 256                   # query pairs read per URL; more: the whole URL is masked (fail closed)
 
@@ -1754,41 +1901,73 @@ _CV_BRACKET_AT = re.compile(r"(?i)[a-z0-9._%+\-] ?[\[\(\{<] ?(?:at|@) ?[\]\)\}>]
 _CV_DOT = re.compile(r"(?i) ?[\[\(\{<] ?(?:dot|\.) ?[\]\)\}>] ?| dot |\s?\.\s?")   # [dot] / [.] / dot / .
 _CV_DOMAIN = re.compile(r"(?i)[a-z0-9\-]{1,63}+(?:\.[a-z0-9\-]{1,63}+){1,4}+(?![a-z0-9\-])")
 
-# Client view only: the CLOSED list of ordinary English words that precede the word "at" in shop prose ("available
-# at amazon.com", "sold at target.com", "look at shopify.com", "find us at etsy dot com"). For the SPELLED " at " forms
-# only (``name at domain.tld`` and ``name at domain dot tld``; never the literal "@" or the bracketed "[at]" / "(at)"
-# forms), a word "at" whose preceding token is one of these words, written in lower case or capitalised (a sentence
-# start: "Available at ..."), is not read as an e-mail. Any other token is still read as a local part: a name or
-# handle not on the list, anything with a digit, dot, underscore, "+", "%" or "-", and an ALL-CAPS word. Role-mailbox
-# words (sales, support, info, help, contact, admin, hello, billing, orders, team, press, jobs, careers, service, news,
-# mail, office, marketing, media, returns, privacy, legal, security, feedback, partners) and words that are also
-# common first names (will, mark, bill, grace, hope, joy, rose, may, june, art, chase, dawn, summer, jack, frank, max,
-# dean, drew, ray, faith, sky, rich, ...) are deliberately NOT on it. Read at call time (``globals()``), so a test can
-# empty it and show the shop-prose test then fails.
+# Client view only (review 601e328a MUST 4, owner decision): the SPELLED " at " forms (``name at domain.tld``,
+# ``name at domain dot tld`` and the letter-spaced / split forms; never the literal "@" or the bracketed "[at]" /
+# "(at)" forms) are NOT read as an e-mail only when BOTH hold:
+#   1. the domain after "at" is one of the CLOSED list of large retailers / marketplaces / platforms below
+#      (``CV_RETAILER_HOSTS``: the host itself or a subdomain of it, read with the e-mail rules' dot forms: ".",
+#      " . ", " dot ", "[dot]"), and
+#   2. the word before "at" is on the closed list of ordinary prose words (``CV_PROSE_BEFORE_AT``: "available at
+#      amazon.com", "sold at target dot com"), written in lower case or capitalised (a sentence start).
+# Role-mailbox words (``CV_ROLE_WORDS``: sales, support, info, shop, store, deals, offers, shipping, order, sale...)
+# and pronouns (us, me, you, our, ...) are NOT on the prose list, so "support at amazon.com" and "shop at
+# acmepets.com" are masked; any address on another domain is masked whatever word comes before it. Both lists are read
+# at call time (``globals()``), so a test can change them and show the tests that rely on them fail.
+_RETAILER_TLDS = {
+    "amazon": ("com", "ca", "co.uk", "de", "fr", "it", "es", "nl", "se", "pl", "com.be", "com.mx", "com.br", "com.au",
+               "co.jp", "in", "sg", "ae", "sa", "com.tr", "eg", "ie"),
+    "ebay": ("com", "ca", "co.uk", "de", "fr", "it", "es", "com.au", "ie", "at", "ch", "nl", "pl", "be"),
+    "walmart": ("com", "ca", "com.mx"), "bestbuy": ("com", "ca"), "costco": ("com", "ca", "co.uk", "com.au"),
+    "homedepot": ("com", "ca"), "lowes": ("com", "ca"), "nordstrom": ("com", "ca"), "sephora": ("com", "ca", "fr"),
+    "petsmart": ("com", "ca"), "wayfair": ("com", "ca", "co.uk", "de"), "ikea": ("com",), "apple": ("com",),
+    "google": ("com", "co.uk", "ca", "de"), "newegg": ("com", "ca"), "gap": ("com", "ca"), "nike": ("com",),
+    "adidas": ("com", "co.uk", "de", "ca"), "zalando": ("de", "co.uk", "fr", "it", "es", "nl"), "otto": ("de",),
+    "rakuten": ("com", "co.jp"), "flipkart": ("com", "in"), "aliexpress": ("com", "us"), "shein": ("com", "co.uk"),
+    "etsy": ("com",), "target": ("com",), "kohls": ("com",), "macys": ("com",), "ulta": ("com",), "chewy": ("com",),
+    "petco": ("com",), "rei": ("com",), "shopify": ("com",), "tiktok": ("com",), "instagram": ("com",),
+    "youtube": ("com",), "facebook": ("com",), "temu": ("com",), "bhphotovideo": ("com",),
+    "dickssportinggoods": ("com",), "zappos": ("com",), "oldnavy": ("com",), "samsclub": ("com",), "cvs": ("com",),
+    "walgreens": ("com",), "kroger": ("com",), "wholefoodsmarket": ("com",), "instacart": ("com",),
+    "doordash": ("com",), "ubereats": ("com",), "alibaba": ("com",), "overstock": ("com",), "dell": ("com",),
+    "argos": ("co.uk",), "bol": ("com",), "mercadolibre": ("com.mx", "com.ar", "com"), "tesco": ("com",),
+    "staples": ("com",), "michaels": ("com",), "wish": ("com",), "poshmark": ("com",), "mercari": ("com",),
+}
+CV_RETAILER_HOSTS = frozenset(f"{name}.{tld}" for name, tlds in _RETAILER_TLDS.items() for tld in tlds)
+CV_ROLE_WORDS = frozenset("""
+sales support info information help helpdesk contact contacts admin administrator hello hi hey billing invoice invoices
+accounts accounting orders order team press jobs careers career hr recruiting service services customerservice
+care news newsletter mail email office marketing media returns return privacy legal security abuse feedback partners
+partner shop shops store stores deal deals offer offers shipping sale merch pricing webmaster postmaster noreply
+enquiries inquiries booking bookings events studio wholesale
+i me my mine we us our ours you your yours they them their theirs he him his she her hers it its
+""".split())
 CV_PROSE_BEFORE_AT = frozenset("""
 a about above across actually affordable again ago all almost alone already also always amazing an and another
 any anyone anything anywhere appear appears are arrive arrived arriving as ask asked assembled available avoid
 away back based be been being best better big both bought brand brands browse browsing built but buy buying
 cart carried carries cheap cheaper cheapest check checked checkout clearance click come comes coming
-compare compared cost costs could currently daily deal deals delivered directly discount
+compare compared cost costs could currently daily delivered directly discount
 discounted discounts do does done down each early easily easy either else elsewhere employed even
 eventually ever every everything everywhere exclusive exclusively expensive featured find finding first found
 free fresh from fun gear get gets getting gift gifts go goes going gone good got great had happen happens has
-have here hired his holiday hosted how however i in instead interested is it items its just kept last later
+have here hired holiday hosted how however in instead interested is items just kept last later
 launched least less let lightly limited listed listing listings live lived located look looked looking lots
-low lower lowest made make many marked me merch more most much must my near nearly never new next nice no not
-nothing now of off offer offered offering offers often on once one online only open or order ordered ordering
-other others our out over own paid pay people pick picked placed post posted pre price priced prices pricing
+low lower lowest made make many marked more most much must near nearly never new next nice no not
+nothing now of off offered offering often on once one online only open or ordered ordering
+other others out over own paid pay people pick picked placed post posted pre price priced prices
 product products published purchase purchased purchases purchasing put quality rated read
 ready really receive received regular rest restocked retail retailer retailers review reviewed reviews right
-sale same save saved say says see seen sell seller sellers selling sells shipped shipping shop shopped shopper
+same save saved say says see seen sell seller sellers selling sells shipped shopped shopper
 shoppers shopping should shown sign signed similar since site sites so sold some someone something sometimes
-soon spend spent start started starting starts still stock stocked stocks store stores subscribe subscribed
-such sure that the their them then there these they thing things this those through today together too top
-tried try trying twice two up us usually very visit visited want wanted was way we week well went were what
-when where which while who why with work worked works worth would yesterday yet you your
+soon spend spent start started starting starts still stock stocked stocks
+such sure that the then there these thing things this those through today together too top
+tried try trying twice two up usually very visit visited want wanted was way week well went were what
+when where which while who why with work worked works worth would yesterday yet
 """.split())
 _CV_TOKEN_AT = re.compile(r"(?<![A-Za-z0-9._%+\-])([A-Za-z0-9._%+\-]++)([ \t\n]{1,3})(?:[Aa][Tt])(?=[ \t\n])")
+CV_HOST_READ = 128
+_CV_SPELLED_DOT = re.compile(r"(?i) ?[\[\(\{<] ?dot ?[\]\)\}>] ?| dot ")
+_CV_HOST_START = re.compile(r"[ \t\n]*+([A-Za-z0-9\-]{1,63}+(?:\.[A-Za-z0-9\-]{1,63}+){0,8}+)")
 
 
 def _cv_prose_word(tok: str) -> bool:
@@ -1798,19 +1977,37 @@ def _cv_prose_word(tok: str) -> bool:
     return tok[:1].isupper() and tok[1:] == tok[1:].lower() and tok.lower() in words
 
 
+def _cv_retailer_after(v: str, i: int) -> bool:
+    """The domain written after the word "at" ending at ``i`` (read with the e-mail rules' dot forms) is a listed
+    retailer host or a subdomain of one. Reads at most ``CV_HOST_READ`` characters (a listed host is at most 30)."""
+    w = _DOT_JOIN.sub(".", _CV_SPELLED_DOT.sub(".", v[i:i + CV_HOST_READ]))
+    m = _CV_HOST_START.match(w)
+    if m is None:
+        return False
+    host = m.group(1).lower().strip(".")
+    hosts = globals()["CV_RETAILER_HOSTS"]
+    labels = host.split(".")
+    return any(".".join(labels[k:]) in hosts for k in range(len(labels) - 1))
+
+
 def _cv_unprose_at(v: str) -> str:
-    """``v`` with every word "at" that follows an ordinary prose word (``CV_PROSE_BEFORE_AT``) blanked to two NULs, so
-    the spelled-at rules do not read it. Linear: a token starts only at the start of its run and is read possessively."""
+    """``v`` with every word "at" that follows an ordinary prose word (``CV_PROSE_BEFORE_AT``) AND precedes a listed
+    retailer domain (``CV_RETAILER_HOSTS``) blanked to two NULs, so the spelled-at rules do not read it. Linear: a token
+    starts only at the start of its run and is read possessively; each host read is bounded."""
     if "t" not in v and "T" not in v:
         return v
-    return _CV_TOKEN_AT.sub(lambda m: m.group(1) + m.group(2) + "\x00\x00" if _cv_prose_word(m.group(1)) else m.group(0),
-                            v)
+
+    def repl(m: re.Match) -> str:
+        if _cv_prose_word(m.group(1)) and _cv_retailer_after(v, m.end()):
+            return m.group(1) + m.group(2) + "\x00\x00"
+        return m.group(0)
+    return _CV_TOKEN_AT.sub(repl, v)
 
 
 def _cv_email(v: str) -> bool:
     """An address (the strict lane's plain and split forms), ``name [at] domain [dot] tld`` (a dot part required, so
-    ``meet us (at) the venue`` is prose) or ``name at domain dot tld`` / ``name at domain.tld`` (not after an ordinary
-    prose word: ``CV_PROSE_BEFORE_AT``)."""
+    ``meet us (at) the venue`` is prose) or ``name at domain dot tld`` / ``name at domain.tld`` and their
+    letter-spaced / split forms (not an ordinary prose word before a listed retailer domain: ``_cv_unprose_at``)."""
     if "@" in v and _cv_at_email(v):
         return True
     low = v.lower()
@@ -1823,12 +2020,14 @@ def _cv_email(v: str) -> bool:
             tail = _CV_DOT.sub(".", v[m.end():m.end() + 300])
             if _CV_DOMAIN.match(tail):
                 return True
-    if "at" not in low:
+    if "at" not in low and "a t" not in low:
         return False
-    w = _cv_unprose_at(v)                                  # the spelled " at " forms only: prose words skipped
+    w = _cv_unprose_at(v)                                  # the spelled " at " forms only: retailer prose skipped
     if _at_word_email(w):
         return True                                        # ``name at domain.tld`` (the strict lane's rule)
-    return " at " in w.lower() and "dot" in low and _spelled_email(w)
+    if " at " in w.lower() and "dot" in low and _spelled_email(w):
+        return True
+    return _spaced_spelled_email(w)                        # letter-spaced / split words (review 601e328a MUST 3)
 
 
 def _cv_at_email(v: str) -> bool:
@@ -1844,20 +2043,16 @@ def _cv_at_email(v: str) -> bool:
             i -= 1
         if i < 0 or not _LOCAL_CHAR.fullmatch(v[i]):
             continue
-        acc = ""
-        for tok in v[m.end():m.end() + 1024].lstrip(" ").split(" ")[:40]:
-            acc += tok
-            if len(acc) > 255:
-                break
-            if _DOMAIN_END.fullmatch(acc.rstrip(".,;:!?)]}>\"'")):
-                return True
+        if _joins_to_domain(v[m.end():m.end() + 1024].lstrip(" ").split(" ")):
+            return True
     return False
 
 
 _CV_SPAN = re.compile(r"[0-9](?:(?:[^\w\ue000]|_){0,4}[0-9])*")
 _CV_GROUP = re.compile(r"[0-9]+")
-_CV_NANP = re.compile(r"(?<![0-9])(?:\+?1[ .\-]?)?(?:\(\d{3}\) ?\d{3}-\d{4}|\d{3}-\d{3}-\d{4}|\d{3}\.\d{3}\.\d{4})"
-                      r"(?![0-9])")
+# review 601e328a MUST 5: a doubled separator (``xxx--xxx--xxxx``) is a phone too
+_CV_NANP = re.compile(r"(?<![0-9])(?:\+?1[ .\-]?)?(?:\(\d{3}\) ?\d{3}-{1,2}\d{4}|\d{3}-{1,2}\d{3}-{1,2}\d{4}"
+                      r"|\d{3}\.{1,2}\d{3}\.{1,2}\d{4})(?![0-9])")
 _CV_NANP_SPACED = re.compile(r"(?<![0-9])(?:\+?1 )?[2-9][0-9]{2} [2-9][0-9]{2} [0-9]{4}(?![0-9])")   # "xxx xxx xxxx"
 _CV_SSN_LABEL = re.compile(r"(?i)(?<![a-z])ssn(?![a-z])[\s:#=.\-]{0,4}(?<![0-9])(?P<d>[0-9]{9})(?![0-9])")
 _CV_E164 = re.compile(r"(?<![\w+])\+ ?[1-9](?:[ .\-()]{0,3}[0-9]){7,14}(?![0-9])")
@@ -1897,16 +2092,17 @@ def _cv_ssn_ok(d: str) -> bool:
     return 0 < area < 900 and area != 666 and group > 0 and serial > 0
 
 
-def _cv_span(w: str, s: re.Match, out: set) -> int:
+def _cv_span(w: str, s: re.Match, out: set, kinds=CV_NUMBER_KINDS) -> int:
     """One digit span (digits with filler runs of at most four characters between them): card windows at group
-    boundaries, the SSN shapes, a NANP number opened by ``(xxx)``. Returns the number of digit groups read."""
+    boundaries, the SSN shapes, a NANP number opened by ``(xxx)`` (only the rules named in ``kinds``). Returns the
+    number of digit groups read."""
     span = s.group(0)
     gs = [(g.start(), g.end()) for g in _CV_GROUP.finditer(span)]
     seps = [span[gs[i][1]:gs[i + 1][0]] for i in range(len(gs) - 1)]
     digits = "".join(span[a:b] for a, b in gs)
     if len(digits) < 9:
         return len(gs)
-    if "card" not in out:
+    if "card" in kinds and "card" not in out:
         bounds = [0]
         for a, b in gs:
             bounds.append(bounds[-1] + b - a)
@@ -1922,7 +2118,7 @@ def _cv_span(w: str, s: re.Match, out: set) -> int:
                     break
             if "card" in out:
                 break
-    if "ssn" not in out:
+    if "ssn" in kinds and "ssn" not in out:
         lens = [b - a for a, b in gs]
         for i in range(len(gs) - 2):
             if lens[i:i + 3] == [3, 2, 4] and _cv_sep(seps[i], " ") and _cv_sep(seps[i + 1], " ") \
@@ -1933,7 +2129,7 @@ def _cv_span(w: str, s: re.Match, out: set) -> int:
                     break
         if len(digits) == 9 and len(gs) >= 3 and all(x == "-" for x in seps) and _cv_ssn_ok(digits):
             out.add("ssn")                                 # a 3-2-4 number with more dashes put in
-    if "phone" not in out and len(digits) == 10 and gs[0][1] - gs[0][0] == 3 and seps and seps[0].startswith(")") \
+    if "phone" in kinds and "phone" not in out and len(digits) == 10 and gs[0][1] - gs[0][0] == 3 and seps and seps[0].startswith(")") \
             and s.start() > 0 and w[s.start() - 1] == "(":
         out.add("phone")                                   # (xxx) and seven digits, however grouped
     return len(gs)
@@ -1947,22 +2143,38 @@ def _cv_numbers(v: str) -> set:
     if any(_cv_ssn_ok(x.group("d")) for x in _CV_SSN_LABEL.finditer(m)):
         out.add("ssn")                                     # "SSN" and nine bare digits (review adacb2ca SHOULD 3)
     for w in (m, m.replace(" ", "")) if " " in m else (m,):
-        if _CV_NANP.search(w) or _CV_E164.search(w) or _CV_NANP_SPACED.search(w):
-            out.add("phone")
-        groups = 0
         # review adacb2ca MUST 2: filler words between digit groups ("then", "followed by", "and", "plus", "next")
-        # bridged as the strict lane bridges them; the card rule (a network's prefix and Luhn) then decides
+        # bridged as the strict lane bridges them (review 601e328a MUST 2: groups of 2-6 digits). The card rule (a
+        # network's prefix and Luhn) reads every bridged word; the SSN and phone rules, which have no check digit, read
+        # only the listed filler words (``CV_FILLER_WORDS``), so "12 for 345 dollars then 678" is not a phone
         ub = _unbridged(w, " ")
-        for s in _CV_SPAN.finditer(ub):
-            groups += _cv_span(ub, s, out)
-            if groups > CV_GROUPS_MAX:
-                out.add("cap")                             # fail closed: a field of thousands of numbers is masked
-                return out
+        fb = _unbridged_fillers(w, " ")
+        for x in (w, fb) if fb != w else (w,):
+            if _CV_NANP.search(x) or _CV_E164.search(x) or _CV_NANP_SPACED.search(x):
+                out.add("phone")
+        groups = 0
+        passes = ((ub, CV_NUMBER_KINDS),) if ub == fb else ((ub, ("card",)), (fb, ("ssn", "phone")))
+        for x, kinds in passes:
+            for s in _CV_SPAN.finditer(x):
+                groups += _cv_span(x, s, out, kinds)
+                if groups > CV_GROUPS_MAX:
+                    out.add("cap")                         # fail closed: a field of thousands of numbers is masked
+                    return out
     return out
 
 
 _CV_CHECKS = (("strong_key", "_cv_strong"), ("userinfo", "_cv_userinfo"), ("label_value", "_cv_label"),
               ("email", "_cv_email"))
+
+
+def _cv_label_nospace(v: str) -> bool:
+    """The label rule on the strict lane's letter-spaced view (``a p i _ k e y = value``: each run of single
+    characters joined, as ``_spaced_label`` reads it; other words keep their spaces, so a word before the label is not
+    glued to it)."""
+    if " " not in v:
+        return False
+    sv = _singles_view(v)
+    return sv != v and _cv_label(sv)
 
 
 def _cv_findings(text: str) -> set:
@@ -1973,6 +2185,8 @@ def _cv_findings(text: str) -> set:
         for name, fn in _CV_CHECKS:
             if name not in found and globals()[fn](v):
                 found.add(name)
+        if "label_value" not in found and globals()["_cv_label_nospace"](v):
+            found.add("label_value")                       # review 601e328a MUST 5: the strict no-space view
         if not {"card", "ssn", "phone"} <= found:
             found |= globals()["_cv_numbers"](v)
     return found

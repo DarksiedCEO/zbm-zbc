@@ -467,6 +467,11 @@ def classify_citation(url: str, domain: str, competitors: list, res: dict) -> di
 # cut by the right edge (or split by spaces across it)
 EXCERPT_MARGIN = 48
 EXCERPT_MARGIN_AFTER = 24
+# review 601e328a MUST 6: the whole-word widening reads at most this many characters past each margin edge (an answer
+# with no whitespace used to make the window the whole text: quadratic in the prompt guard, minutes at 64 KB). A word
+# longer than this is read for this many characters on each side, which still holds the key's prefix or enough of a
+# random run for check (d), the address's "@" and domain, or the label before a value.
+EXCERPT_WORD_MAX = 1024
 
 
 def _withheld_code(name: str | None) -> str | None:
@@ -525,9 +530,10 @@ def _excerpt_window(text: str, terms: list) -> tuple:
     lo = max(0, start - 60) if basis == "brand_mention" else 0
     span = t[lo:lo + EXCERPT_MAX]
     a, b = max(0, lo - EXCERPT_MARGIN), lo + EXCERPT_MAX + EXCERPT_MARGIN_AFTER
-    while a > 0 and not t[a - 1].isspace():
+    a0, b0 = a, b
+    while a > 0 and a0 - a < EXCERPT_WORD_MAX and not t[a - 1].isspace():
         a -= 1                                       # whole words: a key cut by the margin edge is read whole
-    while b < len(t) and not t[b].isspace():
+    while b < len(t) and b - b0 < EXCERPT_WORD_MAX and not t[b].isspace():
         b += 1
     return basis, span, t[a:b]
 

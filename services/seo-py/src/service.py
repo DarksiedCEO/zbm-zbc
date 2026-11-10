@@ -128,18 +128,38 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
                 raise DataDirBusy("the data-directory claim handed to this service instance is not held (released, "
                                   "stale, another instance's, or already adopted); refusing to start")
         try:
-            self.vault = self._open_vault(settings)
+            self.vault = self._open_vault(settings, repair=not observe_existing_on_start)
             import client_report
             if not isinstance(getattr(settings, "report_branding", None), client_report.Branding):
                 # AEGIS L-8: refuse to start rather than answer the client-report route with a 500
                 raise RuntimeError("settings.report_branding must be a client_report.Branding")
             self._start(observe_existing_on_start=observe_existing_on_start)
+            self._record_vault_repair()
         except BaseException:
             self.close()
             raise
 
+    def _record_vault_repair(self) -> None:
+        """Review 601e328a SHOULD 3: a torn final vault line cut at open is recorded as a typed audit event with its
+        counts only (never content); a ledger that cannot take it leaves the repair visible in health as unrecorded."""
+        rep = getattr(self.vault, "tail_repair", None)
+        if not rep:
+            return
+        import logging
+        logging.getLogger("seo.vault").warning("citation vault: a torn final line was cut at open (%d bytes removed, "
+                                               "%d records kept)", rep["bytes_removed"], rep["records_kept"])
+        payload = {"torn_lines": rep["torn_lines"], "bytes_removed": rep["bytes_removed"],
+                   "records_kept": rep["records_kept"], "log_length": len(self.log)}
+        eid = derived_id("evd", "citation_vault_tail_repaired", payload_sha256(payload))
+        try:
+            self._record_twice(eid, "citation_vault_tail_repaired", "seo", "citation_vault", payload,
+                               "citation_vault_tail_repaired citation_vault")
+            rep["recorded"] = True
+        except LedgerRecordError:
+            rep["recorded"] = False
+
     @staticmethod
-    def _open_vault(settings):
+    def _open_vault(settings, repair: bool = True):
         """ADR 0051 (job 2): the client citation vault. With a data directory: ``citation_vault.jsonl`` there, under
         the configured key (no key: every citation run fails closed, VAULT_UNAVAILABLE). Without one (in-memory,
         non-production): the in-memory backend, same encryption, under the configured key or a random key held in
@@ -147,7 +167,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
         import vault
         key = getattr(settings, "vault_key", None)
         if settings.data_dir:
-            return vault.CitationVault(settings.data_dir, key)
+            return vault.CitationVault(settings.data_dir, key, repair=repair)
         return vault.MemoryCitationVault(key if key is not None else vault.ephemeral_vault_key())
 
     def close(self) -> None:
@@ -587,6 +607,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
                 "audits_running": len(self.running_audits),
                 "audits_total": len(self.audits),
                 "log_length": len(self.log),
+                "citation_vault": self.vault.status(),        # counts only (review 601e328a SHOULD 2 / 3)
             }
 
     # ================================================================================================ jobs

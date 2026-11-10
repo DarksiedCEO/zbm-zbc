@@ -228,11 +228,14 @@ SHOP_TEMPLATES = [
     "We {w} at {d} and {d2} before launch.", "The new line is {w} at {d}.", "Fans {w} at {d} in minutes.",
     "If you {w} at {d}, check the reviews.", "Our bowls, {w} at {d}, are dishwasher safe.",
 ]
-PROSE_WORDS = ["available", "sold", "buy", "bought", "shop", "shopping", "find", "found", "look", "looking",
+PROSE_WORDS = ["available", "sold", "buy", "bought", "shopping", "find", "found", "look", "looking",
                "listed", "stocked", "carried", "priced", "offered", "exclusively", "only", "also", "now", "online",
-               "cheaper", "cheapest", "here", "there", "it", "them", "this", "that", "purchase", "ordered", "get",
+               "cheaper", "cheapest", "here", "there", "this", "that", "purchase", "ordered", "get",
                "got", "signed", "up", "live", "located", "based", "hosted", "posted", "published", "read", "see",
-               "visit", "starting", "best", "great", "deals", "discount", "both", "in", "us", "sale", "retail"]
+               "visit", "starting", "best", "great", "discount", "both", "in", "retail"]
+# review 601e328a MUST 4 (owner decision): role-mailbox words and pronouns (shop, deals, sale, us, it, them, ...) are
+# no longer prose before "at" (``sg.CV_ROLE_WORDS``): they were removed from this list and are masked even before a
+# listed retailer domain (tests/test_review_601e328a.py)
 
 
 def _shop_prose(r: random.Random, n: int) -> list:

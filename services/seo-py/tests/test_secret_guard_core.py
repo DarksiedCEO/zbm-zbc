@@ -173,7 +173,7 @@ def test_utility_urls_stay_under_the_bar():
 V1_PHRASES_KEPT = [
     "The key takeaway is revenue growth.", "Ask about our growth strategy for 2026.",
     "Order 112-1234567-1234567 shipped on 2026-11-08.", "ISBN 978-3-16-148410-0 is in stock.",
-    "SKU ABC-12345 and SKU-998877 are restocked.", "Commit 8f14e45fceea167a5a36dedd4bea2543c1b2d3e4 is public.",
+    "Commit 8f14e45fceea167a5a36dedd4bea2543c1b2d3e4 is public.",
     "UUID 550e8400-e29b-41d4-a716-446655440000 identifies the row.", "Hashtag #RevenueRecovery is trending.",
     "Case study: acme-2026-q3-results published today.", "Our refund policy changed in October 2026.",
     "Read the pricing plans comparison report.",
@@ -184,6 +184,8 @@ V1_PHRASES_WITHHELD = {
     "Bearer of good news: fees dropped.": "a_label", "The api key best practices guide is published.": "a_label",
     "The token economy explained for sellers.": "a_label", "Store your access codes in a vault.": "a_label",
     "Order 1005006123456789 shipped on 2026-11-08.": "e_digits", "Call 555-010-0199 for support.": "e_digits",
+    # review 601e328a MUST 2 (was kept): 5- and 6-digit groups joined by filler words are now one digit run
+    "SKU ABC-12345 and SKU-998877 are restocked.": "e_digits",
 }
 
 
@@ -331,7 +333,7 @@ def _mutation_probes() -> dict:
         "norm_drop_Co": ([(sg_ + "_DROP_CATS", frozenset({"Cf", "Mn", "Cc", "Me", "Cn", "Cs"}))], [split(akia, "\ue000"), mail("\ue000")]),
         "norm_drop_Cn": ([(sg_ + "_DROP_CATS", frozenset({"Cf", "Mn", "Cc", "Me", "Co", "Cs"}))], [split(akia, "\u0378"), mail("\u0378")]),
         "norm_collapse": ([(sg_ + "_collapse", lambda t: t)], ["  ".join(_rand_mixed(40, 5))]),
-        "norm_strip_markup": ([(sg_ + "_strip_markup", lambda t: t)], ["AKIA**IOSF**ODNN7" + "EXAMPLE", "write to jane.doe@exa**mple**.com"]),
+        "norm_strip_markup": ([(sg_ + "_strip_markup", lambda t: t), (sg_ + "_strip_md", lambda t: t)], ["AKIA**IOSF**ODNN7" + "EXAMPLE", "write to jane.doe@exa**mple**.com"]),
         # r2 part 2: confusable folding is one step done in two places (label words, and the folded view of (c)-(f))
         "norm_confusable_fold": ([(sg_ + "_FOLD", type("NoFold", (), {"fold_cased": staticmethod(str.lower)})()),
                                   (sg_ + "_fold_confusables", lambda v: v)],

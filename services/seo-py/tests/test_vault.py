@@ -573,12 +573,17 @@ def test_concurrent_puts_produce_valid_lines(tmp_path):
 def test_torn_tail_symlink_and_open_permissions_refuse_open(tmp_path):
     key, _ = new_key()
     d = tmp_path / "data"
-    CitationVault(str(d), key).put(TENANT_A, {"a": 1})
+    vid = CitationVault(str(d), key).put(TENANT_A, {"a": 1})
     p = os.path.join(str(d), VAULT_NAME)
     with open(p, "ab") as fh:
         fh.write(b'{"v":1,"id"')
+    # review 601e328a SHOULD 3 (was: refused): ONLY a torn final line is cut at open and counted; the observe-only
+    # start (repair=False) still refuses it; a torn line with another bad line refuses (tests/test_review_601e328a.py)
     with pytest.raises(VaultCorrupt):
-        CitationVault(str(d), key)
+        CitationVault(str(d), key, repair=False)
+    v = CitationVault(str(d), key)
+    assert v.tail_repair == {"torn_lines": 1, "bytes_removed": 11, "records_kept": 1}
+    assert v.get(TENANT_A, vid) == {"a": 1} and open(p, "rb").read().endswith(b"\n")
     d2 = tmp_path / "data2"
     os.makedirs(str(d2))
     os.symlink(p, os.path.join(str(d2), VAULT_NAME))
