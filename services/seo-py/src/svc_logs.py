@@ -124,7 +124,10 @@ class LogsMixin:
             if body["domain"] not in t["domains"]:
                 raise Forbidden(R("DOMAIN_NOT_AUTHORIZED"))
             self._check_log_caps(tid, new_ingest=True)
-            sample = self._sitemap_sample(tid, body["domain"])
+            latest = self._latest_audit(tid, body["domain"])
+        # sink job B: the latest audit's report is read from the tenant's vault, outside the lock; one that cannot be
+        # read refuses VAULT_UNAVAILABLE (the ingest is never created against a sample that could not be read)
+        sample = self._sitemap_sample(tid, latest)
         guard = self.guard(tid, run="logs")
         robots_text, robots_status = None, "not_fetched"
         try:
@@ -292,14 +295,19 @@ class LogsMixin:
                  report_sha256=d["report_sha256"], robots_text=None)   # not needed any more: memory stays bounded
         self._log_robots.pop(d["ingest_id"], None)
 
-    def _sitemap_sample(self, tid: str, domain: str) -> Optional[list]:
+    def _latest_audit(self, tid: str, domain: str) -> Optional[str]:
+        """Under the lock: the id of the tenant's latest completed audit of ``domain``."""
         latest = None
         for a in self.audits.values():
             if a["tenant_id"] == tid and a["domain"] == domain and a["status"] == "completed":
-                latest = a                                 # log order: the last one completed wins
+                latest = a["audit_id"]                     # log order: the last one completed wins
+        return latest
+
+    def _sitemap_sample(self, tid: str, latest: Optional[str]) -> Optional[list]:
+        """Outside the lock: Delia's sitemap sample in the report of audit ``latest`` (read from the vault)."""
         if latest is None:
             return None
-        for e in latest["report"]["agents"]:
+        for e in self._audit_recorded(tid, latest)["report"]["agents"]:
             if e["agent"] == "delia":
                 return list(e["facts"].get("sitemap_paths_sample") or [])
         return None

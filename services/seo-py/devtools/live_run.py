@@ -553,7 +553,7 @@ def _main(work: Path) -> int:
               "SHA-256, and states the KILLED crawl as not checked, never clean",
               cr_off.status_code == 403 and cr.status_code == 200 and len(cr_ev) == 1
               and hashlib.sha256(doc).hexdigest() == crj.get("document_sha256")
-              and crj.get("audit_report_sha256") == au.json().get("report_sha256")
+              and crj.get("audit_report_hmac") and crj.get("audit_report_hmac") == au.json().get("report_hmac")
               and "NOT CHECKED (stopped)" in crj.get("content", "") and "<script" not in crj.get("content", "")
               and OWN_DOMAIN not in json.dumps(cr_ev))
 

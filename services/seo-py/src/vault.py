@@ -983,6 +983,22 @@ class CitationVault:
             raise VaultRecordInvalid("the field cannot be hashed")
         return self._key.key_id, self._key._cur.field_hash(tenant_id, field, value)
 
+    def field_hash_matches(self, tenant_id: str, field: str, value: str, expected) -> bool:
+        """Sink job B: True when ``expected`` is the log-field HMAC of ``value`` under the current key or the one
+        being retired (constant-time comparisons). Anything else (no key, a malformed argument) is False: a reader
+        fails closed."""
+        key = self._key
+        if key is None or not isinstance(expected, str):
+            return False
+        if not isinstance(tenant_id, str) or not TENANT_ID.fullmatch(tenant_id) or not isinstance(field, str) \
+                or not FIELD_HASH_NAME.fullmatch(field) or not isinstance(value, str):
+            return False
+        ok = False
+        for material in (key._cur, key._prev):
+            if material is not None and hmac.compare_digest(material.field_hash(tenant_id, field, value), expected):
+                ok = True
+        return ok
+
     def _open(self, key: VaultKey, tenant_id, vault_id) -> Optional[dict]:
         if not isinstance(tenant_id, str) or not TENANT_ID.fullmatch(tenant_id):
             return None

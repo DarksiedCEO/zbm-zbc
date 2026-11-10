@@ -122,7 +122,7 @@ class ManagerMixin:
         for a in self.audits.values():
             if a["status"] != "completed":
                 continue
-            for e in a["report"]["agents"]:
+            for e in a["facts"]["agents"]:                 # sink job B: the machine facts kept in the log
                 if e["agent"] == agent and e.get("task") == "search_performance":
                     # Osei's first-party Search Console step is scored on its own (sub-card below), so the main card
                     # keeps meaning what it always did: Osei's data-hygiene runs
@@ -132,7 +132,7 @@ class ManagerMixin:
                 if e["agent"] == agent:
                     runs += 1
                     outcomes[e["outcome"]] = outcomes.get(e["outcome"], 0) + 1
-                    produced += len(e["findings"])
+                    produced += e["findings"]
         if agent == "selene":
             for g in self.log_ingests.values():
                 if g["status"] == "finished":
@@ -144,8 +144,8 @@ class ManagerMixin:
         for s in self.schedules.values():
             for d in s["drifts"]:
                 drifts += 1
-                confirmed += d["drift"]["persisted_by_agent"].get(agent, 0)
-                overturned += d["drift"]["overturned_by_agent"].get(agent, 0)
+                confirmed += d["persisted_by_agent"].get(agent, 0)
+                overturned += d["overturned_by_agent"].get(agent, 0)
 
         def rate(n):
             return None if runs == 0 else round(n / runs, 4)

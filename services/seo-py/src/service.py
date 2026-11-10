@@ -50,6 +50,7 @@ from svc_optext import OperatorTextMixin
 from svc_reports import ReportsMixin
 from svc_schedules import SchedulesMixin
 from svc_tenants import TenantsMixin, OWN_TENANT
+from svc_vaulted import VaultedMixin
 
 INTERNAL = "seo"
 INTEGRITY_RETRY_S = 15
@@ -77,7 +78,7 @@ def request_sha(body: dict) -> str:
 
 
 class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixin, SchedulesMixin, ManagerMixin,
-                 GscMixin, EnginesMixin, ReportsMixin, CitationsMixin, OperatorTextMixin):
+                 GscMixin, EnginesMixin, ReportsMixin, CitationsMixin, OperatorTextMixin, VaultedMixin):
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, ports=None,
                  clock: Optional[Clock] = None, lock_token: Optional[str] = None, *,
                  observe_existing_on_start: bool = False):
@@ -734,8 +735,9 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
                 "evidence": out[offset:offset + limit], "log_length": n_lines}
 
     def audit_export(self, since_seq: int, limit: int) -> dict:
-        """The local log (it holds ids, codes, hashes, the tenants' registered domains and bounded report extracts;
-        no raw page body is ever stored)."""
+        """The local log (it holds ids, codes, hashes and the tenants' registered domains; no raw page body is ever
+        stored). Sink job B: an audit's report and a drift report are in the tenant's vault, and their lines hold a
+        ref, a keyed hash and machine facts; only a line written before it still carries the report."""
         with self.lock:
             if self._closed:
                 raise Unavailable(R("SERVICE_CLOSED"))
@@ -745,7 +747,8 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
             if r["kind"] == "audit_completed" and isinstance(d.get("report"), dict):
                 # AEGIS gl-gsc L2: retention applies here too. Past SEO_GSC_RETENTION_DAYS the report's
                 # search-performance breakdowns are served as totals only, as in the audit view (the section says
-                # ``expired``; report_sha256 is still the hash of the report as recorded)
+                # ``expired``; report_sha256 is still the hash of the report as recorded). Lines written before sink
+                # job B only: later ones carry no report
                 d["report"] = self.gsc_retained(d["report"], r["at"])
             out.append({"seq": r["seq"], "kind": r["kind"], "at": r["at"], "data": d})
             if len(out) >= limit:

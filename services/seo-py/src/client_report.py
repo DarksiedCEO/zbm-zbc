@@ -41,6 +41,8 @@ from agents import split_url
 from agents.prompt_guard import personal_data
 
 RENDERER_VERSION = "seo-client-report/2"        # 2: the "cited = returned by search" definition
+# sink job B: what the "Audit record" line calls the audit report's hash (False: an audit recorded before it)
+HASH_LABEL = {False: "report SHA-256", True: "report keyed hash (HMAC-SHA256)"}
 SUPPORTED_REPORT_VERSIONS = ("seo-audit-report/1",)
 FORMATS = {"markdown": "text/markdown; charset=utf-8", "html": "text/html; charset=utf-8"}
 
@@ -769,7 +771,10 @@ def build(audit: dict, tenant_id: str, branding: Branding = DEFAULT_BRANDING, pr
             or not isinstance(paths, list) or not paths \
             or not all(isinstance(p, str) and _REQ_PATH.fullmatch(p) for p in paths):
         raise ReportInputError("target malformed")
-    rsha = audit.get("report_sha256")
+    # sink job B: an audit's record hash is the keyed HMAC of its report (``report_hmac``); an audit recorded before
+    # has the plain SHA-256 (``report_sha256``). The document names which one it shows.
+    keyed = audit.get("report_hmac") is not None
+    rsha = audit.get("report_hmac") if keyed else audit.get("report_sha256")
     if not isinstance(rsha, str) or not _SHA.fullmatch(rsha):
         raise ReportInputError("report hash missing")
     started, finished = _ts(report.get("started_at")), _ts(report.get("finished_at"))
@@ -831,7 +836,8 @@ def build(audit: dict, tenant_id: str, branding: Branding = DEFAULT_BRANDING, pr
     return {
         "renderer_version": "seo-client-report/3" if any("homepage" in x for x in sections) else RENDERER_VERSION, "preview": bool(preview),
         "brand": {"name": branding.name, "accent": branding.accent},
-        "audit_id": aid, "report_sha256": rsha, "domain": domain, "scheme": scheme,
+        "audit_id": aid, "report_sha256": rsha, "report_hash_label": HASH_LABEL[keyed], "domain": domain,
+        "scheme": scheme,
         "pages": [{"path": ctx.shown[p][0], "url": ctx.page_url(ctx.shown[p][0]) if ctx.shown[p][1] else None}
                   for p in paths],
         "started": started, "finished": finished,
@@ -903,7 +909,7 @@ def render_markdown(m: dict) -> str:
           f"- **Audit ID:** {md_code(m['audit_id'])}",
           f"- **Run:** {md(m['started'])} to {md(m['finished'])}",
           f"- **Run outcome:** {md(m['run_outcome'])} (whether every check could run; not a score)",
-          f"- **Audit record:** report SHA-256 {md_code(m['report_sha256'])}, recorded on a tamper-evident ledger "
+          f"- **Audit record:** {m['report_hash_label']} {md_code(m['report_sha256'])}, recorded on a tamper-evident ledger "
           "when the audit completed.",
           f"- **Pages audited ({len(m['pages'])}):** " + ", ".join(md_code(p["path"]) for p in m["pages"]), "",
           "### What was checked", "",
@@ -1135,7 +1141,7 @@ def render_html(m: dict) -> str:
           f"<dt>Audit ID</dt><dd><code>{h(m['audit_id'])}</code></dd>",
           f"<dt>Run</dt><dd>{h(m['started'])} to {h(m['finished'])}</dd>",
           f"<dt>Run outcome</dt><dd>{h(m['run_outcome'])} (whether every check could run; not a score)</dd>",
-          f"<dt>Audit record</dt><dd>report SHA-256 <code>{h(m['report_sha256'])}</code>, recorded on a "
+          f"<dt>Audit record</dt><dd>{h(m['report_hash_label'])} <code>{h(m['report_sha256'])}</code>, recorded on a "
           "tamper-evident ledger when the audit completed</dd>",
           f"<dt>Pages audited ({len(m['pages'])})</dt><dd>"
           + ", ".join(_h_loc({"kind": "page", "path": p["path"]}, pages) for p in m["pages"]) + "</dd>",

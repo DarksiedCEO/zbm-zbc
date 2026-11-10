@@ -233,15 +233,17 @@ class GscMixin:
         return {**st, "read_started": bool(box.get("read_started")), "section": box.get("section")}
 
     @staticmethod
-    def gsc_evidence(aid: str, report: dict) -> list:
-        """``gsc_read_recorded`` beside the report record when the audit read Search Console."""
+    def gsc_evidence(aid: str, report: dict, keyed) -> list:
+        """``gsc_read_recorded`` beside the report record when the audit read Search Console. Sink job B: the section
+        is the client's first-party data, so its hash on the ledger is ``keyed(section)`` (the vault's keyed HMAC of
+        its canonical JSON), never a plain SHA-256."""
         b = report.get("search_performance")
         if not b or not b.get("read_started"):
             return []
         s = b.get("section")
         return [("gsc_read_recorded", f"audit:{aid}",
                  {"audit_id": aid, "outcome": b["outcome"], "reason": b.get("reason"),
-                  "section_sha256": None if s is None else sha(s),
+                  "section_hmac": None if s is None else keyed(s),
                   "totals": None if s is None else {k: s["totals"][k] for k in ("clicks", "impressions")}},
                  ("gsc_report", aid))]
 

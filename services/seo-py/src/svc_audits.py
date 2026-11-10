@@ -10,8 +10,9 @@ Rules:
     (ZBM's own properties) needs neither and refuses an invoice id;
   - one audit at a time per tenant; kill switches checked at the start and before every outbound step;
   - record-first: ``audit_requested`` (and Andre's approval) on the ledger and the log before any fetch; the report
-    is committed as ``audit_completed`` with its SHA-256 on the ledger. A run whose process died is marked
-    ``interrupted`` by the ``interrupted-audits`` job, never silently completed;
+    is the client's content: it is stored whole in the tenant's vault (svc_vaulted.py, sink job B) and
+    ``audit_completed`` keeps its blob ref, its keyed HMAC (also on the ledger) and machine facts only. A run whose
+    process died is marked ``interrupted`` by the ``interrupted-audits`` job, never silently completed;
   - the report keeps OUTCOME apart from FINDINGS per agent, says what was NOT_CONNECTED and why, and carries every
     agent's methodology and limitations. It never states a business effect (no first-party analytics / CRM is
     connected) and never claims superiority over anyone.
@@ -36,7 +37,10 @@ from primitives import Killed
 from primitives import diff as diff_mod
 from primitives.parse import SCHEMA_RULES_VERSION
 from reasons import R
+import sink_guard
+import vault as vault_mod
 from svc_optext import path_view, text_view, url_flag
+from svc_vaulted import REPORT_FIELD, SECTION_FIELD, normalised, owner_view
 
 log = logging.getLogger("seo.audits")
 REPORT_VERSION = "seo-audit-report/1"
@@ -313,20 +317,23 @@ class AuditsMixin:
             rk = self.rk("audit", tid, body)
             hbody = self._paths_hbody(tid, body)          # review c0c09bd1: the paths' HMACs, never the paths
             prev = self._idem(actor, rk, hbody)
-            if prev:
-                return self.audit_view(tid, prev[1])
-            aid = derived_id("aud", tid, actor, rk)
-            _authorize(self.tenants[tid], body, andre)
-            plan = self._invoice_plan(tid, body, andre)
+            if not prev:
+                aid = derived_id("aud", tid, actor, rk)
+                _authorize(self.tenants[tid], body, andre)
+                self._vaulted_key_check()                 # sink job B: nowhere to keep the report: nothing is run
+                plan = self._invoice_plan(tid, body, andre)
+        if prev:
+            return self.audit_view(tid, prev[1])          # the report is read from the vault outside the lock
         verification = self._verify_invoice(plan)         # Finance (31), outside the lock (W3-2)
         with self.lock:
             self._gate()
             self.check_kill(tenant=tid, capability="audit", write=True)
             prev = self._idem(actor, rk, hbody)
-            if prev:
-                return self.audit_view(tid, prev[1])
-            self._recheck_invoice(plan)
-            ps = self._open_audit(actor, tid, rk, body, andre, aid, request=hbody, verification=verification)
+            if not prev:
+                self._recheck_invoice(plan)
+                ps = self._open_audit(actor, tid, rk, body, andre, aid, request=hbody, verification=verification)
+        if prev:
+            return self.audit_view(tid, prev[1])
         return self._execute_audit(aid, tid, body, ps)
 
     def _open_audit(self, actor: str, tid: str, rk: str, body: dict, andre: bool, aid: str,
@@ -336,6 +343,7 @@ class AuditsMixin:
         ``verification`` is the invoice check made before (svc_invoices.py), recorded with the request."""
         t = self._get(self.tenants, tid, "TENANT_NOT_FOUND")
         _authorize(t, body, andre)
+        self._vaulted_key_check()                           # sink job B: no vault key, no audit (nothing written)
         ps = None
         if body.get("prompt_set_id"):
             p = self.prompt_sets.get(body["prompt_set_id"])
@@ -374,45 +382,69 @@ class AuditsMixin:
         self.running_audits.add(aid)
         return ps
 
-    def _execute_audit(self, aid: str, tid: str, body: dict, ps: Optional[dict]) -> dict:
+    def _execute_audit(self, aid: str, tid: str, body: dict, ps: Optional[dict], full: bool = True) -> dict:
+        """The run and its completion record. Nothing heavy under the service lock (sink job B): the report is
+        normalised, hashed (keyed) and encrypted OUTSIDE it; under it there is the kill-switch re-check, one vault
+        append and the commit. The answer (the owner's view) is read back from the vault outside the lock."""
         try:
+            sealed, failure, stop = None, None, None
             try:
-                report = self._run_audit(aid, tid, body, ps)
-            except Exception as exc:  # noqa: BLE001 - a run that crashes is closed now, never left running
-                # War room (WR-F008..F010): whatever a crawled site serves, the run ends in a recorded state. A bug in
-                # an agent closes the audit as interrupted RUN_FAILED (the exception's type is logged, nothing else)
-                # instead of answering 500 and leaving it "running" until the interrupted-audits job.
-                # AEGIS SEO Wave 3 L2: which step failed and where (module:function:line inside this service), never
-                # the exception's message (it could quote crawled content)
-                agent = getattr(exc, "seo_agent", None) or "report"
-                where = _where(exc)
-                log.error("audit run failed: %s in %s at %s", type(exc).__name__, agent, where)
+                try:
+                    report = self._run_audit(aid, tid, body, ps)
+                except Exception as exc:  # noqa: BLE001 - a run that crashes is closed now, never left running
+                    # War room (WR-F008..F010): whatever a crawled site serves, the run ends in a recorded state. A bug
+                    # in an agent closes the audit as interrupted RUN_FAILED (the exception's type is logged, nothing
+                    # else) instead of answering 500 and leaving it "running" until the interrupted-audits job.
+                    # AEGIS SEO Wave 3 L2: which step failed and where (module:function:line inside this service),
+                    # never the exception's message (it could quote crawled content)
+                    agent = getattr(exc, "seo_agent", None) or "report"
+                    where = where_code(exc)
+                    log.error("audit run failed: %s in %s at %s", type(exc).__name__, agent, where)
+                    failure = {"agent": agent, "where": where, "error_type": _error_type(exc)}
+                else:
+                    try:
+                        # review c0c09bd1: a flagged path is never kept. Then the report as it reads back from the
+                        # vault, its machine facts, its keyed HMAC and its encrypted lines (pending, unwritten)
+                        report = normalised(self._report_paths_kept(report, body))
+                        facts = report_facts(report)
+                        gsc_ev = self.gsc_evidence(aid, report, lambda sec: self._vaulted_hmac(tid, SECTION_FIELD, sec))
+                        sealed = self._vaulted_seal(tid, REPORT_FIELD, report)
+                    except Exception as exc:  # noqa: BLE001 - the report cannot be stored: closed, nothing raw kept
+                        log.error("audit report not stored: %s", type(exc).__name__)
+                        failure = _vault_failure(exc)
+                    finally:
+                        report = None                    # the plaintext report is dropped from memory either way
                 with self.lock:
                     self._gate()
-                    code = R("RUN_FAILED")
-                    fail = {"agent": agent, "where": where, "error_type": type(exc).__name__[:60]}
-                    self._commit("audit_interrupted", {"audit_id": aid, "reason": code, "failure": fail}, "seo",
-                                 evidence=("audit_interrupted", f"audit:{aid}",
-                                           {"audit_id": aid, "reason": code, **fail}, ("interrupted", aid)))
-                    return self.audit_view(tid, aid)
-            with self.lock:
-                self._gate()
-                stop = self.kill_code(tenant=tid, capability="audit", write=True)
-                if stop is not None:
-                    # AEGIS M3: a switch engaged during the run refuses the completion record. The run is closed as
-                    # interrupted (a terminal bookkeeping record, not new work) and the report is discarded.
-                    self._commit("audit_interrupted", {"audit_id": aid, "reason": stop}, "seo",
-                                 evidence=("audit_interrupted", f"audit:{aid}", {"audit_id": aid, "reason": stop},
-                                           ("interrupted", aid)))
-                    return self.audit_view(tid, aid)
-                report = self._report_paths_kept(report, body)   # review c0c09bd1: a flagged path never kept
-                rsha = sha(report)
-                self._commit("audit_completed", {"audit_id": aid, "report": report, "report_sha256": rsha},
-                             "seo", evidence=[("audit_report_recorded", f"audit:{aid}",
-                                               {"audit_id": aid, "report_sha256": rsha, "outcome": report["outcome"],
-                                                "findings": report["summary"]["findings"]}, ("report", aid))]
-                             + self.gsc_evidence(aid, report))
-                return self.audit_view(tid, aid)
+                    if failure is None:
+                        stop = self.kill_code(tenant=tid, capability="audit", write=True)
+                    if failure is None and stop is None:
+                        ev = [("audit_report_recorded", f"audit:{aid}",
+                               {"audit_id": aid, "report_hmac": sealed.hmac, "outcome": facts["outcome"],
+                                "findings": facts["findings"]}, ("report", aid))] + gsc_ev
+                        data = {"audit_id": aid, "report_ref": sealed.ref, "report_hmac": sealed.hmac, "facts": facts}
+                        try:
+                            self._vaulted_commit(sealed, lambda: self._commit("audit_completed", data, "seo",
+                                                                              evidence=ev))
+                        except vault_mod.VaultError as exc:   # the blob write failed: nothing of it is kept
+                            log.error("audit report not stored: %s", type(exc).__name__)
+                            failure = _vault_failure(exc)
+                    if failure is not None:
+                        code = R("RUN_FAILED")
+                        self._commit("audit_interrupted", {"audit_id": aid, "reason": code, "failure": failure},
+                                     "seo", evidence=("audit_interrupted", f"audit:{aid}",
+                                                      {"audit_id": aid, "reason": code, **failure},
+                                                      ("interrupted", aid)))
+                    elif stop is not None:
+                        # AEGIS M3: a switch engaged during the run refuses the completion record. The run is closed
+                        # as interrupted (a terminal bookkeeping record, not new work) and the report is discarded.
+                        self._commit("audit_interrupted", {"audit_id": aid, "reason": stop}, "seo",
+                                     evidence=("audit_interrupted", f"audit:{aid}", {"audit_id": aid, "reason": stop},
+                                               ("interrupted", aid)))
+            finally:
+                if sealed is not None:
+                    sealed.discard()                      # killed / failed: the encrypted lines are never written
+            return self.audit_view(tid, aid, full=full)
         finally:
             with self.lock:
                 self.running_audits.discard(aid)
@@ -424,7 +456,8 @@ class AuditsMixin:
                                                                                   "request_sha", "_obj", "evidence")},
                                       "paths": [x for x in paths if x is not None],
                                       "status": "running", "requested_at": at, "requested_by": d["actor"],
-                                      "completed_at": None, "report": None, "report_sha256": None}
+                                      "completed_at": None, "report": None, "report_sha256": None,
+                                      "report_hmac": None, "report_ref": None, "facts": None}
         if any(x is None for x in paths):
             self.audits[d["audit_id"]]["vault_unavailable"] = True
         if d.get("schedule_id"):
@@ -432,8 +465,16 @@ class AuditsMixin:
                                                                          "audit_id": d["audit_id"], "at": at}
 
     def _a_audit_completed(self, d, at):
-        self.audits[d["audit_id"]].update(status="completed", completed_at=at, report=d["report"],
-                                          report_sha256=d["report_sha256"])
+        """Sink job B: the record names the report's blob (``report_ref``), its keyed HMAC and the machine facts;
+        memory keeps no report. A record written BEFORE sink job B carries the whole report and its plain SHA-256:
+        it is kept as it was recorded (served through the same views), and its facts are derived here."""
+        a = self.audits[d["audit_id"]]
+        if "report" in d:
+            a.update(status="completed", completed_at=at, report=d["report"], report_sha256=d["report_sha256"],
+                     facts=report_facts(d["report"]))
+        else:
+            a.update(status="completed", completed_at=at, report_ref=d["report_ref"], report_hmac=d["report_hmac"],
+                     facts=d["facts"])
 
     def _a_audit_interrupted(self, d, at):
         self.audits[d["audit_id"]].update(status="interrupted", completed_at=at,
@@ -513,33 +554,54 @@ class AuditsMixin:
                                       "untrusted; none of it was acted on",
         }
 
-    def audit_view(self, tid: str, aid: str, full: bool = True) -> dict:
+    def audit_view(self, tid: str, aid: str, full: bool = True, masked: bool = True) -> dict:
+        """The owner's view. ``full``: with the report, read from the tenant's vault OUTSIDE the lock (sink job B); a
+        report that cannot be read (no key, a lost or changed blob) is ``None`` with ``vault_unavailable: true``.
+        ``masked`` (the API): the report through the client-view masker; internal readers (client report, drift) take
+        it as recorded."""
         with self.lock:
             a = self.audits.get(aid)
             if a is None or a["tenant_id"] != tid:
                 raise NotFound(R("AUDIT_NOT_FOUND"))
-            out = {k: v for k, v in a.items() if k != "report"}
+            out = {k: v for k, v in a.items() if k not in ("report", "report_ref")}
             # review c0c09bd1: the owner's view of the audit config: each path through the client-view URL masker
             out["paths"] = [path_view(a["scheme"], a["domain"], x) for x in a["paths"]]
             if a["status"] == "running" and aid not in self.running_audits:
                 out["status"] = "running_elsewhere_or_interrupted"
-            if full:
-                out["report"] = self.gsc_retained(a["report"], a.get("completed_at"))
-            return out
+            inline, ref, mac, done = a["report"], a.get("report_ref"), a.get("report_hmac"), a.get("completed_at")
+        if full:
+            report = inline
+            if inline is None and ref is not None:
+                report = self._vaulted_open(tid, REPORT_FIELD, ref, mac)
+                if report is None:
+                    out["vault_unavailable"] = True       # never served from anywhere else; dependants refuse
+            report = self.gsc_retained(report, done)
+            out["report"] = owner_view(report) if masked and report is not None else report
+        return out
+
+    def _audit_recorded(self, tid: str, aid: str) -> dict:
+        """An internal reader's view (client report, drift): the report as recorded, unmasked. Outside the lock. A
+        completed audit whose report cannot be read refuses VAULT_UNAVAILABLE (never a silent ``None``)."""
+        view = self.audit_view(tid, aid, masked=False)
+        if view["status"] == "completed" and view["report"] is None:
+            raise Unavailable(R("VAULT_UNAVAILABLE"))
+        return view
 
     def drift_view(self, tid: str, aid: str, against: str) -> dict:
-        """Search-truth drift between two completed audits of the same target (agents/drift.py), oldest first."""
+        """Search-truth drift between two completed audits of the same target (agents/drift.py), oldest first. Both
+        reports are read from the tenant's vault outside the lock; one that cannot be read refuses VAULT_UNAVAILABLE."""
         from agents import drift
         with self.lock:
             if self.agent_blocked("osei"):                 # the comparison is Osei's (AEGIS 1472041 M2)
                 raise Forbidden(R("AGENT_RESTRICTED"))
-            x, y = self.audit_view(tid, aid), self.audit_view(tid, against)
+            x, y = self.audit_view(tid, aid, full=False), self.audit_view(tid, against, full=False)
             order = {k: i for i, k in enumerate(self.audits)}          # log order: the order they were requested
         if x["status"] != "completed" or y["status"] != "completed":
             raise Conflict(R("AUDIT_NOT_COMPLETED"))
+        x, y = self._audit_recorded(tid, aid), self._audit_recorded(tid, against)
         a, b = sorted((x, y), key=lambda r: order[r["audit_id"]])
         try:
-            return drift.compare(a["report"], b["report"])
+            return owner_view(drift.compare(a["report"], b["report"]))
         except drift.NotComparable:
             raise Conflict(R("DRIFT_NOT_COMPARABLE")) from None
 
@@ -597,6 +659,47 @@ def _step(ctx, agent: str, task: str, fn):
 
 _SRC = Path(__file__).resolve().parent
 _AGENTS = frozenset({"selene", "delia", "roman", "entity_check", "callum", "naomi", "osei"})
+
+
+WHERE_UNKNOWN = "unknown"
+
+
+def where_code(exc: BaseException) -> str:
+    """Sink job B: ``_where`` as a machine code for the log and the ledger. A frame name such as ``<lambda>`` /
+    ``<listcomp>`` / ``<module>`` loses its angle brackets; a value the sink guard would still not take as a code
+    (too long, or reading as a credential label) falls back to ``module:line``, then to ``unknown``."""
+    raw = _where(exc).replace("<", "").replace(">", "")
+    mod, _, rest = raw.partition(":")
+    for cand in (raw, f"{mod}:{rest.rpartition(':')[2]}" if rest else raw):
+        if sink_guard.classify(cand) == "code":
+            return cand
+    return WHERE_UNKNOWN
+
+
+def _error_type(exc: BaseException) -> str:
+    name = type(exc).__name__[:60]
+    return name if sink_guard.classify(name) == "code" else "Exception"
+
+
+def _vault_failure(exc: BaseException) -> dict:
+    """The report could not be stored in the vault: machine codes only."""
+    out = {"agent": "report", "where": "vault", "error_type": _error_type(exc)}
+    if isinstance(exc, vault_mod.VaultUnavailable):
+        out["code"] = R("VAULT_UNAVAILABLE")
+    return out
+
+
+def report_facts(report: dict) -> dict:
+    """The machine facts of a report that the log keeps (sink job B): codes, counts and times. ``_apply``, the
+    department scorecards and the non-owner surfaces read these; never a title, a URL, a note or a prompt. Tolerant
+    of a missing part (a line written before sink job B is replayed through it)."""
+    envs = [e for e in report.get("agents") or [] if isinstance(e, dict)]
+    summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
+    return {"report_version": report.get("report_version"), "outcome": report.get("outcome"),
+            "findings": summary.get("findings", sum(len(e.get("findings") or []) for e in envs)),
+            "started_at": report.get("started_at"), "finished_at": report.get("finished_at"),
+            "agents": [{"agent": e.get("agent"), "task": e.get("task"), "outcome": e.get("outcome"),
+                        "findings": len(e.get("findings") or [])} for e in envs]}
 
 
 def _where(exc: BaseException) -> str:

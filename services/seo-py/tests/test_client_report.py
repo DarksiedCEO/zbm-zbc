@@ -382,12 +382,15 @@ def test_route_renders_a_real_audit_recorded_first_with_its_hash(tmp_path, srv):
     r = h.ok(_report(h, "zbm", a["audit_id"]))
     data = r["content"].encode()
     assert r["document_sha256"] == hashlib.sha256(data).hexdigest() and r["bytes"] == len(data)
-    assert r["audit_report_sha256"] == a["report_sha256"] and r["media_type"] == "text/html; charset=utf-8"
+    # sink job B: the render names the audit report by its KEYED hash (no plain SHA-256 of the report exists)
+    assert r["audit_report_hmac"] == a["report_hmac"] and len(a["report_hmac"]) == 64
+    assert r["audit_report_sha256"] is None and r["media_type"] == "text/html; charset=utf-8"
     assert r["renderer_version"] == "seo-client-report/3" and r["format"] == "html"
     ev = h.ledger.of_type("client_report_rendered")
     assert len(ev) == 1
     p = ev[0]["_payload"]
-    assert p["document_sha256"] == r["document_sha256"] and p["audit_report_sha256"] == a["report_sha256"]
+    assert p["document_sha256"] == r["document_sha256"] and p["audit_report_hmac"] == a["report_hmac"]
+    assert p["audit_report_sha256"] is None
     assert p["tenant_id"] == "zbm" and p["audit_id"] == a["audit_id"] and p["format"] == "html"
     assert p["branding_sha256"] == cr.DEFAULT_BRANDING.digest()
     assert "content" not in json.dumps(p) and "site.test" not in json.dumps(p)
