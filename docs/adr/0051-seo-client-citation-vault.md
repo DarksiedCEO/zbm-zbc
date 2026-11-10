@@ -111,8 +111,8 @@ service, adds a dependency and a network hop the department does not otherwise n
       separators; and `(xxx)` then seven digits however grouped), also across listed filler words (decision 19);
     - `email`: an address (the strict lane's plain and space-split forms), `name [at] domain [dot] tld` (a dot part
       required), `name at domain dot tld` / `name at domain.tld` and their letter-spaced / split-word forms; the
-      spelled " at " forms are not an e-mail only before a listed retailer domain AND after an ordinary prose word
-      (decision 18);
+      PLAIN spelled form `<word> at <domain>` and a price before "at" / "@" are not read as an e-mail (decision 22,
+      which replaces decision 18's retailer / prose exemption);
     - fail closed: over `MAX_INPUT`, a non-string, more than `CV_GROUPS_MAX` digit groups, an internal error.
 
     An excerpt is judged on its span AND the strict lane's margins (a value cut by the span edge is found whole); the
@@ -185,6 +185,53 @@ service, adds a dependency and a network hop the department does not otherwise n
     guard's e-mail patterns start only at the start of a local-part run and are possessive, the spelled-words form is
     decided by a linear scan that finds the same matches, and the year-range pattern is written without nested
     whitespace runs: the same accept / reject (fuzz-tested against the previous patterns), 64 KB in under 0.2 s.
+
+## Review c13529af: wrapped variants, dash folding, phone vs EAN, base64 offsets, operator text, plain " at "
+
+22. **The plain spelled " at " form is shown to the owner (owner decision, client view ONLY).** In the client view,
+    "<word> at <domain>" (ONE letters-only word, spaces, " at ", a domain written with literal dots and nothing
+    spelled, bracketed or defanged after it) is NOT read as an e-mail. Rationale: it is irreducibly ambiguous with
+    ordinary commerce prose ("Visit us at brand.com", "Get yours at shop.co.uk", "Our team at brand.com can help",
+    "Customers at brand.com rate it 4.8"); the client view is a courtesy on the owner's OWN data behind tenant
+    authentication (Option B), and every closed-list exemption tried before (decision 18, review 08eea6e1 SHOULD 5)
+    left either utility or recall gaps. The client view STILL masks: a literal "@" (also " @ "), "[at]" / "(at)" /
+    "{at}" (also "[a t]"), defanged dots, the spelled "dot" ("x at y dot com"), the hyphen / underscore / glued
+    variants, "at sign", the Spanish / French spellings, letter-spaced forms, and any spelled form whose local part
+    holds a digit, ".", "_", "+" or "-". S1: a local part of digits and dots only (a price: "$12.99 at", "12.99@") is
+    never an e-mail in the client view. The strict lane is unchanged: it withholds every one of these forms from the
+    log, the ledger, the data directory and every outbound surface. The retailer / prose / role lists of decision 18
+    (`CV_RETAILER_HOSTS`, `CV_PROSE_BEFORE_AT`, `CV_ROLE_WORDS`, `CV_PRONOUNS_BEFORE_RETAILER`, `_cv_unprose_at`) are
+    INERT: no rule calls them (tests still read them, so they are kept and documented, not deleted); decision 18 is
+    superseded. Residual: a real address written in the plain form ("jsmith at gmail.com", also a role mailbox such as
+    "sales at brand.com") and a numeric-only local part with "@" are shown to the owner.
+23. **Wrapped and split forms (both lanes).** In the e-mail variant view, spaces (line breaks read as spaces) next to
+    "-" / "_" are removed before the variants are read ("name-\nat-\ndomain", "name_\nat_", "at-\nsign"); a number
+    word, a listed filler word and the Spanish / French spelled words split by one line break are re-joined when the
+    halves form the word; "[a t]" / "(a t)" read as "[at]"; a JSON key wrapped before its closing quote is a label.
+24. **Unicode dashes (both lanes).** U+2010-2015, U+2212, U+FE58, U+FE63 and U+FF0D read as "-" in the per-character
+    map every view uses (typed dashes and the `&hyphen;` / `&dash;` / `&minus;` entities).
+25. **Phone numbers are never a safe shape (both lanes).** The EAN / ISBN / order / date safe shapes are not applied to
+    a digit run right after "+" or with a phone word ("tel", "phone", "call", "text", "whatsapp", "mobile", "cell",
+    "fax", "sms" ...) within 16 characters before it.
+26. **Base64 (both lanes, the same decoded views).** Offsets 0-8 (and the first 8 "-" / "_" boundaries) are all
+    decoded (no offset is skipped); 0-3 bytes are always tried trimmed at both ends of each decoding; format
+    characters (zero-width, bidi, TAG...) and Hangul fillers are removed BEFORE the readable-ratio test. Each run
+    gives its main readings and ONE edge view (at most 8 pieces of 128 characters; at most 16384 edge characters per
+    view) holding the trimmed edges and the head of a reading that only repeats an earlier one shifted by whole quanta.
+    Linear: the bytes are split at two character starts inside the trim zones and the middle is decoded once.
+27. **Operator text is checked before it is written (strict check).** A prompt set is written to `seo_log.jsonl` in
+    plaintext and its prompts / brand-term rules are sent to engines: every string field must pass
+    `secret_guard.check` (a credential: 422 `PROMPT_SECRET`; personal data: 422 `PROMPT_PERSONAL_DATA`; nothing
+    written). The MNC export shows a prompt only when the strict check passes too. Audit / schedule paths
+    (`PATH_WITHHELD`), entity values and provenance (`ENTITY_VALUE_WITHHELD`; check (e) waived on the telephone value
+    only) and URL-prefix Search Console properties (`GSC_PROPERTY_INVALID`) are refused the same way; a log-ingest
+    path-template segment kept by the template rules but failing the strict check (other than a label word alone,
+    such as "reset-password") is written as `{token}`.
+28. **Client view speed.** Strong-prefix scans are remembered per call (an identical string is scanned once), the
+    case-insensitive `db_uri` / `jwt` / `azure` families are skipped when a literal every match holds is absent, a
+    field found `cap` is not read further (also inside one digit span), and the per-word label and token reads are
+    skipped / memoised where they cannot change the answer (equivalence-tested). Measured worst case at 64 KB on the
+    adversarial repeats: see the review report; both lanes are linear.
 
 ## Threat model
 

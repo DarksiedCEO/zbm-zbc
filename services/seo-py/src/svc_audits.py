@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Optional
 
 from agents import RunContext, bots, brand_mention, delia, entity_check, osei, probes, roman, selene
+from agents import secret_guard
 from agents.prompt_guard import personal_data
 from clock import iso
 from envelope import CAPABILITIES, DATA_CLASSES, DECISIONS, EFFECT_CLASSES, envelope, sha, worst_outcome
@@ -80,6 +81,38 @@ def _brand_term_rules(raw: list, terms: list) -> list:
     return sorted(out, key=lambda x: terms.index(x["term"]))
 
 
+_PERSONAL_CHECKS = frozenset(("e_digits", "f_email", "url_personal"))
+
+
+def _strings(x) -> list:
+    """Every string inside a request body (keys and values; lists and objects walked)."""
+    if isinstance(x, str):
+        return [x]
+    if isinstance(x, dict):
+        return [s for k, v in x.items() for s in _strings(k) + _strings(v)]
+    if isinstance(x, (list, tuple)):
+        return [s for v in x for s in _strings(v)]
+    return []
+
+
+def _strict_prompt_set(body: dict) -> None:
+    """Review c13529af MUST 5: a prompt set is written to the log in plaintext and its prompts / brand-term rules are
+    sent to answer engines, so EVERY string field of it (name, brand terms, competitor domains, prompts, engines, every
+    brand-term rule field) must pass the shared core's STRICT check (secret_guard.check): a credential is refused
+    ``PROMPT_SECRET``, personal data ``PROMPT_PERSONAL_DATA``. 422, nothing written. The request id is a UUID
+    (models.REQUEST_ID) and is not free text."""
+    for s in _strings({k: v for k, v in body.items() if k != "request_id"}):
+        name = secret_guard.check(s)
+        if name is not None:
+            raise Invalid(R("PROMPT_PERSONAL_DATA" if name in _PERSONAL_CHECKS else "PROMPT_SECRET"))
+
+
+def path_withheld(scheme: str, domain: str, path: str) -> bool:
+    """An audit / schedule path (written to the log in plaintext) that the strict URL rules withhold (a credential or
+    personal data in a segment or the query: review c13529af MUST 5)."""
+    return secret_guard._url_verdict(f"{scheme}://{domain}{path}") is not None
+
+
 class AuditsMixin:
     # ------------------------------------------------------------------ prompt sets (versioned)
 
@@ -93,6 +126,7 @@ class AuditsMixin:
             raise Invalid(R("PROMPT_SET_INVALID"))
         if any(personal_data(p) for p in prompts):         # W4-3: prompts sent to an engine carry no personal data
             raise Invalid(R("PROMPT_PERSONAL_DATA"))
+        _strict_prompt_set(body)                            # review c13529af MUST 5: nothing written, nothing sent
         content = {"name": body["name"], "brand_terms": terms, "competitor_domains": sorted(body["competitor_domains"]),
                    "prompts": prompts, "engines": sorted(set(body["engines"]))}
         rules = _brand_term_rules(body.get("brand_term_rules") or [], terms)
@@ -146,7 +180,7 @@ class AuditsMixin:
     # ------------------------------------------------------------------ audits
 
     def request_audit(self, actor: str, tid: str, body: dict, andre: bool) -> dict:
-        _check_paths(body["paths"], self.settings.audit_max_pages)
+        _check_paths(body["paths"], self.settings.audit_max_pages, body.get("scheme", "https"), body["domain"])
         with self.lock:
             self._gate()
             self._get(self.tenants, tid, "TENANT_NOT_FOUND")
@@ -453,12 +487,14 @@ def _authorize(t: dict, body: dict, andre: bool) -> None:
         raise Invalid(R("INVOICE_NOT_FOR_OWN_TENANT"))
 
 
-def _check_paths(paths: list, max_pages: int) -> None:
+def _check_paths(paths: list, max_pages: int, scheme: str = "https", domain: str = "site.invalid") -> None:
     if len(paths) > max_pages:
         raise Invalid(R("AUDIT_TOO_LARGE"))
     if not paths or len(set(paths)) != len(paths) or any(
             not _PATH_OK.fullmatch(p) or p.startswith("//") or "#" in p or "\\" in p for p in paths):
         raise Invalid(R("PAGES_INVALID"))
+    if any(path_withheld(scheme, domain, p) for p in paths):
+        raise Invalid(R("PATH_WITHHELD"))
 
 
 def _skipped(agent: str, task: str, selene_env: dict) -> dict:

@@ -27,6 +27,7 @@ import logging
 from datetime import timedelta
 
 from agents import search_performance as sp
+from agents import secret_guard
 from clock import parse_iso
 from envelope import envelope, sha
 from errors import Conflict, Invalid, Unavailable
@@ -78,7 +79,9 @@ class GscMixin:
             if self._idem("andre", rk, body):
                 return self.tenant_view(tid)
             if prop is not None:
-                if not binding_ok(t, prop):
+                # review c13529af MUST 5: the property is written to the log in plaintext; a URL-prefix property whose
+                # path / query the strict URL rules withhold is refused
+                if not binding_ok(t, prop) or (prop.startswith("http") and secret_guard._url_verdict(prop) is not None):
                     raise Invalid(R("GSC_PROPERTY_INVALID"))
                 mine = _site(property_host(prop))
                 for other, o in self.tenants.items():

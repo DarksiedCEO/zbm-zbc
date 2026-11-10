@@ -13,6 +13,7 @@ import string
 import time
 
 import pytest
+import test_review_601e328a as r6
 import test_vault_wiring as vw
 
 import svc_citations
@@ -164,8 +165,10 @@ def test_strict_lane_withholds_every_new_shape_through_every_entry_point(cls):
 
 @pytest.mark.parametrize("cls", sorted(cases()))
 def test_client_view_masks_every_new_shape(cls):
-    samples = cases()[cls]
-    assert _misses(samples, _client_judge) == {}, cls
+    # c13529af (decision 22): the plain "name at domain.tld" samples are shown to the owner (masked until c13529af)
+    samples = [p for p in cases()[cls] if not r6.plain_spelled(p)]
+    assert samples and _misses(samples, _client_judge) == {}, cls
+    assert all(not sg.client_view_findings(p) for p in cases()[cls] if r6.plain_spelled(p)), cls
 
 
 @pytest.mark.parametrize("cls", sorted(client_cases()))
@@ -193,7 +196,10 @@ def test_a_spelled_email_in_a_url_is_withheld_by_safe_url_and_stored_url():
         assert f"{loc}%20at%20{dom}" not in sg.safe_url(u)
         st = callum.stored_url(u)
         assert st["withheld"] and loc not in json.dumps(st)
-        assert sg.client_view_url(u)[1] == sg.PERSONAL
+        # c13529af (decision 22): the plain form in a path segment is shown to the owner (PERSONAL until c13529af);
+        # the spelled " dot " form is still masked there
+        assert sg.client_view_url(u)[1] is None
+        assert sg.client_view_url(u.replace(".com/x", "%20dot%20com/x"))[1] == sg.PERSONAL
 
 
 def test_url_fragments_are_inspected_by_both_lanes():
@@ -295,7 +301,9 @@ def test_ordinary_prose_with_at_and_sentence_ends_is_kept():
 def _bites() -> dict:
     c = cases()
     return {
-        "at_word_email": ([("_at_word_email", lambda v: False)], c["spelled_email_dot"][:5]),
+        # c13529af (decision 22): the probes are the forms BOTH lanes still flag (the plain form is shown)
+        "at_word_email": ([("_at_word_email", lambda v: False)],
+                          [p for p in c["spelled_email_dot"] if not r6.plain_spelled(p)][:5]),
         "word_bridge": ([("_WORD_BRIDGE", re.compile(r"(?!x)x"))], c["word_padded_card"]),
         "ean_not_visa": ([("_cv_card_in_shape", None)], c["ean_visa13"]),
         "b64_offsets": ([("_b64_starts", lambda run: [0])], c["misaligned_b64"]),
@@ -326,7 +334,7 @@ def _ean_old(m):
     ("cv_at_word", "_at_word_email", lambda v: False, "spelled_email_dot"),
 ])
 def test_each_new_client_rule_is_load_bearing(monkeypatch, name, attr, value, cls):
-    probes = cases()[cls]
+    probes = [p for p in cases()[cls] if not r6.plain_spelled(p)]       # c13529af decision 22: plain form shown
     assert all(sg.client_view_findings(p) for p in probes)
     monkeypatch.setattr(sg, attr, value)
     assert sum(1 for p in probes if not sg.client_view_findings(p)) > 0, name

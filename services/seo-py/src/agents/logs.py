@@ -32,7 +32,7 @@ from typing import Callable, Optional
 from urllib.parse import unquote, urlsplit
 
 import lookalikes
-from agents import bots
+from agents import bots, secret_guard
 
 FORMATS = ("combined", "common", "jsonl")
 LINE_MAX = 8192
@@ -84,6 +84,11 @@ def _segment(seg: str) -> str:
     kind = _kind(folded)
     if kind is not None:
         return kind
+    # review c13529af MUST 5: a kept segment is written to the log in the ingest report, so it must also pass the
+    # shared core's STRICT check (a credential or personal value these rules miss becomes a placeholder); a label word
+    # alone ("reset-password") is kept: its value, if any, is another segment and is judged on its own
+    if secret_guard.check(seg) not in (None, "a_label"):
+        return "{token}"
     return _DIGITS.sub("{id}", seg)[:40]
 
 

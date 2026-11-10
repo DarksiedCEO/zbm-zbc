@@ -204,7 +204,9 @@ def recall_table() -> dict:
     table: dict = {}
     for cls, d, p in r6.recall_corpus():
         n, s, c = table.get(("601e328a", cls), (0, 0, 0))
-        table[("601e328a", cls)] = (n + 1, s + (sg.check(p) is None), c + (not sg.client_view_findings(p)))
+        # c13529af (decision 22): the plain spelled form is shown to the owner (not a client-view miss)
+        miss = not sg.client_view_findings(p) and not r6.plain_spelled(p)
+        table[("601e328a", cls)] = (n + 1, s + (sg.check(p) is None), c + miss)
     for name, samples in all_cases().items():
         want = CLASS_OF[name]
         for p in samples:
@@ -426,25 +428,23 @@ def test_the_four_utility_forms_are_shown_and_role_words_stay_masked():
     shown += [f"{pl} at {b} rate it 4.5 stars." for pl in PLURALS for b in BRAND_SITES[:3]]
     shown += [f"Use code SAVE10 at checkout on {b} today." for b in BRAND_SITES]
     shown += [f"It is {w} at {b} now." for w in PROSE for b in BRAND_SITES[:4]]
+    # c13529af (decision 22): the plain form is shown for EVERY single word, role words and pronouns included (they
+    # were masked until c13529af)
+    shown += [f"Write {w} at {b} today." for w in sorted(sg.CV_ROLE_WORDS) for b in BRAND_SITES[:2]]
+    shown += [f"Buy {p} at {b} today." for p in ("it", "them") for b in BRAND_SITES]
     assert sum(1 for t in shown if sg.client_view_findings(t)) == 0
     assert all(sg.check(t) is not None for t in shown)                   # the strict lane withholds them all
-    masked = [f"Write {w} at {b} today." for w in sorted(sg.CV_ROLE_WORDS) for b in BRAND_SITES[:2]]
-    masked += [f"Buy {p} at {b} today." for p in ("it", "them") for b in BRAND_SITES]
-    masked += [f"Write {w} at {r} today." for w in sorted(sg.CV_ROLE_WORDS - sg.CV_PRONOUNS_BEFORE_RETAILER)
-               for r in RETAILERS[:2]]
     loc, dom = r6._mail(rng)
-    masked += [f"It is available at {loc}{AT}{dom}.com today.", f"Customers at {loc} at {dom} dot com rate it."]
+    masked = [f"Write {w} at {b.replace('.', ' dot ')} today." for w in sorted(sg.CV_ROLE_WORDS)
+              for b in BRAND_SITES[:2]]
+    masked += [f"It is available at {loc}{AT}{dom}.com today.", f"Customers at {loc} at {dom} dot com rate it.",
+               f"Write {loc}2 at {dom}.com today.", f"Write {loc}.x at {dom}.com today."]
     assert sum(1 for t in masked if "email" not in sg.client_view_findings(t)) == 0
-    assert not (sg.CV_PROSE_BEFORE_AT & sg.CV_ROLE_WORDS) and not (sg.CV_PRONOUNS_BEFORE_RETAILER & sg.CV_PROSE_BEFORE_AT)
-    assert set(w.lower() for w in PLURALS) <= sg.CV_PROSE_BEFORE_AT
 
 
+# c13529af (decision 22): the "pronoun_before_retailer" and "plural_nouns" bites were removed with the lists they
+# exercised (now inert); the plain-form rule that replaces them is bitten in tests/test_review_c13529af.py
 UTILITY_BITES = {
-    "pronoun_before_retailer": (lambda mp: mp.setattr(sg, "CV_PRONOUNS_BEFORE_RETAILER", frozenset()),
-                                ["Buy it at amazon.com today.", "Buy them at walmart dot com today."]),
-    "plural_nouns": (lambda mp: mp.setattr(sg, "CV_PROSE_BEFORE_AT",
-                                           sg.CV_PROSE_BEFORE_AT - {w.lower() for w in PLURALS}),
-                     [f"{pl} at brightpaws.com rate it." for pl in PLURALS]),
     "join_stop_words": (lambda mp: mp.setattr(sg, "CV_JOIN_STOP", frozenset()),
                         [f"Use code SAVE10 at checkout on {b} today." for b in BRAND_SITES]),
 }

@@ -15,6 +15,7 @@ from __future__ import annotations
 import re
 from datetime import timedelta
 
+from agents import secret_guard
 from clock import parse_iso
 from errors import Conflict, Invalid
 from reasons import R
@@ -47,6 +48,11 @@ def validate_field(field: str, data: dict) -> None:
         raise Invalid(R("ENTITY_VALUE_INVALID"))
     if field == "telephone" and len(phone_digits(value)) != 10:
         raise Invalid(R("ENTITY_VALUE_INVALID"))
+    # review c13529af MUST 5: the value and its provenance are written to the log in plaintext, so both must pass the
+    # shared core's STRICT check (a business telephone number is the one waiver: check (e) on the telephone value)
+    waive = frozenset(("e_digits",)) if field == "telephone" else frozenset()
+    if secret_guard.check(value, waive) is not None or secret_guard.check(data["provenance"]) is not None:
+        raise Invalid(R("ENTITY_VALUE_WITHHELD"))
 
 
 class EntityMixin:

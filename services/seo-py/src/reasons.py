@@ -40,6 +40,10 @@ CODES = frozenset({
     "ENTITY_NOT_FOUND", "ENTITY_FIELD_UNKNOWN", "ENTITY_VALUE_INVALID", "ENTITY_VERSION_STALE", "ENTITY_EXISTS", "ENTITY_TENANT_KIND_INVALID",
     # prompt sets and probes
     "PROMPT_SET_NOT_FOUND", "PROMPT_SET_EXISTS", "PROMPT_SET_INVALID", "PROVIDER_UNKNOWN", "PROMPT_PERSONAL_DATA",
+    # operator text that fails the shared core's strict check is refused before anything is written (review c13529af
+    # MUST 5): a prompt-set field holding a credential; an audit / schedule path or an entity field holding a
+    # credential or personal data
+    "PROMPT_SECRET", "PATH_WITHHELD", "ENTITY_VALUE_WITHHELD",
     # answer-engine adapters (Wave 4; perplexity.py): the closed set an engine run reports
     "ENGINE_AUTH_REFUSED", "ENGINE_RATE_LIMITED", "ENGINE_UNAVAILABLE", "ENGINE_PROTOCOL_ERROR",
     "ENGINE_BUDGET_EXHAUSTED", "ENGINE_KILLED", "ENGINE_NOT_CONNECTED",

@@ -74,6 +74,20 @@ def _keys(rng) -> dict:
             "openai": "sk-" + "proj-" + _r(rng, ALNUM, 40), "google": "AI" + "za" + _r(rng, ALNUM, 35)}
 
 
+# review c13529af (owner decision, ADR 0051 decision 22): the client view shows the PLAIN spelled form "<word> at
+# <domain>" (a letters-only local part, " at ", a domain with literal dots, nothing spelled / bracketed / defanged
+# after it); every client-view assertion below that this decision changed excludes exactly these samples (the strict
+# lane still withholds every one of them)
+_PLAIN_AT = re.compile(r"(?<![A-Za-z0-9._%+\-])([A-Za-z]{2,}) {1,3}(?:at|AT|At) {1,3}([A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+)(?![A-Za-z0-9\-])")
+
+
+def plain_spelled(p: str) -> bool:
+    t = re.sub(r"[*`\\]", "", p)
+    if AT in t or any(b in t for b in "[({") or re.search(r"(?i)(?<![a-z])(?:dot|period|punto|point)(?![a-z])", t):
+        return False
+    return _PLAIN_AT.search(t) is not None
+
+
 def _md_escape(s: str) -> str:
     return "".join("\\" + c if c in "_.-*" else c for c in s)
 
@@ -337,7 +351,9 @@ def test_strict_lane_also_withholds_the_client_view_cases(cls):
 @pytest.mark.parametrize("cls", sorted({**strict_cases(), **client_cases()}))
 def test_client_view_masks_every_new_shape_through_every_entry_point(cls):
     samples = {**strict_cases(), **client_cases()}[cls]
-    assert _misses(samples, _client_everywhere, CLIENT_ENTRIES) == {}, cls
+    shown = [p for p in samples if plain_spelled(p)]                  # decision 22 (c13529af): shown to the owner
+    assert _misses([p for p in samples if not plain_spelled(p)], _client_everywhere, CLIENT_ENTRIES) == {}, cls
+    assert sum(1 for p in shown if sg.client_view_findings(p)) == 0, cls
 
 
 def test_only_real_tags_without_an_address_are_stripped():
@@ -359,9 +375,14 @@ def test_the_markdown_only_view_is_a_view():
 # ------------------------------------------------------------------------------------------------ MUST 4: retailer key
 
 def test_role_mailboxes_on_other_domains_are_all_masked():
+    # c13529af (decision 22): the plain "write sales at shop.com" form is shown; the spelled " dot " form stays masked
     texts = role_mailboxes()
     assert len(ROLE_WORDS) >= 40 and len(NON_RETAILERS) >= 10 and len(texts) >= 800
-    assert sum(1 for t in texts if "email" in sg.client_view_findings(t)) == len(texts)
+    dotted = [t for t in texts if " dot " in t]
+    assert len(dotted) == len(texts) // 2
+    assert sum(1 for t in dotted if "email" in sg.client_view_findings(t)) == len(dotted)
+    assert sum(1 for t in texts if " dot " not in t and sg.client_view_findings(t)) == 0
+    assert all(sg.check(t) is not None for t in texts)
 
 
 def test_prose_words_before_another_domain_are_shown_by_owner_decision_08eea6e1():
@@ -372,16 +393,20 @@ def test_prose_words_before_another_domain_are_shown_by_owner_decision_08eea6e1(
 
 
 def test_shop_prose_with_retailer_domains_is_shown():
+    # c13529af (decision 22): the plain form is shown; the spelled " dot " form is masked (it was shown until c13529af)
     texts = retailer_prose()
     assert len(texts) >= 300
-    assert sum(1 for t in texts if sg.client_view_findings(t)) == 0
+    assert sum(1 for t in texts if " dot " not in t and sg.client_view_findings(t)) == 0
+    assert sum(1 for t in texts if " dot " in t and "email" not in sg.client_view_findings(t)) == 0
     assert all(sg.check(t) is not None for t in texts)                 # the strict lane withholds them all
 
 
 def test_role_words_before_retailer_domains_are_masked():
-    # review 08eea6e1 SHOULD 5: "it" / "them" before a listed retailer are prose ("Buy it at amazon.com")
-    texts = [t for t in role_at_retailers() if t.split(" ")[1] not in sg.CV_PRONOUNS_BEFORE_RETAILER]
-    assert sum(1 for t in texts if "email" in sg.client_view_findings(t)) == len(texts)
+    # c13529af (decision 22): only the spelled " dot " form is masked now; the plain form is shown for every word
+    texts = role_at_retailers()
+    dotted = [t for t in texts if " dot " in t]
+    assert dotted and sum(1 for t in dotted if "email" in sg.client_view_findings(t)) == len(dotted)
+    assert sum(1 for t in texts if " dot " not in t and sg.client_view_findings(t)) == 0
 
 
 def test_the_lists_are_closed_disjoint_and_documented():
@@ -399,20 +424,24 @@ def test_mutation_role_words_added_back_is_caught(monkeypatch):
 
 
 def test_mutation_domain_check_removed_is_caught(monkeypatch):
-    # review 08eea6e1: the retailer check now keys only "it" / "them" (prose words pass for any domain)
+    # c13529af (decision 22): the retailer check is INERT (no rule calls it); the plain form is shown for any domain
+    # and the " dot " form masked for any domain, with or without it (a mutation bite until c13529af)
     texts = [f"Buy {w} at {d}.com now." for w in sorted(sg.CV_PRONOUNS_BEFORE_RETAILER) for d in NON_RETAILERS]
-    assert sum(1 for t in texts if "email" not in sg.client_view_findings(t)) == 0
-    monkeypatch.setattr(sg, "_cv_retailer_after", lambda v, i: True)
-    assert sum(1 for t in texts if "email" not in sg.client_view_findings(t)) > 0
+    dotted = [f"Buy {w} at {d} dot com now." for w in sorted(sg.CV_PRONOUNS_BEFORE_RETAILER) for d in NON_RETAILERS]
+    for patch in (False, True):
+        if patch:
+            monkeypatch.setattr(sg, "_cv_retailer_after", lambda v, i: True)
+        assert sum(1 for t in texts if sg.client_view_findings(t)) == 0
+        assert sum(1 for t in dotted if "email" not in sg.client_view_findings(t)) == 0
 
 
 def test_mutation_retailer_list_emptied_is_caught(monkeypatch):
-    # review 08eea6e1: prose words pass for any domain, so the list now keys the "it" / "them" form
+    # c13529af (decision 22): the retailer list is INERT (a mutation bite until c13529af): emptying it changes nothing
     hosts = sorted({t.split(" at ")[1].split(" ")[0] for t in retailer_prose() if " dot " not in t})
     texts = [f"Buy {p} at {h} for 12 dollars." for p in ("it", "them", "It", "Them") for h in hosts]
     assert len(texts) >= 40 and sum(1 for t in texts if sg.client_view_findings(t)) == 0
     monkeypatch.setattr(sg, "CV_RETAILER_HOSTS", frozenset())
-    assert sum(1 for t in texts if sg.client_view_findings(t)) > 0
+    assert sum(1 for t in texts if sg.client_view_findings(t)) == 0
 
 
 # ------------------------------------------------------------------------------------------------ MUST 5: recall
@@ -423,8 +452,10 @@ def test_client_view_recall_is_complete_on_every_required_class_and_disguise():
     classes = {c for c, _d, _p in corpus}
     assert {"card_visa", "card_visa13", "card_amex", "ssn", "phone", "phone_us", "email", "label_value",
             "url_userinfo", "github_classic", "pem"} <= classes
-    missed = [(c, d) for c, d, p in corpus if not sg.client_view_findings(p)]
+    # c13529af (decision 22): the plain spelled form ("spelled_literal": "name at domain.com") is shown to the owner
+    missed = [(c, d) for c, d, p in corpus if not sg.client_view_findings(p) and not plain_spelled(p)]
     assert missed == [], sorted(set(missed))[:20]
+    assert all(not sg.client_view_findings(p) for _c, _d, p in corpus if plain_spelled(p))
     strict_missed = [(c, d) for c, d, p in corpus if sg.check(p) is None]
     assert strict_missed == [], sorted(set(strict_missed))[:20]
 
@@ -464,10 +495,11 @@ def _probes(where):
 def test_each_new_rule_is_load_bearing(monkeypatch, name):
     patch, where, lane = BITES[name]
     probes = _probes(where)
-    assert all(sg.check(p) is not None and sg.client_view_findings(p) for p in probes), name
+    cv_probes = [p for p in probes if not plain_spelled(p)]           # c13529af decision 22: plain form shown
+    assert all(sg.check(p) is not None for p in probes) and all(sg.client_view_findings(p) for p in cv_probes), name
     patch(monkeypatch)
     strict_leaks = sum(1 for p in probes if sg.check(p) is None)
-    client_leaks = sum(1 for p in probes if not sg.client_view_findings(p))
+    client_leaks = sum(1 for p in cv_probes if not sg.client_view_findings(p))
     if lane in ("both", "strict"):
         assert strict_leaks > 0, (name, "strict: removing this rule broke nothing")
     if lane in ("both", "client"):

@@ -36,7 +36,7 @@ from svc_audits import _authorize, _check_paths
 
 class SchedulesMixin:
     def create_schedule(self, actor: str, tid: str, body: dict, andre: bool) -> dict:
-        _check_paths(body["paths"], self.settings.audit_max_pages)
+        _check_paths(body["paths"], self.settings.audit_max_pages, body.get("scheme", "https"), body["domain"])
         with self.lock:
             self._gate()
             t = self._get(self.tenants, tid, "TENANT_NOT_FOUND")

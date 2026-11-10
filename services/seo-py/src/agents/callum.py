@@ -787,7 +787,9 @@ def mnc_priority(per: dict, ps: dict, run_id: str, domain: str, generated_at: st
         instead = sorted(b["cited_instead"].values(), key=lambda x: (-x["answers"], str(x["url"])))[:10]
         comp = any(x["competitor"] for x in instead)
         items.append({"prompt_id": prompt_id(ps, pi), "prompt_index": pi,
-                      "prompt": observed(ps["prompts"][pi], 500) if personal_data(ps["prompts"][pi]) is None else None,
+                      # review c13529af MUST 5: the prompt is shown only when the STRICT check passes too
+                      "prompt": observed(ps["prompts"][pi], 500) if personal_data(ps["prompts"][pi]) is None
+                      and secret_guard.check(ps["prompts"][pi]) is None else None,
                       "mnc_answers": b["mnc"], "usable_answers": b["usable"],
                       "mentioned_not_cited": _rate(b["mnc"], b["usable"]),
                       "engines": sorted(b["engines"], key=lambda e: e["engine"]), "cited_instead": instead,

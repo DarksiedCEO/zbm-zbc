@@ -33,6 +33,8 @@ import base64
 import binascii
 import html
 import re
+import re._parser as _sre_parse
+import threading
 import unicodedata
 from urllib.parse import parse_qsl, unquote, unquote_plus, urlencode, urlsplit, urlunsplit
 
@@ -56,6 +58,10 @@ CHECKS = ("a_label", "b_userinfo", "c_prefix", "d_token", "e_digits", "f_email",
 _FOLD = lookalikes.Table()
 _HANGUL_FILLERS = frozenset("\u115f\u1160\u3164\uffa0")
 _BLANKS = frozenset("\u2800\u180e")                       # braille blank, Mongolian vowel separator: read as space
+# review c13529af MUST 2: every Unicode dash (hyphen, non-breaking hyphen, figure dash, en / em dash, horizontal bar,
+# minus sign, small em dash, small / full-width hyphen-minus) reads as "-" in every view (so ``&hyphen;`` / ``&dash;``
+# and a typed dash read as the ASCII hyphen the rules know)
+_DASHES = frozenset("\u2010\u2011\u2012\u2013\u2014\u2015\u2212\ufe58\ufe63\uff0d")
 _DROP_CATS = frozenset(("Cf", "Cc", "Mn", "Me", "Co", "Cn", "Cs"))
 _CMAP: dict = {}
 _CMAP_MAX = 20000
@@ -70,6 +76,8 @@ def _map_char(c: str) -> str:
         return r
     if _MAP_SPACES and (c.isspace() or c in _BLANKS or unicodedata.category(c) in ("Zs", "Zl", "Zp")):
         r = " "                                            # every Unicode space, line / paragraph separator, NEL
+    elif c in _DASHES:
+        r = "-"
     elif c in _HANGUL_FILLERS:
         r = ""                                             # Hangul fillers (letters by category, invisible in use)
     elif unicodedata.category(c) in _DROP_CATS:
@@ -85,6 +93,7 @@ def _map_char(c: str) -> str:
 
 
 _SPACES = re.compile(r" {2,}")
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
 def _nfkc(t: str) -> str:
@@ -116,7 +125,7 @@ def _clean(text: str) -> str:
     """Step 1 without decoding: NFKC, the per-character map (spaces, invisibles, joiners, controls), NFKC again (a
     removed joiner can let characters compose), runs of spaces collapsed."""
     t = _nfkc(text)
-    if not t.isascii() or any(c < " " or c == "\x7f" for c in t):
+    if not t.isascii() or _CONTROL.search(t):
         t = _nfkc(_map_chars(t))
     return _collapse(t)
 
@@ -142,7 +151,19 @@ def _strip_md(t: str) -> str:
 
 
 def _strip_tags(t: str) -> str:
-    return _TAG.sub(lambda m: m.group(0) if _TAG_KEEP.search(m.group(0)) else "", t) if "<" in t else t
+    if "<" not in t:
+        return t
+    keep: dict = {}                                        # tag -> kept or removed (a repeated tag is read once)
+
+    def repl(m: re.Match) -> str:
+        g = m.group(0)
+        r = keep.get(g)
+        if r is None:
+            r = g if _TAG_KEEP.search(g) else ""
+            if len(keep) < TOKEN_MEMO_MAX:
+                keep[g] = r
+        return r
+    return _TAG.sub(repl, t)
 
 
 def _strip_markup(t: str) -> str:
@@ -161,46 +182,129 @@ _B64_RUN = re.compile(r"[A-Za-z0-9+/_\-]{12,}={0,2}")
 _HEX_RUN = re.compile(r"(?:[0-9a-fA-F]{2}){8,}")
 
 
-DECODE_TRIM = 3                          # undecodable bytes trimmed at each end of a decoded run (review 08eea6e1 MUST 4)
-B64_OFFSETS = 8                          # a base64 run is decoded from offsets 0..B64_OFFSETS-1 (and its boundaries)
+DECODE_TRIM = 3                          # bytes trimmed at each end of a decoded run (review 08eea6e1 / c13529af MUST 4)
+B64_OFFSETS = 9                          # a base64 run is decoded from offsets 0..B64_OFFSETS-1 (and its boundaries)
+DECODE_EDGE = 128                        # characters of each trimmed / shifted edge kept in a run's edge view
+DECODE_EDGES_MAX = 8                     # edge pieces kept per run
+DECODE_EDGE_TOTAL = 16384                # edge characters kept per decoded view (bounded; past it, main readings only)
+# between two edge pieces: a 12-letter word (no digit run, filler-word bridge, number word or label crosses it)
+_EDGE_JOIN = " qzqzqzqzqzqz "
+
+
+class _InvisibleTable(dict):
+    """``str.translate`` table: a format character (zero-width, bidi, soft hyphen, TAG characters...) or a Hangul
+    filler removed (review c13529af MUST 4d: before the readable-ratio test, so padding cannot hide a payload)."""
+
+    def __missing__(self, o: int) -> str | None:
+        c = chr(o)
+        r = None if (unicodedata.category(c) == "Cf" or c in _HANGUL_FILLERS) else c
+        if len(self) < _CMAP_MAX:
+            self[o] = r
+        return r
+
+
+class _UnreadableTable(dict):
+    """``str.translate`` table keeping only the characters that are NOT readable (not printable and not a tab / line
+    break): ``len(s.translate(...))`` counts them in one C-speed pass."""
+
+    def __missing__(self, o: int) -> str | None:
+        c = chr(o)
+        r = None if (c.isprintable() or c in "\n\t\r") else c
+        if len(self) < _CMAP_MAX:
+            self[o] = r
+        return r
+
+
+_INVISIBLE = _InvisibleTable()
+_UNREADABLE = _UnreadableTable()
+
+
+def _visible(s: str) -> str:
+    return s if s.isascii() else s.translate(_INVISIBLE)
+
+
+def _unreadable(s: str) -> int:
+    return 0 if s.isprintable() else len(s.translate(_UNREADABLE))
 
 
 def _readable(s: str) -> str | None:
     if not s:
         return None
-    if s.isprintable():
-        return s
-    ok = sum(1 for c in s if c.isprintable() or c in "\n\t\r")
-    return s if ok >= 0.85 * len(s) else None
+    return s if _unreadable(s) <= 0.15 * len(s) else None
+
+
+def _utf8(b: bytes) -> str | None:
+    try:
+        return _visible(b.decode("utf-8"))
+    except UnicodeDecodeError:
+        return None
+
+
+def _windows(b: bytes) -> list:
+    """Every readable window of ``b``: (lead, tail, text) for ``lead`` / ``tail`` bytes trimmed at each end (0 to
+    ``DECODE_TRIM``; review c13529af MUST 4c: always tried, not only on a decode error), decoded as UTF-8, format
+    characters removed, then the readable-ratio test. Linear: ``b`` is split at two character starts inside the trim
+    zones, the middle is decoded and counted ONCE and only the few edge bytes are decoded per window."""
+    n, tr = len(b), max(0, int(DECODE_TRIM))
+    out: list = []
+    if n <= 4 * (tr + 4):
+        for lead in range(tr + 1):
+            for tail in range(tr + 1):
+                s = _utf8(b[lead:n - tail]) if n - tail - lead > 0 else None
+                if s and _readable(s) is not None:
+                    out.append((lead, tail, s))
+        return out
+    p = next((i for i in range(tr, tr + 4) if not 0x80 <= b[i] <= 0xBF), None)
+    q = next((i for i in range(n - tr, n - tr - 4, -1) if i == n or not 0x80 <= b[i] <= 0xBF), None)
+    if p is None or q is None:
+        return out                                         # four continuation bytes in a row: no window decodes
+    mid = _utf8(b[p:q])
+    if mid is None:
+        return out                                         # undecodable inside the body: no trim reaches it
+    bad_mid = _unreadable(mid)
+    heads = [_utf8(b[lead:p]) for lead in range(tr + 1)]
+    tails = [_utf8(b[q:n - tail]) for tail in range(tr + 1)]
+    for lead, h in enumerate(heads):
+        if h is None:
+            continue
+        for tail, t in enumerate(tails):
+            if t is None:
+                continue
+            size = len(h) + len(mid) + len(t)
+            if size and _unreadable(h) + bad_mid + _unreadable(t) <= 0.15 * size:
+                out.append((lead, tail, h + mid + t))
+    return out
 
 
 def _printable(b: bytes) -> str | None:
-    """``b`` as readable UTF-8 text, or None. Review 08eea6e1 MUST 4: up to ``DECODE_TRIM`` undecodable bytes are
-    trimmed at each end first (an aligned prefix / suffix glued onto a base64 payload decodes to a few garbage bytes
-    around the payload). At most ``2 * (DECODE_TRIM + 1)`` decodes, each in C."""
-    for lead in range(DECODE_TRIM + 1):
-        seg = b[lead:] if lead else b
-        try:
-            s = seg.decode("utf-8")
-        except UnicodeDecodeError as e:
-            if e.start < len(seg) - DECODE_TRIM:
-                if e.start >= DECODE_TRIM + 1 - lead:
-                    return None                            # undecodable inside the body: no trim reaches it
-                continue
-            try:
-                s = seg[:e.start].decode("utf-8")
-            except UnicodeDecodeError:
-                continue
-        r = _readable(s)
-        if r is not None:
-            return r
-    return None
+    """``b`` as readable UTF-8 text (the first readable window: fewest bytes trimmed at the start, then at the end),
+    or None."""
+    w = _windows(b)
+    return w[0][2] if w else None
+
+
+def _readings(b: bytes) -> tuple:
+    """(main reading or None, edge pieces): the first readable window in full, and the first / last ``DECODE_EDGE``
+    characters of every other readable window whose start / end differs from it (a junk byte that decoded is read
+    both glued and trimmed off)."""
+    w = _windows(b)
+    if not w:
+        return None, []
+    main = w[0][2]
+    edges: list = []
+    for _lead, _tail, s in w[1:]:
+        if not s.startswith(main[:DECODE_EDGE]):
+            edges.append(s[:DECODE_EDGE])
+        if not s.endswith(main[-DECODE_EDGE:]):
+            edges.append(s[-DECODE_EDGE:])
+    return main, edges
 
 
 def _b64_starts(run: str) -> list:
-    """Where a base64 run is decoded from (review adacb2ca MUST 4, review 08eea6e1 MUST 4): offsets 0 to
-    ``B64_OFFSETS - 1`` (a prefix of up to seven characters glued on: ``x`` + payload, ``abcd`` + payload) and just
-    after each of its first ``DECODE_BOUNDARIES_MAX`` ``-`` / ``_`` (``ref-`` / ``x_``)."""
+    """Where a base64 run is decoded from (review adacb2ca MUST 4, review 08eea6e1 / c13529af MUST 4): offsets 0 to
+    ``B64_OFFSETS - 1`` (0-8: a prefix of up to eight characters glued on: ``x`` + payload, ``abcd`` + payload,
+    ``abcdefgh`` + payload) and just after each of its first ``DECODE_BOUNDARIES_MAX`` ``-`` / ``_`` (``ref-`` /
+    ``x_``). Every start is decoded (no offset is skipped)."""
     starts = list(range(B64_OFFSETS))
     for i, c in enumerate(run):
         if c in "-_":
@@ -216,12 +320,34 @@ def _b64_decode(run: str) -> bytes:
     return base64.b64decode(body + "=" * (-len(body) % 4), validate=True)
 
 
+def _shifted(prev: list, s: str) -> bool:
+    """``s`` is an earlier main reading of the same run with a few leading characters removed (offset ``k + 4`` decodes
+    the bytes of offset ``k`` past its first three): only its head is new."""
+    return len(s) > 2 * DECODE_EDGE and any(0 <= len(p) - len(s) <= 16 and p.endswith(s[DECODE_EDGE:]) for p in prev)
+
+
 def _decoded_runs(t: str) -> list:
     """Base64- and hex-looking runs of ``t`` decoded (when they decode to readable text), for inspection only.
     Bounded: at most ``DECODE_RUNS_MAX`` runs of at most ``DECODE_RUN_MAX`` characters each; a base64 run is decoded
-    from each of its ``_b64_starts`` (a constant number per run)."""
+    from each of its ``_b64_starts`` (a constant number per run). Each run gives its main readings and ONE edge view
+    (``_EDGE_JOIN``-joined, at most ``DECODE_EDGES_MAX`` pieces of ``DECODE_EDGE`` characters; at most
+    ``DECODE_EDGE_TOTAL`` edge characters per call): the trimmed edges of every readable window, and the head of a
+    reading that only repeats an earlier one shifted by whole quanta."""
     out: list = []
+    budget = [DECODE_EDGE_TOTAL]
     n = 0
+
+    def emit(mains: list, edges: list) -> None:
+        for s in mains:
+            out.append(_clean(s))
+        kept: list = []
+        for e in edges:
+            c = _clean(e)
+            if c and c not in kept and len(kept) < DECODE_EDGES_MAX and budget[0] >= len(c):
+                budget[0] -= len(c)
+                kept.append(c)
+        if kept:
+            out.append(_EDGE_JOIN.join(kept))
     for rx in (_HEX_RUN, _B64_RUN):
         for m in rx.finditer(t):
             n += 1
@@ -233,22 +359,26 @@ def _decoded_runs(t: str) -> list:
                     b = bytes.fromhex(run if len(run) % 2 == 0 else run[:-1])
                 except ValueError:
                     continue
-                s = _printable(b)
+                s, edges = _readings(b)
                 if s:
-                    out.append(_clean(s))
+                    emit([s], edges)
                 continue
-            done: set = set()
+            mains: list = []
+            edges: list = []
             for k in _b64_starts(run):
-                if 4 <= k < B64_OFFSETS and k - 4 in done:
-                    continue                               # the same payload one quantum later: already read
                 try:
                     b = _b64_decode(run[k:])
                 except (ValueError, binascii.Error):
                     continue
-                s = _printable(b)
-                if s:
-                    done.add(k)
-                    out.append(_clean(s))
+                s, more = _readings(b)
+                if not s:
+                    continue
+                if _shifted(mains, s):
+                    edges.append(s[:DECODE_EDGE])
+                else:
+                    mains.append(s)
+                edges.extend(more)
+            emit(mains, edges)
     return out
 
 
@@ -407,9 +537,28 @@ def _letters_view(v: str, strip_marks: bool = True) -> str:
     syllables are kept whole), then only letters kept."""
     f = _FOLD.fold_cased(v)
     if strip_marks and not f.isascii():
-        f = "".join(c for c in unicodedata.normalize("NFKD", f) if not unicodedata.combining(c))
+        f = unicodedata.normalize("NFKD", f).translate(_MARKS)   # combining marks removed (C speed)
         f = unicodedata.normalize("NFC", f)
-    return "".join(c for c in f if c.isalpha())
+    return _alpha(f)
+
+
+class _AlphaTable(dict):
+    """``str.translate`` table: every character that is not ``isalpha()`` removed (filled on first use, bounded)."""
+
+    def __missing__(self, o: int) -> str | None:
+        c = chr(o)
+        r = c if c.isalpha() else None
+        if len(self) < _CMAP_MAX:
+            self[o] = r
+        return r
+
+
+_ALPHA = _AlphaTable()
+
+
+def _alpha(s: str) -> str:
+    """Only the letters of ``s`` (``isalpha``), in one C-speed pass."""
+    return s.translate(_ALPHA)
 
 
 _FOLD_CACHE: dict = {}
@@ -477,9 +626,22 @@ def _spaced_label(v: str) -> bool:
     return any(_fold_piece(x) in _PIECES for x in _LETTER_RUN.findall(chars) if len(x) >= 3)
 
 
+# every short / piece label is ASCII: when every LETTER of a view is ASCII (its pieces fold to lower case), a piece, a
+# whole word, a split pair, a letter-spaced label all leave the label's letters contiguous among the view's letters, so
+# when no label is there the per-word reads are skipped (review c13529af MUST 6: the same answer, linear in C)
+_PIECES_IN = re.compile("|".join(sorted(_PIECES, key=len, reverse=True)))
+
+
 def _label_hit(v: str) -> bool:
     if _SIG_RX.search(v) or _KEY_VALUE.search(v):
         return True
+    raw = _alpha(v)
+    if raw.isascii() and not _PIECES_IN.search(raw.lower()):
+        letters = _letters_view(v)
+        if _JOINED_RX.search(letters):
+            return True
+        raw_letters = letters if v.isascii() else _alpha(v.lower())
+        return any(s.replace(" ", "") in raw_letters or s.replace(" ", "") in letters for s in _SCRIPT)
     n = len(v)
     for m in _PIECE_RX.finditer(v):
         p = m.group(0)
@@ -518,7 +680,7 @@ def _label_hit(v: str) -> bool:
     letters = _letters_view(v)
     if _JOINED_RX.search(letters):
         return True
-    raw_letters = letters if v.isascii() else "".join(c for c in v.lower() if c.isalpha())
+    raw_letters = letters if v.isascii() else _alpha(v.lower())
     return any(s.replace(" ", "") in raw_letters or s.replace(" ", "") in letters for s in _SCRIPT)
 
 
@@ -585,14 +747,23 @@ _LINEAR_FORMS = {"jwt": r"(?<![A-Za-z0-9_\-])(?>[A-Za-z0-9_\-]*?eyJ)[A-Za-z0-9_\
 _PREFIX_EACH = tuple((n, re.compile(_LINEAR_FORMS.get(n, rx))) for n, rx in PROVIDERS)
 _PREFIX_EACH_NOSPACE = tuple((n, rx) for n, rx in _PREFIX_EACH if n in NOSPACE_FAMILIES)
 _LONG = 256
+# review c13529af MUST 6: a literal every match of the family holds (checked with ``in``, C speed, before the family's
+# own scan; the case-insensitive ``db_uri`` alternation alone was half the cost of a 64 KB scan)
+_PREFIX_MIN = min(_sre_parse.parse(rx).getwidth()[0] for _n, rx in PROVIDERS)   # 9 (a ``db_uri`` scheme)
+_PREFIX_NEEDS = {"db_uri": ("://",), "jwt": ("eyJ",), "mapbox": ("eyJ",),
+                 "azure": ("AccountKey=", "SharedAccessSignature", "SharedAccessKey=", "sv=20")}
 
 
 def _prefix_found(s: str, nospace: bool = False) -> bool:
     """A strong-key prefix family matches in ``s`` (the bare ``sk-`` family only with a digit and a capital)."""
-    if len(s) <= _LONG:
-        rx = _PREFIX_NOSPACE_RX if nospace else _PREFIX_RX
-        return any(m.lastgroup != "sk_generic" or _sk_ok(m) for m in rx.finditer(s))
+    if len(s) < _PREFIX_MIN:
+        return False                                       # shorter than the shortest match of any family
+    # one scan per family (each has a literal the engine searches for quickly; review c13529af MUST 6: faster than
+    # the combined alternation at every length, 13 us against 34 us on a 52-character text)
     for n, rx in (_PREFIX_EACH_NOSPACE if nospace else _PREFIX_EACH):
+        need = _PREFIX_NEEDS.get(n)
+        if need is not None and not any(x in s for x in need):
+            continue                                       # a literal every match holds is absent: no match
         for m in rx.finditer(s):
             if n != "sk_generic" or _sk_ok(m):
                 return True
@@ -637,6 +808,7 @@ _SAFE_SHAPES = re.compile(
 
 
 _DIGIT_CHARS = re.compile(r"[0-9]")
+_ANY_DIGIT = re.compile(r"\d")
 
 
 def _digits(s: str) -> list:
@@ -673,14 +845,29 @@ def _shape_ok(m: re.Match) -> bool:
     return True
 
 
+# review c13529af MUST 3: a digit safe shape (EAN, ISBN, order number, date) is never applied to a run written as a
+# phone number: right after "+" (``_B`` lets it through), or with a phone word ("tel:", "phone", "call", "text",
+# "whatsapp", "mobile", "cell", "fax", "sms"...) within ``PHONE_CONTEXT`` characters before it. Both lanes.
+PHONE_CONTEXT = 16
+_DIGIT_SHAPES = frozenset(("order", "ymd", "iso", "isbn13", "isbn10", "ean"))
+_PHONE_BEFORE = re.compile(r"(?i)\+[\s(]{0,3}$|(?<![a-z])(?:tel|tele|telephone|phone|phones|ph|call|calls|text|texts|txt"
+                           r"|sms|whatsapp|wa|mobile|mob|cell|cellphone|fax|telefono|t\u00e9l\u00e9phone|handy)(?![a-z])")
+
+
+def _phone_context(v: str, a: int) -> bool:
+    return _PHONE_BEFORE.search(v, max(0, a - globals()["PHONE_CONTEXT"]), a) is not None
+
+
 def _masked(v: str) -> str:
     """``v`` with every allowlisted safe shape replaced by a mark that no digit run or token can cross."""
-    if not any(c.isdigit() for c in v):
-        return v
+    if not _ANY_DIGIT.search(v):
+        return v                                           # every safe shape holds a decimal digit
     out, at = [], 0
     for m in _SAFE_SHAPES.finditer(v):
         if not _shape_ok(m):
             continue
+        if m.lastgroup in _DIGIT_SHAPES and _phone_context(v, m.start()):
+            continue                                       # a phone number, never a safe shape
         a, b = m.span(m.lastgroup) if m.lastgroup == "sha" else m.span()
         out.append(v[at:a])
         out.append(_MASK)
@@ -710,8 +897,15 @@ def _classes(r: str) -> tuple:
     return (any(c.isupper() for c in r), any(c.islower() for c in r), any(c.isdigit() for c in r))
 
 
+_LD_CHANGE = re.compile(r"(?<=[0-9])(?=[A-Za-z])|(?<=[A-Za-z])(?=[0-9])")
+_CS_CHANGE = re.compile(r"(?<=[A-Z])(?=[a-z])|(?<=[a-z])(?=[A-Z])")
+
+
 def _transitions(r: str) -> tuple:
-    """(letter<->digit changes, upper<->lower changes) along ``r``."""
+    """(letter<->digit changes, upper<->lower changes) along ``r`` (an ASCII run is counted by two C-speed scans: the
+    same counts, review c13529af MUST 6)."""
+    if r.isascii():
+        return len(_LD_CHANGE.findall(r)), len(_CS_CHANGE.findall(r))
     ld = cs = 0
     prev = None
     for c in r:
@@ -806,6 +1000,7 @@ def _prefix_after_separator(t: str) -> bool:
 
 
 TOKEN_MEMO_MAX = 4096                    # distinct tokens remembered per call (repeated words are checked once)
+_FILLER_ONLY = ("filler",)
 
 
 def _token_hit(v: str) -> bool:
@@ -821,36 +1016,41 @@ def _token_hit(v: str) -> bool:
         return len(nw) >= MIXED_MIN and _random_run(nw, joined=True)
 
     def same_bad(parts: list) -> bool:
-        j = "".join(parts)
-        return len(parts) >= 4 and any(c.isdigit() for c in j) and (_random_run(j, joined=True)
-                                                                    or bool(_AWS_JOINED.search(j)))
+        if len(parts) < 4:
+            return False
+        j = "".join(parts)                                 # short parts are ``_RUN`` pieces: ASCII
+        return _DIGIT_CHARS.search(j) is not None and (_random_run(j, joined=True) or bool(_AWS_JOINED.search(j)))
 
-    for t in toks:
-        if t and "\ue000" not in t and not _ALNUM.search(t):
-            continue                                       # r2 part 2: a filler-only piece (``,,,,``) pads, never splits
-        t = t.strip(_EDGE)
-        if t:
-            t = _TOK_FILLER.sub("-", t)                    # any other filler run inside a token is a separator
-        got = seen.get(t)
+    for raw in toks:
+        got = seen.get(raw)
         if got is None:                                    # the per-token checks are a function of the token alone
-            j = _TOK_SEP.sub("", t)
-            got = (any(_random_run(r) for r in _RUN.findall(t))
-                   or (j != t and (_split_key(t, j) or _prefix_after_separator(t)))
-                   or (j != t and _prefix_found(j)), j)    # (the last: a prefix key split by separators)
+            if raw and "\ue000" not in raw and not _ALNUM.search(raw):
+                got = _FILLER_ONLY                         # r2 part 2: a filler-only piece (``,,,,``) pads, never splits
+            else:
+                t = raw.strip(_EDGE)
+                if t:
+                    t = _TOK_FILLER.sub("-", t)            # any other filler run inside a token is a separator
+                j = _TOK_SEP.sub("", t)
+                got = (any(_random_run(r) for r in _RUN.findall(t))
+                       or (j != t and (_split_key(t, j) or _prefix_after_separator(t)))
+                       or (j != t and _prefix_found(j)), j,  # (the last: a prefix key split by separators)
+                       _tokenish(j), bool(j) and len(j) <= 4 and bool(_RUN.fullmatch(j)))
             if len(seen) < TOKEN_MEMO_MAX:
-                seen[t] = got
+                seen[raw] = got
+        if got is _FILLER_ONLY:
+            continue
         if got[0]:
             return True
         j = got[1]
         # fragments of a key split by spaces / line breaks: consecutive token-like pieces, and runs of 3+ pieces of
         # one length (``AKIA IOSF ODNN 7EXA MPLE``, ``A K I A ...``)
-        if _tokenish(j):
+        if got[2]:
             chain.append(j)
-        else:
-            if chain_bad(chain):
+        elif chain:
+            if len(chain) >= 2 and chain_bad(chain):
                 return True
             chain = []
-        short = bool(j) and len(j) <= 4 and bool(_RUN.fullmatch(j))
+        short = got[3]
         if short and (not same or len(same[0]) == len(j)):
             same.append(j)
         else:
@@ -917,6 +1117,12 @@ def _bridge_sub(rx: re.Pattern, v: str, sep: str) -> str:
     out: list = []
     last = 0
     prev_end, prev_n, run = -1, 0, 0
+    split = [None]                                         # any split filler word in v at all (read once, lazily)
+
+    def split_gap(a: int, b: int) -> bool:
+        if split[0] is None:
+            split[0] = " " in v and globals()["_SPLIT_FILLER"].search(v) is not None
+        return split[0] and _split_gap(rx, v, a, b)
     for g in _DIGIT_GROUP.finditer(v):
         a, n = g.start(), g.end() - g.start()
         if prev_end < 0:
@@ -924,7 +1130,7 @@ def _bridge_sub(rx: re.Pattern, v: str, sep: str) -> str:
         elif _SEP_GAP.fullmatch(v, prev_end, a):
             run += n
         elif (lo <= prev_n <= hi and lo <= n <= hi and (min(prev_n, n) > 1 or run >= need)
-              and rx.fullmatch(v, prev_end, a)):
+              and (rx.fullmatch(v, prev_end, a) or split_gap(prev_end, a))):
             out.append(v[last:prev_end])
             out.append(sep)
             last = a
@@ -938,6 +1144,19 @@ def _bridge_sub(rx: re.Pattern, v: str, sep: str) -> str:
     return "".join(out)
 
 
+BRIDGE_GAP_REJOIN = 64                   # longest gap read again with its split filler words re-joined
+
+
+def _split_gap(rx: re.Pattern, v: str, a: int, b: int) -> bool:
+    """The gap ``v[a:b]`` bridges once a filler word split by one line break is re-joined (``fol\nlowed by``, review
+    c13529af MUST 1). Bounded: only gaps of at most ``BRIDGE_GAP_REJOIN`` characters."""
+    if b - a > BRIDGE_GAP_REJOIN:
+        return False
+    g = v[a:b]
+    j = _rejoin(globals()["_SPLIT_FILLER"], g)
+    return j != g and rx.fullmatch(j) is not None
+
+
 def _unbridged(v: str, sep: str) -> str:
     """``v`` with every filler-word bridge between two digit groups replaced by ``sep``."""
     return _bridge_sub(globals()["_WORD_BRIDGE"], v, sep)
@@ -947,6 +1166,24 @@ def _unbridged_fillers(v: str, sep: str) -> str:
     """``v`` with every bridge of listed filler words (``CV_FILLER_WORDS``) between two digit groups replaced by
     ``sep``: the same bridge, a closed word list (client view: the rules without a check digit)."""
     return _bridge_sub(globals()["_CV_WORD_BRIDGE"], v, sep)
+
+
+# review c13529af MUST 1: a word split by ONE line break (read as a space) is re-joined when its halves form a listed
+# word (number words, filler words, the Spanish / French spelled e-mail words)
+def _split_rx(words) -> re.Pattern:
+    """Every listed word written with ONE space inside it (``fo ur``), as a whole word, case-insensitive; grouped by
+    first letter, so each position tries one branch."""
+    alts = sorted({w[:i] + " " + w[i:] for w in words for i in range(1, len(w))}, key=len, reverse=True)
+    by_first: dict = {}
+    for a in alts:
+        by_first.setdefault(a[0], []).append(a[1:])
+    body = "|".join(re.escape(f) + "(?:" + "|".join(re.escape(x) for x in xs) + ")" for f, xs in sorted(by_first.items()))
+    return re.compile(r"(?i)(?<![a-z])(?:" + body + r")(?![a-z])")
+
+
+def _rejoin(rx: re.Pattern, v: str) -> str:
+    """``v`` with every match of ``rx`` (a listed word split by one space) written without the space."""
+    return rx.sub(lambda m: m.group(0).replace(" ", ""), v) if " " in v else v
 
 
 # review 08eea6e1 NIT: a number spelled as words ("four one one one ...", "zero" / "oh" for 0) is read as digits in a
@@ -960,13 +1197,20 @@ _NUMBER_WORD_RUN = re.compile(r"(?i)(?<![a-z])%s(?:[ ,\-]{1,3}+%s){%d,}(?![a-z])
 _NUMBER_WORD = re.compile(r"(?i)%s(?: ++(?=%s))?" % (_NW, _NW))
 
 
+_SPLIT_NUMBER = _split_rx(NUMBER_WORDS)
+_SPLIT_FILLER = _split_rx(CV_FILLER_WORDS)
+
+
 def _number_word_view(v: str) -> str:
-    """``v`` with every run of ``NUMBER_WORDS_MIN``+ number words written as digits (``v`` itself when none)."""
-    low = v.lower()
-    if not any(w in low for w in ("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "zero")):
+    """``v`` with every run of ``NUMBER_WORDS_MIN``+ number words written as digits (``v`` itself when none). A number
+    word split by one line break (``fo\nur``) is re-joined first (review c13529af MUST 1)."""
+    w = _rejoin(globals()["_SPLIT_NUMBER"], v)
+    low = w.lower()
+    if not any(x in low for x in ("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "zero")):
         return v
-    return _NUMBER_WORD_RUN.sub(lambda m: _NUMBER_WORD.sub(lambda x: NUMBER_WORDS[x.group(0).strip().lower()],
-                                                           m.group(0)), v)
+    out = _NUMBER_WORD_RUN.sub(lambda m: _NUMBER_WORD.sub(lambda x: NUMBER_WORDS[x.group(0).strip().lower()],
+                                                          m.group(0)), w)
+    return v if out == w else out
 
 
 def _digits_hit(v: str) -> bool:
@@ -990,7 +1234,7 @@ def _digits_hit_on(v: str) -> bool:
 # ------------------------------------------------------------------------------------------------ 2f. e-mail
 
 _EMAIL_PLAIN = re.compile(r"[A-Za-z0-9._%+\-]@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,24}(?![A-Za-z])")
-_EMAIL_BRACKET = re.compile(r"(?i)[a-z0-9._%+\-] ?[\[\(\{<] ?(?:at|@) ?[\]\)\}>] ?[a-z0-9\-]{1,63}")
+_EMAIL_BRACKET = re.compile(r"(?i)[a-z0-9._%+\-] ?[\[\(\{<] ?(?:a ?t|@) ?[\]\)\}>] ?[a-z0-9\-]{1,63}")   # "[a t]" too
 _EMAIL_SPELLED = re.compile(r"(?i)[a-z0-9._%+\-] at [a-z0-9\-]{1,63}(?: ?[\[\(\{<]? ?dot ?[\]\)\}>]? ?[a-z0-9\-]{1,63}){1,4}"
                             r"(?![a-z])")
 # ``_EMAIL_SPELLED`` is the specification; ``_spelled_email`` decides the same thing in linear time. The regex engine
@@ -1156,7 +1400,7 @@ def _spaced_join(v: str, stop) -> bool:
 # review 08eea6e1 MUST 1: a DEFANGED dot ([dot] (dot) {dot} <dot> [.] (.) {.} <.>, any case, optional spaces; the NIT
 # spellings [period] / [punto] / [point] too) is read as "." in an e-mail view of its own, so a real "@" or a spelled
 # " at " followed by bracketed dots reads as an address (multi-label domains included)
-_DEFANG_DOT = re.compile(r"(?i) ?[\[\(\{<] ?(?:dot|\.|period|punto|point) ?[\]\)\}>] ?")
+_DEFANG_DOT = re.compile(r"(?i) ?[\[\(\{<] ?(?:d ?o ?t|\.|period|punto|point) ?[\]\)\}>] ?")
 
 
 def _defanged(v: str) -> str:
@@ -1180,14 +1424,34 @@ _GLUED_DOT = re.compile(r"(?<=[a-z0-9])DOT(?=[a-z0-9])")
 _VARIANT_HINTS = ("_at", "-at", "at_", "at-", "sign", "arroba", "arobase", "period", "punto", "point", "_dot", "-dot")
 
 
+# review c13529af MUST 1: a variant WRAPPED at a natural point (a line break, read as a space, before / after a hyphen
+# or at an underscore: ``name-\nat-\ndomain``, ``name_\nat_``, ``at-\nsign``) reads as written unwrapped: in the
+# variant view, spaces next to "-" / "_" are removed first; a Spanish / French spelled word split by a line break
+# (``arro\nba``, ``pun\nto``) is re-joined when its halves form the word
+_WRAP_SEP = re.compile(r" ?([-_]) ?")
+_SPLIT_WORDS = ("arroba", "arobase", "punto", "point", "period")
+
+
+_SPLIT_VARIANT = _split_rx(_SPLIT_WORDS)
+
+
 def _spelled_variants(v: str) -> str:
-    """``v`` with the spelled e-mail variants written as " at " / " dot " (``v`` itself when none). Linear: four
+    """``v`` with the spelled e-mail variants written as " at " / " dot " (``v`` itself when none). Linear: a few
     bounded substitutions."""
+    if " " in v:
+        if "-" in v or "_" in v:
+            v0 = v
+            v = _WRAP_SEP.sub(r"\1", v)
+        else:
+            v0 = v
+        v = _rejoin(_SPLIT_VARIANT, v)
+    else:
+        v0 = v
     low = v.lower()
     if "@" not in v and "AT" not in v and "DOT" not in v and not any(h in low for h in _VARIANT_HINTS):
-        return v
+        return v0
     w = _GLUED_DOT.sub(" dot ", _GLUED_AT.sub(" at ", _VAR_DOT.sub(" dot ", _VAR_AT.sub(" at ", v))))
-    return v if w == v else _collapse(w)
+    return v0 if w == v else _collapse(w)
 
 
 def _email_views(v: str) -> list:
@@ -1227,7 +1491,8 @@ def _email_forms(v: str) -> bool:
             if _joins_to_domain(v[m.end():m.end() + 1024].lstrip(" ").split(" ")):
                 return True
     low = v.lower()
-    if (("at" in low or "@" in v) and ("[" in v or "(" in v or "{" in v or "<" in v)) and _EMAIL_BRACKET.search(v):
+    if (("at" in low or "a t" in low or "@" in v) and ("[" in v or "(" in v or "{" in v or "<" in v)) \
+            and _EMAIL_BRACKET.search(v):
         return True
     if _at_word_email(v):
         return True
@@ -1922,13 +2187,15 @@ def _cv_label_rx() -> re.Pattern:
 
 
 _CV_LABEL = _cv_label_rx()
-_CV_SCRIPT = re.compile("|".join(" ?".join(re.escape(c) for c in s.replace(" ", ""))
+# review c13529af S5: the letters of a non-Latin label may be joined by a space or "_" (``<label_word>value``, XML tag
+# form)
+_CV_SCRIPT = re.compile("|".join("[ _]?".join(re.escape(c) for c in s.replace(" ", ""))
                                  for s in sorted(set(_SCRIPT) | {"\u043f\u0430\u0440\u043e\u043b\u044c"},
                                                  key=len, reverse=True)))
 # what follows a label: closing quotes / brackets / emphasis, then a separator, then opening quotes / brackets, then a
 # value of 4+ characters (stopped by a space, a quote, a bracket, ``|`` ``,`` ``;`` ``&``)
 _CV_AFTER = re.compile(
-    "[\"'\\]\\)>*`]{0,3} ?(?:(?P<p>:|=>|=|->|\u2192|\u21d2|\\||>)"
+    " ?[\"'\\]\\)>*`]{0,3} ?(?:(?P<p>:|=>|=|->|\u2192|\u21d2|\\||>)"
     "| (?:is|-|\u2013|\u2014) |(?P<w> (?:was|are|would be|will be|remains) ))"
     " ?[\"'`<\\[(*|]{0,3} ?(?P<val>[^\\s\"'`<>|,;&)\\]]{4,}|[^\\s\"'`<>|,;&)\\]]{1,3} [^\\s\"'`<>|,;&)\\]]{1,16})")
 
@@ -1985,14 +2252,32 @@ def _cv_label(v: str) -> bool:
     return False
 
 
+_CV_MEMO = threading.local()
+
+
+def _cv_prefix_found(s: str) -> bool:
+    """``_prefix_found(s)`` (every family), remembered for the length of one client-view call (review c13529af MUST 6:
+    a view, its space-removed form and its token joins are often identical across views; each is scanned once)."""
+    memo = getattr(_CV_MEMO, "prefix", None)
+    if memo is None:
+        return _prefix_found(s)
+    r = memo.get(s)
+    if r is None:
+        r = memo[s] = _prefix_found(s)
+    return r
+
+
 def _cv_strong(v: str) -> bool:
-    """A strong-key prefix (2c) on the view, on the view with every space removed (every family), and on each token
-    with its separators removed (a prefix key with separators put in: ``sk-pr-oj-...``)."""
-    if _prefix_hit(v):
+    """A strong-key prefix (2c) on the view, on the view with every space removed (every family: a superset of the
+    strict lane's no-space families), the AWS id with separators removed, and on each token with its separators
+    removed (a prefix key with separators put in: ``sk-pr-oj-...``)."""
+    if _cv_prefix_found(v):
         return True
-    if " " in v and _prefix_found(v.replace(" ", "")):
+    if " " in v and _cv_prefix_found(v.replace(" ", "")):
         return True
     ns = _CV_NOSEP.sub("", v)
+    if _AWS_JOINED.search(ns):
+        return True
     if "BEGIN" in ns and _CV_PEM.search(ns):
         return True                                        # a PEM / PGP header with spaces or separators put in
     toks = [t for t in (x.strip(_EDGE) for x in v.split(" ") if len(x) >= 12) if _TOK_SEP.search(t)]
@@ -2001,10 +2286,10 @@ def _cv_strong(v: str) -> bool:
     # every token with separators is read three ways, each as ONE text (one regex pass, not one per token): its
     # separators all removed, and removed only after its first / second separator (the prefix's own one kept)
     joined = " ".join(_TOK_SEP.sub("", t) for t in toks)
-    if _CV_JOINED_START.search(joined) or _prefix_found(joined):
+    if _CV_JOINED_START.search(joined) or _cv_prefix_found(joined):
         return True
     for k in (1, 2):
-        if _prefix_found(" ".join(_cv_after_sep(t, k) for t in toks)):
+        if _cv_prefix_found(" ".join(_cv_after_sep(t, k) for t in toks)):
             return True
     for t in toks:
         if t[0] not in "MNO":
@@ -2058,8 +2343,8 @@ def _cv_userinfo(v: str) -> bool:
     return False
 
 
-_CV_BRACKET_AT = re.compile(r"(?i)[a-z0-9._%+\-] ?[\[\(\{<] ?(?:at|@) ?[\]\)\}>] ?")
-_CV_DOT = re.compile(r"(?i) ?[\[\(\{<] ?(?:dot|\.) ?[\]\)\}>] ?| dot |\s?\.\s?")   # [dot] / [.] / dot / .
+_CV_BRACKET_AT = re.compile(r"(?i)[a-z0-9._%+\-] ?[\[\(\{<] ?(?:a ?t|@) ?[\]\)\}>] ?")      # "[a t]" too
+_CV_DOT = re.compile(r"(?i) ?[\[\(\{<] ?(?:d ?o ?t|\.) ?[\]\)\}>] ?| dot |\s?\.\s?")   # [dot] / [.] / dot / .
 _CV_DOMAIN = re.compile(r"(?i)[a-z0-9\-]{1,63}+(?:\.[a-z0-9\-]{1,63}+){1,4}+(?![a-z0-9\-])")
 
 # Client view only (review 601e328a MUST 4, owner decision): the SPELLED " at " forms (``name at domain.tld``,
@@ -2197,36 +2482,79 @@ def _cv_unprose_at(v: str) -> str:
     return _CV_TOKEN_AT.sub(repl, v)
 
 
+# Review c13529af UTILITY (owner decision, ADR 0051 decision 22): the client view does NOT read the PLAIN spelled form
+# ``<word> at <domain>`` (one letters-only word, spaces, " at ", a domain written with literal dots and nothing spelled
+# or defanged after it) as an e-mail: it is irreducibly ambiguous with prose ("Visit us at brand.com", "Get yours at
+# shop.com", "Our team at brand.co.uk"). It still reads the literal "@", "[at]" / "(at)" / "{at}", defanged dots, the
+# spelled "dot" ("x at y dot com"), the hyphen / underscore / glued variants, "at sign", the Spanish / French
+# spellings, letter-spaced forms, and any spelled form whose local part holds a digit, ".", "_", "+" or "-". S1: a
+# local part that is only digits and dots (a price: "$12.99 at", "12.99@") is never an e-mail here. The retailer /
+# prose / role lists above (``CV_RETAILER_HOSTS``, ``CV_PROSE_BEFORE_AT``, ``CV_ROLE_WORDS``,
+# ``CV_PRONOUNS_BEFORE_RETAILER``, ``_cv_unprose_at``) are now INERT: kept (tests still read them) but no rule calls
+# them. The strict lane is unchanged (it withholds every one of these forms).
+_CV_TOKEN_SEP = re.compile(r"(?<![A-Za-z0-9._%+\-])([A-Za-z0-9._%+\-]++)(?:([ \t\n]{1,3})([Aa][Tt])(?=[ \t\n])|( ?)@)")
+_CV_PRICE = re.compile(r"[0-9.]*[0-9][0-9.]*")
+_CV_WORD = re.compile(r"[A-Za-z]+")
+_CV_PLAIN_HOST = re.compile(r"[ \t\n]{1,3}[A-Za-z0-9\-]{1,63}+(?:\.[A-Za-z0-9\-]{1,63}+)++(?![A-Za-z0-9\-])")
+_CV_HOST_GOES_ON = re.compile(r"(?i) ?[\[\(\{<] ?(?:d ?o ?t|\.|period|punto|point) ?[\]\)\}>]"
+                              r"| ?(?:dot|period|punto|point)(?![a-z]) ?[a-z0-9]")
+
+
+def _cv_plain_at(v: str) -> str:
+    """``v`` with every "at" / "@" the client view does not read as an e-mail blanked to NULs (decision 22): " at "
+    after one letters-only word (not letter-spaced) before a plainly dotted domain, and " at " / "@" after a price.
+    Linear: a token starts only at the start of its run and is read possessively; each host read is bounded."""
+    if "t" not in v and "T" not in v and "@" not in v:
+        return v
+
+    def repl(m: re.Match) -> str:
+        tok = m.group(1)
+        if _CV_PRICE.fullmatch(tok):
+            return tok + (m.group(2) + "\x00\x00" if m.group(3) else m.group(4) + "\x00")       # S1: a price
+        if not m.group(3) or not _CV_WORD.fullmatch(tok):
+            return m.group(0)
+        s0 = m.start(1)
+        if len(tok) == 1 and s0 >= 2 and v[s0 - 1] == " " and v[s0 - 2] != " " and (s0 < 3 or v[s0 - 3] == " "):
+            return m.group(0)                              # a letter-spaced local part ("j o h n at ...")
+        h = _CV_PLAIN_HOST.match(v, m.end(), m.end() + CV_HOST_READ)
+        if h is None or _CV_HOST_GOES_ON.match(v, h.end()):
+            return m.group(0)
+        return tok + m.group(2) + "\x00\x00"
+    return _CV_TOKEN_SEP.sub(repl, v)
+
+
 def _cv_email(v: str) -> bool:
     """An address (the strict lane's plain and split forms), ``name [at] domain [dot] tld`` (a dot part required, so
-    ``meet us (at) the venue`` is prose) or ``name at domain dot tld`` / ``name at domain.tld`` and their
-    letter-spaced / split forms (not an ordinary prose word before a listed retailer domain: ``_cv_unprose_at``)."""
-    if "@" in v and _cv_at_email(v):
+    ``meet us (at) the venue`` is prose), ``name at domain dot tld``, the spelled variants and the letter-spaced /
+    split forms; not the plain ``<word> at <domain>`` form nor a price before "at" / "@" (``_cv_plain_at``)."""
+    u = globals()["_cv_plain_at"](v)
+    if "@" in u and _cv_at_email(u):
         return True
-    low = v.lower()
-    if ("at" in low or "@" in v) and ("[" in v or "(" in v or "{" in v or "<" in v):     # name[@]domain[.]com too
+    low = u.lower()
+    if ("at" in low or "a t" in low or "@" in u) and ("[" in u or "(" in u or "{" in u or "<" in u):  # [@] [.] too
         n = 0
-        for m in _CV_BRACKET_AT.finditer(v):
+        for m in _CV_BRACKET_AT.finditer(u):
             n += 1
             if n > EMAIL_AT_MAX:
                 return True                                # fail closed
-            tail = _CV_DOT.sub(".", v[m.end():m.end() + 300])
+            tail = _CV_DOT.sub(".", u[m.end():m.end() + 300])
             if _CV_DOMAIN.match(tail):
                 return True
-    d = _defanged(v)                                       # review 08eea6e1 MUST 1: "@" with defanged dots
-    if d != v and "@" in d and _cv_at_email(d):
+    d = _defanged(u)                                       # review 08eea6e1 MUST 1: "@" with defanged dots
+    if d != u and "@" in d and _cv_at_email(d):
         return True
-    if "at" not in low and "a t" not in low and "@" not in v and "arroba" not in low and "arobase" not in low:
-        return False
-    # the spelled " at " forms: prose skipped (``_cv_unprose_at``), then read as written, with defanged dots
-    # (MUST 1) and with the spelled variants (MUST 2): the shared e-mail views of the strict lane
-    for w in _email_views(_cv_unprose_at(v)):
+    views = _email_views(u)
+    if len(views) == 1 and "at" not in low and "a t" not in low:
+        return False                                       # no "at" and no variant / defanged view: nothing to read
+    # the spelled forms, read as written, with defanged dots (MUST 1) and with the spelled variants (MUST 2): the
+    # shared e-mail views of the strict lane
+    for w in views:
         wl = w.lower()
         if _at_word_email(w):
-            return True                                    # ``name at domain.tld`` (the strict lane's rule)
+            return True                                    # ``name at domain.tld`` (not the plain form: blanked)
         if " at " in wl and "dot" in wl and _spelled_email(w):
             return True
-        if _spaced_spelled_email(w) and _spaced_join(w, CV_JOIN_STOP):
+        if _spaced_join(w, CV_JOIN_STOP) and _spaced_spelled_email(w):
             return True                                    # letter-spaced / split words (review 601e328a MUST 3)
     return False
 
@@ -2309,6 +2637,9 @@ def _cv_span(w: str, s: re.Match, out: set, kinds=CV_NUMBER_KINDS) -> int:
     number of digit groups read."""
     span = s.group(0)
     gs = [(g.start(), g.end()) for g in _CV_GROUP.finditer(span)]
+    if len(gs) > CV_GROUPS_MAX:
+        out.add("cap")                                     # fail closed before reading thousands of groups
+        return len(gs)
     seps = [span[gs[i][1]:gs[i + 1][0]] for i in range(len(gs) - 1)]
     digits = "".join(span[a:b] for a, b in gs)
     if len(digits) < 9:
@@ -2377,7 +2708,7 @@ def _cv_numbers_on(v: str) -> set:
         for x, kinds in passes:
             for s in _CV_SPAN.finditer(x):
                 groups += _cv_span(x, s, out, kinds)
-                if groups > CV_GROUPS_MAX:
+                if groups > CV_GROUPS_MAX or "cap" in out:
                     out.add("cap")                         # fail closed: a field of thousands of numbers is masked
                     return out
     return out
@@ -2398,17 +2729,26 @@ def _cv_label_nospace(v: str) -> bool:
 
 
 def _cv_findings(text: str) -> set:
+    """Every client-view rule on every (distinct) inspection view. Review c13529af MUST 6: a rule already found is not
+    read again, the strong-prefix scans are remembered for the call (an identical string is scanned once), and a field
+    found ``cap`` (fail closed: masked whatever else is in it) is not read further."""
     found: set = set()
-    for v, _folded in _tagged_views(text):
-        if not v:
-            continue
-        for name, fn in _CV_CHECKS:
-            if name not in found and globals()[fn](v):
-                found.add(name)
-        if "label_value" not in found and globals()["_cv_label_nospace"](v):
-            found.add("label_value")                       # review 601e328a MUST 5: the strict no-space view
-        if not {"card", "ssn", "phone"} <= found:
-            found |= globals()["_cv_numbers"](v)
+    _CV_MEMO.prefix = {}
+    try:
+        for v, _folded in _tagged_views(text):
+            if not v:
+                continue
+            for name, fn in _CV_CHECKS:
+                if name not in found and globals()[fn](v):
+                    found.add(name)
+            if "label_value" not in found and globals()["_cv_label_nospace"](v):
+                found.add("label_value")                   # review 601e328a MUST 5: the strict no-space view
+            if not {"card", "ssn", "phone"} <= found:
+                found |= globals()["_cv_numbers"](v)
+            if "cap" in found:
+                break
+    finally:
+        _CV_MEMO.prefix = None
     return found
 
 

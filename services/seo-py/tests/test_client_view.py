@@ -9,6 +9,7 @@ one (names and counts only)."""
 from __future__ import annotations
 
 import random
+import re
 import string
 import time
 
@@ -275,24 +276,41 @@ def _masked(texts: list) -> int:
 
 
 def test_spelled_at_after_ordinary_prose_words_is_shown_in_the_client_view():
+    # review c13529af (owner decision, ADR 0051 decision 22): the plain "<word> at <domain>" form is shown; the spelled
+    # " dot " form is masked whatever word comes before it (it was shown after a prose word until c13529af)
     texts = _shop_prose(random.Random(51100), 400)
     assert len(texts) >= 200 and len(set(RETAILERS)) >= 30
-    masked = _masked(texts)
-    assert masked == 0, masked
+    plain = [t for t in texts if " dot " not in t]
+    dotted = [t for t in texts if " dot " in t]
+    assert _masked(plain) == 0, _masked(plain)
+    assert _masked(dotted) == len(dotted), (_masked(dotted), len(dotted))
+
+
+def _plain_spelled(t: str) -> bool:
+    """The plain "<word> at <domain>" form the client view shows (decision 22): a letters-only local part, " at ", a
+    domain with literal dots."""
+    m = re.search(r"(?<![A-Za-z0-9._%+\-])([A-Za-z0-9._%+\-]+) at ([A-Za-z0-9.\-]+)", t)
+    return bool(m and m.group(1).isalpha() and "." in m.group(2))
 
 
 def test_spelled_mails_with_name_or_handle_local_parts_are_still_masked():
+    # review c13529af (decision 22): every spelled form is masked except the plain letters-only one before a dotted
+    # domain (it was masked until c13529af); a handle local part (digit, ".", "_", "+", "-") is always masked
     assert not set(FIRST) & sg.CV_PROSE_BEFORE_AT and not set(LAST) & sg.CV_PROSE_BEFORE_AT
     texts = _spelled_mails(random.Random(51101), 360)
-    masked = _masked(texts)
-    assert masked == len(texts), (masked, len(texts))
+    plain = [t for t in texts if _plain_spelled(t)]
+    rest = [t for t in texts if not _plain_spelled(t)]
+    assert len(plain) >= 40 and len(rest) >= 250
+    assert _masked(plain) == 0, _masked(plain)
+    assert _masked(rest) == len(rest), (_masked(rest), len(rest))
 
 
-def test_the_prose_list_bites(monkeypatch):
-    # mutation: with the list emptied, the shop-prose test's corpus is read as e-mails again
+def test_the_prose_list_is_inert(monkeypatch):
+    # review c13529af (decision 22): the prose list no longer decides anything (it was a mutation bite until c13529af)
     texts = _shop_prose(random.Random(51100), 400)
+    before = _masked(texts)
     monkeypatch.setattr(sg, "CV_PROSE_BEFORE_AT", frozenset())
-    assert _masked(texts) > 0
+    assert _masked(texts) == before
 
 
 def test_the_prose_list_does_not_touch_the_literal_or_bracketed_forms_or_the_strict_lane():
@@ -303,7 +321,10 @@ def test_the_prose_list_does_not_touch_the_literal_or_bracketed_forms_or_the_str
     assert _masked(lit) == len(lit) and _masked(brk) == len(brk)
     assert all(sg.check(t) is not None for t in shop)                    # the log lane still withholds every one
     capsed = [t.upper() for t in shop[:20]]
-    assert _masked(capsed) == len(capsed)                                # an ALL-CAPS word is not read as prose
+    # review c13529af (decision 22): an ALL-CAPS plain form is shown like any plain form (masked until c13529af); the
+    # spelled " DOT " form stays masked
+    assert _masked([t for t in capsed if " DOT " in t]) == sum(1 for t in capsed if " DOT " in t) > 0
+    assert _masked([t for t in capsed if " DOT " not in t]) == 0
 
 
 def test_prose_word_matching_is_linear():
