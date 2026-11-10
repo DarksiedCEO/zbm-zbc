@@ -43,6 +43,7 @@ REDACTED = WITHHELD                      # v1 name; same marker
 MAX_INPUT = 65536                        # characters; a longer field is withheld unread
 URL_MAX_INPUT = 8192                     # characters; a longer URL is withheld unread (real citation URLs are short)
 PERCENT_ROUNDS = 3
+FRAGMENT_EXTRA_DECODE = 1                # review 08eea6e1 NIT: a URL fragment is decoded once more, as a path / query is
 DECODE_RUNS_MAX = 64                     # base64 / hex runs decoded per view
 DECODE_RUN_MAX = 4096                    # characters of one run decoded
 DECODE_BOUNDARIES_MAX = 8                # "-" / "_" boundaries inside one base64 run also decoded from
@@ -160,24 +161,50 @@ _B64_RUN = re.compile(r"[A-Za-z0-9+/_\-]{12,}={0,2}")
 _HEX_RUN = re.compile(r"(?:[0-9a-fA-F]{2}){8,}")
 
 
-def _printable(b: bytes) -> str | None:
-    try:
-        s = b.decode("utf-8")
-    except UnicodeDecodeError:
-        return None
+DECODE_TRIM = 3                          # undecodable bytes trimmed at each end of a decoded run (review 08eea6e1 MUST 4)
+B64_OFFSETS = 8                          # a base64 run is decoded from offsets 0..B64_OFFSETS-1 (and its boundaries)
+
+
+def _readable(s: str) -> str | None:
     if not s:
         return None
+    if s.isprintable():
+        return s
     ok = sum(1 for c in s if c.isprintable() or c in "\n\t\r")
     return s if ok >= 0.85 * len(s) else None
 
 
+def _printable(b: bytes) -> str | None:
+    """``b`` as readable UTF-8 text, or None. Review 08eea6e1 MUST 4: up to ``DECODE_TRIM`` undecodable bytes are
+    trimmed at each end first (an aligned prefix / suffix glued onto a base64 payload decodes to a few garbage bytes
+    around the payload). At most ``2 * (DECODE_TRIM + 1)`` decodes, each in C."""
+    for lead in range(DECODE_TRIM + 1):
+        seg = b[lead:] if lead else b
+        try:
+            s = seg.decode("utf-8")
+        except UnicodeDecodeError as e:
+            if e.start < len(seg) - DECODE_TRIM:
+                if e.start >= DECODE_TRIM + 1 - lead:
+                    return None                            # undecodable inside the body: no trim reaches it
+                continue
+            try:
+                s = seg[:e.start].decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+        r = _readable(s)
+        if r is not None:
+            return r
+    return None
+
+
 def _b64_starts(run: str) -> list:
-    """Where a base64 run is decoded from (review adacb2ca MUST 4): its start, offsets 1-3 (a short prefix glued on:
-    ``x`` + payload) and just after each of its first ``DECODE_BOUNDARIES_MAX`` ``-`` / ``_`` (``ref-`` / ``x_``)."""
-    starts = [0, 1, 2, 3]
+    """Where a base64 run is decoded from (review adacb2ca MUST 4, review 08eea6e1 MUST 4): offsets 0 to
+    ``B64_OFFSETS - 1`` (a prefix of up to seven characters glued on: ``x`` + payload, ``abcd`` + payload) and just
+    after each of its first ``DECODE_BOUNDARIES_MAX`` ``-`` / ``_`` (``ref-`` / ``x_``)."""
+    starts = list(range(B64_OFFSETS))
     for i, c in enumerate(run):
         if c in "-_":
-            if len(starts) >= 4 + DECODE_BOUNDARIES_MAX:
+            if len(starts) >= B64_OFFSETS + DECODE_BOUNDARIES_MAX:
                 break
             starts.append(i + 1)
     return sorted({s for s in starts if len(run) - s >= 8})
@@ -210,13 +237,17 @@ def _decoded_runs(t: str) -> list:
                 if s:
                     out.append(_clean(s))
                 continue
+            done: set = set()
             for k in _b64_starts(run):
+                if 4 <= k < B64_OFFSETS and k - 4 in done:
+                    continue                               # the same payload one quantum later: already read
                 try:
                     b = _b64_decode(run[k:])
                 except (ValueError, binascii.Error):
                     continue
                 s = _printable(b)
                 if s:
+                    done.add(k)
                     out.append(_clean(s))
     return out
 
@@ -846,18 +877,26 @@ _ASCII_DIGITS = "0123456789"
 # (``WORD_BRIDGE_GROUP``), so an SSN written 3-2-4 and an Amex written 4-6-5 with filler words are bridged; the card /
 # SSN / 9+ digit rules then decide. Linear: every part of the pattern is bounded and a match starts only at the first
 # digit of a group.
+#
+# Review 08eea6e1 MUST 3: a group is 1-8 digits (a card written 8-8 / 7-8 with filler words, a 1-digit tail group); a
+# 1-DIGIT group bridges only when its run already holds ``BRIDGE_ONE_DIGIT_RUN`` digits (so "5 and 6" in prose is not
+# glued). The bridge is a linear scan over the digit groups (``_bridge_sub``): ``_bridge_rx`` is the GAP between two
+# groups, matched with ``fullmatch`` on that gap only (bounded pattern).
 WORD_BRIDGE_WORDS = 2
 WORD_BRIDGE_LETTERS = 10
-WORD_BRIDGE_GROUP = (2, 6)
+WORD_BRIDGE_GROUP = (1, 8)
+BRIDGE_ONE_DIGIT_RUN = 8
 _BRIDGE_FILL = r"(?:[^\w\ue000]|_){0,4}"
+_DIGIT_GROUP = re.compile(r"[0-9]+")
+_SEP_GAP = re.compile(r"(?:[^\w\ue000]|_)+")
+_HAS_LETTER = re.compile(r"[^\W\d_]")
 
 
 def _bridge_rx(word: str) -> re.Pattern:
-    """Two digit groups of ``WORD_BRIDGE_GROUP`` digits with up to ``WORD_BRIDGE_WORDS`` words matching ``word``
-    between them (and a little punctuation / space around them)."""
-    return re.compile(r"(?<![0-9])([0-9]{%d,%d})" % WORD_BRIDGE_GROUP + _BRIDGE_FILL
-                      + r"(?:" + word + r"(?:[^\w\ue000]|_){1,4}){0,%d}" % (WORD_BRIDGE_WORDS - 1)
-                      + word + _BRIDGE_FILL + r"(?=[0-9]{%d,%d}(?![0-9]))" % WORD_BRIDGE_GROUP)
+    """The gap between two digit groups that is bridged: up to ``WORD_BRIDGE_WORDS`` words matching ``word`` (and a
+    little punctuation / space around them). Used with ``fullmatch`` on the gap."""
+    return re.compile(_BRIDGE_FILL + r"(?:" + word + r"(?:[^\w\ue000]|_){1,4}){0,%d}" % (WORD_BRIDGE_WORDS - 1)
+                      + word + _BRIDGE_FILL)
 
 
 _WORD_BRIDGE = _bridge_rx(r"[^\W\d_]{1,%d}" % WORD_BRIDGE_LETTERS)          # the strict lane: any letter-only word
@@ -868,7 +907,35 @@ _CV_WORD_BRIDGE = _bridge_rx(r"(?i:" + "|".join(CV_FILLER_WORDS) + r")(?![^\W\d_
 
 
 def _bridge_sub(rx: re.Pattern, v: str, sep: str) -> str:
-    return rx.sub(lambda m: m.group(1) + sep, v) if any(c.isalpha() for c in v) else v
+    """``v`` with every gap ``rx`` bridges between two digit groups of ``WORD_BRIDGE_GROUP`` digits replaced by
+    ``sep`` (a 1-digit group only once its run holds ``BRIDGE_ONE_DIGIT_RUN`` digits; a run continues through bridged
+    gaps and through pure filler). One pass over the groups; each gap is read by a bounded ``fullmatch``."""
+    if not _HAS_LETTER.search(v):
+        return v
+    lo, hi = globals()["WORD_BRIDGE_GROUP"]
+    need = globals()["BRIDGE_ONE_DIGIT_RUN"]
+    out: list = []
+    last = 0
+    prev_end, prev_n, run = -1, 0, 0
+    for g in _DIGIT_GROUP.finditer(v):
+        a, n = g.start(), g.end() - g.start()
+        if prev_end < 0:
+            run = n
+        elif _SEP_GAP.fullmatch(v, prev_end, a):
+            run += n
+        elif (lo <= prev_n <= hi and lo <= n <= hi and (min(prev_n, n) > 1 or run >= need)
+              and rx.fullmatch(v, prev_end, a)):
+            out.append(v[last:prev_end])
+            out.append(sep)
+            last = a
+            run += n
+        else:
+            run = n
+        prev_end, prev_n = g.end(), n
+    if not out:
+        return v
+    out.append(v[last:])
+    return "".join(out)
 
 
 def _unbridged(v: str, sep: str) -> str:
@@ -882,7 +949,34 @@ def _unbridged_fillers(v: str, sep: str) -> str:
     return _bridge_sub(globals()["_CV_WORD_BRIDGE"], v, sep)
 
 
+# review 08eea6e1 NIT: a number spelled as words ("four one one one ...", "zero" / "oh" for 0) is read as digits in a
+# digit view of its own when NUMBER_WORDS_MIN or more number words follow one another (separated by spaces, commas or
+# hyphens); each word becomes its digit and the spaces between two such words are dropped (other punctuation kept).
+NUMBER_WORDS = {"zero": "0", "oh": "0", "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6",
+                "seven": "7", "eight": "8", "nine": "9"}
+NUMBER_WORDS_MIN = 9
+_NW = "(?:" + "|".join(sorted(NUMBER_WORDS, key=len, reverse=True)) + ")"
+_NUMBER_WORD_RUN = re.compile(r"(?i)(?<![a-z])%s(?:[ ,\-]{1,3}+%s){%d,}(?![a-z])" % (_NW, _NW, NUMBER_WORDS_MIN - 1))
+_NUMBER_WORD = re.compile(r"(?i)%s(?: ++(?=%s))?" % (_NW, _NW))
+
+
+def _number_word_view(v: str) -> str:
+    """``v`` with every run of ``NUMBER_WORDS_MIN``+ number words written as digits (``v`` itself when none)."""
+    low = v.lower()
+    if not any(w in low for w in ("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "zero")):
+        return v
+    return _NUMBER_WORD_RUN.sub(lambda m: _NUMBER_WORD.sub(lambda x: NUMBER_WORDS[x.group(0).strip().lower()],
+                                                           m.group(0)), v)
+
+
 def _digits_hit(v: str) -> bool:
+    nw = _number_word_view(v)
+    if nw != v and _digits_hit_on(nw):
+        return True
+    return _digits_hit_on(v)
+
+
+def _digits_hit_on(v: str) -> bool:
     if sum(map(v.count, _ASCII_DIGITS)) < 9:
         return False
     compact = _DIGIT_FILLER.sub("", _unbridged(v, ""))
@@ -1030,6 +1124,16 @@ def _anchor_items(v: str) -> list:
 
 
 def _spaced_spelled_email(v: str) -> bool:
+    return _spaced_join(v, frozenset())
+
+
+# review 08eea6e1 SHOULD 5 (client view only): the split-word join stops at a common English word, so "at checkout on
+# shop.com" is not glued into one domain; the strict lane joins through them (never loosened)
+CV_JOIN_STOP = frozenset(("on", "at", "in", "the", "and", "for", "from", "with", "checkout", "today", "to", "of", "or",
+                          "by", "now", "via"))
+
+
+def _spaced_join(v: str, stop) -> bool:
     low = f" {v.lower()} "
     if " at " not in low and " a t " not in low:
         return False
@@ -1039,7 +1143,7 @@ def _spaced_spelled_email(v: str) -> bool:
             continue
         words: list = []
         for k2, t2 in items[i + 1:i + 1 + JOIN_WORDS]:
-            if k2 in ("at", "end"):
+            if k2 in ("at", "end") or (stop and k2 == "w" and t2.lower().strip(".,;:!?)]}>\"'") in stop):
                 break
             words.append("." if k2 == "dot" else t2)
         n = globals()["_joins_to_domain"](words)
@@ -1049,7 +1153,60 @@ def _spaced_spelled_email(v: str) -> bool:
     return False
 
 
+# review 08eea6e1 MUST 1: a DEFANGED dot ([dot] (dot) {dot} <dot> [.] (.) {.} <.>, any case, optional spaces; the NIT
+# spellings [period] / [punto] / [point] too) is read as "." in an e-mail view of its own, so a real "@" or a spelled
+# " at " followed by bracketed dots reads as an address (multi-label domains included)
+_DEFANG_DOT = re.compile(r"(?i) ?[\[\(\{<] ?(?:dot|\.|period|punto|point) ?[\]\)\}>] ?")
+
+
+def _defanged(v: str) -> str:
+    if "[" not in v and "(" not in v and "{" not in v and "<" not in v:
+        return v
+    return _DEFANG_DOT.sub(".", v)
+
+
+# review 08eea6e1 MUST 2 / NIT: the spelled variants read as " at " / " dot " in an e-mail view of their own:
+# local-at-domain-dot-tld (hyphens or underscores), " _at_ " / " _dot_ ", "at sign" / "at-sign", "period" for dot,
+# Spanish "arroba" / "punto", French "arobase" / "point", a literal "@" (so "name@domain dot com" reads as spelled), and
+# the glued "localATdomainDOTtld" (anchored on a case boundary: a lower-case letter or digit on both sides)
+_AT_WORDS = r"(?:at[- ]?sign|at|arroba|arobase)"
+_DOT_WORDS = r"(?:dot|period|punto|point)"
+_VAR_AT = re.compile(r"(?i)(?<=[a-z0-9])[-_]%s[-_](?=[a-z0-9])|(?<![^ ])_%s_(?![^ ])|(?<![a-z])(?:at[- ]sign|arroba"
+                     r"|arobase)(?![a-z])| ?@ ?" % (_AT_WORDS, _AT_WORDS))
+_VAR_DOT = re.compile(r"(?i)(?<=[a-z0-9])[-_]%s[-_](?=[a-z0-9])|(?<![^ ])_%s_(?![^ ])|(?<![a-z])(?:period|punto"
+                      r"|point)(?![a-z])" % (_DOT_WORDS, _DOT_WORDS))
+_GLUED_AT = re.compile(r"(?<=[a-z0-9])AT(?=[a-z0-9])")
+_GLUED_DOT = re.compile(r"(?<=[a-z0-9])DOT(?=[a-z0-9])")
+_VARIANT_HINTS = ("_at", "-at", "at_", "at-", "sign", "arroba", "arobase", "period", "punto", "point", "_dot", "-dot")
+
+
+def _spelled_variants(v: str) -> str:
+    """``v`` with the spelled e-mail variants written as " at " / " dot " (``v`` itself when none). Linear: four
+    bounded substitutions."""
+    low = v.lower()
+    if "@" not in v and "AT" not in v and "DOT" not in v and not any(h in low for h in _VARIANT_HINTS):
+        return v
+    w = _GLUED_DOT.sub(" dot ", _GLUED_AT.sub(" at ", _VAR_DOT.sub(" dot ", _VAR_AT.sub(" at ", v))))
+    return v if w == v else _collapse(w)
+
+
+def _email_views(v: str) -> list:
+    """``v``, its defanged-dot view and its spelled-variant view (distinct, in order)."""
+    out = [v]
+    d = _defanged(v)
+    if d != v:
+        out.append(d)
+    s = _spelled_variants(d)
+    if s not in out:
+        out.append(s)
+    return out
+
+
 def _email_hit(v: str) -> bool:
+    return any(_email_forms(x) for x in _email_views(v))
+
+
+def _email_forms(v: str) -> bool:
     if "@" in v:
         w = re.sub(r" ?@ ?", "@", v)
         if _EMAIL_PLAIN.search(w):
@@ -1475,7 +1632,11 @@ def _inspect(url, urls: bool, fetch: bool = False) -> dict | None:
         query.append(("", p.query, _kind(chk(p.query)), False))
     return {"scheme": (p.scheme or "").lower(), "host": host, "port": port, "host_kind": host_kind,
             "userinfo": "@" in (p.netloc or ""), "segments": verdicts, "positions": waived, "query": query,
-            "fragment_kind": _kind(chk(p.fragment)) if p.fragment else None, "exempt_dependent": dependent}
+            # review 08eea6e1 NIT: the fragment is read to the depth of a path / query value (one decode before the
+            # check's own rounds)
+            "fragment_kind": _kind(chk(p.fragment) or (chk(unquote(p.fragment)) if globals()["FRAGMENT_EXTRA_DECODE"]
+                                                       else None)) if p.fragment else None,
+            "exempt_dependent": dependent}
 
 
 def inspect_url(url) -> dict | None:
@@ -1909,6 +2070,10 @@ _CV_DOMAIN = re.compile(r"(?i)[a-z0-9\-]{1,63}+(?:\.[a-z0-9\-]{1,63}+){1,4}+(?![
 #      " . ", " dot ", "[dot]"), and
 #   2. the word before "at" is on the closed list of ordinary prose words (``CV_PROSE_BEFORE_AT``: "available at
 #      amazon.com", "sold at target dot com"), written in lower case or capitalised (a sentence start).
+# Review 08eea6e1 SHOULD 5 (owner decision) widens this for the spelled " at " form only: a prose-list word before "at"
+# is prose for ANY domain (condition 1 dropped for it); "it" / "them" before "at" are prose only before a listed
+# retailer (``CV_PRONOUNS_BEFORE_RETAILER``); a domain with a defanged dot (``[.]``, ``(dot)``) and the spelled
+# variants (``-at-``, ``_at_``, "at sign", "arroba"...) are never exempt; the literal "@" and "[at]" never were.
 # Role-mailbox words (``CV_ROLE_WORDS``: sales, support, info, shop, store, deals, offers, shipping, order, sale...)
 # and pronouns (us, me, you, our, ...) are NOT on the prose list, so "support at amazon.com" and "shop at
 # acmepets.com" are masked; any address on another domain is masked whatever word comes before it. Both lists are read
@@ -1963,7 +2128,9 @@ soon spend spent start started starting starts still stock stocked stocks
 such sure that the then there these thing things this those through today together too top
 tried try trying twice two up usually very visit visited want wanted was way week well went were what
 when where which while who why with work worked works worth would yesterday yet
-""".split())
+customers shoppers buyers users reviewers people fans members visitors readers
+day days weeks month months year years line lines
+""".split())                             # review 08eea6e1 SHOULD 5: plural nouns ("Customers at x.com rate it ...")
 _CV_TOKEN_AT = re.compile(r"(?<![A-Za-z0-9._%+\-])([A-Za-z0-9._%+\-]++)([ \t\n]{1,3})(?:[Aa][Tt])(?=[ \t\n])")
 CV_HOST_READ = 128
 _CV_SPELLED_DOT = re.compile(r"(?i) ?[\[\(\{<] ?dot ?[\]\)\}>] ?| dot ")
@@ -1990,15 +2157,41 @@ def _cv_retailer_after(v: str, i: int) -> bool:
     return any(".".join(labels[k:]) in hosts for k in range(len(labels) - 1))
 
 
+_CV_AT_SIGN = re.compile(r"(?i)[ \t\n]{1,3}sign(?![a-z])")
+_CV_HOST_DEFANGED = re.compile(r"[ \t\n]*+[A-Za-z0-9\-]{1,63}+(?:[.\x01][A-Za-z0-9\-]{1,63}+){0,8}+")
+
+
+def _cv_defanged_after(v: str, i: int) -> bool:
+    """The domain written after the word "at" ending at ``i`` holds a defanged dot (``[.]``, ``(dot)``...): such a
+    form is always masked (review 08eea6e1 SHOULD 5). Reads at most ``CV_HOST_READ`` characters."""
+    w = v[i:i + CV_HOST_READ]
+    if "[" not in w and "(" not in w and "{" not in w and "<" not in w:
+        return False
+    w = _DOT_JOIN.sub(".", _CV_SPELLED_DOT.sub(".", _DEFANG_DOT.sub("\x01", w)))
+    m = _CV_HOST_DEFANGED.match(w)
+    return m is not None and "\x01" in m.group(0)
+
+
+# review 08eea6e1 SHOULD 5: "Buy it at amazon.com" / "Buy them at walmart dot com": these pronouns only before a listed
+# retailer domain (every other pronoun and every role word stays masked everywhere)
+CV_PRONOUNS_BEFORE_RETAILER = frozenset(("it", "them"))
+
+
 def _cv_unprose_at(v: str) -> str:
-    """``v`` with every word "at" that follows an ordinary prose word (``CV_PROSE_BEFORE_AT``) AND precedes a listed
-    retailer domain (``CV_RETAILER_HOSTS``) blanked to two NULs, so the spelled-at rules do not read it. Linear: a token
-    starts only at the start of its run and is read possessively; each host read is bounded."""
+    """``v`` with every spelled word "at" read as prose blanked to two NULs, so the spelled-at rules do not read it:
+    after an ordinary prose word (``CV_PROSE_BEFORE_AT``) before ANY domain (review 08eea6e1 SHOULD 5, owner decision),
+    or after "it" / "them" (``CV_PRONOUNS_BEFORE_RETAILER``) before a listed retailer domain (``CV_RETAILER_HOSTS``);
+    never when the domain holds a defanged dot. Linear: a token starts only at the start of its run and is read
+    possessively; each host read is bounded."""
     if "t" not in v and "T" not in v:
         return v
 
     def repl(m: re.Match) -> str:
-        if _cv_prose_word(m.group(1)) and _cv_retailer_after(v, m.end()):
+        tok, j = m.group(1), m.end()
+        if _cv_defanged_after(v, j) or _CV_AT_SIGN.match(v, j):
+            return m.group(0)                              # a defanged dot or "at sign": never exempt
+        if _cv_prose_word(tok) or (tok.lower() in globals()["CV_PRONOUNS_BEFORE_RETAILER"]
+                                   and _cv_retailer_after(v, j)):
             return m.group(1) + m.group(2) + "\x00\x00"
         return m.group(0)
     return _CV_TOKEN_AT.sub(repl, v)
@@ -2020,14 +2213,22 @@ def _cv_email(v: str) -> bool:
             tail = _CV_DOT.sub(".", v[m.end():m.end() + 300])
             if _CV_DOMAIN.match(tail):
                 return True
-    if "at" not in low and "a t" not in low:
-        return False
-    w = _cv_unprose_at(v)                                  # the spelled " at " forms only: retailer prose skipped
-    if _at_word_email(w):
-        return True                                        # ``name at domain.tld`` (the strict lane's rule)
-    if " at " in w.lower() and "dot" in low and _spelled_email(w):
+    d = _defanged(v)                                       # review 08eea6e1 MUST 1: "@" with defanged dots
+    if d != v and "@" in d and _cv_at_email(d):
         return True
-    return _spaced_spelled_email(w)                        # letter-spaced / split words (review 601e328a MUST 3)
+    if "at" not in low and "a t" not in low and "@" not in v and "arroba" not in low and "arobase" not in low:
+        return False
+    # the spelled " at " forms: prose skipped (``_cv_unprose_at``), then read as written, with defanged dots
+    # (MUST 1) and with the spelled variants (MUST 2): the shared e-mail views of the strict lane
+    for w in _email_views(_cv_unprose_at(v)):
+        wl = w.lower()
+        if _at_word_email(w):
+            return True                                    # ``name at domain.tld`` (the strict lane's rule)
+        if " at " in wl and "dot" in wl and _spelled_email(w):
+            return True
+        if _spaced_spelled_email(w) and _spaced_join(w, CV_JOIN_STOP):
+            return True                                    # letter-spaced / split words (review 601e328a MUST 3)
+    return False
 
 
 def _cv_at_email(v: str) -> bool:
@@ -2087,6 +2288,16 @@ def _cv_sep(x: str, extra: str = "") -> bool:
     return 0 < len(x) <= 2 and all(c in "-." + extra for c in x)
 
 
+# review 08eea6e1 SHOULD 3: the SSN 3-2-4 shape takes the strict lane's separator set (``_`` ``/`` ``||`` ``--`` ``:``
+# ``~`` ``+`` ``*`` ``#`` ``=`` ``\`` ``,`` ...; 1-4 characters, spaces around them allowed) except list punctuation
+# with a space (", " / "; ": "sizes 100, 20, 3000" is prose)
+_CV_SSN_SEP = re.compile(r" ?(?:[^\w\s\ue000,;]|_|,){1,2} ?| ")
+
+
+def _cv_ssn_sep(x: str) -> bool:
+    return 0 < len(x) <= 4 and _CV_SSN_SEP.fullmatch(x) is not None and not (("," in x or ";" in x) and " " in x)
+
+
 def _cv_ssn_ok(d: str) -> bool:
     area, group, serial = int(d[:3]), int(d[3:5]), int(d[5:])
     return 0 < area < 900 and area != 666 and group > 0 and serial > 0
@@ -2121,8 +2332,9 @@ def _cv_span(w: str, s: re.Match, out: set, kinds=CV_NUMBER_KINDS) -> int:
     if "ssn" in kinds and "ssn" not in out:
         lens = [b - a for a, b in gs]
         for i in range(len(gs) - 2):
-            if lens[i:i + 3] == [3, 2, 4] and _cv_sep(seps[i], " ") and _cv_sep(seps[i + 1], " ") \
-                    and (i == 0 or not _cv_sep(seps[i - 1])) and (i + 3 >= len(gs) or not _cv_sep(seps[i + 2])):
+            if lens[i:i + 3] == [3, 2, 4] and _cv_ssn_sep(seps[i]) and _cv_ssn_sep(seps[i + 1]) \
+                    and (i == 0 or not _cv_ssn_sep(seps[i - 1].strip())) \
+                    and (i + 3 >= len(gs) or not _cv_ssn_sep(seps[i + 2].strip())):
                 d = digits[sum(lens[:i]):sum(lens[:i + 3])]
                 if _cv_ssn_ok(d):
                     out.add("ssn")
@@ -2136,6 +2348,14 @@ def _cv_span(w: str, s: re.Match, out: set, kinds=CV_NUMBER_KINDS) -> int:
 
 
 def _cv_numbers(v: str) -> set:
+    out = _cv_numbers_on(v)
+    nw = _number_word_view(v)                              # review 08eea6e1 NIT: number words read as digits
+    if nw != v:
+        out |= _cv_numbers_on(nw)
+    return out
+
+
+def _cv_numbers_on(v: str) -> set:
     out: set = set()
     if sum(map(v.count, _ASCII_DIGITS)) < 8:
         return out
@@ -2347,7 +2567,8 @@ def _cv_url(url: str) -> tuple:
         if "=" in frag:
             frag = _cv_pairs(frag, kinds)
         else:
-            fk = client_view_kind(client_view_findings(frag))
+            fk = client_view_kind(client_view_findings(frag) or (client_view_findings(unquote(frag))
+                                                                 if FRAGMENT_EXTRA_DECODE else []))
             if fk is not None:
                 kinds.add(fk)
                 frag = CLIENT_HIDDEN

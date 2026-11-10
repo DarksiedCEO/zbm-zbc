@@ -364,9 +364,11 @@ def test_role_mailboxes_on_other_domains_are_all_masked():
     assert sum(1 for t in texts if "email" in sg.client_view_findings(t)) == len(texts)
 
 
-def test_prose_words_before_another_domain_are_masked():
+def test_prose_words_before_another_domain_are_shown_by_owner_decision_08eea6e1():
+    # review 08eea6e1 SHOULD 5 (owner decision): a prose-list word before the spelled " at " is prose for ANY domain
     texts = [f"It is {w} at {d}.com now." for w in RETAILER_PROSE_WORDS for d in NON_RETAILERS]
-    assert sum(1 for t in texts if "email" in sg.client_view_findings(t)) == len(texts)
+    assert sum(1 for t in texts if "email" in sg.client_view_findings(t)) == 0
+    assert all(sg.check(t) is not None for t in texts)                 # the strict lane withholds them all
 
 
 def test_shop_prose_with_retailer_domains_is_shown():
@@ -377,7 +379,8 @@ def test_shop_prose_with_retailer_domains_is_shown():
 
 
 def test_role_words_before_retailer_domains_are_masked():
-    texts = role_at_retailers()
+    # review 08eea6e1 SHOULD 5: "it" / "them" before a listed retailer are prose ("Buy it at amazon.com")
+    texts = [t for t in role_at_retailers() if t.split(" ")[1] not in sg.CV_PRONOUNS_BEFORE_RETAILER]
     assert sum(1 for t in texts if "email" in sg.client_view_findings(t)) == len(texts)
 
 
@@ -396,14 +399,20 @@ def test_mutation_role_words_added_back_is_caught(monkeypatch):
 
 
 def test_mutation_domain_check_removed_is_caught(monkeypatch):
+    # review 08eea6e1: the retailer check now keys only "it" / "them" (prose words pass for any domain)
+    texts = [f"Buy {w} at {d}.com now." for w in sorted(sg.CV_PRONOUNS_BEFORE_RETAILER) for d in NON_RETAILERS]
+    assert sum(1 for t in texts if "email" not in sg.client_view_findings(t)) == 0
     monkeypatch.setattr(sg, "_cv_retailer_after", lambda v, i: True)
-    texts = [f"It is {w} at {d}.com now." for w in RETAILER_PROSE_WORDS for d in NON_RETAILERS]
     assert sum(1 for t in texts if "email" not in sg.client_view_findings(t)) > 0
 
 
 def test_mutation_retailer_list_emptied_is_caught(monkeypatch):
+    # review 08eea6e1: prose words pass for any domain, so the list now keys the "it" / "them" form
+    hosts = sorted({t.split(" at ")[1].split(" ")[0] for t in retailer_prose() if " dot " not in t})
+    texts = [f"Buy {p} at {h} for 12 dollars." for p in ("it", "them", "It", "Them") for h in hosts]
+    assert len(texts) >= 40 and sum(1 for t in texts if sg.client_view_findings(t)) == 0
     monkeypatch.setattr(sg, "CV_RETAILER_HOSTS", frozenset())
-    assert sum(1 for t in retailer_prose() if sg.client_view_findings(t)) > 0
+    assert sum(1 for t in texts if sg.client_view_findings(t)) > 0
 
 
 # ------------------------------------------------------------------------------------------------ MUST 5: recall
@@ -707,7 +716,10 @@ def test_a_torn_final_vault_line_is_cut_at_start_and_recorded_with_counts_only(t
     p = _torn(h)
     h2 = h.restart()
     st = h2.svc.health()["citation_vault"]
-    assert st["tail_repair"] == {"torn_lines": 1, "bytes_removed": 24, "records_kept": n, "recorded": True}
+    rep = dict(st["tail_repair"])
+    assert len(rep.pop("repair_id")) == 32                             # review 08eea6e1: a hash id, no content
+    assert rep == {"torn_lines": 1, "bytes_removed": 24, "records_kept": n, "recorded": True, "records_removed": 1,
+                   "newline_added": 0, "quarantined": 1}
     assert st["records"] == n and open(p, "rb").read().endswith(b"\n")
     evs = h2.ledger.of_type("citation_vault_tail_repaired")
     assert len(evs) == 1 and set(evs[0]["_payload"]) >= {"torn_lines", "bytes_removed", "records_kept"}

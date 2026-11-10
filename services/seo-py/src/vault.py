@@ -46,6 +46,14 @@ from config import TENANT_ID
 VAULT_NAME = "citation_vault.jsonl"
 MAX_RECORD_BYTES = 256 * 1024          # the encoded JSON of one record; above it the record is refused unread
 _MAX_LINE_BYTES = 4 * (MAX_RECORD_BYTES + 16) // 3 + 1024   # base64 of the largest ciphertext plus the other fields
+# review 08eea6e1 SHOULD 1 / 2: a torn final line is cut only when it is a fragment of ONE record; the cut bytes go to
+# ``<vault>.torn-<repair id>`` (0600) and the repair's counts to ``<vault>.repair`` before the cut, so a start that
+# fails after the cut records it on the next start
+QUARANTINE_SUFFIX = ".torn-"
+REPAIR_MARKER_SUFFIX = ".repair"
+REPAIR_FIELDS = ("torn_lines", "bytes_removed", "records_removed", "records_kept", "newline_added", "quarantined",
+                 "repair_id")
+REPAIR_ID = re.compile(r"[0-9a-f]{32}")
 KEY_BYTES = 32
 NONCE_BYTES = 12
 TAG_BYTES = 16
@@ -345,6 +353,12 @@ def _parse_line(line: bytes) -> Optional[dict]:
     return {"vault_id": vid.hex(), "tag": tag, "key_id": key_id, "nonce": nonce, "ct": ct}
 
 
+def _torn_fragment(tail: bytes) -> bool:
+    """A torn write of ONE record: shorter than a line, opening one JSON object and holding no record boundary (a
+    stored line's only ``}`` is its last byte, so a fragment has none)."""
+    return 0 < len(tail) < _MAX_LINE_BYTES and tail[:1] == b"{" and tail.count(b"{") == 1 and b"}" not in tail
+
+
 def _encode(record) -> Optional[bytes]:
     try:
         return json.dumps(record, ensure_ascii=False, allow_nan=False, sort_keys=True,
@@ -462,15 +476,150 @@ class CitationVault:
                 self._index[parsed["vault_id"]] = (offset, len(line))
             offset += len(line) + 1
         if torn:
-            # review 601e328a SHOULD 3: ONLY the final line is torn (a write cut by a crash: no newline): it is cut
-            # off and the cut recorded (counts, never content); a torn line with any other bad line still refuses
+            # review 601e328a SHOULD 3 / review 08eea6e1 SHOULD 1: ONLY the final line lacks its newline; a torn line
+            # with any other bad line still refuses
+            tail = raw[len(body):]
             if self.bad_lines or not self._repair:
                 self._index, self.bad_lines = {}, 0
                 raise VaultCorrupt("the vault file ends with a torn line (and holds another bad line, or this start "
                                    "repairs nothing); refusing to open (inspect it)")
-            self._cut_tail(len(raw), len(body))
-            self.tail_repair = {"torn_lines": 1, "bytes_removed": len(raw) - len(body), "records_kept": len(self._index)}
+            parsed = _parse_line(tail)
+            if parsed is not None and parsed["vault_id"] not in self._index:
+                # (a) a COMPLETE final record lacking only its newline: kept, and the newline appended
+                self._index[parsed["vault_id"]] = (len(body), len(tail))
+                rep = {"torn_lines": 0, "bytes_removed": 0, "records_removed": 0,
+                       "records_kept": len(self._index), "newline_added": 1, "quarantined": 0,
+                       "repair_id": hashlib.sha256(b"newline:" + tail).hexdigest()[:32]}
+                self._write_marker(rep)
+                self._append_newline(len(raw))
+                body = raw + b"\n"
+                self.tail_repair = rep
+            else:
+                # (b) a genuine torn fragment of ONE record only (shorter than a line, no record boundary in it);
+                # anything else (a file with its newlines removed, records merged) refuses to open
+                if not _torn_fragment(tail):
+                    self._index, self.bad_lines = {}, 0
+                    raise VaultCorrupt("the vault file ends with more than one torn record (newlines removed or "
+                                       "records merged); refusing to open (inspect it)")
+                rep = {"torn_lines": 1, "bytes_removed": len(tail), "records_removed": 1,
+                       "records_kept": len(self._index), "newline_added": 0, "quarantined": 1,
+                       "repair_id": hashlib.sha256(tail).hexdigest()[:32]}
+                # (c) the cut bytes go to a 0600 quarantine file next to the vault and a durable marker is written
+                # BEFORE the cut (review 08eea6e1 SHOULD 2: a start that fails after the cut records it next time)
+                self._quarantine(tail, rep["repair_id"])
+                self._write_marker(rep)
+                self._cut_tail(len(raw), len(body))
+                self.tail_repair = rep
+        elif self._repair:
+            self.tail_repair = self._read_marker()               # a cut from an earlier start not yet recorded
         self._size = len(body)
+
+    @property
+    def repairs(self) -> bool:
+        return self._repair
+
+    def _marker_path(self) -> str:
+        return self.path + REPAIR_MARKER_SUFFIX
+
+    def _fsync_dir(self) -> None:
+        try:
+            dfd = os.open(self.data_dir, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        except OSError:
+            return
+        try:
+            os.fsync(dfd)
+        except OSError:
+            pass
+        finally:
+            os.close(dfd)
+
+    def _quarantine(self, tail: bytes, repair_id: str) -> None:
+        """The cut bytes copied to ``<vault>.torn-<repair id>`` (0600; ciphertext fragment only, never decrypted)."""
+        qpath = self.path + QUARANTINE_SUFFIX + repair_id
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+        try:
+            fd = os.open(qpath, flags, 0o600)
+        except FileExistsError:
+            try:
+                with open(qpath, "rb") as fh:
+                    same = fh.read(len(tail) + 1) == tail
+            except OSError:
+                same = False
+            if not same:
+                raise VaultCorrupt("the vault's quarantine file exists with other content; refusing") from None
+            return                                               # an earlier start copied it, then stopped
+        except OSError:
+            raise VaultCorrupt("the vault's torn line cannot be quarantined; refusing") from None
+        try:
+            os.write(fd, tail)
+            os.fsync(fd)
+        except OSError:
+            raise VaultCorrupt("the vault's torn line cannot be quarantined; refusing") from None
+        finally:
+            os.close(fd)
+        self._fsync_dir()
+
+    def _write_marker(self, rep: dict) -> None:
+        """The repair's counts written durably (temp file, fsync, rename, directory fsync) before the cut."""
+        tmp = self._marker_path() + ".tmp"
+        data = json.dumps({k: rep[k] for k in REPAIR_FIELDS}, sort_keys=True).encode("ascii")
+        try:
+            try:
+                os.unlink(tmp)
+            except FileNotFoundError:
+                pass
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
+                         0o600)
+            try:
+                os.write(fd, data)
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            os.replace(tmp, self._marker_path())
+        except OSError:
+            raise VaultCorrupt("the vault's repair marker cannot be written; refusing") from None
+        self._fsync_dir()
+
+    def _read_marker(self) -> Optional[dict]:
+        try:
+            with open(self._marker_path(), "rb") as fh:
+                obj = json.loads(fh.read(4096).decode("ascii"))
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError, UnicodeDecodeError):
+            raise VaultCorrupt("the vault's repair marker cannot be read; refusing (inspect it)") from None
+        if not isinstance(obj, dict) or set(obj) != set(REPAIR_FIELDS) \
+                or not all(type(obj[k]) is int and obj[k] >= 0 for k in REPAIR_FIELDS if k != "repair_id") \
+                or not isinstance(obj["repair_id"], str) or not REPAIR_ID.fullmatch(obj["repair_id"]):
+            raise VaultCorrupt("the vault's repair marker is malformed; refusing (inspect it)")
+        obj["from_marker"] = True
+        return obj
+
+    def clear_repair_marker(self) -> None:
+        """The repair is recorded in the ledger: the marker goes (a failure leaves it; the next start records the same
+        event again, which the ledger takes as the same event)."""
+        try:
+            os.unlink(self._marker_path())
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return
+        self._fsync_dir()
+
+    def _append_newline(self, size: int) -> None:
+        try:
+            fd = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0))
+        except OSError:
+            raise VaultCorrupt("the vault file's final newline cannot be added (open failed); refusing") from None
+        try:
+            if os.fstat(fd).st_size != size:
+                raise VaultCorrupt("the vault file changed while it was opened; refusing")
+            os.write(fd, b"\n")
+            os.fsync(fd)
+        except OSError:
+            raise VaultCorrupt("the vault file's final newline cannot be added; refusing") from None
+        finally:
+            os.close(fd)
 
     def _cut_tail(self, size: int, keep: int) -> None:
         try:

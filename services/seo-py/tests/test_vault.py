@@ -582,7 +582,10 @@ def test_torn_tail_symlink_and_open_permissions_refuse_open(tmp_path):
     with pytest.raises(VaultCorrupt):
         CitationVault(str(d), key, repair=False)
     v = CitationVault(str(d), key)
-    assert v.tail_repair == {"torn_lines": 1, "bytes_removed": 11, "records_kept": 1}
+    rep = dict(v.tail_repair)
+    assert len(rep.pop("repair_id")) == 32                             # review 08eea6e1 SHOULD 1: counts + a hash id
+    assert rep == {"torn_lines": 1, "bytes_removed": 11, "records_kept": 1, "records_removed": 1, "newline_added": 0,
+                   "quarantined": 1}
     assert v.get(TENANT_A, vid) == {"a": 1} and open(p, "rb").read().endswith(b"\n")
     d2 = tmp_path / "data2"
     os.makedirs(str(d2))

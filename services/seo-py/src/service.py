@@ -143,13 +143,16 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
         """Review 601e328a SHOULD 3: a torn final vault line cut at open is recorded as a typed audit event with its
         counts only (never content); a ledger that cannot take it leaves the repair visible in health as unrecorded."""
         rep = getattr(self.vault, "tail_repair", None)
-        if not rep:
+        if not rep or not getattr(self.vault, "repairs", True):
             return
         import logging
-        logging.getLogger("seo.vault").warning("citation vault: a torn final line was cut at open (%d bytes removed, "
-                                               "%d records kept)", rep["bytes_removed"], rep["records_kept"])
-        payload = {"torn_lines": rep["torn_lines"], "bytes_removed": rep["bytes_removed"],
-                   "records_kept": rep["records_kept"], "log_length": len(self.log)}
+        logging.getLogger("seo.vault").warning("citation vault: the final line was repaired at open (%d bytes removed, "
+                                               "%d records removed, %d records kept)", rep["bytes_removed"],
+                                               rep.get("records_removed", 0), rep["records_kept"])
+        # review 08eea6e1 SHOULD 2: the payload is the repair marker's counts only (no log length), so the event a
+        # start records after a repair an EARLIER, failed start made is the same event (the ledger is idempotent)
+        import vault as _vault
+        payload = {k: rep[k] for k in _vault.REPAIR_FIELDS if k in rep}
         eid = derived_id("evd", "citation_vault_tail_repaired", payload_sha256(payload))
         try:
             self._record_twice(eid, "citation_vault_tail_repaired", "seo", "citation_vault", payload,
@@ -157,6 +160,10 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
             rep["recorded"] = True
         except LedgerRecordError:
             rep["recorded"] = False
+            return
+        clear = getattr(self.vault, "clear_repair_marker", None)
+        if clear is not None:
+            clear()
 
     @staticmethod
     def _open_vault(settings, repair: bool = True):

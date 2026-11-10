@@ -1494,10 +1494,10 @@ def test_over_redaction_on_a_corpus_of_ordinary_urls_stays_under_the_bar():
     # crossing "/" in Drive/Canva ids and Title-case product paths. Strong rules are never exempted; security > precision.
     # ADR 0051 job 2: only credential findings block a fetch (was 650 / 1180 with r2 part 3a's personal-data block)
     assert len(flagged) == 299, len(flagged)
-    # the strict flag recorded in the log: unchanged, 650 / 1180 (random-looking ids on CDN / doc / design hosts,
-    # numeric ids)
+    # the strict flag recorded in the log: 651 / 1180 (random-looking ids on CDN / doc / design hosts, numeric ids);
+    # review 08eea6e1 MUST 3 (1-8 digit groups bridged) adds one: an 8-digit question id + two words + a year
     flagged_strict = [u for u in urls if callum.url_flag(u)]
-    assert len(flagged_strict) == 650, len(flagged_strict)
+    assert len(flagged_strict) == 651, len(flagged_strict)
     # the CLIENT view (ADR 0051 job 3: high-precision findings only). Bar 2.5%: met
     masked = [u for u in urls if callum.secret_guard.client_view_url(u)[1] is not None]
     assert len(masked) / len(urls) <= 0.025, len(masked)
