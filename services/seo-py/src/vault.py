@@ -353,6 +353,29 @@ def _encode(record) -> Optional[bytes]:
         return None
 
 
+_COLLECT = threading.local()            # (vault, batch) while ``CitationVault.collecting`` is active on this thread
+
+
+class VaultBatch:
+    """Encrypted lines put while collecting, written later by ``CitationVault.write_batch`` in ONE append with ONE fsync
+    (review adacb2ca SHOULD 1). Holds ciphertext only; ``discard`` drops it (nothing is written)."""
+
+    def __init__(self):
+        self.lines: list = []                           # [(vault id, encrypted line)]
+
+    def discard(self) -> None:
+        self.lines = []
+
+    def __len__(self) -> int:
+        return len(self.lines)
+
+    def __repr__(self) -> str:
+        return f"VaultBatch(lines={len(self.lines)})"
+
+    def __reduce__(self):
+        raise TypeError("a vault batch is never pickled")
+
+
 class CitationVault:
     """Per-tenant encrypted, append-only store under the service's data directory. Thread-safe (one re-entrant lock,
     as ``service.Service`` and ``store.RecordLog``); one process per data directory (the data-directory flock)."""
@@ -461,6 +484,10 @@ class CitationVault:
         line = json.dumps({"v": VERSION, "id": _b64(vid), "t": _b64(material.tenant_tag(tenant_id)),
                            "k": _b64(material.key_id.encode("ascii")), "n": _b64(nonce), "c": _b64(ct)},
                           sort_keys=True, separators=(",", ":")).encode("ascii")
+        slot = getattr(_COLLECT, "slot", None)
+        if slot is not None and slot[0] is self:
+            slot[1].lines.append((vault_id, line))          # written by write_batch (or discarded)
+            return vault_id
         with self.lock:
             if vault_id in self._index:           # 2**-128; never overwrite or shadow a record
                 raise VaultWriteError("vault id collision; nothing written")
@@ -468,6 +495,38 @@ class CitationVault:
             self._index[vault_id] = (self._size, len(line))
             self._size += len(line) + 1
         return vault_id
+
+    def collecting(self, batch: VaultBatch):
+        """While active (this thread only), ``put`` encrypts into ``batch`` instead of writing."""
+        vault = self
+
+        class _Ctx:
+            def __enter__(self):
+                self.prev = getattr(_COLLECT, "slot", None)
+                _COLLECT.slot = (vault, batch)
+                return batch
+
+            def __exit__(self, *exc):
+                _COLLECT.slot = self.prev
+                return False
+        return _Ctx()
+
+    def write_batch(self, batch: VaultBatch) -> None:
+        """Append every line of ``batch`` at once: one write, one fsync; all or nothing (a failed write is cut back,
+        as ``_append``). The batch is emptied either way."""
+        lines, batch.lines = list(batch.lines), []
+        if not lines:
+            return
+        with self.lock:
+            ids = [vid for vid, _ in lines]
+            if len(set(ids)) != len(ids) or any(vid in self._index for vid in ids):
+                raise VaultWriteError("vault id collision; nothing written")
+            self._append(b"\n".join(line for _, line in lines))
+            offset = self._size
+            for vid, line in lines:
+                self._index[vid] = (offset, len(line))
+                offset += len(line) + 1
+            self._size = offset
 
     def _append(self, line: bytes) -> None:
         """store.RecordLog's rules: the file must be exactly what this process wrote, the write is fsynced, a failed
@@ -560,6 +619,9 @@ class CitationVault:
         line = self._read_line(vault_id)
         parsed = _parse_line(line) if line is not None else None
         if parsed is None or parsed["vault_id"] != vault_id:
+            # ADR 0051 (review adacb2ca NIT): the tenant HMAC is computed for an unknown id too, so that path does the
+            # same keyed work as a wrong tenant's (it still does no file read: the paths are not timing-equal)
+            _tenant_matches(key._cur, tenant_id, b"\0" * 32)
             return None
         material = key._material(parsed["key_id"])
         if material is None or not _tenant_matches(material, tenant_id, parsed["tag"]):

@@ -42,7 +42,10 @@ service, adds a dependency and a network hop the department does not otherwise n
    compared (constant time) before any decryption, so a wrong tenant never reaches the key; the associated data
    binds tenant, id and key id a second time. A wrong tenant, an unknown or malformed id, a tampered line, an
    unknown key id and a failed decryption all raise the same `VaultNotFound("citation record not found")`, raised
-   outside every `except` block (no chained context).
+   outside every `except` block (no chained context). Correction (review adacb2ca): that makes them
+   indistinguishable by the exception and its message only. At the vault level the paths are NOT timing-equal: an
+   unknown id does no file read (its tenant HMAC is now computed too, so the keyed work matches, but the read does
+   not). The indistinguishability boundary is the API: a wrong tenant and an unknown run answer the same 404 body.
 6. **Fail closed.** No key configured: `put` raises `VaultUnavailable` and writes nothing (the file is not even
    created); `get` raises `VaultUnavailable`. There is never a plaintext fallback.
 7. **Concurrency.** One re-entrant lock (`threading.RLock`, as `service.Service.lock` and `RecordLog.lock`) around

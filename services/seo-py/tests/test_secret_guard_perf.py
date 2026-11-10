@@ -23,7 +23,7 @@ def _fill(unit: str, n: int) -> str:
 FAMILIES = {
     "slug_5th_digit": lambda n: _fill("guide-" + _LETTERS[:22] + "12345 ", n),     # was exponential (_PLAIN_WORD)
     "slug_capital": lambda n: _fill("guide-" + _LETTERS[:22] + "X ", n),
-    "slug_accent": lambda n: _fill("guide-" + _LETTERS[:22] + "é ", n),
+    "slug_accent": lambda n: _fill("guide-" + _LETTERS[:22] + "\u00e9 ", n),
     "slug_percent": lambda n: _fill("guide-" + _LETTERS[:22] + "% ", n),
     "short_pairs": lambda n: _fill("the s id and the s ig of c le or p w ", n),     # was quadratic (pair search)
     "url_dense": lambda n: _fill("See https://example.com/blog/post-12 for more. ", n),
@@ -72,7 +72,7 @@ def test_guard_record_deep_nesting_is_linear():
 def test_plain_word_accepts_exactly_what_the_nested_pattern_accepted():
     nested = re.compile(r"(?:[A-Z]?[a-z]+)+\d{0,4}|[A-Z]{2,6}\d{0,4}|\d{1,4}")
     for n in range(7):
-        for t in itertools.product("aBz19é%", repeat=n):
+        for t in itertools.product("aBz19\u00e9%", repeat=n):
             s = "".join(t)
             assert bool(nested.fullmatch(s)) == bool(sg._PLAIN_WORD.fullmatch(s)), s
     t = time.perf_counter()
@@ -82,8 +82,8 @@ def test_plain_word_accepts_exactly_what_the_nested_pattern_accepted():
 
 def test_linear_spelled_email_decides_what_the_regex_decides():
     rnd = random.Random(20261109)
-    alpha = ["x", " at ", "dot", " ", "a", "1", "-", "[", "]", "(", ")", "<", ">", ".", "K", "K", "ſ",
-             "é", "D", "O", "T", "AT", "q", "_", "%"]
+    alpha = ["x", " at ", "dot", " ", "a", "1", "-", "[", "]", "(", ")", "<", ">", ".", "K", "\u212a", "\u017f",
+             "\u00e9", "D", "O", "T", "AT", "q", "_", "%"]
     for _ in range(20000):
         s = "".join(rnd.choice(alpha) for _ in range(rnd.randint(1, 25)))
         assert (sg._EMAIL_SPELLED.search(s) is not None) == sg._spelled_email(s), repr(s)
@@ -91,7 +91,7 @@ def test_linear_spelled_email_decides_what_the_regex_decides():
         lens = [rnd.randint(1, 70) for _ in range(5)]
         s = "x at " + "a" * lens[0] + "".join(
             rnd.choice(["", " ", " [", " ("]) + "dot" + rnd.choice(["", " ", "] ", ")"]) + rnd.choice(["a", "dot", "1-"])
-            * lens[k] for k in range(rnd.randint(1, 4))) + rnd.choice(["", "b", "1", " ", "é"])
+            * lens[k] for k in range(rnd.randint(1, 4))) + rnd.choice(["", "b", "1", " ", "\u00e9"])
         assert (sg._EMAIL_SPELLED.search(s) is not None) == sg._spelled_email(s), repr(s)
 
 

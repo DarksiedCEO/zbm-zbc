@@ -263,7 +263,9 @@ def _bite_probes() -> dict:
     zero = DIGIT_ZEROS["devanagari"]
     deva = "see " + ",,,,".join("".join(chr(zero + int(c)) for c in g) for g in groups) + " ok"
     commas = "see " + ",,,,".join(groups) + " ok"
-    words = "see " + " and ".join(groups) + " ok"
+    # two-digit groups: the word bridge (review adacb2ca MUST 2, 3-4 digit groups only) does not cover them, so this
+    # probe still bites the letter bridge alone
+    words = "see " + " and ".join(ds[i:i + 2] for i in range(0, 16, 2)) + " ok"
     tok = _mixed(rng, 40)
     while sum(c.isdigit() for c in tok) > 4 or sum(c.isdigit() for c in tok) < 2:
         tok = _mixed(rng, 40)

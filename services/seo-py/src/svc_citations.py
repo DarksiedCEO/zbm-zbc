@@ -137,41 +137,61 @@ class CitationsMixin:
                 return self._interrupt_citation_run(tid, cid, R("RUN_FAILED"),
                                                     {"agent": "callum", "where": where,
                                                      "error_type": type(exc).__name__[:60]})
-            with self.lock:
-                self._gate()
-                stop = self.kill_code(tenant=tid, capability="ai_probe", write=True) or self.kill_code(
-                    capability="audit")
-                if stop is not None:
-                    return self._interrupt_citation_run(tid, cid, stop)
+            # review adacb2ca SHOULD 1: the split (encryption into a pending batch, keyed hashes) and the sweep run
+            # OUTSIDE the service lock; under it only the kill check, ONE vault append (one fsync) and the commit
+            pending = vault_mod.VaultBatch()
+            stopped = False
+            try:
                 try:
-                    failure = self._record_citation_result(tid, cid, env, sink)
+                    logged = self._prepare_citation_result(tid, env, sink, pending)
+                    failure = logged if not isinstance(logged, tuple) else None
+                    if failure is None:
+                        with self.lock:
+                            self._gate()
+                            stop = self.kill_code(tenant=tid, capability="ai_probe", write=True) or self.kill_code(
+                                capability="audit")
+                            if stop is not None:
+                                stopped = True
+                                pending.discard()        # killed: nothing is written
+                            else:
+                                failure = self._record_citation_result(tid, cid, logged[0], pending)
                 except Exception as exc:  # noqa: BLE001 - split / sweep / commit failed: closed now, never left running
                     where = _where(exc)
                     log.error("citation run failed: %s at %s", type(exc).__name__, where)
                     failure = _vault_failure() if isinstance(exc, vault_mod.VaultUnavailable) else {
                         "agent": "callum", "where": where, "error_type": type(exc).__name__[:60]}
-                finally:
-                    sink.clear()                     # the plaintext evidence is dropped from memory either way
-                    env = None
-                if failure is not None:
-                    return self._interrupt_citation_run(tid, cid, R("RUN_FAILED"), failure)
-                return self.citation_run_view(tid, cid)
+            finally:
+                sink.clear()                         # the plaintext evidence is dropped from memory either way
+                pending.discard()
+                env = logged = None
+            if stopped:
+                return self._interrupt_citation_run(tid, cid, stop)
+            if failure is not None:
+                return self._interrupt_citation_run(tid, cid, R("RUN_FAILED"), failure)
+            return self.citation_run_view(tid, cid)
         finally:
             with self.lock:
                 self.running_citation_runs.discard(cid)
 
-    def _record_citation_result(self, tid: str, cid: str, env, sink: list) -> Optional[dict]:
-        """Under the lock. ADR 0051: split (each row's full evidence into the vault under ``tid``; the envelope keeps
-        references, keyed hashes, host-only URLs and verdict flags), then the fail-closed sweep of the whole envelope
-        (ADR 0050 v2 step 4: every key and value; a field that is not clearly safe is withheld whole), then the commit.
-        Returns None when committed, else the failure (the run is then closed RUN_FAILED). Anything that raises here
-        is caught by the caller and closes the run the same way."""
-        env = callum.split_evidence(env, sink, lambda record: self.vault.put(tid, record),
-                                    field_hash=lambda field, value: self.vault.field_hash(tid, field, value))
+    def _prepare_citation_result(self, tid: str, env, sink: list, pending) -> object:
+        """Outside the lock. ADR 0051: split (each row's full evidence encrypted for ``tid`` into ``pending``, written
+        later in one append; the envelope keeps references, keyed hashes, host-only URLs and verdict flags), then the
+        fail-closed sweep of the whole envelope (ADR 0050 v2 step 4: every key and value; a field that is not clearly
+        safe is withheld whole). Returns ``(logged envelope,)``, or the failure (the run is then closed RUN_FAILED).
+        Anything that raises is caught by the caller and closes the run the same way."""
+        with self.vault.collecting(pending):
+            env = callum.split_evidence(env, sink, lambda record: self.vault.put(tid, record),
+                                        field_hash=lambda field, value: self.vault.field_hash(tid, field, value))
         env = callum.secret_guard.guard_record(env)
         if not isinstance(env, dict) or not isinstance(env.get("facts", {}), dict):
             # the sweep itself failed (it returns "[withheld]"): never stored
             return {"agent": "callum", "where": "secret_guard", "error_type": "GuardFailed"}
+        return (env,)
+
+    def _record_citation_result(self, tid: str, cid: str, env, pending) -> Optional[dict]:
+        """Under the lock: the pending vault records in one append (one fsync), then the commit. Returns None when
+        committed. Anything that raises is caught by the caller and closes the run RUN_FAILED."""
+        self.vault.write_batch(pending)
         rsha = sha(env)
         facts = env.get("facts") or {}
         totals = (facts.get("metrics") or {}).get("totals") or {}
@@ -238,18 +258,21 @@ class CitationsMixin:
         """The owner's view (ADR 0051): the logged result with each row's evidence decrypted from the vault for
         ``tid``; a field with a client-view finding (job 3) is masked with ``alert``, every other field shown in full."""
         with self.lock:
+            # review adacb2ca SHOULD 1: a snapshot under the lock (the recorded result is never changed once
+            # recorded); every row is decrypted and masked outside it
             r = self.citation_runs.get(cid)
             if not self._owns(r, tid):
                 raise NotFound(R("CITATION_RUN_NOT_FOUND"))
             out = {k: v for k, v in r.items() if k != "result"}
             if r["status"] == "running" and cid not in self.running_citation_runs:
                 out["status"] = "running_elsewhere_or_interrupted"
-            if full:
-                out["result"] = callum.client_view(r["result"], lambda ref: self._vault_record(tid, ref)) \
-                    if r["result"] is not None else None
-            else:
-                out["outcome"] = (r["result"] or {}).get("outcome")
-            return out
+            result = r["result"]
+        if full:
+            out["result"] = callum.client_view(result, lambda ref: self._vault_record(tid, ref)) \
+                if result is not None else None
+        else:
+            out["outcome"] = (result or {}).get("outcome")
+        return out
 
     def _vault_record(self, tid: str, ref) -> tuple:
         """(record, None) for the owning tenant, else (None, reason): never raises, never says why beyond the code."""

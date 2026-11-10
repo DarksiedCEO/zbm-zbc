@@ -44,6 +44,7 @@ URL_MAX_INPUT = 8192                     # characters; a longer URL is withheld 
 PERCENT_ROUNDS = 3
 DECODE_RUNS_MAX = 64                     # base64 / hex runs decoded per view
 DECODE_RUN_MAX = 4096                    # characters of one run decoded
+DECODE_BOUNDARIES_MAX = 8                # "-" / "_" boundaries inside one base64 run also decoded from
 GUARD_MAX_DEPTH = 16
 GUARD_MAX_NODES = 200000
 CHECKS = ("a_label", "b_userinfo", "c_prefix", "d_token", "e_digits", "f_email", "url_credential", "url_personal")
@@ -155,9 +156,28 @@ def _printable(b: bytes) -> str | None:
     return s if ok >= 0.85 * len(s) else None
 
 
+def _b64_starts(run: str) -> list:
+    """Where a base64 run is decoded from (review adacb2ca MUST 4): its start, offsets 1-3 (a short prefix glued on:
+    ``x`` + payload) and just after each of its first ``DECODE_BOUNDARIES_MAX`` ``-`` / ``_`` (``ref-`` / ``x_``)."""
+    starts = [0, 1, 2, 3]
+    for i, c in enumerate(run):
+        if c in "-_":
+            if len(starts) >= 4 + DECODE_BOUNDARIES_MAX:
+                break
+            starts.append(i + 1)
+    return sorted({s for s in starts if len(run) - s >= 8})
+
+
+def _b64_decode(run: str) -> bytes:
+    body = run.rstrip("=").replace("-", "+").replace("_", "/")
+    body = body[: len(body) - len(body) % 4] if len(body) % 4 == 1 else body
+    return base64.b64decode(body + "=" * (-len(body) % 4), validate=True)
+
+
 def _decoded_runs(t: str) -> list:
     """Base64- and hex-looking runs of ``t`` decoded (when they decode to readable text), for inspection only.
-    Bounded: at most ``DECODE_RUNS_MAX`` runs of at most ``DECODE_RUN_MAX`` characters each."""
+    Bounded: at most ``DECODE_RUNS_MAX`` runs of at most ``DECODE_RUN_MAX`` characters each; a base64 run is decoded
+    from each of its ``_b64_starts`` (a constant number per run)."""
     out: list = []
     n = 0
     for rx in (_HEX_RUN, _B64_RUN):
@@ -166,18 +186,23 @@ def _decoded_runs(t: str) -> list:
             if n > DECODE_RUNS_MAX:
                 return out
             run = m.group(0)[:DECODE_RUN_MAX]
-            try:
-                if rx is _HEX_RUN:
+            if rx is _HEX_RUN:
+                try:
                     b = bytes.fromhex(run if len(run) % 2 == 0 else run[:-1])
-                else:
-                    body = run.rstrip("=").replace("-", "+").replace("_", "/")
-                    body = body[: len(body) - len(body) % 4] if len(body) % 4 == 1 else body
-                    b = base64.b64decode(body + "=" * (-len(body) % 4), validate=True)
-            except (ValueError, binascii.Error):
+                except ValueError:
+                    continue
+                s = _printable(b)
+                if s:
+                    out.append(_clean(s))
                 continue
-            s = _printable(b)
-            if s:
-                out.append(_clean(s))
+            for k in _b64_starts(run):
+                try:
+                    b = _b64_decode(run[k:])
+                except (ValueError, binascii.Error):
+                    continue
+                s = _printable(b)
+                if s:
+                    out.append(_clean(s))
     return out
 
 
@@ -510,7 +535,7 @@ _MASK = " \ue000\ue000\ue000\ue000 "   # private use: dropped from every view, s
 _B = r"(?<![A-Za-z0-9])"
 _E = r"(?![A-Za-z0-9])"
 _SAFE_SHAPES = re.compile(
-    _B + r"(?:"
+    r"(?:(?P<geo>@[+-]?\d{1,2}\.\d{1,12},[+-]?\d{1,3}\.\d{1,12})|" + _B + r"(?:"   # geo: the "@" is its own boundary
     r"(?P<uuid>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
     r"|(?P<order>\d{3}-\d{7}-\d{7})"
     r"|(?P<ymd>(?:19|20)\d\d/(?:0?[1-9]|1[0-2])/(?:0?[1-9]|[12]\d|3[01]))"
@@ -520,7 +545,10 @@ _SAFE_SHAPES = re.compile(
     r"|(?P<isbn10>ISBN(?:-10)?:? ?\d(?:[- ]?\d){8}[- ]?[\dX])"
     r"|(?P<ean>\d{13})"
     r"|(?i:commit|commits|revision|sha)[ :#]{1,3}(?P<sha>[0-9a-f]{7,40})"
-    r")" + _E)
+    r"))" + _E)
+
+
+_DIGIT_CHARS = re.compile(r"[0-9]")
 
 
 def _digits(s: str) -> list:
@@ -547,7 +575,13 @@ def _shape_ok(m: re.Match) -> bool:
     if k == "isbn10":
         return _isbn10_ok(m.group(k))
     if k == "ean":
-        return _ean_ok(m.group(k))
+        # review adacb2ca MUST 3: a 13-digit number with a card network's prefix that passes Luhn (a Visa) is never
+        # the EAN safe shape, in either lane
+        return _ean_ok(m.group(k)) and not _cv_card(m.group(k))
+    if k == "geo":
+        # a map's "@<lat>,<lng>" (signed decimals with a dot; review adacb2ca SHOULD 4), unless its digits read as a card
+        lat, lng = m.group(k)[1:].split(",")
+        return abs(float(lat)) <= 90 and abs(float(lng)) <= 180 and not _cv_card("".join(_DIGIT_CHARS.findall(m.group(k))))
     return True
 
 
@@ -749,10 +783,29 @@ _DIGIT_RUN = re.compile(r"[0-9](?:[^\W\d_]{0,%d}[0-9])*" % DIGIT_LETTER_BRIDGE)
 _ASCII_DIGITS = "0123456789"
 
 
+# review adacb2ca MUST 2: between two digit groups of 3-4 digits, up to WORD_BRIDGE_WORDS letter-only words of at most
+# WORD_BRIDGE_LETTERS letters each (with a little punctuation / space around them) are read as filler too:
+# ``1234 then 5678``, ``1234 followed by 5678``, ``1234then5678``. Linear: every part of the pattern is bounded and a
+# match starts only at the first digit of a group.
+WORD_BRIDGE_WORDS = 2
+WORD_BRIDGE_LETTERS = 10
+_BRIDGE_FILL = r"(?:[^\w\ue000]|_){0,4}"
+_WORD_BRIDGE = re.compile(r"(?<![0-9])([0-9]{3,4})" + _BRIDGE_FILL
+                          + r"(?:[^\W\d_]{1,%d}" % WORD_BRIDGE_LETTERS
+                          + r"(?:[^\w\ue000]|_){1,4}){0,%d}" % (WORD_BRIDGE_WORDS - 1)
+                          + r"[^\W\d_]{1,%d}" % WORD_BRIDGE_LETTERS + _BRIDGE_FILL
+                          + r"(?=[0-9]{3,4}(?![0-9]))")
+
+
+def _unbridged(v: str, sep: str) -> str:
+    """``v`` with every filler-word bridge between two digit groups replaced by ``sep``."""
+    return _WORD_BRIDGE.sub(lambda m: m.group(1) + sep, v) if any(c.isalpha() for c in v) else v
+
+
 def _digits_hit(v: str) -> bool:
     if sum(map(v.count, _ASCII_DIGITS)) < 9:
         return False
-    compact = _DIGIT_FILLER.sub("", v)
+    compact = _DIGIT_FILLER.sub("", _unbridged(v, ""))
     for m in _DIGIT_RUN.finditer(compact):
         g = m.group(0)
         if len(g) >= 9 and sum(map(g.count, _ASCII_DIGITS)) >= 9:
@@ -829,6 +882,24 @@ _TLDS = ("com", "net", "org", "io", "co", "us", "uk", "de", "fr", "ca", "au", "i
 EMAIL_AT_MAX = 256
 _LOCAL_CHAR = re.compile(r"[A-Za-z0-9._%+\-]")
 _DOMAIN_END = re.compile(r"[A-Za-z0-9\-]{1,63}(?:\.[A-Za-z0-9\-]{1,63}){0,8}\.(?:" + "|".join(_TLDS) + r")", re.IGNORECASE)
+# review adacb2ca MUST 1: ``name at domain.tld`` with a literal dot (``domain.co.uk``; spaces around the dot tolerated:
+# ``domain . com``, ``domain .com``, and ``domain. com`` when the next label is lower case, so a sentence end such as
+# ``at noon. It`` is not read as one). After each word ``at`` preceded by a local-part character, the following text
+# (dots re-joined) must read as a domain ending in a common top-level domain. Linear: the dots are re-joined once for
+# the whole view, and each match reads only up to the next space.
+_AT_WORD = re.compile(r"(?i)[A-Za-z0-9._%+\-][ \t\n]{1,3}at[ \t\n]{1,3}(?=[A-Za-z0-9])")
+_DOT_JOIN = re.compile(r"[ \t]+\.[ \t]*(?=[A-Za-z0-9])|\.[ \t]+(?=[a-z0-9])")
+_AT_DOMAIN = re.compile(_DOMAIN_END.pattern + r"(?![A-Za-z0-9\-])", re.IGNORECASE)
+
+
+def _at_word_email(v: str) -> bool:
+    low = v.lower()
+    if "at" not in low or "." not in v:
+        return False
+    w = _DOT_JOIN.sub(".", v)
+    return any(_AT_DOMAIN.match(w, m.end()) for m in _AT_WORD.finditer(w))
+
+
 def _email_hit(v: str) -> bool:
     if "@" in v:
         w = re.sub(r" ?@ ?", "@", v)
@@ -855,7 +926,9 @@ def _email_hit(v: str) -> bool:
                 if _DOMAIN_END.fullmatch(acc.rstrip(".,;:!?)]}>\"'")):
                     return True
     low = v.lower()
-    if ("at" in low and ("[" in v or "(" in v or "{" in v or "<" in v)) and _EMAIL_BRACKET.search(v):
+    if (("at" in low or "@" in v) and ("[" in v or "(" in v or "{" in v or "<" in v)) and _EMAIL_BRACKET.search(v):
+        return True
+    if _at_word_email(v):
         return True
     return " at " in low and "dot" in low and _spelled_email(v)
 
@@ -1579,7 +1652,17 @@ def _cv_deaccent(v: str) -> str:
     return _fold_confusables(unicodedata.normalize("NFKD", v).translate(_MARKS))
 
 
+# ``Bearer <token>`` with only a space (review adacb2ca SHOULD 3): a token of 12+ token characters holding a digit or a
+# token symbol (``bearer instruments`` is prose)
+_CV_BEARER = re.compile(r"(?i)(?<![a-z])bearer (?P<t>[A-Za-z0-9\-._~+/]{12,}=*)")
+
+
 def _cv_label(v: str) -> bool:
+    if "bearer" in v.lower():
+        for m in _CV_BEARER.finditer(v):
+            t = m.group("t")
+            if any(c.isdigit() or c in "-._~+/=" for c in t):
+                return True
     forms = (v,) if v.isascii() else (v, _cv_deaccent(v))
     for w in forms:
         for m in _CV_LABEL.finditer(w):
@@ -1668,7 +1751,7 @@ def _cv_userinfo(v: str) -> bool:
 
 
 _CV_BRACKET_AT = re.compile(r"(?i)[a-z0-9._%+\-] ?[\[\(\{<] ?(?:at|@) ?[\]\)\}>] ?")
-_CV_DOT = re.compile(r"(?i) ?[\[\(\{<] ?dot ?[\]\)\}>] ?| dot |\s?\.\s?")
+_CV_DOT = re.compile(r"(?i) ?[\[\(\{<] ?(?:dot|\.) ?[\]\)\}>] ?| dot |\s?\.\s?")   # [dot] / [.] / dot / .
 _CV_DOMAIN = re.compile(r"(?i)[a-z0-9\-]{1,63}+(?:\.[a-z0-9\-]{1,63}+){1,4}+(?![a-z0-9\-])")
 
 
@@ -1678,7 +1761,7 @@ def _cv_email(v: str) -> bool:
     if "@" in v and _cv_at_email(v):
         return True
     low = v.lower()
-    if "at" in low and ("[" in v or "(" in v or "{" in v or "<" in v):
+    if ("at" in low or "@" in v) and ("[" in v or "(" in v or "{" in v or "<" in v):     # name[@]domain[.]com too
         n = 0
         for m in _CV_BRACKET_AT.finditer(v):
             n += 1
@@ -1687,6 +1770,8 @@ def _cv_email(v: str) -> bool:
             tail = _CV_DOT.sub(".", v[m.end():m.end() + 300])
             if _CV_DOMAIN.match(tail):
                 return True
+    if _at_word_email(v):
+        return True                                        # ``name at domain.tld`` (the strict lane's rule)
     return " at " in low and "dot" in low and _spelled_email(v)
 
 
@@ -1717,6 +1802,8 @@ _CV_SPAN = re.compile(r"[0-9](?:(?:[^\w\ue000]|_){0,4}[0-9])*")
 _CV_GROUP = re.compile(r"[0-9]+")
 _CV_NANP = re.compile(r"(?<![0-9])(?:\+?1[ .\-]?)?(?:\(\d{3}\) ?\d{3}-\d{4}|\d{3}-\d{3}-\d{4}|\d{3}\.\d{3}\.\d{4})"
                       r"(?![0-9])")
+_CV_NANP_SPACED = re.compile(r"(?<![0-9])(?:\+?1 )?[2-9][0-9]{2} [2-9][0-9]{2} [0-9]{4}(?![0-9])")   # "xxx xxx xxxx"
+_CV_SSN_LABEL = re.compile(r"(?i)(?<![a-z])ssn(?![a-z])[\s:#=.\-]{0,4}(?<![0-9])(?P<d>[0-9]{9})(?![0-9])")
 _CV_E164 = re.compile(r"(?<![\w+])\+ ?[1-9](?:[ .\-()]{0,3}[0-9]){7,14}(?![0-9])")
 
 
@@ -1801,12 +1888,17 @@ def _cv_numbers(v: str) -> set:
     if sum(map(v.count, _ASCII_DIGITS)) < 8:
         return out
     m = _masked(v)
+    if any(_cv_ssn_ok(x.group("d")) for x in _CV_SSN_LABEL.finditer(m)):
+        out.add("ssn")                                     # "SSN" and nine bare digits (review adacb2ca SHOULD 3)
     for w in (m, m.replace(" ", "")) if " " in m else (m,):
-        if _CV_NANP.search(w) or _CV_E164.search(w):
+        if _CV_NANP.search(w) or _CV_E164.search(w) or _CV_NANP_SPACED.search(w):
             out.add("phone")
         groups = 0
-        for s in _CV_SPAN.finditer(w):
-            groups += _cv_span(w, s, out)
+        # review adacb2ca MUST 2: filler words between digit groups ("then", "followed by", "and", "plus", "next")
+        # bridged as the strict lane bridges them; the card rule (a network's prefix and Luhn) then decides
+        ub = _unbridged(w, " ")
+        for s in _CV_SPAN.finditer(ub):
+            groups += _cv_span(ub, s, out)
             if groups > CV_GROUPS_MAX:
                 out.add("cap")                             # fail closed: a field of thousands of numbers is masked
                 return out
@@ -1859,6 +1951,7 @@ def client_view_kind(findings) -> str | None:
 
 # URL query keys whose value is a credential (compared lower case with every non-letter / digit removed)
 CV_QUERY_KEYS = frozenset(("token", "key", "apikey", "secret", "sig", "signature", "password", "pwd", "passwd", "pass",
+                           "pw", "pin", "phpsessid",
                            "auth", "accesstoken", "clientsecret", "code", "session", "sid", "sessionid", "authtoken",
                            "idtoken", "refreshtoken", "accesskey", "secretkey", "privatekey", "xapikey",
                            "authorization", "bearer", "jwt", "otp", "credential", "credentials"))
@@ -1869,14 +1962,22 @@ CV_QUERY_SUFFIXES = ("token", "secret", "password", "passwd", "apikey", "accessk
 CV_ANALYTICS_KEYS = TRACKING_PARAMS | frozenset((
     "_kx", "ef_id", "spm", "cid", "clickid", "click_id", "irgwc", "_branch_match_id", "oly_enc_id", "oly_anon_id",
     "vero_id", "rb_clickid", "__hstc", "__hssc", "__hsfp", "_hsq", "hsctatracking", "trk", "trkcampaign", "_bta_tid",
-    "_bta_c", "wickedid", "obclid", "fb_action_ids", "gad_source", "gad_campaignid", "_gac"))
+    "_bta_c", "wickedid", "obclid", "fb_action_ids", "gad_source", "gad_campaignid", "_gac",
+    "ved", "ei", "sca_esv", "gs_lcrp", "oq", "aqs"))                 # Google search's own (review adacb2ca SHOULD 4)
 CV_ANALYTICS_PREFIXES = ("utm_", "hsa_", "pk_", "mtm_", "_ga")
 _CV_TOKEN_VALUE = re.compile(r"[A-Za-z0-9_\-+/=.~]+")
 _CV_HEX40 = re.compile(r"[0-9a-fA-F]{40,}")
 
 
+# session-id keys matched by their EXACT name only (review adacb2ca SHOULD 4): Shopify search's ``_sid`` is not one
+CV_SID_KEYS = frozenset(("sid", "sessionid", "session_id", "jsessionid", "phpsessid"))
+
+
 def _cv_query_key(k: str) -> bool:
-    n = re.sub(r"[^a-z0-9]", "", k.lower())
+    low = k.lower()
+    n = re.sub(r"[^a-z0-9]", "", low)
+    if n == "sid":
+        return low in CV_SID_KEYS
     return n in CV_QUERY_KEYS or n.endswith(CV_QUERY_SUFFIXES)
 
 
@@ -1929,6 +2030,18 @@ def _cv_pairs(raw: str, kinds: set) -> str:
     return "&".join(out)
 
 
+def _cv_seg_findings(seg: str) -> list:
+    """A path segment's findings, and ``label_value`` for a ``;key=value`` path parameter under a credential-like key
+    (``;jsessionid=...``; review adacb2ca SHOULD 3)."""
+    f = client_view_findings(seg)
+    if ";" in seg and not f:
+        for prm in seg.split(";")[1:CV_URL_PARTS_MAX]:
+            k, eq, val = unquote_plus(prm).partition("=")
+            if eq and val and _cv_query_key(k):
+                return ["label_value"]
+    return f
+
+
 def _cv_url(url: str) -> tuple:
     p = urlsplit(url)
     host = p.hostname or ""
@@ -1946,7 +2059,7 @@ def _cv_url(url: str) -> tuple:
             k = client_view_kind(client_view_findings(part)) or CREDENTIAL
             return None, k                                 # a host carrying a value: the whole URL is masked
     segs = (p.path or "").split("/")
-    seg_f = [client_view_findings(s) if s else [] for s in segs]
+    seg_f = [_cv_seg_findings(s) if s else [] for s in segs]
     kept = [CLIENT_HIDDEN if f else s for s, f in zip(segs, seg_f)]
     for f in seg_f:
         if f:
