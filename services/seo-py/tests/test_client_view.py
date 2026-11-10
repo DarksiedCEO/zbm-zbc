@@ -206,3 +206,107 @@ def test_client_view_findings_is_linear_on_adversarial_inputs(name):
     t64 = _timed(sg.client_view_findings, gen(64 * 1024))
     assert t64 < 1.0                                                  # 200 ms measured bar; 1 s here for slow CI
     assert t64 < 8 * t16 + 0.05, (t16, t64)                           # linear: 4x the input, about 4x the time
+
+
+# ------------------------------------------------------------------------------------------------ spelled "at" in prose
+# Client view only: the spelled " at " e-mail forms skip a word "at" that follows an ordinary prose word
+# (``sg.CV_PROSE_BEFORE_AT``). Generated at run time; only counts are asserted or reported, never the strings.
+
+RETAILERS = [
+    "amazon.com", "target.com", "walmart.com", "shopify.com", "etsy.com", "ebay.com", "bestbuy.com", "costco.com",
+    "chewy.com", "petco.com", "petsmart.com", "wayfair.com", "homedepot.com", "lowes.com", "kohls.com", "macys.com",
+    "nordstrom.com", "sephora.com", "ulta.com", "zappos.com", "newegg.com", "temu.com", "shein.com", "aliexpress.com",
+    "alibaba.com", "tiktok.com", "instagram.com", "overstock.com", "samsclub.com", "kroger.com", "cvs.com",
+    "walgreens.com", "ikea.com", "rei.com", "nike.com", "adidas.com", "apple.com", "dell.com", "amazon.co.uk",
+    "argos.co.uk", "zalando.de", "otto.de", "bol.com", "rakuten.co.jp", "flipkart.in", "mercadolibre.com.mx",
+]
+SHOP_TEMPLATES = [
+    "{W} at {d} for {p}.", "This bed is {w} at {d} and in stores.", "You can {w} at {d} today.",
+    "Our toys are {w} at {d} and {d2}.", "It is {w} at {d} right now.", "Prices {w} at {d} this week.",
+    "{W} at {d}, then compare.", "The kit ships fast and is {w} at {d}.", "Shoppers {w} at {d} every day.",
+    "Most items are {w} at {d} or {d2}.", "Also {w} at {d} with free shipping.", "{W} at {d} (limited stock).",
+    "We {w} at {d} and {d2} before launch.", "The new line is {w} at {d}.", "Fans {w} at {d} in minutes.",
+    "If you {w} at {d}, check the reviews.", "Our bowls, {w} at {d}, are dishwasher safe.",
+]
+PROSE_WORDS = ["available", "sold", "buy", "bought", "shop", "shopping", "find", "found", "look", "looking",
+               "listed", "stocked", "carried", "priced", "offered", "exclusively", "only", "also", "now", "online",
+               "cheaper", "cheapest", "here", "there", "it", "them", "this", "that", "purchase", "ordered", "get",
+               "got", "signed", "up", "live", "located", "based", "hosted", "posted", "published", "read", "see",
+               "visit", "starting", "best", "great", "deals", "discount", "both", "in", "us", "sale", "retail"]
+
+
+def _shop_prose(r: random.Random, n: int) -> list:
+    out = []
+    for i in range(n):
+        t = SHOP_TEMPLATES[i % len(SHOP_TEMPLATES)]
+        w = PROSE_WORDS[r.randrange(len(PROSE_WORDS))]
+        d, d2 = RETAILERS[i % len(RETAILERS)], RETAILERS[r.randrange(len(RETAILERS))]
+        if i % 5 == 4:
+            d = d.replace(".", " dot ", 1)                                          # "amazon dot com"
+        out.append(t.format(W=w.capitalize(), w=w, d=d, d2=d2, p=r.randint(5, 99)))
+    return out
+
+
+FIRST = ["maria", "james", "aisha", "kenji", "olga", "diego", "fatima", "liam", "priya", "noah", "chen", "sofia",
+         "omar", "elena", "tariq", "hannah", "mateo", "zara", "lucas", "ingrid", "kwame", "yuki", "andrei", "leila"]
+LAST = ["smith", "garcia", "okafor", "tanaka", "novak", "silva", "khan", "muller", "rossi", "kowalski", "nguyen"]
+MAIL_DOMAINS = ["gmail.com", "yahoo.com", "outlook.com", "proton.me", "acme.io", "shop.co.uk", "example.org"]
+
+
+def _spelled_mails(r: random.Random, n: int) -> list:
+    out = []
+    for i in range(n):
+        f, last = FIRST[r.randrange(len(FIRST))], LAST[r.randrange(len(LAST))]
+        local = [f, f.capitalize(), f"{f}.{last}", f"{f}_{last}", f"{f}{r.randint(1, 9999)}", f"{f[0]}{last}",
+                 f"{f}-{last}", f"{f}+{r.randint(1, 99)}", f"{f[0]}.{last}{r.randint(1, 99)}"][i % 9]
+        d = MAIL_DOMAINS[r.randrange(len(MAIL_DOMAINS))]
+        if i % 3 == 2:
+            d = d.replace(".", " dot ")
+        out.append(["Write to {m} for details.", "Contact {m} today.", "{m} replied.", "My address is {m}"][i % 4]
+                   .format(m=f"{local} at {d}"))
+    return out
+
+
+def _masked(texts: list) -> int:
+    return sum(1 for t in texts if "email" in sg.client_view_findings(t))
+
+
+def test_spelled_at_after_ordinary_prose_words_is_shown_in_the_client_view():
+    texts = _shop_prose(random.Random(51100), 400)
+    assert len(texts) >= 200 and len(set(RETAILERS)) >= 30
+    masked = _masked(texts)
+    assert masked == 0, masked
+
+
+def test_spelled_mails_with_name_or_handle_local_parts_are_still_masked():
+    assert not set(FIRST) & sg.CV_PROSE_BEFORE_AT and not set(LAST) & sg.CV_PROSE_BEFORE_AT
+    texts = _spelled_mails(random.Random(51101), 360)
+    masked = _masked(texts)
+    assert masked == len(texts), (masked, len(texts))
+
+
+def test_the_prose_list_bites(monkeypatch):
+    # mutation: with the list emptied, the shop-prose test's corpus is read as e-mails again
+    texts = _shop_prose(random.Random(51100), 400)
+    monkeypatch.setattr(sg, "CV_PROSE_BEFORE_AT", frozenset())
+    assert _masked(texts) > 0
+
+
+def test_the_prose_list_does_not_touch_the_literal_or_bracketed_forms_or_the_strict_lane():
+    r = random.Random(51102)
+    shop = _shop_prose(r, 120)
+    lit = [t.replace(" at ", "@", 1) for t in shop if " dot " not in t]
+    brk = [t.replace(" at ", " [at] ", 1).replace(".", " [dot] ", 1) for t in shop if " dot " not in t]
+    assert _masked(lit) == len(lit) and _masked(brk) == len(brk)
+    assert all(sg.check(t) is not None for t in shop)                    # the log lane still withholds every one
+    capsed = [t.upper() for t in shop[:20]]
+    assert _masked(capsed) == len(capsed)                                # an ALL-CAPS word is not read as prose
+
+
+def test_prose_word_matching_is_linear():
+    t16 = _timed(sg.client_view_findings, _fill("available at shop at a.b at ", 16 * 1024))
+    t64 = _timed(sg.client_view_findings, _fill("available at shop at a.b at ", 64 * 1024))
+    run16 = _timed(sg.client_view_findings, "a" * (16 * 1024) + " x")
+    run64 = _timed(sg.client_view_findings, "a" * (64 * 1024 - 2) + " x")
+    assert t64 < 1.0 and run64 < 1.0
+    assert t64 < 8 * t16 + 0.05 and run64 < 8 * run16 + 0.05, (t16, t64, run16, run64)

@@ -1754,10 +1754,63 @@ _CV_BRACKET_AT = re.compile(r"(?i)[a-z0-9._%+\-] ?[\[\(\{<] ?(?:at|@) ?[\]\)\}>]
 _CV_DOT = re.compile(r"(?i) ?[\[\(\{<] ?(?:dot|\.) ?[\]\)\}>] ?| dot |\s?\.\s?")   # [dot] / [.] / dot / .
 _CV_DOMAIN = re.compile(r"(?i)[a-z0-9\-]{1,63}+(?:\.[a-z0-9\-]{1,63}+){1,4}+(?![a-z0-9\-])")
 
+# Client view only: the CLOSED list of ordinary English words that precede the word "at" in shop prose ("available
+# at amazon.com", "sold at target.com", "look at shopify.com", "find us at etsy dot com"). For the SPELLED " at " forms
+# only (``name at domain.tld`` and ``name at domain dot tld``; never the literal "@" or the bracketed "[at]" / "(at)"
+# forms), a word "at" whose preceding token is one of these words, written in lower case or capitalised (a sentence
+# start: "Available at ..."), is not read as an e-mail. Any other token is still read as a local part: a name or
+# handle not on the list, anything with a digit, dot, underscore, "+", "%" or "-", and an ALL-CAPS word. Role-mailbox
+# words (sales, support, info, help, contact, admin, hello, billing, orders, team, press, jobs, careers, service, news,
+# mail, office, marketing, media, returns, privacy, legal, security, feedback, partners) and words that are also
+# common first names (will, mark, bill, grace, hope, joy, rose, may, june, art, chase, dawn, summer, jack, frank, max,
+# dean, drew, ray, faith, sky, rich, ...) are deliberately NOT on it. Read at call time (``globals()``), so a test can
+# empty it and show the shop-prose test then fails.
+CV_PROSE_BEFORE_AT = frozenset("""
+a about above across actually affordable again ago all almost alone already also always amazing an and another
+any anyone anything anywhere appear appears are arrive arrived arriving as ask asked assembled available avoid
+away back based be been being best better big both bought brand brands browse browsing built but buy buying
+cart carried carries cheap cheaper cheapest check checked checkout clearance click come comes coming
+compare compared cost costs could currently daily deal deals delivered directly discount
+discounted discounts do does done down each early easily easy either else elsewhere employed even
+eventually ever every everything everywhere exclusive exclusively expensive featured find finding first found
+free fresh from fun gear get gets getting gift gifts go goes going gone good got great had happen happens has
+have here hired his holiday hosted how however i in instead interested is it items its just kept last later
+launched least less let lightly limited listed listing listings live lived located look looked looking lots
+low lower lowest made make many marked me merch more most much must my near nearly never new next nice no not
+nothing now of off offer offered offering offers often on once one online only open or order ordered ordering
+other others our out over own paid pay people pick picked placed post posted pre price priced prices pricing
+product products published purchase purchased purchases purchasing put quality rated read
+ready really receive received regular rest restocked retail retailer retailers review reviewed reviews right
+sale same save saved say says see seen sell seller sellers selling sells shipped shipping shop shopped shopper
+shoppers shopping should shown sign signed similar since site sites so sold some someone something sometimes
+soon spend spent start started starting starts still stock stocked stocks store stores subscribe subscribed
+such sure that the their them then there these they thing things this those through today together too top
+tried try trying twice two up us usually very visit visited want wanted was way we week well went were what
+when where which while who why with work worked works worth would yesterday yet you your
+""".split())
+_CV_TOKEN_AT = re.compile(r"(?<![A-Za-z0-9._%+\-])([A-Za-z0-9._%+\-]++)([ \t\n]{1,3})(?:[Aa][Tt])(?=[ \t\n])")
+
+
+def _cv_prose_word(tok: str) -> bool:
+    words = globals()["CV_PROSE_BEFORE_AT"]
+    if tok in words:
+        return True
+    return tok[:1].isupper() and tok[1:] == tok[1:].lower() and tok.lower() in words
+
+
+def _cv_unprose_at(v: str) -> str:
+    """``v`` with every word "at" that follows an ordinary prose word (``CV_PROSE_BEFORE_AT``) blanked to two NULs, so
+    the spelled-at rules do not read it. Linear: a token starts only at the start of its run and is read possessively."""
+    if "t" not in v and "T" not in v:
+        return v
+    return _CV_TOKEN_AT.sub(lambda m: m.group(1) + m.group(2) + "\x00\x00" if _cv_prose_word(m.group(1)) else m.group(0),
+                            v)
+
 
 def _cv_email(v: str) -> bool:
     """An address (the strict lane's plain and split forms), ``name [at] domain [dot] tld`` (a dot part required, so
-    ``meet us (at) the venue`` is prose) or ``name at domain dot tld``."""
+    ``meet us (at) the venue`` is prose) or ``name at domain dot tld`` / ``name at domain.tld`` (not after an ordinary
+    prose word: ``CV_PROSE_BEFORE_AT``)."""
     if "@" in v and _cv_at_email(v):
         return True
     low = v.lower()
@@ -1770,9 +1823,12 @@ def _cv_email(v: str) -> bool:
             tail = _CV_DOT.sub(".", v[m.end():m.end() + 300])
             if _CV_DOMAIN.match(tail):
                 return True
-    if _at_word_email(v):
+    if "at" not in low:
+        return False
+    w = _cv_unprose_at(v)                                  # the spelled " at " forms only: prose words skipped
+    if _at_word_email(w):
         return True                                        # ``name at domain.tld`` (the strict lane's rule)
-    return " at " in low and "dot" in low and _spelled_email(v)
+    return " at " in w.lower() and "dot" in low and _spelled_email(w)
 
 
 def _cv_at_email(v: str) -> bool:
