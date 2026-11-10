@@ -21,6 +21,9 @@ Public entry points (names kept from v1 so callers do not break):
   ``redact_text(text) -> (text or "[withheld]", findings)``   ``is_clearly_safe(text) -> bool``
   ``safe_url(url) -> str``   ``url_secret_segments(url) -> (bad indexes, other)``   ``url_has_secret(url) -> bool``
   ``guard_record(obj)``: fail-closed recursive sweep (dict keys and values, lists, tuples, sets, bytes, objects).
+
+Section 5 (ADR 0051 job 3) is a SEPARATE, precise rule for the owner's decrypted view only
+(``client_view_findings(text)``, ``client_view_url(url)``); it never decides what is logged, fetched or sent.
 """
 
 from __future__ import annotations
@@ -30,7 +33,7 @@ import binascii
 import html
 import re
 import unicodedata
-from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, unquote, unquote_plus, urlencode, urlsplit, urlunsplit
 
 import lookalikes
 
@@ -1493,3 +1496,514 @@ def guard_record(obj):
         return _guard(obj, 0, None, _Budget())
     except Exception:  # noqa: BLE001 - fail closed
         return globals()["_on_guard_error"](obj)
+
+
+# ------------------------------------------------------------------------------------------------ 5. client view
+# ADR 0051 job 3 (Option B): the OWNER'S decrypted view of its own citation evidence (behind tenant authentication)
+# and its exports mask a field only on HIGH-PRECISION findings, read on the same inspection views as the strict lane
+# (``_tagged_views``: NFKC, invisibles removed, Unicode digits and confusables folded, bounded decoding). The strict
+# filter above is unchanged and stays the only filter for logs, outbound data and every cross-tenant surface; nothing
+# here is ever used to decide what is logged, fetched or sent.
+#   strong_key   a known strong-key prefix (the 2c table, also on the view with spaces removed and on each token with
+#                its separators removed) or a PEM / PGP block
+#   userinfo     ``scheme://user:password@``
+#   label_value  a credential label word (the 2a list) FOLLOWED by a separator (``:`` ``=`` ``->`` an arrow ``|`` ``>``,
+#                JSON forms, or `` is `` / `` - `` / `` would be `` ... with a value-like value) and a value of 4+
+#                non-space characters; the bare word in prose is not masked
+#   card         a Luhn-valid number with a card network's prefix and length (13-19 digits, any separators / padding)
+#   ssn          a US SSN shape 3-2-4 with a valid area, group and serial
+#   phone        E.164 (``+`` and 8-15 digits) or NANP written ``(xxx) xxx-xxxx``, ``xxx-xxx-xxxx``, ``xxx.xxx.xxxx``
+#   email        an e-mail address, the spelled and bracketed at / dot forms included
+# Bare unlabelled short values and random tokens without a label or a known prefix are NOT masked here (residual,
+# ADR 0051 decision 13).
+
+CLIENT_HIDDEN = "{hidden}"
+CV_PERSONAL = frozenset(("card", "ssn", "phone", "email"))
+CV_GROUPS_MAX = 2048                     # digit groups read per view; more: the field is masked (fail closed)
+CV_URL_PARTS_MAX = 256                   # query pairs read per URL; more: the whole URL is masked (fail closed)
+
+
+def _cv_letters(w: str) -> str:
+    return "[ _.\\-]{0,2}".join(f"[{c}{c.upper()}]" for c in w)
+
+
+def _cv_label_rx() -> re.Pattern:
+    """Every ASCII label of the 2a list (``_JOINED`` and ``_PIECES``), letters optionally split by up to two separator
+    characters, starting and ending at a piece boundary (a non-letter, or a camelCase change), grouped by first
+    letter."""
+    words = sorted(set(_JOINED) | set(_PIECES), key=len, reverse=True)
+    by_first: dict = {}
+    for w in words:
+        if w.isascii() and w.isalpha():
+            by_first.setdefault(w[0], []).append(w)
+    alts = [f"(?=[{f}{f.upper()}])(?:" + "|".join(_cv_letters(w) for w in ws) + ")" for f, ws in sorted(by_first.items())]
+    return re.compile(r"(?:(?<![A-Za-z])|(?<=[a-z])(?=[A-Z]))(?:" + "|".join(alts) + r")(?:(?![A-Za-z])|(?=[A-Z][a-z]))")
+
+
+_CV_LABEL = _cv_label_rx()
+_CV_SCRIPT = re.compile("|".join(" ?".join(re.escape(c) for c in s.replace(" ", ""))
+                                 for s in sorted(set(_SCRIPT) | {"\u043f\u0430\u0440\u043e\u043b\u044c"},
+                                                 key=len, reverse=True)))
+# what follows a label: closing quotes / brackets / emphasis, then a separator, then opening quotes / brackets, then a
+# value of 4+ characters (stopped by a space, a quote, a bracket, ``|`` ``,`` ``;`` ``&``)
+_CV_AFTER = re.compile(
+    "[\"'\\]\\)>*`]{0,3} ?(?:(?P<p>:|=>|=|->|\u2192|\u21d2|\\||>)"
+    "| (?:is|-|\u2013|\u2014) |(?P<w> (?:was|are|would be|will be|remains) ))"
+    " ?[\"'`<\\[(*|]{0,3} ?(?P<val>[^\\s\"'`<>|,;&)\\]]{4,}|[^\\s\"'`<>|,;&)\\]]{1,3} [^\\s\"'`<>|,;&)\\]]{1,16})")
+
+
+def _cv_valueish(val: str) -> bool:
+    """After a natural-language separator beyond the listed ones (`` was ``, `` would be ``, `` remains ``...) the
+    value must look like one: a digit or a symbol in it, or a capital after its first letter (``the password would be
+    reset`` is prose). After the listed separators (``:`` ``=`` `` is `` `` - `` an arrow, JSON) any value of 4+
+    characters counts."""
+    return not val.isalpha() or any(c.isupper() for c in val[1:])
+
+
+class _MarkTable(dict):
+    """``str.translate`` table: a combining mark removed (filled on first use, bounded)."""
+
+    def __missing__(self, o: int) -> str | None:
+        r = None if unicodedata.combining(chr(o)) else chr(o)
+        if len(self) < _CMAP_MAX:
+            self[o] = r
+        return r
+
+
+_MARKS = _MarkTable()
+
+
+def _cv_deaccent(v: str) -> str:
+    """Diacritics removed (NFKD, combining marks dropped) and confusables folded: ``contrase\u00f1a`` reads as
+    ``contrasena``."""
+    return _fold_confusables(unicodedata.normalize("NFKD", v).translate(_MARKS))
+
+
+def _cv_label(v: str) -> bool:
+    forms = (v,) if v.isascii() else (v, _cv_deaccent(v))
+    for w in forms:
+        for m in _CV_LABEL.finditer(w):
+            a = _CV_AFTER.match(w, m.end())
+            if a is not None and (a.group("w") is None or _cv_valueish(a.group("val"))):
+                return True
+    if not v.isascii():
+        for m in _CV_SCRIPT.finditer(v):
+            a = _CV_AFTER.match(v, m.end())
+            if a is not None and (a.group("w") is None or _cv_valueish(a.group("val"))):
+                return True
+    return False
+
+
+def _cv_strong(v: str) -> bool:
+    """A strong-key prefix (2c) on the view, on the view with every space removed (every family), and on each token
+    with its separators removed (a prefix key with separators put in: ``sk-pr-oj-...``)."""
+    if _prefix_hit(v):
+        return True
+    if " " in v and _prefix_found(v.replace(" ", "")):
+        return True
+    ns = _CV_NOSEP.sub("", v)
+    if "BEGIN" in ns and _CV_PEM.search(ns):
+        return True                                        # a PEM / PGP header with spaces or separators put in
+    toks = [t for t in (x.strip(_EDGE) for x in v.split(" ") if len(x) >= 12) if _TOK_SEP.search(t)]
+    if not toks:
+        return False
+    # every token with separators is read three ways, each as ONE text (one regex pass, not one per token): its
+    # separators all removed, and removed only after its first / second separator (the prefix's own one kept)
+    joined = " ".join(_TOK_SEP.sub("", t) for t in toks)
+    if _CV_JOINED_START.search(joined) or _prefix_found(joined):
+        return True
+    for k in (1, 2):
+        if _prefix_found(" ".join(_cv_after_sep(t, k) for t in toks)):
+            return True
+    for t in toks:
+        if t[0] not in "MNO":
+            continue
+        if "-" in t and _PREFIX_DISCORD.search(t.replace("-", "")):
+            return True                                    # a Discord token with dashes put in
+        if t.count(".") >= 3 and _CV_DISCORD_JOINED.fullmatch(t.replace(".", "")) and all(_classes(t)):
+            return True                                    # a Discord token with dots put in
+    return False
+
+
+def _cv_after_sep(t: str, k: int) -> str:
+    """``t`` with every separator after its ``k``-th one removed (``_prefix_after_separator``), or "" when it has
+    fewer or the ``k``-th ends past character 12."""
+    ends = [m.end() for m in _TOK_SEP.finditer(t, 0, 64)][:k]
+    if len(ends) < k or ends[k - 1] > 12:
+        return ""
+    e = ends[k - 1]
+    return t[:e] + _TOK_SEP.sub("", t[e:])
+
+
+_CV_JOINED_START = re.compile(r"(?<![^ ])(?:" + _JOINED_PREFIX.pattern + ")")
+
+
+_CV_NOSEP = re.compile(r"[\s.\-_/:]+")
+_CV_PEM = re.compile(r"BEGIN[A-Z0-9]{0,40}(?:PRIVATEKEY|PGP|OPENSSH|ENCRYPTED|CERTIFICATEREQUEST)")
+_PREFIX_DISCORD = re.compile(dict(PROVIDERS)["discord"])
+_CV_DISCORD_JOINED = re.compile(r"[MNO][A-Za-z0-9_\-]{56,120}")
+
+
+_CV_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.\-]{0,31}://")
+_CV_AUTHORITY = re.compile(r"[^\s/?#]{0,512}")
+
+
+def _cv_userinfo(v: str) -> bool:
+    """``scheme://user:password@`` (a password present; a bare ``user@`` is not a credential)."""
+    if "@" not in v:
+        return False
+    for w in (v, v.replace(" ", "")) if " " in v else (v,):
+        if "://" not in w:
+            continue
+        n = 0
+        for m in _CV_SCHEME.finditer(w):
+            n += 1
+            if n > URL_TEXT_MAX:
+                return True                                # fail closed
+            auth = _CV_AUTHORITY.match(w, m.end()).group(0)
+            ui, at, _host = auth.rpartition("@")
+            if at and ":" in ui and ui.split(":", 1)[1]:
+                return True
+    return False
+
+
+_CV_BRACKET_AT = re.compile(r"(?i)[a-z0-9._%+\-] ?[\[\(\{<] ?(?:at|@) ?[\]\)\}>] ?")
+_CV_DOT = re.compile(r"(?i) ?[\[\(\{<] ?dot ?[\]\)\}>] ?| dot |\s?\.\s?")
+_CV_DOMAIN = re.compile(r"(?i)[a-z0-9\-]{1,63}+(?:\.[a-z0-9\-]{1,63}+){1,4}+(?![a-z0-9\-])")
+
+
+def _cv_email(v: str) -> bool:
+    """An address (the strict lane's plain and split forms), ``name [at] domain [dot] tld`` (a dot part required, so
+    ``meet us (at) the venue`` is prose) or ``name at domain dot tld``."""
+    if "@" in v and _cv_at_email(v):
+        return True
+    low = v.lower()
+    if "at" in low and ("[" in v or "(" in v or "{" in v or "<" in v):
+        n = 0
+        for m in _CV_BRACKET_AT.finditer(v):
+            n += 1
+            if n > EMAIL_AT_MAX:
+                return True                                # fail closed
+            tail = _CV_DOT.sub(".", v[m.end():m.end() + 300])
+            if _CV_DOMAIN.match(tail):
+                return True
+    return " at " in low and "dot" in low and _spelled_email(v)
+
+
+def _cv_at_email(v: str) -> bool:
+    """The strict lane's two ``@`` forms (2f): a plain address, or one split by spaces / line breaks (after each ``@``
+    the next words joined until they read as a domain with a common top-level domain)."""
+    if _EMAIL_PLAIN.search(re.sub(r" ?@ ?", "@", v)):
+        return True
+    for n, m in enumerate(re.finditer("@", v)):
+        if n >= EMAIL_AT_MAX:
+            return True                                    # fail closed
+        i = m.start() - 1
+        while i >= 0 and v[i] == " " and m.start() - i < 8:
+            i -= 1
+        if i < 0 or not _LOCAL_CHAR.fullmatch(v[i]):
+            continue
+        acc = ""
+        for tok in v[m.end():m.end() + 1024].lstrip(" ").split(" ")[:40]:
+            acc += tok
+            if len(acc) > 255:
+                break
+            if _DOMAIN_END.fullmatch(acc.rstrip(".,;:!?)]}>\"'")):
+                return True
+    return False
+
+
+_CV_SPAN = re.compile(r"[0-9](?:(?:[^\w\ue000]|_){0,4}[0-9])*")
+_CV_GROUP = re.compile(r"[0-9]+")
+_CV_NANP = re.compile(r"(?<![0-9])(?:\+?1[ .\-]?)?(?:\(\d{3}\) ?\d{3}-\d{4}|\d{3}-\d{3}-\d{4}|\d{3}\.\d{3}\.\d{4})"
+                      r"(?![0-9])")
+_CV_E164 = re.compile(r"(?<![\w+])\+ ?[1-9](?:[ .\-()]{0,3}[0-9]){7,14}(?![0-9])")
+
+
+def _cv_card(d: str) -> bool:
+    """A card number: a network's prefix and length (Visa, Mastercard, Amex, Discover, Diners, JCB, UnionPay), then
+    Luhn."""
+    n = len(d)
+    if not 13 <= n <= 19 or d[0] not in "23456":
+        return False
+    p2, p3, p4 = int(d[:2]), int(d[:3]), int(d[:4])
+    if d[0] == "4":
+        ok = n in (13, 16, 19)
+    elif 51 <= p2 <= 55 or 2221 <= p4 <= 2720:
+        ok = n == 16
+    elif p2 in (34, 37):
+        ok = n == 15
+    elif p4 == 6011 or 644 <= p3 <= 649 or p2 == 65:
+        ok = 16 <= n <= 19
+    elif 300 <= p3 <= 305 or p2 in (36, 38, 39):
+        ok = 14 <= n <= 19
+    elif 3528 <= p4 <= 3589 or p2 == 62:
+        ok = 16 <= n <= 19
+    else:
+        ok = False
+    return ok and _luhn(d)
+
+
+def _cv_sep(x: str, extra: str = "") -> bool:
+    """A number's own group separator: one or two of ``-`` ``.`` (and ``extra``)."""
+    return 0 < len(x) <= 2 and all(c in "-." + extra for c in x)
+
+
+def _cv_ssn_ok(d: str) -> bool:
+    area, group, serial = int(d[:3]), int(d[3:5]), int(d[5:])
+    return 0 < area < 900 and area != 666 and group > 0 and serial > 0
+
+
+def _cv_span(w: str, s: re.Match, out: set) -> int:
+    """One digit span (digits with filler runs of at most four characters between them): card windows at group
+    boundaries, the SSN shapes, a NANP number opened by ``(xxx)``. Returns the number of digit groups read."""
+    span = s.group(0)
+    gs = [(g.start(), g.end()) for g in _CV_GROUP.finditer(span)]
+    seps = [span[gs[i][1]:gs[i + 1][0]] for i in range(len(gs) - 1)]
+    digits = "".join(span[a:b] for a, b in gs)
+    if len(digits) < 9:
+        return len(gs)
+    if "card" not in out:
+        bounds = [0]
+        for a, b in gs:
+            bounds.append(bounds[-1] + b - a)
+        for i in range(len(gs)):
+            if digits[bounds[i]] not in "23456":
+                continue
+            for j in range(i + 1, len(bounds)):
+                n = bounds[j] - bounds[i]
+                if n > 19:
+                    break
+                if n >= 13 and _cv_card(digits[bounds[i]:bounds[j]]):
+                    out.add("card")
+                    break
+            if "card" in out:
+                break
+    if "ssn" not in out:
+        lens = [b - a for a, b in gs]
+        for i in range(len(gs) - 2):
+            if lens[i:i + 3] == [3, 2, 4] and _cv_sep(seps[i], " ") and _cv_sep(seps[i + 1], " ") \
+                    and (i == 0 or not _cv_sep(seps[i - 1])) and (i + 3 >= len(gs) or not _cv_sep(seps[i + 2])):
+                d = digits[sum(lens[:i]):sum(lens[:i + 3])]
+                if _cv_ssn_ok(d):
+                    out.add("ssn")
+                    break
+        if len(digits) == 9 and len(gs) >= 3 and all(x == "-" for x in seps) and _cv_ssn_ok(digits):
+            out.add("ssn")                                 # a 3-2-4 number with more dashes put in
+    if "phone" not in out and len(digits) == 10 and gs[0][1] - gs[0][0] == 3 and seps and seps[0].startswith(")") \
+            and s.start() > 0 and w[s.start() - 1] == "(":
+        out.add("phone")                                   # (xxx) and seven digits, however grouped
+    return len(gs)
+
+
+def _cv_numbers(v: str) -> set:
+    out: set = set()
+    if sum(map(v.count, _ASCII_DIGITS)) < 8:
+        return out
+    m = _masked(v)
+    for w in (m, m.replace(" ", "")) if " " in m else (m,):
+        if _CV_NANP.search(w) or _CV_E164.search(w):
+            out.add("phone")
+        groups = 0
+        for s in _CV_SPAN.finditer(w):
+            groups += _cv_span(w, s, out)
+            if groups > CV_GROUPS_MAX:
+                out.add("cap")                             # fail closed: a field of thousands of numbers is masked
+                return out
+    return out
+
+
+_CV_CHECKS = (("strong_key", "_cv_strong"), ("userinfo", "_cv_userinfo"), ("label_value", "_cv_label"),
+              ("email", "_cv_email"))
+
+
+def _cv_findings(text: str) -> set:
+    found: set = set()
+    for v, _folded in _tagged_views(text):
+        if not v:
+            continue
+        for name, fn in _CV_CHECKS:
+            if name not in found and globals()[fn](v):
+                found.add(name)
+        if not {"card", "ssn", "phone"} <= found:
+            found |= globals()["_cv_numbers"](v)
+    return found
+
+
+def client_view_findings(text) -> list:
+    """The client view's HIGH-PRECISION findings on ``text`` (sorted names: ``strong_key``, ``userinfo``,
+    ``label_value``, ``card``, ``ssn``, ``phone``, ``email``; ``cap`` / ``error`` / ``type`` fail closed), or [] when the
+    owner may see it in full. For the owner's decrypted view and its exports ONLY (ADR 0051 job 3): logs, outbound
+    data and cross-tenant surfaces use ``check`` (the strict lane). Never raises."""
+    if text is None:
+        return []
+    if not isinstance(text, str):
+        return ["type"]
+    if not text:
+        return []
+    if len(text) > MAX_INPUT:
+        return ["cap"]
+    try:
+        return sorted(_cv_findings(text))
+    except Exception:  # noqa: BLE001 - fail closed: a field the checks cannot read is masked
+        return ["error"]
+
+
+def client_view_kind(findings) -> str | None:
+    """``personal`` when every finding is a personal-data one, ``credential`` when any other is present, else None."""
+    f = set(findings or ())
+    if not f:
+        return None
+    return PERSONAL if f <= CV_PERSONAL else CREDENTIAL
+
+
+# URL query keys whose value is a credential (compared lower case with every non-letter / digit removed)
+CV_QUERY_KEYS = frozenset(("token", "key", "apikey", "secret", "sig", "signature", "password", "pwd", "passwd", "pass",
+                           "auth", "accesstoken", "clientsecret", "code", "session", "sid", "sessionid", "authtoken",
+                           "idtoken", "refreshtoken", "accesskey", "secretkey", "privatekey", "xapikey",
+                           "authorization", "bearer", "jwt", "otp", "credential", "credentials"))
+CV_QUERY_SUFFIXES = ("token", "secret", "password", "passwd", "apikey", "accesskey", "secretkey", "privatekey",
+                     "signature", "sessionid", "credential")
+# analytics / tracking keys: their values are random ids by design, so the high-entropy rule does not apply to them
+# (every other client-view finding still does)
+CV_ANALYTICS_KEYS = TRACKING_PARAMS | frozenset((
+    "_kx", "ef_id", "spm", "cid", "clickid", "click_id", "irgwc", "_branch_match_id", "oly_enc_id", "oly_anon_id",
+    "vero_id", "rb_clickid", "__hstc", "__hssc", "__hsfp", "_hsq", "hsctatracking", "trk", "trkcampaign", "_bta_tid",
+    "_bta_c", "wickedid", "obclid", "fb_action_ids", "gad_source", "gad_campaignid", "_gac"))
+CV_ANALYTICS_PREFIXES = ("utm_", "hsa_", "pk_", "mtm_", "_ga")
+_CV_TOKEN_VALUE = re.compile(r"[A-Za-z0-9_\-+/=.~]+")
+_CV_HEX40 = re.compile(r"[0-9a-fA-F]{40,}")
+
+
+def _cv_query_key(k: str) -> bool:
+    n = re.sub(r"[^a-z0-9]", "", k.lower())
+    return n in CV_QUERY_KEYS or n.endswith(CV_QUERY_SUFFIXES)
+
+
+def _cv_analytics(k: str) -> bool:
+    k = k.lower()
+    return k in CV_ANALYTICS_KEYS or k.startswith(CV_ANALYTICS_PREFIXES)
+
+
+def _cv_entropy(v: str) -> bool:
+    """A high-entropy token value: 32+ characters mixing upper case, lower case and digits, or 40+ hex digits."""
+    if len(v) < 32 or not _CV_TOKEN_VALUE.fullmatch(v):
+        return False
+    up, lo, dg = _classes(v)
+    return (up and lo and dg) or bool(_CV_HEX40.fullmatch(v))
+
+
+def _cv_host_key(label: str) -> bool:
+    """A host label holding a strong-key prefix (host names are case-insensitive: read as written, upper-cased, and
+    with only its first two letters upper-cased)."""
+    return any(_prefix_found(x) for x in (label, label.upper(), label[:2].upper() + label[2:])) \
+        or bool(_AWS_JOINED.search(_NOSEP.sub("", label.upper())))
+
+
+def _cv_pairs(raw: str, kinds: set) -> str:
+    """A query (or a ``k=v`` fragment): each value masked on its own (``{hidden}``), the rest kept as written."""
+    pairs = raw.split("&")
+    if len(pairs) > CV_URL_PARTS_MAX:
+        raise ValueError("too many query pairs")
+    out = []
+    for pair in pairs:
+        k_raw, eq, v_raw = pair.partition("=")
+        k, v = unquote_plus(k_raw), unquote_plus(v_raw)
+        fk = client_view_findings(k) if k else []
+        if fk:
+            kinds.add(client_view_kind(fk))
+            out.append(CLIENT_HIDDEN)                      # the key itself carries a value: the whole pair
+            continue
+        kind = None
+        if v and _cv_query_key(k):
+            kind = CREDENTIAL
+        elif v:
+            kind = client_view_kind(client_view_findings(v))
+            if kind is None and not _cv_analytics(k) and _cv_entropy(v):
+                kind = CREDENTIAL
+        if kind is None:
+            out.append(pair)
+        else:
+            kinds.add(kind)
+            out.append(k_raw + eq + CLIENT_HIDDEN)
+    return "&".join(out)
+
+
+def _cv_url(url: str) -> tuple:
+    p = urlsplit(url)
+    host = p.hostname or ""
+    if not p.scheme or not p.netloc or not host:
+        k = client_view_kind(client_view_findings(url))
+        return (url, None) if k is None else (None, k)
+    kinds: set = set()
+    ui, at, hostport = p.netloc.rpartition("@")
+    netloc = p.netloc
+    if at and ((":" in ui and ui.split(":", 1)[1]) or client_view_findings(unquote(ui))):
+        kinds.add(CREDENTIAL if ":" in ui else client_view_kind(client_view_findings(unquote(ui))))
+        netloc = CLIENT_HIDDEN + "@" + hostport
+    for part in [host] + host.split("."):
+        if part and (_cv_host_key(part) or client_view_findings(part)):
+            k = client_view_kind(client_view_findings(part)) or CREDENTIAL
+            return None, k                                 # a host carrying a value: the whole URL is masked
+    segs = (p.path or "").split("/")
+    seg_f = [client_view_findings(s) if s else [] for s in segs]
+    kept = [CLIENT_HIDDEN if f else s for s, f in zip(segs, seg_f)]
+    for f in seg_f:
+        if f:
+            kinds.add(client_view_kind(f))
+    # a value split across segments: the path read joined by "/" and glued; a finding no single segment has masks every
+    # segment
+    seen = set().union(*seg_f) if seg_f else set()
+    joined = set(client_view_findings("/".join(segs))) | _cv_glued(segs)
+    if joined - seen:
+        kinds.add(client_view_kind(joined - seen))
+        kept = [CLIENT_HIDDEN if s else s for s in segs]
+    query = _cv_pairs(p.query, kinds) if p.query else ""
+    frag = p.fragment
+    if frag:
+        if "=" in frag:
+            frag = _cv_pairs(frag, kinds)
+        else:
+            fk = client_view_kind(client_view_findings(frag))
+            if fk is not None:
+                kinds.add(fk)
+                frag = CLIENT_HIDDEN
+    kinds.discard(None)
+    if not kinds:
+        return url, None
+    shown = urlunsplit((p.scheme, netloc, "/".join(kept), query, frag))
+    return shown, (CREDENTIAL if CREDENTIAL in kinds else PERSONAL)
+
+
+_CV_GLUED_EMAIL = re.compile(r"[A-Za-z0-9._%+\-]@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.(?:" + "|".join(_TLDS)
+                             + r")(?![A-Za-z0-9])", re.IGNORECASE)
+
+
+def _cv_glued(segs: list) -> set:
+    """The path's segments glued with nothing between them (a value split across segments): every finding but a
+    label (no separator survives the glue) and an e-mail only with a common top-level domain (``pkg@1.2.3/dist/x.js``
+    glued is not an address)."""
+    glued = "".join(segs)
+    found = set(client_view_findings(glued)) - {"label_value", "email"}
+    if any("@" in v and _CV_GLUED_EMAIL.search(v) for v in views(glued)):
+        found.add("email")
+    return found
+
+
+def client_view_url(url) -> tuple:
+    """(shown, kind) for the owner's view of ``url`` (ADR 0051 job 3): ``(url, None)`` when nothing is masked (the
+    URL exactly as given); else ``kind`` is ``credential`` or ``personal`` and ``shown`` is the URL with only the
+    offending parts replaced by ``{hidden}`` (a path segment, a query or ``k=v`` fragment value, the user info), or
+    None when the whole URL is masked (a host label carrying a value, a URL that cannot be read, over the caps).
+    Query values are masked under credential-like keys, and when high-entropy under any key but analytics / tracking
+    ones. For the owner's view and its exports ONLY; never raises."""
+    if url is None:
+        return None, None
+    if not isinstance(url, str) or len(url) > URL_MAX_INPUT:
+        return None, CREDENTIAL
+    if not url:
+        return url, None
+    try:
+        return _cv_url(url)
+    except Exception:  # noqa: BLE001 - fail closed
+        return None, CREDENTIAL

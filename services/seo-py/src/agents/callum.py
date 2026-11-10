@@ -35,10 +35,12 @@ and Adaeze (content gap); neither consumer is built (ADR 0046).
 Provider text is DATA: scanned in memory for brand terms; only a bounded excerpt (``EXCERPT_MAX`` characters, marked
 untrusted) is kept for the dashboard drill-down. ADR 0051 (job 2, Option B): when the service passes a ``sink`` the
 client's full evidence for each row (cited URL, excerpt, title, hint) is handed to it for the per-tenant encrypted
-vault, and ``split_evidence`` turns the envelope into the form that is logged: host-only URLs, SHA-256 hashes and the
-strict filter's verdict flags, never a path or a text. ``client_view`` rebuilds the owner's view from the vault: a
-field the strict filter flags is masked (``alert``), every other field is shown in full. Without a sink (unit use)
-the rows are the strict lane's stored forms, as before.
+vault, and ``split_evidence`` turns the envelope into the form that is logged: host-only URLs, keyed per-field hashes
+(HMAC-SHA256 under the vault's log-field sub-key, job 3) and the strict filter's verdict flags, never a path or a
+text. ``client_view`` rebuilds the owner's view from the vault: a field with a HIGH-PRECISION client-view finding
+(``secret_guard.client_view_findings`` / ``client_view_url``, job 3; never the strict flag) is masked (``alert``; a
+URL only in its offending parts), every other field is shown in full. Without a sink (unit use) the rows are the
+strict lane's stored forms, as before.
 
 No agent touches service state, the ledger or the log: the service records what this module returns.
 """
@@ -500,6 +502,20 @@ def _safe_hint(hint) -> str | None:
 def _excerpt_span(text: str, terms: list) -> tuple:
     """(basis, span, withheld code): the kept span and the strict check of it AND ``EXCERPT_MARGIN`` characters on
     each side (whole words)."""
+    basis, span, window = _excerpt_window(text, terms)
+    return basis, span, field_check(window) or field_check(span)
+
+
+def _excerpt_view_findings(text: str, terms: list) -> list:
+    """The CLIENT view's findings (ADR 0051 job 3) on the excerpt's span AND its margins (the same window the strict
+    lane reads): a value cut by the span's edge is still found whole. Recorded in the vault record (never logged)."""
+    _basis, span, window = _excerpt_window(text, terms)
+    return sorted(set(secret_guard.client_view_findings(window)) | set(secret_guard.client_view_findings(span)))
+
+
+def _excerpt_window(text: str, terms: list) -> tuple:
+    """(basis, span, window): the kept span and the span with ``EXCERPT_MARGIN`` characters on each side (whole
+    words)."""
     t = " ".join((text or "").split())
     basis, start = "answer_opening", 0
     for term in terms:
@@ -513,7 +529,7 @@ def _excerpt_span(text: str, terms: list) -> tuple:
         a -= 1                                       # whole words: a key cut by the margin edge is read whole
     while b < len(t) and not t[b].isspace():
         b += 1
-    return basis, span, field_check(t[a:b]) or field_check(span)
+    return basis, span, t[a:b]
 
 
 def excerpt(text: str, terms: list) -> dict:
@@ -592,6 +608,7 @@ def classify(engines: dict, prompt_set: dict, domain: str, resolver: Resolver, r
                 k["zero_citation_answers"] += 1
             ev = excerpt(text, terms)
             raw_ex = _raw_excerpt(text, terms) if sink is not None else None
+            raw_view = _excerpt_view_findings(text, terms) if sink is not None else None
             basis = getattr(a, "citation_basis", None)
             hints = getattr(a, "citation_hints", None) or {}
             titles = getattr(a, "citation_titles", None) or {}
@@ -632,7 +649,7 @@ def classify(engines: dict, prompt_set: dict, domain: str, resolver: Resolver, r
                 shown = (cl["chain"]["final"] if is_redirector(c["url"]) and cl["chain"]["final"]
                          else cl["chain"]["cited"]) or {}
                 entry = evidence_entry(_shown_raw(c["url"], res), res, raw_ex, titles.get(c["url"]), hint,
-                                       ev["withheld"]) \
+                                       ev["withheld"], raw_view) \
                     if sink is not None else None
                 ref = add({**base, "class": cl["class"], "reason": cl["reason"], "url": shown.get("url"),
                            "position": c["position"], "via": cl["via"],
@@ -647,7 +664,8 @@ def classify(engines: dict, prompt_set: dict, domain: str, resolver: Resolver, r
                 k["strength"] += 1
             said = brand_mention.mention(text, terms, term_rules, domain=domain, client_cited=strength)
             if said["mentioned"] and not strength:
-                entry = evidence_entry(None, {}, raw_ex, None, None, ev["withheld"]) if sink is not None else None
+                entry = evidence_entry(None, {}, raw_ex, None, None, ev["withheld"], raw_view) \
+                    if sink is not None else None
                 if "INCONCLUSIVE" in classes:
                     k["inconclusive_answers"] += 1
                     add({**base, "class": "INCONCLUSIVE", "reason": "MENTION_WITH_UNRESOLVED_CITATIONS",
@@ -889,9 +907,10 @@ def _findings(result: dict, stopped: dict) -> list:
 
 # ---------------------------------------------------------------------------------------------- the vault split
 # ADR 0051 (job 2, Option B). The client's full evidence for a row goes to the per-tenant encrypted vault; what is
-# logged (data/seo_log.jsonl, the ledger, events) keeps only the vault reference, SHA-256 hashes, host-only URLs
-# (the host itself checked by the strict filter), counts / codes and the strict filter's verdict flags. The owner's
-# view is rebuilt from the vault: a flagged field is masked with ``alert``, every other field is shown in full.
+# logged (data/seo_log.jsonl, the ledger, events) keeps only the vault reference, keyed HMAC-SHA256 field hashes (job
+# 3), host-only URLs (the host itself checked by the strict filter), counts / codes and the strict filter's verdict
+# flags. The owner's view is rebuilt from the vault: a field with a client-view finding (job 3) is masked with
+# ``alert``, every other field is shown in full.
 
 EVIDENCE_FIELDS = ("cited_url", "final_url", "canonical_url", "excerpt", "title", "hint")
 URL_FIELDS = frozenset(("cited_url", "final_url", "canonical_url"))
@@ -934,10 +953,12 @@ def _shown_raw(url: str, res: dict) -> str:
     return secret_guard.redirect_withheld(url) or url
 
 
-def evidence_entry(cited_url, res: dict, excerpt_text, title, hint, excerpt_flag=None) -> dict:
+def evidence_entry(cited_url, res: dict, excerpt_text, title, hint, excerpt_flag=None, excerpt_view=None) -> dict:
     """One row's vault record (full evidence) and the strict filter's verdict on each field. ``excerpt_flag``: the
     strict lane's verdict on the excerpt (its span AND the margins around it, on the text as the engine gave it); the
-    excerpt is flagged when that or the same check on the kept text fails."""
+    excerpt is flagged when that or the same check on the kept text fails. ``excerpt_view``: the client view's
+    findings on the same span and margins (ADR 0051 job 3), kept in the record (``excerpt_view``) for the owner's
+    view, never logged."""
     def text(x):
         return x[:2000] if isinstance(x, str) else None
     final = res.get("final_url") if res.get("state") == "RESOLVED" and isinstance(res.get("final_url"), str) else None
@@ -947,6 +968,8 @@ def evidence_entry(cited_url, res: dict, excerpt_text, title, hint, excerpt_flag
     flags = {f: _flag(f, record[f]) for f in EVIDENCE_FIELDS}
     if record["excerpt"] is not None:
         flags["excerpt"] = excerpt_flag or flags["excerpt"]
+        if excerpt_view:
+            record["excerpt_view"] = sorted(str(x) for x in excerpt_view)[:16]
     return {"record": record, "flags": flags}
 
 
@@ -956,10 +979,6 @@ def _flag(name: str, value) -> str | None:
     if not isinstance(value, str):
         return "credential"
     return url_flag(value) if name in URL_FIELDS else field_check(value)
-
-
-def _sha(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8", "surrogatepass")).hexdigest()
 
 
 def checked_host(host) -> dict:
@@ -994,8 +1013,11 @@ def _chain_part(d) -> dict | None:
 
 
 def _log_fields(entry: dict) -> dict:
-    rec, flags = entry["record"], entry["flags"]
-    return {f: {"sha256": _sha(rec[f]), "flag": flags[f]} for f in EVIDENCE_FIELDS if isinstance(rec.get(f), str)}
+    """Each field of a row's evidence as logged: its keyed hash (``hmac_sha256``, computed by ``split_evidence`` under
+    the vault's log-field sub-key; ADR 0051 job 3) and the strict filter's verdict flag. Never a plain hash: an entry
+    without its keyed hashes raises (the run then fails closed)."""
+    rec, flags, macs = entry["record"], entry["flags"], entry["hmacs"]
+    return {f: {"hmac_sha256": macs[f], "flag": flags[f]} for f in EVIDENCE_FIELDS if isinstance(rec.get(f), str)}
 
 
 _ROW_TEXT_KEYS = ("url", "chain", "evidence", "engine_hint_unverified", "evidence_ref")
@@ -1015,11 +1037,12 @@ def log_row(row: dict, vault_ref: str | None, entry: dict | None) -> dict:
         return out
     out.update(url_host(entry["record"]["cited_url"]))
     ev = row.get("evidence") if isinstance(row.get("evidence"), dict) else {}
-    out["evidence"] = {"vault_id": vault_ref, "basis": ev.get("basis"), "fields": _log_fields(entry)}
+    out["evidence"] = {"vault_id": vault_ref, "basis": ev.get("basis"), "hash_key_id": entry["hash_key_id"],
+                       "fields": _log_fields(entry)}
     return out
 
 
-def _log_mnc(mp, refs: dict, sink: list):
+def _log_mnc(mp, refs: dict, sink: dict):
     if not isinstance(mp, dict) or not isinstance(mp.get("items"), list):
         return mp
     items = []
@@ -1032,7 +1055,7 @@ def _log_mnc(mp, refs: dict, sink: list):
         evs = []
         for e in it.get("evidence") or []:
             r = e.get("evidence_ref")
-            entry = sink[r] if isinstance(r, int) and r in refs else None
+            entry = sink.get(r) if isinstance(r, int) and r in refs else None
             evs.append({"engine": e.get("engine"), "sample": e.get("sample"), "observed_at": e.get("observed_at"),
                         "basis": e.get("basis"), "vault_id": refs.get(r),
                         "excerpt": _log_fields(entry).get("excerpt") if entry else None})
@@ -1042,14 +1065,30 @@ def _log_mnc(mp, refs: dict, sink: list):
     return {**mp, "items": items}
 
 
-def split_evidence(env, sink: list, put: Callable):
+def _hashed(entry: dict, field_hash: Callable) -> dict:
+    """``entry`` with the keyed hash of each of its fields (``field_hash(field, value) -> (key id, hex)``)."""
+    rec = entry["record"]
+    macs, kids = {}, set()
+    for f in EVIDENCE_FIELDS:
+        if isinstance(rec.get(f), str):
+            kid, macs[f] = field_hash(f, rec[f])
+            kids.add(kid)
+    if len(kids) > 1:
+        raise ValueError("the log-field key changed during a run")
+    return {**entry, "hmacs": macs, "hash_key_id": next(iter(kids), None)}
+
+
+def split_evidence(env, sink: list, put: Callable, field_hash: Callable | None = None):
     """The envelope as it is logged: every row's full evidence ``put`` into the vault (``put(record) -> vault id``),
-    the row reduced to ``log_row``; the MNC list likewise. Raises on anything inconsistent (the run then fails)."""
+    the row reduced to ``log_row``; the MNC list likewise. Each logged field hash is ``field_hash(field, value) ->
+    (key id, HMAC-SHA256 hex)`` (the vault's keyed log-field hash, ADR 0051 job 3); without one, a run with evidence
+    fails. Raises on anything inconsistent (the run then fails)."""
     from vault import ref as vault_ref
     facts = env.get("facts") if isinstance(env, dict) else None
     if not isinstance(facts, dict) or not isinstance(facts.get("rows"), list):
         return env                                   # no rows (NOT_CONNECTED, KILLED): nothing to keep
     refs: dict = {}
+    hashed: dict = {}
     rows = []
     for row in facts["rows"]:
         i = row.get("evidence_ref")
@@ -1058,29 +1097,49 @@ def split_evidence(env, sink: list, put: Callable):
             continue
         if not isinstance(i, int) or not 0 <= i < len(sink) or i in refs:
             raise ValueError("a row names evidence that is not in the sink")
+        if field_hash is None:
+            raise ValueError("no keyed hash for the logged evidence fields")
         refs[i] = vault_ref(put(sink[i]["record"]))
-        rows.append(log_row(row, refs[i], sink[i]))
-    return {**env, "facts": {**facts, "rows": rows, "mnc_priority": _log_mnc(facts.get("mnc_priority"), refs, sink)}}
+        hashed[i] = _hashed(sink[i], field_hash)
+        rows.append(log_row(row, refs[i], hashed[i]))
+    return {**env, "facts": {**facts, "rows": rows,
+                             "mnc_priority": _log_mnc(facts.get("mnc_priority"), refs, hashed)}}
 
 
-def _display(name: str, value, logged_flag) -> dict | None:
-    """One field of the owner's view: in full, or masked with ``alert`` when the strict filter flags it (the flag
-    recorded at the run, or the same check on the value now)."""
+def _display(name: str, value, logged_flag=None, recorded=None) -> dict | None:
+    """One field of the owner's view (ADR 0051 job 3): in full, or masked with ``alert`` on a HIGH-PRECISION finding
+    of the client view (``secret_guard.client_view_findings`` / ``client_view_url``), never on the strict lane's flag:
+    ``logged_flag`` (the strict verdict recorded at the run, kept in the log) is not read here. A text field is masked
+    whole; a URL keeps every part but the offending ones (``{hidden}``), or is masked whole when its host carries a
+    value or it cannot be read. ``recorded``: client-view findings recorded with the value (an excerpt's margins)."""
     if value is None:
         return None
-    flag = logged_flag or _flag(name, value)
-    if flag is None:
-        out = {"value": value, "alert": False, "reason": None}
+    if not isinstance(value, str):
+        out = _mask("credential", "type")
+    elif name in URL_FIELDS:
+        shown, kind = secret_guard.client_view_url(value)
+        if kind is None:
+            out = {"value": value, "alert": False, "reason": None}
+        else:
+            k = "credential" if kind == secret_guard.CREDENTIAL else "personal"
+            out = _mask(k, "url_part" if shown is not None else "url")
+            if shown is not None:
+                out["value"] = shown
     else:
-        kind = "credential" if flag == "credential" else "personal"
-        out = _mask(kind, flag)
+        found = sorted(set(secret_guard.client_view_findings(value))
+                       | ({str(x) for x in recorded} if isinstance(recorded, list) else set()))
+        kind = secret_guard.client_view_kind(found)
+        if kind is None:
+            out = {"value": value, "alert": False, "reason": None}
+        else:
+            out = _mask("credential" if kind == secret_guard.CREDENTIAL else "personal", "+".join(found))
     if name == "excerpt":
         out["untrusted"] = True
     return out
 
 
-def _mask(kind: str, flag: str) -> dict:
-    return {"value": MASK[kind], "alert": True, "reason": MASK_REASON[kind], "check": flag}
+def _mask(kind: str, check: str) -> dict:
+    return {"value": MASK[kind], "alert": True, "reason": MASK_REASON[kind], "check": check}
 
 
 def _shown(d) -> str | None:
@@ -1101,7 +1160,8 @@ def client_row(row: dict, got: Callable) -> dict:
         out["evidence"] = {"vault_id": ev["vault_id"], "basis": ev.get("basis"), "available": False, "reason": why}
         return out
     fields = ev.get("fields") or {}
-    shown = {f: _display(f, record.get(f), (fields.get(f) or {}).get("flag")) for f in EVIDENCE_FIELDS}
+    shown = {f: _display(f, record.get(f), (fields.get(f) or {}).get("flag"),
+                         record.get("excerpt_view") if f == "excerpt" else None) for f in EVIDENCE_FIELDS}
     out["url"] = _shown(shown["cited_url"])
     out["engine_hint_unverified"] = _shown(shown["hint"])
     out["evidence"] = {"vault_id": ev["vault_id"], "basis": ev.get("basis"), "available": True, **shown}
@@ -1125,7 +1185,8 @@ def _client_mnc(mp, got: Callable):
         for e in it.get("evidence") or []:
             rec, why = got(e["vault_id"]) if e.get("vault_id") else (None, None)
             flag = (e.get("excerpt") or {}).get("flag")
-            evs.append({**e, "excerpt": _display("excerpt", rec.get("excerpt"), flag) if rec is not None else None,
+            evs.append({**e, "excerpt": _display("excerpt", rec.get("excerpt"), flag, rec.get("excerpt_view"))
+                        if rec is not None else None,
                         **({} if rec is not None else {"reason": why})})
         items.append({**it, "cited_instead": inst, "evidence": evs})
     return {**mp, "items": items}

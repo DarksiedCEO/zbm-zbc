@@ -24,10 +24,11 @@ Rules (the audit product's, applied here):
   - tenant isolation: another tenant's run answers the same 404 as a missing one.
 Ledger payloads carry ids, codes, counts and hashes only. ADR 0051 (job 2, Option B): each row's full evidence (cited
 URL, excerpt, title, hint) is encrypted into the per-tenant citation vault (vault.py) under the run's tenant; the
-result committed to the append-only log keeps only the vault reference, SHA-256 hashes, host-only URLs, codes, counts
-and the strict filter's verdict flags (and is still swept by secret_guard.guard_record before the commit). The owning
-tenant's GET decrypts from the vault: a field the strict filter flags is masked with ``alert``, every other field is
-shown in full. No vault key with a data directory: the run fails closed (RUN_FAILED, VAULT_UNAVAILABLE) before any
+result committed to the append-only log keeps only the vault reference, keyed per-field hashes (HMAC-SHA256 under a
+sub-key of the vault key, job 3), host-only URLs, codes, counts and the strict filter's verdict flags (and is still
+swept by secret_guard.guard_record before the commit). The owning tenant's GET decrypts from the vault: a field with a
+HIGH-PRECISION client-view finding (secret_guard.client_view_findings / client_view_url, job 3) is masked with
+``alert`` (a URL only in its offending parts), every other field is shown in full. No vault key with a data directory: the run fails closed (RUN_FAILED, VAULT_UNAVAILABLE) before any
 engine is asked, and nothing is written. Any exception while splitting, sweeping or committing closes the run
 RUN_FAILED (never left running); nothing raw is written on any path.
 """
@@ -161,11 +162,12 @@ class CitationsMixin:
 
     def _record_citation_result(self, tid: str, cid: str, env, sink: list) -> Optional[dict]:
         """Under the lock. ADR 0051: split (each row's full evidence into the vault under ``tid``; the envelope keeps
-        references, hashes, host-only URLs and verdict flags), then the fail-closed sweep of the whole envelope
+        references, keyed hashes, host-only URLs and verdict flags), then the fail-closed sweep of the whole envelope
         (ADR 0050 v2 step 4: every key and value; a field that is not clearly safe is withheld whole), then the commit.
         Returns None when committed, else the failure (the run is then closed RUN_FAILED). Anything that raises here
         is caught by the caller and closes the run the same way."""
-        env = callum.split_evidence(env, sink, lambda record: self.vault.put(tid, record))
+        env = callum.split_evidence(env, sink, lambda record: self.vault.put(tid, record),
+                                    field_hash=lambda field, value: self.vault.field_hash(tid, field, value))
         env = callum.secret_guard.guard_record(env)
         if not isinstance(env, dict) or not isinstance(env.get("facts", {}), dict):
             # the sweep itself failed (it returns "[withheld]"): never stored
@@ -234,7 +236,7 @@ class CitationsMixin:
 
     def citation_run_view(self, tid: str, cid: str, full: bool = True) -> dict:
         """The owner's view (ADR 0051): the logged result with each row's evidence decrypted from the vault for
-        ``tid``; a field the strict filter flags is masked with ``alert``, every other field shown in full."""
+        ``tid``; a field with a client-view finding (job 3) is masked with ``alert``, every other field shown in full."""
         with self.lock:
             r = self.citation_runs.get(cid)
             if not self._owns(r, tid):

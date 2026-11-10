@@ -109,7 +109,15 @@ def test_zero_leaks_through_the_real_service_path_into_seo_log_jsonl(tmp_path):
     import test_perplexity as base
     from test_callum import prompt_set, run, service
     res = lh.run_service(tmp_path, lh.service_cases(), te, base, service, prompt_set, run)
+    # the strict lane: nothing reaches the log, the data directory or the ledger
     assert res["cases"] >= 2300 and res["leaks"] == [], (res["runs"], res["leaks"][:10])
+    # ADR 0051 job 3: the owner's API view masks on high-precision findings; only the documented residual (unlabelled
+    # random tokens: no label, no known prefix) shows there, never a key, a labelled value, a card, SSN, phone or e-mail
+    shown = {n.split("/")[1] if n.startswith("url/") else n.split("/")[0] for n in res["client_view_leaks"]}
+    assert shown <= CLIENT_VIEW_RESIDUAL, sorted(shown - CLIENT_VIEW_RESIDUAL)
+
+
+CLIENT_VIEW_RESIDUAL = frozenset(("aws_secret", "hex32_unlabelled", "hex64_unlabelled", "b64_unlabelled"))
 
 
 # --------------------------------------------------------------------------------------- utility (disclosed)
@@ -152,10 +160,12 @@ def test_utility_urls_stay_under_the_bar():
     stored = [u for _, u in urls if (callum.stored_url(u) or {}).get("withheld")]
     assert len(stored) == 64, len(stored)
     # ADR 0051 job 2: the log keeps host only, so the strict lane's URL numbers above no longer cost the client
-    # anything; what the owner sees is the CLIENT view, where a URL the strict filter flags (any part, tracking
-    # parameters included) is masked with an alert. The 2.5% bar is MISSED: measured 73 / 306 (23.9%). Recorded, not met
-    masked = [u for _, u in urls if callum.url_flag(u)]
-    assert len(masked) == 73, len(masked)
+    # anything. The strict flag recorded in the log (any part, tracking parameters included) is unchanged: 73 / 306
+    flagged = [u for _, u in urls if callum.url_flag(u)]
+    assert len(flagged) == 73, len(flagged)
+    # job 3: what the owner sees is the CLIENT view (high-precision findings only, offending parts only). Bar 2.5%: met
+    masked = [u for _, u in urls if sg.client_view_url(u)[1] is not None]
+    assert len(masked) / len(urls) <= 0.025, len(masked)
 
 
 # the v1 precision fixtures, now with their v2 verdicts stated explicitly (rule 2a withholds any field holding a

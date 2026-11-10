@@ -61,6 +61,12 @@ VAULT_ID = re.compile(r"[0-9a-f]{32}")
 _B64_KEY = re.compile(r"[A-Za-z0-9_-]{43}=?")
 _B64 = re.compile(r"[A-Za-z0-9_-]{1,%d}" % _MAX_LINE_BYTES)
 _AAD_TAG = b"seo-citation-vault/v1"
+# ADR 0051 job 3: every per-field hash written to the log is an HMAC under this sub-key of the vault key (HKDF, its own
+# info label), so a short guessable field (an e-mail or a phone number alone in a hint) cannot be confirmed by hashing
+# guesses
+FIELD_HASH_INFO = b"seo-citation-vault/v1/log-field-hmac"
+FIELD_HASH_TAG = b"seo-log-field/v1"
+FIELD_HASH_NAME = re.compile(r"[a-z][a-z0-9_]{0,31}")
 _FIELDS = frozenset(("v", "id", "t", "k", "n", "c"))
 
 
@@ -96,18 +102,25 @@ NOT_FOUND = "citation record not found"
 
 
 class _Material:
-    """One vault key, held as its two derived sub-keys (AES-256-GCM and the tenant-tag HMAC). The raw key is not kept.
-    Never printed, pickled or copied."""
+    """One vault key, held as its three derived sub-keys (AES-256-GCM, the tenant-tag HMAC and the log-field HMAC,
+    each from HKDF-SHA256 with its own info label). The raw key is not kept. Never printed, pickled or copied."""
 
-    __slots__ = ("key_id", "_aead", "_mac")
+    __slots__ = ("key_id", "_aead", "_mac", "_field_mac")
 
     def __init__(self, key_id: str, raw: bytes):
         self.key_id = key_id
         self._aead = AESGCM(_derive(raw, b"seo-citation-vault/v1/aes-256-gcm"))
         self._mac = _derive(raw, b"seo-citation-vault/v1/tenant-tag")
+        self._field_mac = _derive(raw, FIELD_HASH_INFO)
 
     def tenant_tag(self, tenant_id: str) -> bytes:
         return hmac.new(self._mac, tenant_id.encode("ascii"), hashlib.sha256).digest()
+
+    def field_hash(self, tenant_id: str, field: str, value: str) -> str:
+        """HMAC-SHA256 (hex) of one evidence field for the log, bound to the tenant and the field name."""
+        msg = b"\x00".join((FIELD_HASH_TAG, tenant_id.encode("ascii"), field.encode("ascii"),
+                            value.encode("utf-8", "surrogatepass")))
+        return hmac.new(self._field_mac, msg, hashlib.sha256).hexdigest()
 
     def __repr__(self) -> str:
         return f"<vault key {self.key_id!r}: redacted>"
@@ -528,6 +541,16 @@ class CitationVault:
         if record is None:
             raise VaultNotFound(NOT_FOUND)    # raised outside every except block: no chained context
         return record
+
+    def field_hash(self, tenant_id: str, field: str, value: str) -> tuple:
+        """(key id, HMAC-SHA256 hex) of one evidence field for the log (ADR 0051 job 3), under the CURRENT key's
+        log-field sub-key, bound to ``tenant_id`` and ``field``. No key: ``VaultUnavailable`` (nothing is hashed)."""
+        if self._key is None:
+            raise VaultUnavailable("no vault key is configured")
+        if not isinstance(tenant_id, str) or not TENANT_ID.fullmatch(tenant_id) or not isinstance(field, str) \
+                or not FIELD_HASH_NAME.fullmatch(field) or not isinstance(value, str):
+            raise VaultRecordInvalid("the field cannot be hashed")
+        return self._key.key_id, self._key._cur.field_hash(tenant_id, field, value)
 
     def _open(self, key: VaultKey, tenant_id, vault_id) -> Optional[dict]:
         if not isinstance(tenant_id, str) or not TENANT_ID.fullmatch(tenant_id):

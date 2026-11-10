@@ -1316,11 +1316,13 @@ def test_ordinary_cited_urls_are_kept_and_fetchable():
     assert len(by_label) == 9 and len(by_tracking_value) == 2
     # ADR 0051 job 2: only a credential finding blocks a fetch (was 23 under r2 part 3a's personal-data block)
     assert len(flagged) == 13, len(flagged)
-    # the CLIENT view (ADR 0051): a URL the strict filter flags (credential or personal-data shape, any part) is shown
-    # to the owner masked with an alert. The 2.5% bar is MISSED on this list: measured 23 / 42 (label words in slugs,
-    # key-like tracking values, numeric and random-looking ids). Recorded, not met
-    masked = [u for u in KEEP_URLS if callum.url_flag(u)]
-    assert len(masked) == 23, len(masked)
+    # the strict flag recorded in the log (credential or personal-data shape, any part): unchanged, 23 / 42 (label
+    # words in slugs, key-like tracking values, numeric and random-looking ids)
+    flagged_strict = [u for u in KEEP_URLS if callum.url_flag(u)]
+    assert len(flagged_strict) == 23, len(flagged_strict)
+    # the CLIENT view (ADR 0051 job 3: high-precision findings only). Bar 2.5%: met
+    masked = [u for u in KEEP_URLS if callum.secret_guard.client_view_url(u)[1] is not None]
+    assert len(masked) / len(KEEP_URLS) <= 0.025, len(masked)
     for u in KEEP_URLS:
         s = callum.stored_url(u)
         # never a leaked secret: an id window may be replaced by {secret}, but no raw credential is ever kept
@@ -1492,10 +1494,13 @@ def test_over_redaction_on_a_corpus_of_ordinary_urls_stays_under_the_bar():
     # crossing "/" in Drive/Canva ids and Title-case product paths. Strong rules are never exempted; security > precision.
     # ADR 0051 job 2: only credential findings block a fetch (was 650 / 1180 with r2 part 3a's personal-data block)
     assert len(flagged) == 299, len(flagged)
-    # the CLIENT view (ADR 0051): URLs the strict filter flags are masked for the owner. The 2.5% bar is MISSED:
-    # measured 650 / 1180 (55.1%: random-looking ids on CDN / doc / design hosts, numeric ids). Recorded, not met
-    masked = [u for u in urls if callum.url_flag(u)]
-    assert len(masked) == 650, len(masked)
+    # the strict flag recorded in the log: unchanged, 650 / 1180 (random-looking ids on CDN / doc / design hosts,
+    # numeric ids)
+    flagged_strict = [u for u in urls if callum.url_flag(u)]
+    assert len(flagged_strict) == 650, len(flagged_strict)
+    # the CLIENT view (ADR 0051 job 3: high-precision findings only). Bar 2.5%: met
+    masked = [u for u in urls if callum.secret_guard.client_view_url(u)[1] is not None]
+    assert len(masked) / len(urls) <= 0.025, len(masked)
 
 
 def test_keys_inside_answer_text_and_urls_in_text_are_redacted_in_the_excerpt():

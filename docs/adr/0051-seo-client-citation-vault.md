@@ -61,31 +61,93 @@ service, adds a dependency and a network hop the department does not otherwise n
     redirect's id is never kept, not even here), `final_url`, `canonical_url`, `excerpt`, `title`, `hint`) and the
     strict filter's verdict on each field to the service, which `put`s it into the vault under the run's tenant.
     `callum.split_evidence` then reduces every row to what is logged (`seo_log.jsonl`, the ledger, events): the vault
-    reference (`seo-vlt-` + id + 8 hex check, `vault.ref`), a SHA-256 per field, the verdict flag per field, the host
+    reference (`seo-vlt-` + id + 8 hex check, `vault.ref`), a keyed hash per field (job 3, decision 15; job 2 wrote
+    a plain SHA-256), the verdict flag per field, the host
     only (itself checked by the strict filter; a failing host is withheld), chain hosts, counts and codes. The MNC list
     is reduced the same way. `guard_record` still sweeps the whole envelope before `_commit`. Split, sweep and commit
     run in one guarded block: any exception closes the run `RUN_FAILED` (never left running) and nothing raw is
     written; records already put stay encrypted and unreferenced.
 11. **Owner's view.** `GET .../citation-runs/{cid}` (and the MNC export) for the owning tenant rebuilds rows from the
-    vault (`callum.client_view`): a field the strict filter flags (recorded flag, or the same check on the value now)
-    is returned masked (`[hidden: looks like a credential]` / `[hidden: looks like personal data]`, `alert: true`,
-    `reason` `LOOKS_LIKE_CREDENTIAL` / `LOOKS_LIKE_PERSONAL_DATA`); every other field in full. Another tenant: the same
-    404 as a missing run. A record that cannot be read (no key, rotated away) shows `available: false` with a code,
+    vault (`callum.client_view`): a field with a client-view finding (job 3, decision 14; job 2 used the strict
+    filter here) is returned masked (`[hidden: looks like a credential]` / `[hidden: looks like personal data]`,
+    `alert: true`, `reason` `LOOKS_LIKE_CREDENTIAL` / `LOOKS_LIKE_PERSONAL_DATA`); every other field in full. Another
+    tenant: the same 404 as a missing run. A record that cannot be read (no key, rotated away) shows `available: false` with a code,
     never an error. The client report renders audit envelopes only and has no citation-run path.
 12. **Fetch rule (ADR 0050 r2 part 3a decision 6 reverted).** Only a credential finding blocks a fetch; a
     personal-data-shaped URL is fetched (it is the client's evidence) and never logged. The exact-host exemptions of
     r2 part 3a stay (the log no longer keeps paths, so they cost nothing there).
-13. **Utility (client view, measured on the disclosed corpora).** Excerpts masked: 22 / 312 (7.05%), bar 5%, MISSED
-    (all by check (a), a credential label word). URLs masked: 73 / 306 (23.9%) on `utility_corpus_v2`, 650 / 1180
-    (55.1%) on `url_corpus`, bar 2.5%, MISSED (random-looking and numeric ids, label words in slugs, key-like tracking
-    values). The display uses the strict filter as is; a looser display rule is an owner decision.
+13. **Utility (client view, measured on the disclosed corpora).** Job 2 (strict filter as the display rule): excerpts
+    masked 22 / 312 (7.05%), URLs 73 / 306 (23.9%) on `utility_corpus_v2` and 650 / 1180 (55.1%) on `url_corpus`,
+    both bars MISSED. Job 3 (decision 14): excerpts 0 / 312 (0%, span and margins), URLs 0 / 306, 0 / 1180 and 0 / 42
+    (`KEEP_URLS`); bars (5% excerpts, 2.5% URLs) MET. The strict lane's own numbers are unchanged (22 / 312 excerpts
+    withheld from the log, 73 / 306, 650 / 1180 and 23 / 42 URLs flagged in the log).
+
+## Job 3: precise client-view masking, keyed log hashes
+
+14. **Client view rule** (`secret_guard.client_view_findings(text)`, `secret_guard.client_view_url(url)`; used ONLY by
+    `callum._display`, i.e. the owner's decrypted view and its MNC export; never for logs, fetches, outbound data or
+    any cross-tenant surface, which keep the strict filter unchanged). Read on the strict lane's inspection views
+    (NFKC, invisibles removed, Unicode digits and confusables folded, bounded percent / entity / escape / base64 / hex
+    decoding). A text field is masked whole on a HIGH-PRECISION finding only:
+    - `strong_key`: the rule (c) prefix table (PEM / PGP included), also on the view with spaces removed, on each
+      token with its separators removed (and removed after its first / second separator), a PEM header with
+      separators put in, a Discord token with dashes or dots put in;
+    - `userinfo`: `scheme://user:password@` (a password present);
+    - `label_value`: a rule (a) label word (split by up to two separator characters, at a piece boundary) FOLLOWED by
+      `:` `=` `=>` `->` an arrow `|` `>` (JSON / XML / table forms), ` is ` or ` - `, and a value of 4+ non-space
+      characters (or two short pieces); after `was` / `are` / `would be` / `will be` / `remains` the value must look
+      like one (a digit, a symbol or an inner capital). The bare word in prose is NOT masked; `the password is
+      required` IS (the ` is ` separator is on the list);
+    - `card`: Luhn-valid, 13-19 digits read across any separators / padding at digit-group boundaries, AND a card
+      network's prefix and length (Visa 4: 13/16/19; Mastercard 51-55, 2221-2720: 16; Amex 34/37: 15; Discover,
+      Diners, JCB, UnionPay ranges: 14-19). Stricter than "any Luhn number" on purpose: 13-19 digit social / order
+      ids starting 1, 7, 8, 9 are never cards;
+    - `ssn`: 3-2-4 groups (separators `-` `.` space) with a valid area (not 000, 666, 900-999), group and serial;
+    - `phone`: E.164 (`+` then 8-15 digits) or NANP `(xxx) xxx-xxxx`, `xxx-xxx-xxxx`, `xxx.xxx.xxxx` (and `(xxx)` then
+      seven digits however grouped);
+    - `email`: an address (the strict lane's plain and space-split forms), `name [at] domain [dot] tld` (a dot part
+      required) or `name at domain dot tld`;
+    - fail closed: over `MAX_INPUT`, a non-string, more than `CV_GROUPS_MAX` digit groups, an internal error.
+
+    An excerpt is judged on its span AND the strict lane's margins (a value cut by the span edge is found whole); the
+    margin findings are kept in the vault record (`excerpt_view`), never logged. A URL keeps every part but the
+    offending ones, each replaced by `{hidden}` (`alert: true`, `check: url_part`; the row's top-level `url` stays
+    null when masked): a path segment with a finding; every segment when the path read joined by `/` or glued has a
+    finding no single segment has (a glued e-mail only with a common top-level domain); a query or `k=v` fragment value
+    under a credential-like key (`token`, `key`, `api_key`, `secret`, `sig`, `signature`, `password`, `pwd`, `auth`,
+    `access_token`, `client_secret`, `code`, `session`, `sid` and names ending in token / secret / password / apikey /
+    signature ...), with a finding of its own, or high-entropy (32+ characters mixing upper, lower and digits, or 40+
+    hex) under any key except analytics / tracking ones (`TRACKING_PARAMS`, `utm_*` and the listed analytics keys); a
+    key with a finding hides its whole pair; user info with a password. A host label with a finding (or a key prefix,
+    case-insensitive) masks the whole URL, as does a URL that cannot be read or is over the caps. Product ids, listing
+    ids, commit SHAs, Drive / Docs ids, random-looking slugs, years, prices and order numbers are shown.
+
+    Recall (client view, measured): leak_corpus_v2 text cases strong keys 1734 / 1734, labelled credentials
+    1250 / 1250, cards 102 / 102, SSNs 51 / 51, phones 102 / 102, e-mails 51 / 51; URL cases strong keys 305 / 305,
+    cards 20 / 20, SSNs 10 / 10, phones 18 / 18, e-mails 9 / 9; secret_corpus strong keys 23 / 23 and labelled
+    24 / 24; the real service path (owner's API response): no non-residual family shown.
+
+    **Residual (by design).** Bare unlabelled random tokens with no known prefix (an AWS secret access key alone, 32 /
+    64 hex, 40-character base64) and bare unlabelled short values are NOT masked in the client view (measured: 196 /
+    204 leak_corpus_v2 text cases and 29 / 38 URL cases of those families are shown to the owner). They are the
+    owner's own evidence behind tenant authentication; the strict lane still keeps every one of them out of the log,
+    the data directory, the ledger and every fetch.
+15. **Keyed log hashes.** Every per-field hash written to the log is HMAC-SHA256 (`hmac_sha256`) under a sub-key of
+    the vault key derived with HKDF-SHA256 and its own info label (`seo-citation-vault/v1/log-field-hmac`, distinct
+    from the AES-GCM and tenant-tag labels), over a tag, the tenant id, the field name and the value (so equal values
+    of two tenants or two fields do not compare equal). The row's evidence carries `hash_key_id` (the current key's
+    id; a rotation changes the hashes). `CitationVault.field_hash` refuses without a key (`VaultUnavailable`), and
+    `callum.split_evidence` without a hasher refuses a run with evidence: no plain per-field SHA-256 is written any
+    more. Content-integrity hashes that are existing contracts stay plain SHA-256 (`result_sha256`, `prompt_set_sha256`,
+    `domain_sha256`, the log chain).
 
 ## Threat model
 
 | Threat | What stops it | What does not |
 |---|---|---|
 | Disk read (backup, volume snapshot, a stolen copy of the data dir) | AES-256-GCM; the key is not on disk; tenant tags are keyed, so tenant names cannot be confirmed by hashing guesses | Record count, sizes and write times are visible |
-| Log read | The vault writes no log line; the logged row keeps the vault reference, SHA-256 hashes, host-only URLs and verdict flags | Plain SHA-256 of a short, guessable field (an e-mail or phone alone in a hint) can be confirmed by hashing guesses |
+| Log read | The vault writes no log line; the logged row keeps the vault reference, keyed HMAC-SHA256 field hashes (tenant- and field-bound), host-only URLs and verdict flags | Equality of one field's value across rows of the same tenant under the same key is visible (same HMAC) |
+| Owner's view (tenant-authenticated) | High-precision client-view masking (decision 14) | Unlabelled random tokens and bare short values are shown to the owner (residual, decision 14) |
 | Cross-tenant read | Keyed tenant tag checked before decryption; tenant id in the associated data | A caller that passes the wrong tenant id on a client's behalf (the API's tenant authentication is the boundary) |
 | Tamper (ciphertext, nonce, tag, key id, record moved to another tenant or id) | GCM tag over ciphertext and associated data; every failure is `VaultNotFound` | Deletion, truncation or rollback of whole lines by someone with write access to the data dir (a missing record is not found, not detected) |
 | Missing key | `put` refuses and writes nothing; malformed settings refuse | - |

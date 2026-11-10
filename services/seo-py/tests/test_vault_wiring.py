@@ -8,6 +8,7 @@ scripted answer-engine port that returns ProviderAnswers carrying excerpts, titl
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import logging
 import os
@@ -212,14 +213,19 @@ def test_a_real_run_logs_ids_and_hashes_only_and_the_owner_sees_full_evidence(tm
     assert os.path.exists(os.path.join(h.settings.data_dir, vault.VAULT_NAME))
     assert len(h.svc.vault) == len(run["result"]["facts"]["rows"])
 
-    # the logged row: vault reference, hashes, host only, verdict flags
+    # the logged row: vault reference, keyed hashes (job 3: HMAC-SHA256 under the vault's log-field sub-key, was a
+    # plain SHA-256), host only, verdict flags
     logged = h.svc.citation_runs[cid]["result"]["facts"]["rows"]
     for row in logged:
         assert "url" not in row and "engine_hint_unverified" not in row and "evidence_ref" not in row
         ev = row["evidence"]
         assert vault.parse_ref(ev["vault_id"]) is not None
-        assert set(ev) == {"vault_id", "basis", "fields"}
-        assert all(set(f) == {"sha256", "flag"} for f in ev["fields"].values())
+        assert set(ev) == {"vault_id", "basis", "hash_key_id", "fields"} and ev["hash_key_id"] == h.svc.vault._key.key_id
+        assert all(set(f) == {"hmac_sha256", "flag"} for f in ev["fields"].values())
+        record = h.svc.vault.get("zbm", vault.parse_ref(ev["vault_id"]))
+        for name, f in ev["fields"].items():
+            assert f["hmac_sha256"] == h.svc.vault.field_hash("zbm", name, record[name])[1], name
+            assert f["hmac_sha256"] != hashlib.sha256(record[name].encode()).hexdigest(), name
     assert {r["host"] for r in logged} == {"site.test", "competitor.test", None}
     assert sum(1 for r in logged if r["evidence"]["fields"].get("cited_url", {}).get("flag")) == 4
 
@@ -240,8 +246,10 @@ def test_a_real_run_logs_ids_and_hashes_only_and_the_owner_sees_full_evidence(tm
     reasons = sorted(r["evidence"]["cited_url"]["reason"] for r in masked)
     assert reasons == ["LOOKS_LIKE_CREDENTIAL"] + ["LOOKS_LIKE_PERSONAL_DATA"] * 3
     for r in masked:
+        # job 3: a URL keeps every part but the offending one (a path segment, a query value), shown as {hidden}
         f = r["evidence"]["cited_url"]
-        assert f["value"] == callum.MASK["credential" if f["reason"] == "LOOKS_LIKE_CREDENTIAL" else "personal"]
+        assert f["check"] == "url_part" and f["value"].startswith("https://competitor.test/"), f["check"]
+        assert f["value"].count(sg.CLIENT_HIDDEN) == 1
     alerts = [(r["evidence"][k]["reason"]) for r in got["result"]["facts"]["rows"]
               for k in ("title", "hint", "excerpt") if r["evidence"].get(k) and r["evidence"][k]["alert"]]
     assert "LOOKS_LIKE_CREDENTIAL" in alerts and "LOOKS_LIKE_PERSONAL_DATA" in alerts
@@ -409,15 +417,15 @@ def test_the_scenario_holds_unmutated(tmp_path):
 def test_mutation_no_vault_split_is_caught(tmp_path, monkeypatch):
     real = callum.split_evidence
 
-    def evidence_in_the_envelope(env, sink, put):
-        out = real(env, sink, put)
+    def evidence_in_the_envelope(env, sink, put, **kw):
+        out = real(env, sink, put, **kw)
         return {**out, "facts": {**out["facts"], "evidence": [e["record"] for e in sink]}}
     monkeypatch.setattr(callum, "split_evidence", evidence_in_the_envelope)
     assert _scenario(tmp_path)["log_clean"] is False
 
 
 def test_mutation_no_display_mask_is_caught(tmp_path, monkeypatch):
-    def unmasked(name, value, flag):
+    def unmasked(name, value, flag=None, recorded=None):
         return None if value is None else {"value": value, "alert": False, "reason": None}
     monkeypatch.setattr(callum, "_display", unmasked)
     assert _scenario(tmp_path)["owner_masked"] is False
@@ -430,29 +438,34 @@ def test_mutation_no_tenant_check_is_caught(tmp_path, monkeypatch):
 
 # ------------------------------------------------------------------------------------------------ utility (client)
 
-EXCERPTS_MASKED_MEASURED = 22      # of 312 (7.05%): the 5% bar is MISSED; all by check (a), a credential label word
+# ADR 0051 job 3: the client view masks on HIGH-PRECISION findings only (secret_guard.client_view_findings /
+# client_view_url), never on the strict flag. Bars: excerpts <= 5%, URLs <= 2.5% (job 2 measured 22 / 312 = 7.05% and
+# 73 / 306 = 23.9% with the strict filter as the display rule; job 3 measures 0 / 312 and 0 / 306)
+EXCERPT_BAR = 0.05
+URL_BAR = 0.025
 
 
-def test_utility_client_view_excerpts_are_measured():
+def test_utility_client_view_excerpts_meet_the_bar():
     ex = uc.excerpts()
     assert len(ex) == 312
     masked = 0
     for i, b, e in ex:
         raw = callum._raw_excerpt(uc.ANSWERS[i], [b] if b else [])
-        d = callum._display("excerpt", raw, e["withheld"])
+        d = callum._display("excerpt", raw, e["withheld"],
+                            callum._excerpt_view_findings(uc.ANSWERS[i], [b] if b else []))       # span + margins
         masked += bool(d and d["alert"])
-    # ADR 0051 client view: an excerpt the strict filter flags (its span or the margins) is masked for the owner.
-    # Bar 5%: MISSED, measured 22 / 312 (7.05%), the same excerpts the strict lane withholds. Recorded, not met
-    assert masked == EXCERPTS_MASKED_MEASURED, masked
+    assert masked / len(ex) <= EXCERPT_BAR, masked
+    # the strict lane is unchanged: it still withholds the same 22 excerpts from the log (recorded flag)
+    assert sum(1 for _i, _b, e in ex if e["withheld"]) == 22
 
 
-def test_utility_client_view_urls_are_measured():
+def test_utility_client_view_urls_meet_the_bar():
     urls = [u for _, u in uc.urls()]
     shown = [callum._display("cited_url", u, callum.url_flag(u)) for u in urls]
     masked = sum(1 for d in shown if d["alert"])
-    # Bar 2.5%: MISSED, measured 73 / 306 (23.9%). Recorded, not met (see test_secret_guard_core.py)
-    assert len(urls) == 306 and masked == 73, masked
-    assert all(d["value"] == u for d, u in zip(shown, urls) if not d["alert"])          # unflagged: in full
+    assert len(urls) == 306 and masked / len(urls) <= URL_BAR, masked
+    assert all(d["value"] == u for d, u in zip(shown, urls) if not d["alert"])          # unmasked: in full
+    assert sum(1 for u in urls if callum.url_flag(u)) == 73                             # the strict flag, unchanged
 
 
 # ------------------------------------------------------------------------------------------------ in-memory backend
@@ -476,6 +489,33 @@ def test_the_in_memory_vault_round_trips_and_isolates_tenants():
     assert "redacted" not in repr(m) and "records=1" in repr(m)
     with pytest.raises(TypeError):
         pickle.dumps(m)
+
+
+def test_log_field_hashes_are_keyed_and_bound_to_tenant_and_field():
+    """Job 3: a logged field hash is HMAC-SHA256 under an HKDF sub-key of the vault key (its own info label), bound to
+    the tenant and the field name: a short guessable value cannot be confirmed by hashing guesses."""
+    k = _key()
+    m = vault.MemoryCitationVault(k)
+    r = random.Random(SEED + 3)
+    guess = _rand(r, string.ascii_lowercase, 6) + "@" + _rand(r, string.ascii_lowercase, 5) + ".com"
+    kid, mac = m.field_hash("zbm", "hint", guess)
+    assert kid == "k-test" and len(mac) == 64 and mac != hashlib.sha256(guess.encode()).hexdigest()
+    assert m.field_hash("zbm", "hint", guess)[1] == mac                                   # deterministic per key
+    assert m.field_hash("acme", "hint", guess)[1] != mac                                  # tenant-bound
+    assert m.field_hash("zbm", "title", guess)[1] != mac                                  # field-bound
+    assert vault.MemoryCitationVault(_key()).field_hash("zbm", "hint", guess)[1] != mac   # key-bound
+    assert vault.FIELD_HASH_INFO not in (b"seo-citation-vault/v1/aes-256-gcm", b"seo-citation-vault/v1/tenant-tag")
+    for bad in (("Bad Tenant", "hint", guess), ("zbm", "Hint!", guess), ("zbm", "hint", 7)):
+        with pytest.raises(vault.VaultRecordInvalid):
+            m.field_hash(*bad)
+    with pytest.raises(vault.VaultUnavailable):
+        vault.MemoryCitationVault(None).field_hash("zbm", "hint", guess)
+
+
+def test_a_run_without_a_keyed_hasher_fails_instead_of_logging_plain_hashes():
+    with pytest.raises(ValueError):
+        callum.split_evidence({"facts": {"rows": [{"evidence_ref": 0}]}},
+                              [{"record": {"excerpt": MARK}, "flags": {"excerpt": None}}], lambda rec: "0" * 32)
 
 
 def test_the_in_memory_vault_without_a_key_stores_nothing():

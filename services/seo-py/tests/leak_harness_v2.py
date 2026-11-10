@@ -134,8 +134,12 @@ def openai_body(te, text: str, url: str, title: str) -> dict:
 def run_service(tmp_path, cases_with_carriers, te, base, service, prompt_set, run, batch: int = 96) -> dict:
     """The REAL service path: each batch is one citation run on a fresh service with a data directory; every case is
     one engine answer (text + cited URL + title). Everything the service wrote (data/seo_log.jsonl and every file in
-    the data directory, the ledger payloads, the API response) is searched for each case's probes."""
+    the data directory, the ledger payloads) is searched for each case's probes: ``leaks`` (the strict lane: must be
+    empty). The API response to the owning tenant is the CLIENT view (ADR 0051 job 3: the owner's own evidence, masked
+    on high-precision findings only) and is searched on its own: ``client_view_leaks`` (only the documented residual,
+    unlabelled random tokens, may show there)."""
     leaks: list = []
+    client: list = []
     runs = 0
     for start in range(0, len(cases_with_carriers), batch):
         chunk = cases_with_carriers[start:start + batch]
@@ -150,8 +154,8 @@ def run_service(tmp_path, cases_with_carriers, te, base, service, prompt_set, ru
         runs += 1
         assert v["status"] == "completed" and len(fakes["openai"].requests) == len(chunk), (
             v.get("status"), len(fakes["openai"].requests), len(chunk), v["result"]["facts"]["engines"])
-        blob = json.dumps(v, ensure_ascii=False) + json.dumps([e["_payload"] for e in h.ledger.events],
-                                                             ensure_ascii=False, default=str)
+        view = _scrub(json.dumps(v, ensure_ascii=False))
+        blob = json.dumps([e["_payload"] for e in h.ledger.events], ensure_ascii=False, default=str)
         seen_log = False
         for root, _d, files in os.walk(d / "data"):
             for f in files:
@@ -163,10 +167,14 @@ def run_service(tmp_path, cases_with_carriers, te, base, service, prompt_set, ru
         assert seen_log, "the run wrote no data/seo_log.jsonl"
         blob = _scrub(blob)
         pre = (_forms(blob), re.sub(r"\D", "", blob))
+        pre_view = (_forms(view), re.sub(r"\D", "", view))
         for c, _t, _u, _ti in chunk:
             if leaked(blob, c, pre):
                 leaks.append(c.name)
-    return {"runs": runs, "cases": len(cases_with_carriers), "leaks": sorted(set(leaks))}
+            if leaked(view, c, pre_view):
+                client.append(c.name)
+    return {"runs": runs, "cases": len(cases_with_carriers), "leaks": sorted(set(leaks)),
+            "client_view_leaks": sorted(set(client))}
 
 
 def service_cases():
