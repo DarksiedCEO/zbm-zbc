@@ -280,9 +280,8 @@ def test_audit_completed_keeps_ids_codes_counts_a_ref_and_a_keyed_hash(tmp_path,
 
 
 def test_no_legacy_entry_remains_for_the_audit_sinks():
-    kinds = {k for k, _ in sg.LEGACY_ROWS}
-    assert not kinds & {"audit_completed", "drift_recorded", "audit_interrupted", "ledger:audit_interrupted"}
-    assert len(sg.LEGACY_ROWS) <= 53 and sum(sg.LEGACY_COUNTS.values()) == len(sg.LEGACY_ROWS)    # 53 after job B; C: 23
+    """Sink job D deleted the legacy list: there is no entry for any sink."""
+    assert not hasattr(sg, "LEGACY_ROWS") and not hasattr(sg, "LEGACY_PROSE_PATHS") and not hasattr(sg, "LEGACY_COUNTS")
 
 
 def test_the_report_is_not_readable_at_rest(tmp_path, srv):
@@ -490,7 +489,7 @@ def test_the_blob_is_encrypted_outside_the_service_lock_and_appended_once_under_
     assert held["open"] and not any(held["open"])            # every read of a blob: never under the service lock
     assert held["append"] and all(held["append"])            # the one append per document: under it, with the commit
     assert len(held["append"]) == len(held["seal"]) == len(records(h, "audit_completed")) + len(
-        records(h, "drift_recorded"))
+        records(h, "drift_recorded")) + len(records(h, "log_ingest_created"))     # (sink job D: the ingest's inputs)
 
 
 # ================================================================================================ readers fail closed
@@ -564,7 +563,9 @@ def test_a_log_ingest_reads_the_sitemap_sample_from_the_vault_or_refuses(tmp_pat
     h = harness(tmp_path, srv)
     a = h.ok(audit(h), 201)
     g = h.ok(tl.ingest(h), 201)
-    assert h.svc.log_ingests[g["ingest_id"]]["sitemap_sample"] == ["/", "/about"]
+    # sink job D: the sample is in the ingest's inputs blob (memory keeps its count)
+    assert h.svc._ingest_inputs("zbm", g["ingest_id"])["sitemap_sample"] == ["/", "/about"]
+    assert h.svc.log_ingests[g["ingest_id"]]["sitemap_sample_count"] == 2
     _lose(h, h.svc.audits[a["audit_id"]]["report_ref"])
     before = len(h.svc.log)
     h.refused(tl.ingest(h), 503, "VAULT_UNAVAILABLE")        # never created against a sample that could not be read
@@ -803,7 +804,8 @@ def test_mutation_readers_ignoring_vault_unavailable_is_caught(tmp_path, srv, mo
 
 def test_mutation_a_plain_sha256_instead_of_the_keyed_hash_is_caught(tmp_path, srv, monkeypatch):
     monkeypatch.setattr(svc_vaulted.VaultedMixin, "_vaulted_hmac",
-                        lambda self, tid, field, obj: hashlib.sha256(svc_vaulted.canonical(obj).encode()).hexdigest())
+                        lambda self, tid, field, obj, vault=None: hashlib.sha256(
+                            svc_vaulted.canonical(obj).encode()).hexdigest())
     got = _scenario(tmp_path, srv)
     assert got["hash_is_keyed"] is False
     assert got["owner_reads_the_report"] is False            # and a reader refuses a hash that is not the keyed one

@@ -281,24 +281,35 @@ def test_the_ledger_recorder_refuses_payloads_and_anchors_itself(h):
     assert len(h.ledger.events) == n + 1
 
 
-def test_a_legacy_path_passes_for_now_and_only_for_its_own_kind(h, monkeypatch):
-    monkeypatch.setattr(sg, "OBSERVER", None)               # this test's own records are not the suite's
-    simple = [(k, p) for k, p in sg.LEGACY_ROWS if not k.startswith(sg.LEDGER) and "[]" not in p
-              and "*" not in p and "{" not in p and "N" not in p]
-    if not simple:
-        pytest.skip("no plain legacy path is left: nothing of this shape passes any more")
-    kind, path = simple[0]
-    text = marker()
+FORMER_LEGACY = (("entity_created", "/fields/name/value"), ("entity_created", "/fields/locality/provenance"),
+                 ("log_ingest_created", "/robots_text"), ("log_ingest_finished", "/report/envelope/methodology"),
+                 ("prompt_set_version", "/content/brand_terms[]"), ("log_chunk", "/delta/families/*/templates/{key}"))
+
+
+def _at(path: str, text: str) -> dict:
+    """A record holding ``text`` at the normalised ``path`` (``[]`` a list, ``*`` any key, ``{key}`` the key)."""
     data = cur = {}
     parts = path.strip("/").split("/")
-    for part in parts[:-1]:
-        cur[part] = {}
-        cur = cur[part]
-    cur[parts[-1]] = text
-    assert sg.refused(kind, data) == []
-    other = "job_ran" if kind != "job_ran" else "switch_set"
-    assert sg.refused(other, data) == [path]
-    refused_commit(h, other, data)
+    for i, part in enumerate(parts):
+        last = i == len(parts) - 1
+        if part == "{key}":
+            cur[text] = 1
+            break
+        name, is_list = part.removesuffix("[]"), part.endswith("[]")
+        name = "anyfamily" if name == "*" else name
+        nxt = text if last else {}
+        cur[name] = [nxt] if is_list else nxt
+        cur = nxt
+    return data
+
+
+@pytest.mark.parametrize("kind,path", FORMER_LEGACY)
+def test_a_former_legacy_path_is_refused_like_any_other(h, kind, path):
+    """Sink job D: the legacy list is gone. The paths it used to let through refuse their commit."""
+    data = _at(path, marker())
+    assert [p for p, _ in sg.violations(kind, data)] != []
+    assert sg.refused(kind, data) != []
+    refused_commit(h, kind, data)
 
 
 def test_the_reason_code_is_in_the_catalogue_and_the_api_answers_it(h, monkeypatch):
@@ -313,29 +324,55 @@ def test_the_reason_code_is_in_the_catalogue_and_the_api_answers_it(h, monkeypat
 
 # ------------------------------------------------------------------------------------------------ the legacy list
 
-def test_the_legacy_list_is_explicit_sorted_and_names_known_sinks():
-    rows = sg.LEGACY_ROWS
-    assert list(rows) == sorted(set(rows)) and sg.LEGACY_PROSE_PATHS == frozenset(rows)
+def test_there_is_no_legacy_list_and_no_bypass():
+    """Sink job D: ``LEGACY_PROSE_PATHS`` and the code that consulted it are deleted; ``refused`` is ``violations``."""
+    for name in ("LEGACY_PROSE_PATHS", "LEGACY_ROWS", "LEGACY_COUNTS", "_legacy"):
+        assert not hasattr(sg, name), name
+    src = open(sg.__file__, encoding="utf-8").read()
+    assert "LEGACY-BEGIN" not in src and "_legacy(" not in src
     kinds = {name[3:] for name in dir(SeoService) if name.startswith("_a_")}
     assert len(kinds) == 27
-    for kind, path in rows:
-        assert kind.removeprefix(sg.LEDGER) and (kind in kinds or kind.startswith(sg.LEDGER)), kind
-        assert path.startswith("/") and set(path) <= set(string.ascii_lowercase + "_N/*[]{}"), path
-    assert sum(sg.LEGACY_COUNTS.values()) == len(rows)
-    assert sg.LEGACY_COUNTS == {k: sum(1 for kk, _ in rows if kk == k) for k in {kk for kk, _ in rows}}
+    text = marker()
+    for kind in sorted(kinds):
+        assert sg.refused(kind, {"x": text}) == ["/x"], kind
+        assert sg.refused(sg.LEDGER + kind, {"x": [text]}) == ["/x[]"], kind
+
+
+# Tests that PROVOKE a refusal on purpose (each asserts it): the only places the guard may refuse during the suite.
+# A refusal in any other test is a record the service tried to write with a non-machine value: a failure.
+_PROBE = frozenset((("job_ran", "/job"),))                # the canary tests' direct commits of a canary value
+EXPECTED_SINK_REFUSALS = {                                # test -> the only (sink, path) pairs it may refuse (None: any)
+    "test_canary_all_routes.py::test_every_route_and_every_string_field_with_canaries_leaves_nothing_but_the_"
+    "known_limit": _PROBE,
+    "test_canary_all_routes.py::test_the_quick_scenario_holds_unmutated": _PROBE,
+    "test_sink_job_d.py::test_the_services_own_log_lines_survive_the_sink": _PROBE,
+    "test_sink_job_d.py::test_the_guard_has_no_exceptions": None,
+    "test_review_c0c09bd1.py::test_identifier_validation_is_load_bearing_at_the_endpoint": None,
+    "test_sink_guard.py::test_a_former_legacy_path_is_refused_like_any_other": None,
+    "test_sink_guard.py::test_commit_refuses_a_non_legacy_value_and_writes_nothing": None,
+    "test_sink_guard.py::test_commit_refuses_an_evidence_payload_before_any_ledger_event": None,
+    "test_sink_guard.py::test_properties_hold_unmutated": None,
+    "test_sink_guard.py::test_the_ledger_recorder_refuses_payloads_and_anchors_itself": None,
+    "test_sink_guard.py::test_the_reason_code_is_in_the_catalogue_and_the_api_answers_it": None,
+    "test_sink_guard.py::test_there_is_no_legacy_list_and_no_bypass": None,
+}
 
 
 @pytest.mark.sink_last
-def test_legacy_list_is_exactly_what_the_suite_needed_and_every_kind_passed():
-    """Runs LAST. Every record the suite committed went through the guard (conftest's observer). A path outside the
-    legacy list refuses its commit where it happens (the test above); here: no legacy entry is stale, and each of the
-    27 kinds was committed. A partial run only checks that nothing outside the list was let through."""
+def test_no_violating_path_anywhere_in_the_suite_and_every_kind_passed():
+    """Runs LAST. Every record the suite committed went through the guard (conftest's observer). There is no legacy
+    list: a violating path refuses its commit where it happens, and here ANY refusal outside the tests that provoke
+    one on purpose fails the suite (names of tests, sinks and paths only). A full run also shows each of the 27
+    kinds was committed and passed."""
     seen = conftest.SINK_SEEN
-    assert seen["legacy_used"] <= sg.LEGACY_PROSE_PATHS
+    stray = {t: sorted(v) for t, v in seen["violations"].items()
+             if t not in EXPECTED_SINK_REFUSALS or (EXPECTED_SINK_REFUSALS[t] is not None
+                                                    and not v <= EXPECTED_SINK_REFUSALS[t])}
+    assert stray == {}, f"{len(stray)} test(s) made the sink guard refuse a record: {stray}"
     if not seen["full_run"]:
-        pytest.skip("a partial run: the legacy list is compared with a full run only")
-    stale = sorted(sg.LEGACY_PROSE_PATHS - seen["legacy_used"])
-    assert stale == [], f"{len(stale)} legacy entries are no longer needed: delete them from LEGACY_ROWS: {stale}"
+        pytest.skip("a partial run: the kinds are compared with a full run only")
+    unused = sorted(set(EXPECTED_SINK_REFUSALS) - set(seen["violations"]))
+    assert unused == [], f"listed as provoking a refusal but none happened: {unused}"
     kinds = {name[3:] for name in dir(SeoService) if name.startswith("_a_")}
     assert kinds - seen["passed"] == set()
     assert len([k for k in seen["passed"] if k.startswith(sg.LEDGER)]) >= 32
@@ -763,8 +800,8 @@ def _aad_without(part: str):
 BITES = {
     "guard_disabled_in_commit": (lambda m: m.setattr(sg, "enforce", lambda kind, data: None),
                                  (prop_commit_refuses_prose, prop_ledger_refuses_prose)),
-    "legacy_bypass_widened_to_everything": (lambda m: m.setattr(sg, "_legacy", lambda kind, path: True),
-                                            (prop_commit_refuses_prose, prop_ledger_refuses_prose)),
+    "refused_reports_nothing": (lambda m: m.setattr(sg, "refused", lambda kind, data: []),
+                                (prop_commit_refuses_prose, prop_ledger_refuses_prose)),
     "no_violations_reported": (lambda m: m.setattr(sg, "violations", lambda kind, data: []),
                                (prop_commit_refuses_prose, prop_ledger_refuses_prose)),
     "at_allowed": (lambda m: m.setattr(sg, "_ALLOWED", sg._ALLOWED + AT), (prop_at_refused,)),

@@ -39,8 +39,9 @@ from primitives.parse import SCHEMA_RULES_VERSION
 from reasons import R
 import sink_guard
 import vault as vault_mod
+from svc_entity import unreadable as entity_unreadable
 from svc_optext import path_view, text_view, url_flag
-from svc_vaulted import REPORT_FIELD, SECTION_FIELD, normalised, owner_view
+from svc_vaulted import PROMPT_SET_FIELD, REPORT_FIELD, SECTION_FIELD, canonical, normalised, owner_view
 
 log = logging.getLogger("seo.audits")
 REPORT_VERSION = "seo-audit-report/1"
@@ -155,70 +156,98 @@ class AuditsMixin:
             raise Invalid(R("PROMPT_PERSONAL_DATA"))
         _strict_prompt_set(body)                            # review c0c09bd1: identifiers strict, free text vaulted
         rules = _brand_term_rules(body.get("brand_term_rules") or [], terms)
+        # sink job D: the WHOLE content (name, brand terms, rules, competitor domains, prompts, engines) is one blob
+        # per version in the operator text vault, encrypted and HMAC-ed OUTSIDE the service lock; the version's
+        # fingerprint is the keyed HMAC of its canonical JSON (never a plain SHA-256 over brand terms), and the log
+        # keeps the ref, the HMAC and counts
+        content = {"name": body["name"], "brand_terms": terms,
+                   "competitor_domains": sorted(body["competitor_domains"]), "prompts": prompts,
+                   "engines": sorted(set(body["engines"]))}
+        if rules:
+            content["brand_term_rules"] = rules
+        content = normalised(content)
         with self.lock:
             self._gate()
             self._get(self.tenants, tid, "TENANT_NOT_FOUND")
             self.check_kill(tenant=tid, capability="prompt_sets", write=True)
             self._optext_key_check()
+        sealed = self._doc_seal(tid, PROMPT_SET_FIELD, content, self.optext_vault)
+        try:
+            with self.lock:
+                self._gate()
+                self._get(self.tenants, tid, "TENANT_NOT_FOUND")
+                self.check_kill(tenant=tid, capability="prompt_sets", write=True)
+                self._optext_key_check()
 
-            def hp(t):
-                return self._optext_hmac(tid, "prompt", t)
+                def hp(t):
+                    return self._optext_hmac(tid, "prompt", t)
 
-            def hr(t):
-                return self._optext_hmac(tid, "brand_term", t)
-            # review c0c09bd1: the idempotency body and the content hash carry the HMACs of the free text, never it
-            hbody = {**body, "prompts": [hp(" ".join(p.split())) for p in body["prompts"]]}
-            if body.get("brand_term_rules"):
-                hbody["brand_term_rules"] = [{**r, "context_terms": [hr(" ".join(w.split())) for w in r.get(
-                    "context_terms") or []], "negative_terms": [hr(" ".join(w.split())) for w in r.get(
-                        "negative_terms") or []]} for r in body["brand_term_rules"]]
-            hashed = {"name": body["name"], "brand_terms": terms, "competitor_domains": sorted(body["competitor_domains"]),
-                      "prompts": [hp(p) for p in prompts], "engines": sorted(set(body["engines"]))}
-            if rules:                                  # absent when none: an existing set's content hash is unchanged
-                hashed["brand_term_rules"] = _rules_hashed(rules, hr)
-            rk = self.rk("prompt_set", tid, body)
-            prev = self._idem(actor, rk, hbody)
-            if prev:
-                return self.prompt_set_view(tid, prev[1])
-            psid = derived_id("pst", tid, body["name"])
-            cur = self.prompt_sets.get(psid)
-            csha = sha(hashed)
-            if cur is not None and cur["versions"][str(cur["current"])]["sha256"] == csha:
-                raise Conflict(R("PROMPT_SET_EXISTS"))
-            version = 1 if cur is None else cur["current"] + 1
-            ctx = [w for r in rules for k in ("context_terms", "negative_terms") for w in r[k]]
-            stubs = self._optext_seal(tid, "prompt", prompts)
-            rstubs = iter(self._optext_seal(tid, "brand_term", ctx))
-            content = {**hashed, "prompts": stubs}
-            if rules:
-                content["brand_term_rules"] = [{**r, "context_terms": [next(rstubs) for _ in r["context_terms"]],
-                                                "negative_terms": [next(rstubs) for _ in r["negative_terms"]]}
-                                               for r in rules]
-            data = {"prompt_set_id": psid, "tenant_id": tid, "version": version, "content": content, "sha256": csha}
-            try:
-                self._commit("prompt_set_version", self._req(data, actor, rk, hbody, psid), actor,
-                             evidence=("prompt_set_version", f"prompt_set:{psid}",
-                                       {"prompt_set_id": psid, "tenant_id": tid, "version": version, "sha256": csha},
-                                       (actor, rk)))
-            except BaseException:
-                self._optext_orphaned()
-                raise
-            self._optext_committed()
-            return self.prompt_set_view(tid, psid)
+                def hr(t):
+                    return self._optext_hmac(tid, "brand_term", t)
+                # review c0c09bd1: the idempotency body and the content hash carry the HMACs of the free text, never it
+                hbody = {**body, "prompts": [hp(" ".join(p.split())) for p in body["prompts"]]}
+                if body.get("brand_term_rules"):
+                    hbody["brand_term_rules"] = [{**r, "context_terms": [hr(" ".join(w.split())) for w in r.get(
+                        "context_terms") or []], "negative_terms": [hr(" ".join(w.split())) for w in r.get(
+                            "negative_terms") or []]} for r in body["brand_term_rules"]]
+                hashed = {"name": body["name"], "brand_terms": terms, "competitor_domains": sorted(body["competitor_domains"]),
+                          "prompts": [hp(p) for p in prompts], "engines": sorted(set(body["engines"]))}
+                if rules:                                  # absent when none: an existing set's content hash is unchanged
+                    hashed["brand_term_rules"] = _rules_hashed(rules, hr)
+                rk = self.rk("prompt_set", tid, body)
+                prev = self._idem(actor, rk, hbody)
+                if prev:
+                    return self.prompt_set_view(tid, prev[1])
+                psid = derived_id("pst", tid, body["name"])
+                cur = self.prompt_sets.get(psid)
+                if cur is not None:
+                    last = cur["versions"][str(cur["current"])]
+                    same = last["sha256"] == sha(hashed) if last.get("plain_sha256") else \
+                        self.optext_vault.field_hash_matches(tid, PROMPT_SET_FIELD, canonical(content), last["sha256"])
+                    if same:
+                        raise Conflict(R("PROMPT_SET_EXISTS"))
+                version = 1 if cur is None else cur["current"] + 1
+                facts = {"prompts": len(prompts), "brand_terms": len(terms), "brand_term_rules": len(rules),
+                         "competitor_domains": len(content["competitor_domains"]), "engines": content["engines"]}
+                data = {"prompt_set_id": psid, "tenant_id": tid, "version": version, "content_ref": sealed.ref,
+                        "content_hmac": sealed.hmac, "facts": facts}
+                self._doc_commit(sealed, content, lambda: self._commit(
+                    "prompt_set_version", self._req(data, actor, rk, hbody, psid), actor,
+                    evidence=("prompt_set_version", f"prompt_set:{psid}",
+                              {"prompt_set_id": psid, "tenant_id": tid, "version": version,
+                               "content_hmac": sealed.hmac}, (actor, rk))))
+                return self.prompt_set_view(tid, psid)
+        finally:
+            sealed.discard()
 
     def _a_prompt_set_version(self, d, at):
         ps = self.prompt_sets.setdefault(d["prompt_set_id"], {"prompt_set_id": d["prompt_set_id"],
                                                               "tenant_id": d["tenant_id"], "versions": {}})
-        c = d["content"]
-        cache: dict = {}
         tid = d["tenant_id"]
+        if "content" not in d:
+            # sink job D: the content is the version's blob; ``sha256`` (the version's fingerprint everywhere else)
+            # is its keyed HMAC. A blob that cannot be read leaves an empty, unusable version (``vault_unavailable``)
+            c = self._doc_applied(tid, PROMPT_SET_FIELD, d.get("content_ref"), d.get("content_hmac"),
+                                  self.optext_vault)
+            ok = isinstance(c, dict) and isinstance(c.get("prompts"), list) and isinstance(c.get("brand_terms"), list)
+            facts = d.get("facts") or {}
+            v = dict(c) if ok else {"name": None, "brand_terms": [], "competitor_domains": [], "prompts": [],
+                                    "engines": list(facts.get("engines") or [])}
+            v.update(version=d["version"], sha256=d["content_hmac"], created_at=at)
+            if not ok:
+                v["vault_unavailable"] = True
+            ps["versions"][str(d["version"])] = v
+            ps["current"] = d["version"]
+            return
+        c = d["content"]                                   # a line written before sink job D (per-text stubs)
+        cache: dict = {}
         prompts = [self._optext_open(tid, x, cache) for x in c["prompts"]]
         rules = [{**r, "context_terms": [self._optext_open(tid, x, cache) for x in r.get("context_terms") or []],
                   "negative_terms": [self._optext_open(tid, x, cache) for x in r.get("negative_terms") or []]}
                  for r in c.get("brand_term_rules") or []]
         texts = prompts + [w for r in rules for w in r["context_terms"] + r["negative_terms"]]
         v = {**c, "prompts": [p if p is not None else "" for p in prompts], "version": d["version"],
-             "sha256": d["sha256"], "created_at": at}
+             "sha256": d["sha256"], "created_at": at, "plain_sha256": True}
         if "brand_term_rules" in c:
             v["brand_term_rules"] = [{**r, "context_terms": [w for w in r["context_terms"] if w is not None],
                                       "negative_terms": [w for w in r["negative_terms"] if w is not None]}
@@ -238,7 +267,7 @@ class AuditsMixin:
             versions = {}
             for k, v in ps["versions"].items():
                 shown = [text_view(p) for p in v["prompts"]]
-                out_v = {**v, "prompts": [x[0] for x in shown]}
+                out_v = {**{f: x for f, x in v.items() if f != "plain_sha256"}, "prompts": [x[0] for x in shown]}
                 masked = [i for i, x in enumerate(shown) if x[1]]
                 if v.get("brand_term_rules"):
                     out_v["brand_term_rules"] = [{**r, **{f: [text_view(w)[0] for w in r[f]]
@@ -501,8 +530,15 @@ class AuditsMixin:
             envs.append(_step(ctx, "delia", "sitemaps_and_llms_txt", lambda: delia.run(ctx))
                         if ctx.robots is not None else _skipped("delia", "sitemaps_and_llms_txt", s_env))
             envs.append(_step(ctx, "roman", "content_structure", lambda: roman.run(ctx, pages)))
-        envs.append(_step(ctx, "entity_check", "on_site_entity_consistency",
-                          lambda: entity_check.run(ctx, pages, self.entity_for_tenant(tid, raw=True))))
+        def entity_step():
+            ent = self.entity_for_tenant(tid, raw=True)
+            if entity_unreadable(ent):
+                # sink job D: a canonical value that cannot be read from the vault is never compared (fail closed)
+                return envelope("entity_check", "on_site_entity_consistency", "BLOCKED", [],
+                                reason=R("VAULT_UNAVAILABLE"),
+                                methodology="not run: the canonical entity record cannot be read from the vault")
+            return entity_check.run(ctx, pages, ent)
+        envs.append(_step(ctx, "entity_check", "on_site_entity_consistency", entity_step))
         envs.append(_step(ctx, "callum", "citation_sources",
                           lambda: probes.run_callum(self.ports.engines, ps, body["domain"],
                                                     self.settings.probe_samples, ctx.guard, o,

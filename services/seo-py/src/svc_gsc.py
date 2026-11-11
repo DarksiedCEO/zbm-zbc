@@ -34,6 +34,7 @@ from errors import Conflict, Invalid, Unavailable
 from gsc_client import ALLOWED_HOSTS, SCOPE, GscError, property_host
 from primitives import Killed
 from reasons import R
+from svc_entity import unreadable as entity_unreadable
 from svc_optext import url_flag
 
 log = logging.getLogger("seo.gsc")
@@ -99,19 +100,24 @@ class GscMixin:
                     raise Invalid(R("GSC_PROPERTY_INVALID"))
                 mine = _site(property_host(prop))
                 for other, o in self.tenants.items():
-                    theirs = o.get("gsc_property")
+                    # sink job D: the binding's HOST is what the log keeps in the clear (a host name is a machine
+                    # value), so a binding whose vaulted URL-prefix property cannot be read still holds its host
+                    theirs = o.get("gsc_property_host") or property_host(o.get("gsc_property") or "")
                     if other != tid and theirs:
-                        h = _site(property_host(theirs) or "")
+                        h = _site(theirs)
                         if h == mine or h.endswith("." + mine) or mine.endswith("." + h):
                             raise Conflict(R("GSC_PROPERTY_TAKEN"))
             if url_prefix:
                 stub = self._optext_seal(tid, "gsc_property", [prop], [url_flag(prop)])[0]
                 data = {"tenant_id": tid, "property": stub, "property_host": property_host(prop)}
-                psha = sha(stub["hmac"])
+                ev = {"tenant_id": tid, "property_hmac": stub["hmac"], "bound": True}
             else:
-                data = {"tenant_id": tid, "property": prop}
-                psha = None if prop is None else sha(prop)
-            ev = {"tenant_id": tid, "property_sha256": psha, "bound": prop is not None}
+                # a Domain property is ``sc-domain:`` + a host name: the log keeps the HOST (a machine value of any
+                # legal length) and the kind; its plain SHA-256 on the ledger says nothing the host does not
+                data = {"tenant_id": tid, "property": None} if prop is None else \
+                    {"tenant_id": tid, "property_kind": "domain", "property_host": property_host(prop)}
+                ev = {"tenant_id": tid, "property_sha256": None if prop is None else sha(prop),
+                      "bound": prop is not None}
             try:
                 self._commit("tenant_gsc_property_set", self._req(data, "andre", rk, hbody, tid), "andre",
                              evidence=("tenant_gsc_property_set", f"tenant:{tid}", ev, ("andre", rk)))
@@ -122,7 +128,17 @@ class GscMixin:
             return self.tenant_view(tid)
 
     def _a_tenant_gsc_property_set(self, d, at):
-        self.tenants[d["tenant_id"]]["gsc_property"] = self._optext_open(d["tenant_id"], d["property"])
+        t = self.tenants[d["tenant_id"]]
+        if d.get("property_kind") == "domain":             # sink job D: a Domain property is logged as its host
+            prop = "sc-domain:" + d["property_host"]
+        else:
+            prop = self._optext_open(d["tenant_id"], d.get("property"))
+        t["gsc_property"] = prop
+        # sink job D: the bound host is kept apart from the property text. A URL-prefix property whose vault record
+        # is lost leaves the binding in place (``gsc_property_host``), marked ``gsc_vault_unavailable``: the host is
+        # never free for another tenant, and every read for this tenant fails closed.
+        t["gsc_property_host"] = d.get("property_host") or (property_host(prop) if isinstance(prop, str) else None)
+        t["gsc_vault_unavailable"] = prop is None and d.get("property") is not None
 
     # ------------------------------------------------------------------ budget
 
@@ -150,7 +166,8 @@ class GscMixin:
                 "max_requests_per_read": s.gsc_max_requests, "page_rows": s.gsc_page_rows,
                 "max_pages": s.gsc_max_pages, "max_rows": s.gsc_max_rows, "deadline_seconds": s.gsc_deadline_s,
                 "retention_days": s.gsc_retention_days,
-                "tenants_bound": sum(1 for t in self.tenants.values() if t.get("gsc_property")),
+                "tenants_bound": sum(1 for t in self.tenants.values()
+                                     if t.get("gsc_property") or t.get("gsc_property_host")),
                 "outbound_requests_made": getattr(port, "requests_made", 0) if connected else 0}
 
     # ------------------------------------------------------------------ the audit section
@@ -171,6 +188,8 @@ class GscMixin:
         with self.lock:
             t = self.tenants[tid]
             prop = t.get("gsc_property")
+            if t.get("gsc_vault_unavailable"):             # sink job D: bound, but the property cannot be read
+                return env("BLOCKED", R("VAULT_UNAVAILABLE"), {"state": "VAULT_UNAVAILABLE"})
             if not binding_ok(t, prop):
                 return env("NOT_CONNECTED", "GSC_PROPERTY_UNBOUND", {"state": "UNBOUND"},
                            nc={"first_party:search_console"})
@@ -178,6 +197,8 @@ class GscMixin:
             for d in t["domains"]:
                 hosts |= {_site(d), "www." + _site(d)}
             ent = self.entity_for_tenant(tid, raw=True)
+            if entity_unreadable(ent):                     # sink job D: never a brand list built from ``None``
+                return env("BLOCKED", R("VAULT_UNAVAILABLE"), {"state": "VAULT_UNAVAILABLE"})
             brands = sp.brand_tokens(t["domains"], ((ent or {}).get("fields") or {}).get("name", {}).get("value")
                                      if isinstance(ent, dict) else None)
         try:
@@ -189,13 +210,23 @@ class GscMixin:
                 return env("BLOCKED", "GSC_BUDGET_EXHAUSTED", {"state": "BUDGET_EXHAUSTED",
                                                                "reads_per_day": self.settings.gsc_reads_per_day})
             start, end = sp.window(self.now(), self.settings.gsc_window_days)
-            data = {"tenant_id": tid, "audit_id": aid, "property": kept_property(prop), "window_start": start,
-                    "window_end": end}
+            # sink job D: a Domain property (``sc-domain:<host>``) is a machine value and is logged as it is; a
+            # URL-prefix property is client text: the log and the ledger keep its host and its keyed HMAC only
+            if isinstance(prop, str) and prop.startswith("http"):
+                try:
+                    named = {"property_host": property_host(prop),
+                             "property_hmac": self._optext_hmac(tid, "gsc_property", prop)}
+                except Unavailable as exc:
+                    return env("BLOCKED", exc.reason, {"state": "NOT_RECORDED"})
+                ev_prop = {"property_hmac": named["property_hmac"]}
+            else:
+                named = {"property_kind": "domain", "property_host": property_host(prop)}
+                ev_prop = {"property_sha256": sha(prop)}
+            data = {"tenant_id": tid, "audit_id": aid, **named, "window_start": start, "window_end": end}
             try:
                 self._commit("gsc_read_started", data, "seo",
                              evidence=("gsc_read_started", f"audit:{aid}",
-                                       {"tenant_id": tid, "audit_id": aid,
-                                        "property_sha256": sha(kept_property(prop)),
+                                       {"tenant_id": tid, "audit_id": aid, **ev_prop,
                                         "window_start": start, "window_end": end}, ("gsc", aid)))
             except Unavailable as exc:                     # record-first: no record, no request
                 return env("BLOCKED", exc.reason, {"state": "NOT_RECORDED"})

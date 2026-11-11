@@ -73,18 +73,20 @@ FORBIDDEN_KEYS = frozenset({
 
 
 def forbidden_keys(obj: Any, path: str = "", depth: int = 0) -> list[str]:
+    """The forbidden keys found in a body, each as its NORMALISED name from ``FORBIDDEN_KEYS`` (sink job D: an
+    error body never repeats a key the caller wrote, nor the path of client keys that led to it)."""
     out: list[str] = []
     if depth > 40:
         return out
     if isinstance(obj, dict):
         for k, v in obj.items():
-            p = f"{path}.{k}" if path else str(k)
-            if str(k).lower().replace("-", "_") in FORBIDDEN_KEYS:
-                out.append(p[:120])
-            out += forbidden_keys(v, p, depth + 1)
+            name = str(k).lower().replace("-", "_")
+            if name in FORBIDDEN_KEYS:
+                out.append(name)
+            out += forbidden_keys(v, "", depth + 1)
     elif isinstance(obj, list):
         for v in obj[:10_000]:
-            out += forbidden_keys(v, path, depth + 1)
+            out += forbidden_keys(v, "", depth + 1)
     return out
 
 
@@ -247,11 +249,46 @@ class Callers:
         return found
 
 
+def _model_field_names() -> frozenset:
+    names: set = set()
+    for obj in vars(m).values():
+        if isinstance(obj, type) and issubclass(obj, BaseModel):
+            names.update(obj.model_fields)
+    return frozenset(names)
+
+
+# Sink job D: an error body is reason codes and machine values only; nothing the caller sent comes back. A ``loc``
+# element is an index, or a name from this closed set (the request models' fields, the parameter names of the
+# routes, the forbidden-key catalogue); any other element (a key the caller invented) is "*".
+ERROR_LOC_NAMES = frozenset(("body", "query", "path", "header", "cookie", "tid", "eid", "psid", "aid", "cid", "iid",
+                             "sid", "agent", "name", "against", "since", "limit", "offset", "event_type",
+                             "authorization")) | _model_field_names() | FORBIDDEN_KEYS
+# validation error types whose message is built from the schema alone (a pattern, a bound, the allowed literals)
+ERROR_TYPES_WITH_MESSAGE = frozenset((
+    "missing", "forbidden_field", "extra_forbidden", "string_type", "string_pattern_mismatch", "string_too_short",
+    "string_too_long", "int_type", "bool_type", "literal_error", "list_type", "dict_type", "too_short", "too_long",
+    "greater_than_equal", "less_than_equal", "greater_than", "less_than", "model_type", "model_attributes_type",
+    "int_parsing", "bool_parsing", "none_required", "float_type", "finite_number"))
+ERROR_MESSAGE_WITHHELD = "invalid value"
+_ERROR_TYPE = re.compile(r"[a-z][a-z0-9_.]{0,63}")
+
+
+def _loc_item(x):
+    if isinstance(x, bool) or not isinstance(x, (int, str)):
+        return "*"
+    if isinstance(x, int):
+        return x if 0 <= x < 10 ** 8 else "*"
+    return x if x in ERROR_LOC_NAMES else "*"
+
+
 def _sanitize(errors: list[dict]) -> dict:
     out = []
     for e in errors[:ERROR_MAX_ERRORS]:
-        loc = [str(x)[:ERROR_MAX_STR] if isinstance(x, str) else x for x in list(e.get("loc", ()))[:8]]
-        out.append({"loc": loc, "msg": str(e.get("msg", ""))[:ERROR_MAX_STR], "type": e.get("type")})
+        loc = [_loc_item(x) for x in list(e.get("loc", ()))[:8]]
+        kind = e.get("type")
+        kind = kind if isinstance(kind, str) and _ERROR_TYPE.fullmatch(kind) else "invalid"
+        msg = str(e.get("msg", ""))[:ERROR_MAX_STR] if kind in ERROR_TYPES_WITH_MESSAGE else ERROR_MESSAGE_WITHHELD
+        out.append({"loc": loc, "msg": msg, "type": kind})
     return {"detail": out, "errors_total": len(errors)}
 
 
@@ -290,6 +327,14 @@ def _id(value: str, rx: re.Pattern = SEO_ID) -> str:
     return value
 
 
+def _billing_view(audit: dict) -> dict:
+    """Finance (31)'s view of an audit (sink job D): the billing facts only. The audited paths are the operator's
+    text (they can carry a query); Finance gets their count, never the paths."""
+    out = {k: v for k, v in audit.items() if k != "paths"}
+    out["paths_count"] = len(audit.get("paths") or [])
+    return out
+
+
 def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
     app = FastAPI(title="ZBM/ZBC Search & Answer Intelligence (2)", version="0.1.0", docs_url=None, redoc_url=None,
                   openapi_url=None, description="SEO / AEO / GEO / LLMO, Wave 1: read core, machine readability, "
@@ -302,6 +347,8 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
                              list(settings.caller_tokens.values()) + list(settings.tenant_tokens.values()))
     app.state.service = svc
     app.state.gate = gate
+    import log_sink
+    log_sink.install()                                     # sink job D: Python logging takes machine values only
 
     def caller(*allowed: str) -> Callable:
         def dep(request: Request) -> str:
@@ -474,7 +521,8 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
 
     @app.get(P + "/tenants/{tid}/audits", dependencies=auth)
     def audits(scope: tuple = Depends(scoped("dashboard", "seo_agent", "hub", "finance_31", "compliance_38"))) -> list:
-        return svc.audits_view(scope[1])
+        rows = svc.audits_view(scope[1])
+        return [_billing_view(a) for a in rows] if scope[0] == "finance_31" else rows
 
     @app.get(P + "/tenants/{tid}/audits/{aid}/drift", dependencies=auth)
     def drift(aid: str, against: str = Query(pattern=r"^seo-aud-[0-9a-f]{40}$"),
@@ -495,7 +543,9 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
     @app.get(P + "/tenants/{tid}/audits/{aid}", dependencies=auth)
     def audit(aid: str, scope: tuple = Depends(scoped("dashboard", "seo_agent", "hub", "finance_31",
                                                       "compliance_38"))) -> dict:
-        return svc.audit_view(scope[1], _id(aid), full=scope[0] != "finance_31")
+        if scope[0] == "finance_31":
+            return _billing_view(svc.audit_view(scope[1], _id(aid), full=False))
+        return svc.audit_view(scope[1], _id(aid))
 
     # ------------------------------------------------------------------ Callum's citation-source runs (ADR 0046)
 

@@ -63,17 +63,26 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "sink_last: runs after every other test (it reads what the whole run wrote)")
 
 
-# Sink job A: every record the suite commits is observed by the sink guard. ``SINK_SEEN`` keeps, for the whole run, the
-# sinks whose records passed and the legacy (sink, path) pairs that were actually used; tests/test_sink_guard.py reads
-# it LAST and fails when a legacy entry was never needed (so sink jobs B-D must shrink the list). Paths and sink names
-# only: never a value.
-SINK_SEEN = {"passed": set(), "legacy_used": set(), "full_run": False}
+# Sink jobs A-D: every record the suite commits is observed by the sink guard. ``SINK_SEEN`` keeps, for the whole run,
+# the sinks whose records passed and, per test, the (sink, path) pairs the guard REFUSED. There is no legacy list any
+# more (sink job D): tests/test_sink_guard.py reads this LAST and fails when a refusal happened anywhere but in a test
+# that provokes one on purpose (``EXPECTED_SINK_REFUSALS`` there). Paths and sink names only: never a value.
+SINK_SEEN = {"passed": set(), "violations": {}, "full_run": False, "test": "(outside a test)"}
 
 
 def _sink_observer(kind, found, bad):
     if not bad:
         SINK_SEEN["passed"].add(kind)
-        SINK_SEEN["legacy_used"].update((kind, p) for p, _ in found)
+    else:
+        SINK_SEEN["violations"].setdefault(SINK_SEEN["test"], set()).update((kind, p) for p in bad)
+
+
+@pytest.fixture(autouse=True)
+def _sink_current_test(request):
+    name = getattr(request.node, "originalname", None) or request.node.name
+    SINK_SEEN["test"] = f"{Path(str(request.node.fspath)).name}::{name}"
+    yield
+    SINK_SEEN["test"] = "(outside a test)"
 
 
 def _install_sink_observer():

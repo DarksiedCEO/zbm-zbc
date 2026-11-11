@@ -136,10 +136,16 @@ class ManagerMixin:
         if agent == "selene":
             for g in self.log_ingests.values():
                 if g["status"] == "finished":
-                    e = g["report"]["envelope"]
+                    # sink job D: the machine facts the log keeps (a line written before it carries the report)
+                    if g.get("facts"):
+                        outcome, n = g["facts"]["outcome"], g["facts"]["findings"]
+                    elif g.get("report"):
+                        outcome, n = g["report"]["envelope"]["outcome"], len(g["report"]["envelope"]["findings"])
+                    else:
+                        continue
                     runs += 1
-                    outcomes[e["outcome"]] = outcomes.get(e["outcome"], 0) + 1
-                    produced += len(e["findings"])
+                    outcomes[outcome] = outcomes.get(outcome, 0) + 1
+                    produced += n
         confirmed = overturned = drifts = 0
         for s in self.schedules.values():
             for d in s["drifts"]:

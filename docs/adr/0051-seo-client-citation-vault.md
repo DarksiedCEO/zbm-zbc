@@ -333,6 +333,137 @@ service, adds a dependency and a network hop the department does not otherwise n
 40. **A `[withheld]` marker is never logged.** Where a logged fact would have carried the sweep's marker, the code
     `WITHHELD` is written (`svc_citations.run_facts`); the marker itself is refused by the guard.
 
+## Sink job D: no free text in any log (the legacy list is gone)
+
+41. **No legacy list.** `sink_guard.LEGACY_PROSE_PATHS` (23 entries after job C), `LEGACY_ROWS`, `LEGACY_COUNTS`
+    and the bypass (`_legacy`) are deleted. `refused` is `violations`: ANY non-machine value refuses its write, for
+    every kind and every ledger event. The suite's exactness test is now: a refusal anywhere but in the tests that
+    provoke one on purpose (a closed list of test names) fails the run; a full run also shows that each of the 27
+    kinds was committed and passed.
+42. **What each kind migrated in job D keeps in the log** (everything else is ONE blob per record, HMAC-ed with the
+    log-field sub-key over its canonical JSON, encrypted outside the service lock, appended under it with the commit;
+    the `_apply` handler takes the document from the commit in memory and reads the blob on a replay):
+    - `entity_created`: `entity_id`, `tenant_id`, `fields` (the field NAMES, from the closed schema), `flags` (per
+      field, the strict verdict names of its value and provenance, or null), `content_ref`, `content_hmac`. The blob
+      (`entity_content`, operator text vault) is `{v, entity_id, version, fields: {name: {value, source, provenance,
+      authority}}}`. Ledger: `entity_id`, `tenant_id`, `content_hmac`. The founder's own record is a constant of the
+      code base: its line is `{entity_id, tenant_id, seed: "zbm_nap_v1"}` (no vault, so a deployment without a vault
+      key still starts) and its ledger payload names the seed.
+    - `entity_field_set`: `entity_id`, `field`, `version`, `flags`, `content_ref`, `content_hmac`; the blob holds
+      that one field of that version. Ledger: `entity_id`, `field`, `version`, `content_hmac`.
+    - `prompt_set_version`: `prompt_set_id`, `tenant_id`, `version`, `content_ref`, `content_hmac`, `facts` (counts
+      of prompts, brand terms, rules and competitor domains; the engine codes). The blob (`prompt_set_content`,
+      operator text vault) is the whole content: name, brand terms, rules (term, context terms, negative terms,
+      flags), competitor domains, prompts, engines. Ledger: ids, version, `content_hmac`. The version's fingerprint
+      (`sha256` in memory, in the views and wherever a later record names the prompt set) IS that keyed HMAC. The
+      known gap (an e-mail-shaped context term in the line) is closed: no brand term, rule term or context term is
+      in the line.
+    - `log_ingest_created`: ids, `domain`, `scheme`, `format`, `key_fp`, `robots_status` (a code),
+      `robots_present`, `sitemap_sample_count`, `inputs_ref`, `inputs_hmac`. The blob (`log_ingest_inputs`) is
+      `{v, robots_text, sitemap_sample}`. Ledger: ids, format, `domain_sha256`, `robots_status`, `inputs_hmac`.
+    - `log_chunk`: `ingest_id`, `seq`, `last`, `bytes`, `delta_ref`, `delta_hmac`, `counts` (lines, non-bot, no
+      User-Agent, quarantine reason codes, per bot family: requests / verified / spoofed / claimed). The blob
+      (`log_chunk_delta`) is the chunk's aggregate delta (path templates, status mix, sketch, sample indices).
+      Uploaded log LINES are in neither: a chunk is parsed in memory and dropped, and the request's idempotency hash
+      is over the keyed HMAC of its base64 text. Ledger: `ingest_id`, `seq`, `lines`, `delta_hmac`.
+    - `log_ingest_finished`: `ingest_id`, `report_ref`, `report_hmac`, `facts` (outcome code, findings count,
+      lines). The blob (`log_report`) is the report (methodology, limitations, findings, templates). Ledger:
+      `ingest_id`, `report_hmac`, `outcome`.
+    - `tenant_gsc_property_set`: a Domain property is logged as `property_kind: "domain"` + `property_host` (a host
+      name of any legal length is a machine value; `sc-domain:` + a long host was not); a URL-prefix property as its
+      stub (vault id, keyed HMAC) + `property_host`, as before. Ledger: `property_hmac` (URL prefix) or
+      `property_sha256` (Domain: over a logged host). `gsc_read_started`: `property_kind` + `property_host`, or
+      `property_host` + `property_hmac` (it carried the kept URL text, which the guard refused).
+    Memory holds: entity values and prompt-set content (opened when the line is applied); for a log ingest the
+    counts only, with the inputs and the full totals read from the blobs on demand, outside the lock.
+43. **A blob that cannot be read fails closed.** Entity: the field is `null`, the view says `vault_unavailable`,
+    the audit's entity check is `BLOCKED` / `VAULT_UNAVAILABLE` (never a comparison with `null`) and the Search
+    Console read is `BLOCKED`; setting the fields again repairs it. Prompt set: the version is empty and
+    `vault_unavailable`; audits and citation runs naming it refuse `VAULT_UNAVAILABLE`. Log ingest: lost inputs
+    refuse the next chunk and the finish, a lost delta refuses the finish, a lost report shows `report: null` with
+    `vault_unavailable`. Search Console binding: a URL-prefix property whose vault record is lost leaves the
+    binding IN PLACE (`gsc_property_host` in memory, from the logged host), marked `gsc_vault_unavailable`;
+    `GSC_PROPERTY_TAKEN` is decided on the logged host, so the host is never free for another tenant, the status
+    still counts the tenant as bound, and reads for it are `BLOCKED`.
+44. **Third sink: Python logging (`src/log_sink.py`).** Every log record is scrubbed before any handler emits it:
+    the message template is kept only when it is a string literal of the calling code (found among the constants
+    of the caller's code object; an f-string is not), else the message is `WITHHELD`; each argument is kept only
+    when `sink_guard` classes it as a machine value (ints and floats under nine digits), else `WITHHELD`; exception
+    text, tracebacks and stack text are dropped and replaced by `[<ExceptionType>@<module:function:line>]`
+    (`svc_audits.where_code`). Installed as the log-record factory, as a `logging.Filter` on the root logger and
+    on `seo`, `uvicorn`, `uvicorn.error`, `uvicorn.access`, `httpx`, `httpcore`, `asyncio`, `py.warnings` and
+    their handlers, and in `logging.Handler.handle` (handlers added later, records made by `makeLogRecord`).
+    `SeoService.__init__` and `api.create_app` install it. The guard's own refusal line logs the sink, the count
+    of paths and the first path as a code.
+45. **Error bodies carry reason codes and machine values only.** A validation error keeps `loc` elements that are
+    an index or a name from a closed set (the request models' fields, the routes' parameter names, the
+    forbidden-key catalogue); any other element is `"*"`. `msg` is kept only for the error types whose text comes
+    from the schema (a pattern, a bound, the allowed literals), else `"invalid value"`; `input` and `ctx` are never
+    returned; `type` is a code. A forbidden key is named by its normalised catalogue name, not by the path of
+    caller keys that led to it. Finance (31)'s view of an audit carries `paths_count`, not the audited paths.
+46. **Idempotency hash.** `request_sha` is the SHA-256 of the request body with every non-machine string replaced
+    by its keyed HMAC (`request_text`, `SeoService._machine_body`); a body of machine values only hashes as before
+    (lines written earlier stay idempotent). No vault key and a non-machine string: `VAULT_UNAVAILABLE`.
+47. **Hash fields: every one and its decision (supersedes the last sentence of decision 38).**
+
+    | Field (log / ledger) | Input | Decision |
+    |---|---|---|
+    | `content_hmac` (entity, prompt set) | the version's content | keyed HMAC (new; was `fields_sha256` / `value_sha256` over HMACs and identifiers, and a plain `sha256` over name, brand terms, competitor domains and prompt HMACs) |
+    | `inputs_hmac`, `delta_hmac`, `report_hmac` (log ingest) | robots.txt + sitemap sample; a chunk delta; the report | keyed HMAC (new; were plain `robots_sha256`, `sitemap_sample_sha256`, `delta_sha256`, `report_sha256`) |
+    | `facts_hmac` (`invoice_verified`, the audit's verification) | Finance's facts about the invoice | keyed HMAC (new; was plain `facts_sha256`) |
+    | `property_hmac` (URL-prefix property) | the property URL | keyed HMAC (new on the ledger and in `gsc_read_started`; was a plain SHA-256 of the HMAC / of the kept URL) |
+    | `report_hmac`, `drift_hmac`, `result_hmac`, `section_hmac`, `audit_report_hmac`, `model_hmac`, stub `hmac` | client documents, a model string, operator texts | keyed HMAC (jobs B, C, review c0c09bd1) |
+    | `request_sha` | the request body | plain SHA-256 over machine values and keyed HMACs (decision 46) |
+    | `sha256` (prompt-set reference in `audit_requested`), `prompt_set_sha256` | the prompt-set fingerprint | that fingerprint as recorded: the keyed `content_hmac` for a version created since job D; for an older version the plain SHA-256 it was created with (name kept so old lines and readers still agree) |
+    | `domain_sha256` | a registered domain | plain: the domain is logged as a host name |
+    | `paths_sha256` | the audited paths | plain, over their keyed HMACs |
+    | `property_sha256` (Domain property) | `sc-domain:<host>` | plain: the host is logged |
+    | `scorecard_sha256` | an agent's scorecard | plain: counts and outcome codes derived from logged facts |
+    | `document_sha256` | the rendered client report | plain, kept on purpose: the owner verifies the delivered file with it; its input is a whole document, not a short guessable text (residual: a near-empty document is derivable from logged facts) |
+    | `audit_report_sha256` | the audit report | null since job B (a value only for audits recorded before it) |
+    | `branding_sha256` | the deployment's report branding | plain: operator configuration, not client text |
+    | `key_fp` | the log hash key | plain, 64 bits of a deployment secret's SHA-256 (binds an ingest to its key) |
+    | `line_sha256`, `prev_line_sha256`, `record_sha256`, `payload_sha256`, `log_head_sha256` | log lines and ledger payloads | plain: the chain, over what is logged |
+    | derived ids (`seo-<prefix>-<40 hex>`) | tenant id, actor, request key, prompt-set name, event type, payload hash | plain: identifiers and machine values (the known limit below) |
+
+    `tests/test_sink_job_d.py::test_every_hash_field_has_a_decision` fails when a hash-like key that is not in
+    this table appears in a log line or a ledger payload.
+48. **The universal canary test (`tests/test_canary_all_routes.py`).** Every route is discovered from
+    `app.routes` (41; none exempt; a new route without a builder or an exemption fails), every string field from
+    the request models' schemas, the path and query parameters and the four headers the service reads (279 fields).
+    Each gets unique run-time canaries in six families (prose, e-mail, key prefix, 16-digit Luhn, SSN shape, short
+    token) and three disguises (raw, base64, percent-encoded), plus a syntax-fitted form where a field has one
+    (5,235 canaries, 5,231 requests), in an otherwise valid call as the owning caller. The persisting flows run
+    with canaries in operator text and in engine- and crawl-originated text (answers, citation titles, hints and
+    URLs, page titles and text, canonical and redirect URLs, robots.txt, sitemap URLs, llms.txt, uploaded log
+    lines, Search Console pages and queries), then a restart. The scan covers every data-directory file (the log,
+    both vault files, a real log file written by a logging handler), the ledger payloads, the logs captured at
+    DEBUG, every error body, another tenant's hub responses, the Finance views, the operator aggregates, the
+    evidence and export views, /health and /status, in raw, lower / upper case, hex, base64 and base64url at three
+    alignments, percent-encoded, JSON-escaped and digits-only forms. Result: 0 hits outside the known limit.
+    Mutations that make it fail: the guard disabled; any one of the six migrated kinds written inline again
+    (refused by the guard, and found by the scan with the guard off; with the guard off and nothing inlined the
+    scan is clean); the logging sink disabled; the validation `input` echo restored.
+49. **Known limit (asserted, not hidden).** A short token with no whitespace that is not key-, e-mail- or
+    9+-digit-shaped, accepted into an IDENTIFIER field, is a machine value by definition and is logged as such. The
+    canary test asserts the exact (route, field) pairs where that happens: `POST /tenants` `tenant_id`,
+    `POST /tenants/{tid}/domains` `domains[]` (a host name), `POST /tenants/{tid}/finance-client`
+    `finance_client_id`; and that it happens nowhere else. A prompt-set name and an entity source are identifiers
+    too, but they are now inside the blobs and reach no log.
+50. **Guard cost per commit (re-measured).** Measured on the final code: `sink_guard.enforce` on the largest real
+    record of each kind (0.4-2.9 kB each now that the content is in blobs); cold = the first call in a fresh
+    process (median of 3 processes), warm = the median of 300 further calls. Log kinds (26 of 27;
+    `schedule_slot_skipped` was not produced by the measurement scenario): cold 1.6-7.2 ms (median 2.6 ms; the
+    largest are `audit_completed` 7.2, `audit_requested` 5.9, `schedule_created` 5.9), warm 7-538 microseconds
+    (median 58). Ledger payloads (30 event types): cold 0.3-2.8 ms (median 1.1 ms), warm 2-308 microseconds. Job A
+    had measured 70-80 ms of guard time on the first commit of a process for a large inline record.
+51. **Replay.** Lines written before job D still replay: an `entity_created` with plain values (the seed) or
+    per-text stubs, an `entity_field_set` with stubs, a `prompt_set_version` with `content` and a plain `sha256`
+    (still recognised as the same content), a `log_ingest_created` with `robots_text` / `sitemap_sample`, a
+    `log_chunk` with `delta`, a `log_ingest_finished` with `report` / `report_sha256`, a
+    `tenant_gsc_property_set` with a `sc-domain:` string. An ingest opened before job D keeps its full totals in
+    memory and takes later chunks as blobs.
+
 ## Threat model
 
 | Threat | What stops it | What does not |

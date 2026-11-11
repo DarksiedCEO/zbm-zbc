@@ -310,11 +310,8 @@ def test_the_stored_envelope_names_evidence_by_id_and_carries_no_hash(tmp_path):
 
 
 def test_no_legacy_entry_remains_for_the_citation_and_engine_sinks():
-    kinds = {k for k, _ in sg.LEGACY_ROWS}
-    assert not kinds & {k for kind in KINDS for k in (kind, "ledger:" + kind)}
-    assert len(sg.LEGACY_ROWS) == 23 and sum(sg.LEGACY_COUNTS.values()) == 23
-    assert set(sg.LEGACY_COUNTS) == {"entity_created", "log_chunk", "log_ingest_created", "log_ingest_finished",
-                                     "prompt_set_version"}
+    """Sink job D deleted the legacy list: there is no entry for any sink."""
+    assert not hasattr(sg, "LEGACY_ROWS") and not hasattr(sg, "LEGACY_PROSE_PATHS") and not hasattr(sg, "LEGACY_COUNTS")
 
 
 def test_the_result_is_not_readable_at_rest(tmp_path, caplog):
@@ -534,6 +531,8 @@ def test_the_blob_is_sealed_outside_the_service_lock_appended_once_under_it_and_
     monkeypatch.setattr(guard_mod, "guard_record", sweep)
     monkeypatch.setattr(callum, "_display", display)
     psid = tc.prompt_set(h, engines=("openai",))
+    assert held["seal"] == [False]                           # (sink job D: the prompt set's blob, outside the lock too)
+    held["seal"].clear()
     held["mask"].clear()                                     # (a prompt set's own view masks its texts)
     run = h.ok(tc.run(h, psid), 201)
     cid = run["citation_run_id"]
@@ -972,7 +971,8 @@ def test_mutation_readers_ignoring_vault_unavailable_is_caught(tmp_path, monkeyp
 
 def test_mutation_a_plain_sha256_instead_of_the_keyed_hash_is_caught(tmp_path, monkeypatch):
     monkeypatch.setattr(svc_vaulted.VaultedMixin, "_vaulted_hmac",
-                        lambda self, tid, field, obj: hashlib.sha256(svc_vaulted.canonical(obj).encode()).hexdigest())
+                        lambda self, tid, field, obj, vault=None: hashlib.sha256(
+                            svc_vaulted.canonical(obj).encode()).hexdigest())
     got = _scenario(tmp_path)
     assert got["hash_is_keyed"] is False
     assert got["owner_reads_the_result"] is False            # and a reader refuses a hash that is not the keyed one

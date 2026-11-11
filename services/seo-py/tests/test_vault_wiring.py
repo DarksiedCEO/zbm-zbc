@@ -154,12 +154,16 @@ def start(h: Harness, v: dict, fetcher=None) -> Port:
     return port
 
 
-def citation_run(h: Harness):
-    psid = h.ok(h.post("/tenants/zbm/prompt-sets", {"request_id": rid(), "name": "core",
+def prompt_set(h: Harness) -> str:
+    return h.ok(h.post("/tenants/zbm/prompt-sets", {"request_id": rid(), "name": "core",
                                                     "brand_terms": ["Z Best Media"],
                                                     "competitor_domains": ["competitor.test"],
                                                     "prompts": ["who recovers marketplace revenue"],
                                                     "engines": ["openai"]}), 201)["prompt_set_id"]
+
+
+def citation_run(h: Harness, psid=None):
+    psid = psid or prompt_set(h)
     return h.ok(h.post("/tenants/zbm/citation-runs", {"request_id": rid(), "domain": DOMAIN, "prompt_set_id": psid}),
                 201)
 
@@ -470,9 +474,10 @@ def test_mutation_the_result_written_to_the_log_again_is_caught(tmp_path, monkey
         return real(self, kind, data, actor, evidence=evidence)
     real_seal = SeoService._vaulted_seal
 
-    def seal(self, tid, field, obj):
-        box["doc"] = obj
-        return real_seal(self, tid, field, obj)
+    def seal(self, tid, field, obj, vault=None):
+        if field == "citation_result":                     # (sink job D: a prompt set is sealed the same way)
+            box["doc"] = obj
+        return real_seal(self, tid, field, obj, vault)
     monkeypatch.setattr(SeoService, "_commit", inline)
     monkeypatch.setattr(SeoService, "_vaulted_seal", seal)
     h = harness(tmp_path / "guarded")

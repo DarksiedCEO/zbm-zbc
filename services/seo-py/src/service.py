@@ -85,6 +85,8 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
         if type(observe_existing_on_start) is not bool:
             raise TypeError("observe_existing_on_start must be a bool")
         import ports as ports_mod
+        import log_sink
+        log_sink.install()                               # sink job D: Python logging takes machine values only
         self.settings = settings
         self.rec = recorder
         self.log = log
@@ -113,6 +115,9 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
         self._log_verify_cache: dict = {}                # ingest -> {family|ip hash: verdict} (memory only)
         self._log_budget: dict = {}
         self._log_robots: dict = {}                      # open ingests' parsed robots.txt (memory only)
+        self._log_inputs: dict = {}                      # ingest -> its vaulted robots.txt / sitemap sample (memory)
+        self._log_full: dict = {}                        # ingest -> its full totals, rebuilt from the chunk blobs
+        self._doc_handoff: dict = {}                     # blob ref -> document, during its own commit only
         self.integrity = {"ok": False, "checked_at": None, "problem": "not yet verified against the ledger"}
         self._last_integrity_try = 0
         self._own_pending: Optional[bytes] = None
@@ -258,13 +263,18 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
             if named:
                 data["evidence"] = named
             # sink job A: the line and every evidence payload hold machine values only, checked BEFORE anything is
-            # written (no ledger event, no pending line). A path outside the legacy list refuses the whole commit.
+            # written (no ledger event, no pending line). Any non-machine value refuses the whole commit (job D).
             try:
                 sink_guard.enforce(kind, data)
                 for _eid, event_type, _subject, payload in events:
                     sink_guard.enforce(sink_guard.LEDGER + str(event_type), payload)
             except sink_guard.SinkViolation as exc:
-                logging.getLogger("seo.sink").error("commit refused by the sink guard: %s", exc)
+                # codes and a count only (the logging sink withholds anything else): the sink and the first path,
+                # the path written as a code (``/content/prompts[]`` -> ``content.prompts.list``)
+                first = (exc.paths[0] if exc.paths else "").strip("/").replace("/", ".").replace("[]", ".list") \
+                    .replace("{key}", "KEY").replace("*", "ANY")
+                logging.getLogger("seo.sink").error("commit refused by the sink guard: sink=%s paths=%d first=%s",
+                                                    exc.kind.replace(":", "."), len(exc.paths), first or "none")
                 raise Unavailable(R("SINK_REFUSED")) from None
             for eid, event_type, subject_id, payload in events:
                 try:
@@ -334,7 +344,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
         prev = self.requests.get((actor, rk))
         if prev is None:
             return None
-        if prev[0] != request_sha(body):
+        if prev[0] != request_sha(self._machine_body(body)):
             raise Conflict(R("REQUEST_ID_REUSED"))
         return prev
 
@@ -344,9 +354,11 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
         different request)."""
         return f"{op}|{target}|{body['request_id']}"
 
-    @staticmethod
-    def _req(data: dict, actor: str, rk: str, body: dict, obj) -> dict:
-        return {**data, "actor": actor, "request_id": rk, "request_sha": request_sha(body), "_obj": obj}
+    def _req(self, data: dict, actor: str, rk: str, body: dict, obj) -> dict:
+        """The request fields of a log line. ``request_sha`` is the SHA-256 of the body with every non-machine
+        string replaced by its keyed HMAC (sink job D, ``_machine_body``): never a plain hash of client text."""
+        return {**data, "actor": actor, "request_id": rk, "request_sha": request_sha(self._machine_body(body)),
+                "_obj": obj}
 
     def _gate(self) -> None:
         if self._closed:

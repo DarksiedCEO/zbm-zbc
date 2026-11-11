@@ -30,7 +30,6 @@ import test_vault_wiring as vw
 import reasons
 import svc_audits
 import svc_entity
-import svc_optext
 from agents import callum, logs
 from agents import secret_guard as sg
 from helpers import rid
@@ -924,14 +923,27 @@ def test_a_real_service_run_keeps_no_operator_text_on_disk_and_the_owner_reads_d
 
 
 def test_operator_vaulting_is_load_bearing(tmp_path, monkeypatch, caplog):
-    """Mutation: the seal writes the text itself into the log record: the scan finds it."""
+    """Mutation (sink job D form): the prompt set's content is written into the log record again. With the sink
+    guard in place the commit is refused and nothing is written; without it the scan finds the text."""
+    import sink_guard
+    from service import SeoService
     rng = random.Random(SEED + 41)
     v = {"label_value": _secret_word(rng), "email": _email(rng)}
-    monkeypatch.setattr(svc_optext.OperatorTextMixin, "_optext_seal",
-                        lambda self, tid, field, texts, flags=None: list(texts))
+    real = SeoService._commit
+
+    def inline(self, kind, data, actor, evidence=None):
+        if kind == "prompt_set_version":
+            data = {**data, "inline": list(self._doc_handoff.values())[-1]}
+        return real(self, kind, data, actor, evidence=evidence)
+    monkeypatch.setattr(SeoService, "_commit", inline)
+    monkeypatch.setattr(sink_guard, "OBSERVER", None)       # a mutated service's records are not the suite's
     h = _harness(tmp_path)
-    h.ok(h.post("/tenants/zbm/prompt-sets", _ps("core", [f"how to reset my password {v['label_value']}"],
-                                                [{"term": "Z Best Media", "context_terms": [v["email"]]}])), 201)
+    body = _ps("core", [f"how to reset my password {v['label_value']}"],
+               [{"term": "Z Best Media", "context_terms": [v["email"]]}])
+    h.refused(h.post("/tenants/zbm/prompt-sets", body), 503, "SINK_REFUSED")
+    assert _scan(h, caplog, v) == []
+    monkeypatch.setattr(sink_guard, "violations", lambda kind, data: [])
+    h.ok(h.post("/tenants/zbm/prompt-sets", {**body, "request_id": rid()}), 201)
     assert _scan(h, caplog, v) != []
 
 
@@ -963,7 +975,20 @@ def test_idempotency_and_the_content_hash_use_the_hmac(tmp_path):
     h.refused(h.post("/tenants/zbm/prompt-sets", {**body, "request_id": rid()}), 409, "PROMPT_SET_EXISTS")
     rec = [r for r in h.svc.log.records if r["kind"] == "prompt_set_version"][-1]
     assert "how to reset" not in json.dumps(rec)
-    assert all(svc_optext.is_stub(x) for x in rec["data"]["content"]["prompts"])
+    # sink job D: the whole content is ONE blob; the line keeps its ref, its keyed HMAC and counts (no stub, no text)
+    import hashlib
+    import sink_guard
+    import svc_vaulted
+    d = rec["data"]
+    assert "content" not in d and "sha256" not in d and sink_guard.violations("prompt_set_version", d) == []
+    assert d["facts"] == {"prompts": 1, "brand_terms": 1, "brand_term_rules": 0, "competitor_domains": 1,
+                          "engines": ["openai"]}
+    content = h.svc.optext_vault.get_blob("zbm", d["content_ref"])
+    assert content["prompts"] == ["how to reset my password on shopify"]
+    canon = svc_vaulted.canonical(content)
+    assert d["content_hmac"] == h.svc.optext_vault.field_hash("zbm", "prompt_set_content", canon)[1]
+    assert d["content_hmac"] != hashlib.sha256(canon.encode()).hexdigest()
+    assert h.ledger.of_type("prompt_set_version")[-1]["_payload"]["content_hmac"] == d["content_hmac"]
 
 
 # ================================================================================================ MUST 10: entity waiver
@@ -980,9 +1005,11 @@ def test_the_telephone_waiver_applies_to_the_telephone_field_only(tmp_path):
          "authority": "first_party"},
         {"field": "telephone", "value": "(562) 248-6617", "source": "founder_statement", "provenance": "stated",
          "authority": "first_party"}]}, andre=True), 201)
-    rec = [r for r in h.svc.log.records if r["kind"] == "entity_created"][-1]["data"]["fields"]
-    assert rec["name"]["value"]["flag"] == "e_digits" and rec["street_address"]["value"]["flag"] == "e_digits"
-    assert rec["telephone"]["value"]["flag"] is None
+    data = [r for r in h.svc.log.records if r["kind"] == "entity_created"][-1]["data"]
+    rec = data["flags"]                                    # sink job D: field names and flags; the values are a blob
+    assert data["fields"] == ["name", "street_address", "telephone"]
+    assert rec["name"]["value"] == "e_digits" and rec["street_address"]["value"] == "e_digits"
+    assert rec["telephone"]["value"] is None
     assert svc_entity.value_flag("locality", card) == "e_digits" and svc_entity.value_flag("telephone", "5622486617") \
         is None
 

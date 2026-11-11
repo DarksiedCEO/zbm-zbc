@@ -27,6 +27,7 @@ from config import CAPABILITY_SWITCHES, PROVIDER_SWITCHES, TENANT_ID
 from errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from primitives import Killed
 from reasons import R
+import sink_guard
 from svc_optext import url_view
 
 TENANT_KINDS = ("own", "client")
@@ -46,7 +47,12 @@ def valid_domain(d) -> bool:
 def identifier_refused(x) -> bool:
     """Review c0c09bd1: an identifier (tenant id, domain, Finance client id) holding a key, a 9+ digit run, an e-mail
     form, or failing the strict check (secret_guard.identifier_refusal)."""
-    return secret_guard.identifier_refusal(x) is not None
+    if secret_guard.identifier_refusal(x) is not None:
+        return True
+    # sink job D: an identifier is LOGGED, so it must be a machine value of the sink guard (a host name the strict
+    # host check takes, a code of at most 64 characters holding a letter, a small number). One that is not is
+    # refused here (422 IDENTIFIER_WITHHELD) instead of being accepted and then refused at the sink (503)
+    return sink_guard.classify(x) is None
 
 
 def _site(d: str) -> str:
@@ -260,8 +266,11 @@ class TenantsMixin:
     def tenant_view(self, tid: str) -> dict:
         with self.lock:
             t = self._get(self.tenants, tid, "TENANT_NOT_FOUND")
-            out = {**t, "domains": list(t["domains"]),
+            out = {**{k: v for k, v in t.items() if k not in ("gsc_property_host", "gsc_vault_unavailable")},
+                   "domains": list(t["domains"]),
                    "audits": sum(1 for a in self.audits.values() if a["tenant_id"] == tid)}
+            if t.get("gsc_vault_unavailable"):            # sink job D: bound, the property text cannot be read
+                out["gsc_vault_unavailable"] = True
             prop = t.get("gsc_property")
             if isinstance(prop, str) and prop.startswith("http"):
                 shown, alert = url_view(prop)             # review c0c09bd1: the owner's view, client-view masked

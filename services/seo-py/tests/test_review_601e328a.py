@@ -795,8 +795,9 @@ def test_a_batch_id_collision_closes_the_run_and_writes_nothing(tmp_path, monkey
     v = vw.synthetic()
     h = vw.harness(tmp_path)
     vw.start(h, v)
+    psid = vw.prompt_set(h)                # (sink job D: the prompt set is a blob too; made before ids collide)
     monkeypatch.setattr(vault.secrets, "token_bytes", lambda n: b"\x07" * n)
-    run = vw.citation_run(h)
+    run = vw.citation_run(h, psid)
     assert run["status"] == "interrupted" and run["interrupted_reason"] == "RUN_FAILED"
     assert len(h.svc.vault) == 0 and h.ledger.of_type("citation_run_recorded") == []
     assert vw.found(vw.written(h, caplog), v) == []

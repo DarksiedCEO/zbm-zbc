@@ -36,6 +36,14 @@ from svc_optext import text_view, url_view
 REPORT_FIELD = "audit_report"
 DRIFT_FIELD = "drift_report"
 SECTION_FIELD = "gsc_section"
+# sink job D: the last free text leaves the log
+ENTITY_FIELD = "entity_content"              # one blob per entity version (operator text vault)
+PROMPT_SET_FIELD = "prompt_set_content"      # one blob per prompt-set version (operator text vault)
+INGEST_INPUTS_FIELD = "log_ingest_inputs"    # robots.txt and the sitemap sample fixed when an ingest is created
+LOG_DELTA_FIELD = "log_chunk_delta"          # one chunk's aggregate delta (path templates are its keys)
+LOG_REPORT_FIELD = "log_report"              # the finished ingest's report
+REQUEST_FIELD = "request_text"               # a non-machine string of a request body, in its idempotency hash
+REQUEST_TENANT = "seo"                       # the binding of ``REQUEST_FIELD`` (the request key scopes the request)
 # machine classes a secret or personal data cannot hide in (the strict check already passed, or the shape is closed)
 _PLAIN_CLASSES = frozenset(("empty", "service_id", "scoped_id", "invoice_id", "request_id", "timestamp", "date",
                             "number", "version", "boolean", "actor", "hostname", "code"))
@@ -91,10 +99,10 @@ class Sealed:
     """A document prepared for the vault outside the service lock: its pending (encrypted, unwritten) lines, its blob
     ref and its keyed HMAC. Holds no plaintext."""
 
-    __slots__ = ("pending", "ref", "hmac")
+    __slots__ = ("pending", "ref", "hmac", "vault")
 
-    def __init__(self, pending, ref: str, mac: str):
-        self.pending, self.ref, self.hmac = pending, ref, mac
+    def __init__(self, pending, ref: str, mac: str, vault=None):
+        self.pending, self.ref, self.hmac, self.vault = pending, ref, mac, vault
 
     def discard(self) -> None:
         self.pending.discard()
@@ -106,41 +114,105 @@ class VaultedMixin:
         if not self.vault.key_configured:
             raise Unavailable(R("VAULT_UNAVAILABLE"))
 
-    def _vaulted_hmac(self, tid: str, field: str, obj) -> str:
+    def _vaulted_hmac(self, tid: str, field: str, obj, vault=None) -> str:
         """The keyed HMAC of ``obj``'s canonical JSON. Raises ``vault.VaultError`` (no key, a bad value)."""
-        return self.vault.field_hash(tid, field, canonical(obj))[1]
+        return (self.vault if vault is None else vault).field_hash(tid, field, canonical(obj))[1]
 
-    def _vaulted_seal(self, tid: str, field: str, obj) -> Sealed:
+    def _vaulted_seal(self, tid: str, field: str, obj, vault=None) -> Sealed:
         """OUTSIDE the service lock: ``obj`` (already ``normalised``) encrypted for ``tid`` into a pending batch, and
-        its keyed HMAC. Nothing is written. Raises ``vault.VaultError``."""
+        its keyed HMAC. Nothing is written. Raises ``vault.VaultError``. ``vault``: the operator text vault for
+        operator-typed content (sink job D); the citation vault otherwise."""
+        vault = self.vault if vault is None else vault       # (a vault has a length: never ``or``)
         pending = vault_mod.VaultBatch()
         try:
-            mac = self._vaulted_hmac(tid, field, obj)
-            with self.vault.collecting(pending):
-                ref = self.vault.put_blob(tid, obj)
+            mac = self._vaulted_hmac(tid, field, obj, vault)
+            with vault.collecting(pending):
+                ref = vault.put_blob(tid, obj)
         except BaseException:
             pending.discard()
             raise
-        return Sealed(pending, ref, mac)
+        return Sealed(pending, ref, mac, vault)
 
     def _vaulted_commit(self, sealed: Sealed, commit) -> None:
         """UNDER the service lock: the pending lines in one append (one fsync), then ``commit()``. A commit that fails
         after the append leaves an orphan blob: counted, and the failure is raised."""
+        vault = self.vault if sealed.vault is None else sealed.vault
         written = len(sealed.pending)
-        self.vault.write_batch(sealed.pending)
+        vault.write_batch(sealed.pending)
         try:
             commit()
         except BaseException:
-            self.vault.note_orphans(written)
+            vault.note_orphans(written)
             raise
 
-    def _vaulted_open(self, tid: str, field: str, ref, mac):
+    def _vaulted_open(self, tid: str, field: str, ref, mac, vault=None):
         """OUTSIDE the service lock: the document for its OWNING tenant, or None (no key, a lost or changed blob,
         another tenant's ref, an HMAC that does not match). Never raises."""
+        vault = self.vault if vault is None else vault       # (a vault has a length: never ``or``)
         try:
-            obj = self.vault.get_blob(tid, ref)
-            if not self.vault.field_hash_matches(tid, field, canonical(obj), mac):
+            obj = vault.get_blob(tid, ref)
+            if not vault.field_hash_matches(tid, field, canonical(obj), mac):
                 return None
             return obj
         except (vault_mod.VaultError, TypeError, ValueError, RecursionError):
             return None
+
+    # ------------------------------------------------------------------ sink job D: small operator documents
+
+    def _doc_seal(self, tid: str, field: str, obj, vault=None) -> Sealed:
+        """``_vaulted_seal`` for a request path: a vault failure is the request's refusal (VAULT_UNAVAILABLE without
+        a key, STORE_UNAVAILABLE otherwise); nothing is written."""
+        try:
+            return self._vaulted_seal(tid, field, obj, vault)
+        except vault_mod.VaultUnavailable:
+            raise Unavailable(R("VAULT_UNAVAILABLE")) from None
+        except vault_mod.VaultError:
+            raise Unavailable(R("STORE_UNAVAILABLE")) from None
+
+    def _doc_commit(self, sealed: Sealed, obj, commit) -> None:
+        """UNDER the service lock: ``_vaulted_commit`` for a document whose ``_apply`` handler reads it back. The
+        plaintext is handed to the handler in memory (``_doc_handoff``: ref -> document, this commit only), so the
+        live path does not decrypt what it has just encrypted; a replay reads the blob."""
+        self._doc_handoff[sealed.ref] = obj
+        try:
+            try:
+                self._vaulted_commit(sealed, commit)
+            except vault_mod.VaultError:
+                raise Unavailable(R("STORE_UNAVAILABLE")) from None
+        finally:
+            self._doc_handoff.pop(sealed.ref, None)
+            sealed.discard()
+
+    def _doc_applied(self, tid: str, field: str, ref, mac, vault=None):
+        """In an ``_apply`` handler: the document of a record (the live commit's hand-off, else the blob read for the
+        owning tenant with its HMAC checked), or None when it cannot be read."""
+        got = self._doc_handoff.get(ref)
+        if got is not None:
+            return got
+        return self._vaulted_open(tid, field, ref, mac, vault)
+
+    def _machine_body(self, body):
+        """Sink job D: a request body as its idempotency hash sees it. Every string that is not a machine value
+        (sink_guard) is replaced by its keyed HMAC (``REQUEST_FIELD``), so ``request_sha`` is never a plain SHA-256
+        over client text; a body of machine values only is returned as it is (its hash is unchanged). No vault key
+        and a non-machine string: VAULT_UNAVAILABLE (never a plain hash instead)."""
+        if not sink_guard.violations("request_body", body):
+            return body
+        vault = self.optext_vault
+
+        def walk(x):
+            if isinstance(x, str):
+                if sink_guard.classify(x) is not None:
+                    return x
+                try:
+                    return vault.field_hash(REQUEST_TENANT, REQUEST_FIELD, x)[1]
+                except vault_mod.VaultUnavailable:
+                    raise Unavailable(R("VAULT_UNAVAILABLE")) from None
+                except vault_mod.VaultError:
+                    raise Unavailable(R("STORE_UNAVAILABLE")) from None
+            if isinstance(x, dict):
+                return {(walk(k) if isinstance(k, str) else k): walk(v) for k, v in x.items()}
+            if isinstance(x, (list, tuple)):
+                return [walk(v) for v in x]
+            return x
+        return walk(body)

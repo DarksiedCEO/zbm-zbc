@@ -29,11 +29,14 @@ from __future__ import annotations
 
 from typing import Optional
 
-from envelope import sha
 from errors import Conflict, Invalid, Unavailable
 import compliance_client
+import vault as vault_mod
 from finance_client import DEFINITIVE, PAID, FinanceLookupError, assess
 from reasons import R
+from svc_vaulted import normalised
+
+INVOICE_FACTS_FIELD = "invoice_facts"
 
 
 class InvoicesMixin:
@@ -92,13 +95,19 @@ class InvoicesMixin:
         except FinanceLookupError as exc:
             code = exc.code
         if code == PAID:
+            # sink job D: Finance's facts are the client's invoice data: their hash is keyed (the vault's log-field
+            # sub-key, bound to the tenant), never a plain SHA-256; without a vault key the run is refused
+            try:
+                fh = self._vaulted_hmac(plan["tenant_id"], INVOICE_FACTS_FIELD, normalised(facts))
+            except vault_mod.VaultError:
+                raise Unavailable(R("VAULT_UNAVAILABLE"), override_allowed=False) from None
             return {"mode": "finance", "verdict": PAID, "cause": None, "override": None, "invoice_status": "paid",
-                    "facts_sha256": sha(facts), "compliance": cmp_}
+                    "facts_hmac": fh, "compliance": cmp_}
         if code in DEFINITIVE:
             raise Conflict(R(code), override_allowed=False)
         if plan["override"]:
             return {"mode": "finance", "verdict": "OVERRIDDEN", "cause": code, "override": plan["override"],
-                    "invoice_status": None, "facts_sha256": None, "compliance": cmp_}
+                    "invoice_status": None, "facts_hmac": None, "compliance": cmp_}
         raise Unavailable(R(code), override_allowed=True)
 
     def _recheck_invoice(self, plan: Optional[dict]) -> None:
@@ -130,7 +139,7 @@ class InvoicesMixin:
             return out
         if verification["verdict"] == PAID:
             return out + [("invoice_verified", subject, {**ids, "invoice_id": invoice_id, "verdict": PAID,
-                                                         "facts_sha256": verification["facts_sha256"]}, (actor, rk))]
+                                                         "facts_hmac": verification["facts_hmac"]}, (actor, rk))]
         return out + [("invoice_verification_overridden_by_andre", subject,
                        {**ids, "invoice_id": invoice_id, "cause": verification["cause"],
                         "override": verification["override"]}, ("andre", rk))]
