@@ -21,7 +21,7 @@ import ledger as ledger_mod
 import sink_guard as sg
 import vault
 from errors import Unavailable
-from helpers import Harness, invoice_id
+from helpers import Harness, invoice_id, ruling_id
 from ledger import LedgerNotRecorded, derived_id
 from service import SeoService
 from store import PENDING_NAME
@@ -59,6 +59,11 @@ def accepted_values() -> dict:
                       "invoice:" + invoice_id(3), "request:" + str(uuid.uuid4()), derived_id("pst", 1) + ":v2:7",
                       derived_id("egr", 1) + ":p3"],
         "invoice_id": [invoice_id(1), invoice_id(2)],
+        # review 2b26d980: every other id Finance issues, and the ruling id Compliance issues
+        "finance_id": ["fin-crc-" + invoice_id(3)[8:], "fin-brk-" + invoice_id(4)[8:], "fin-je-" + hexa(40, 5),
+                       "fin-invvoid-" + hexa(40, 6)],
+        "ruling_id": [ruling_id("a"), ruling_id("b")],
+        "jurisdiction": ["US-CA", "US-PW", "US-ID"],
         "request_id": [str(uuid.uuid4()), str(uuid.uuid4())],
         "request_key": [f"audit|acme|{uuid.uuid4()}", f"client_report|acme/{sid}|{uuid.uuid4()}",
                         f"domains|acme-corp|{uuid.uuid4()}", f"log_chunk|{derived_id('lgi', 1)}|{uuid.uuid4()}",
@@ -67,6 +72,7 @@ def accepted_values() -> dict:
         "timestamp": ["2026-10-09T18:00:00Z", "2026-10-09T18:00:00.123456Z", "2026-10-09T18:00Z"],
         "date": ["2026-10-09", "1999-01-31"],
         "number": ["0", "7", "12345678", "-3"],
+        "amount": ["100.000000", "0.004500", "99999.999999", "123456.000001"],
         "version": ["1.0", "v2.3.1", "2026-10-01.1", "seo-client-report/2", "bot-families/2026-10-01.1",
                     "seo-audit-report/1"],
         "boolean": ["true", "false"],
@@ -81,7 +87,9 @@ def accepted_values() -> dict:
 
 def test_every_class_is_accepted_and_the_set_is_closed():
     values = accepted_values()
-    assert set(values) == set(sg.CLASSES)
+    # ``key_id`` (review 2b26d980) is the one class that is not a property of the value alone: a configured vault
+    # key id, only as the value of a ``key_id`` field (tests/test_review_2b26d980.py); ``classify`` never returns it
+    assert set(values) | {"key_id"} == set(sg.CLASSES)
     wrong = [(cls, i) for cls, vs in values.items() for i, v in enumerate(vs) if sg.classify(v) != cls]
     assert wrong == []
     assert all(sg.violations("job_ran", {"k": vs}) == [] for vs in values.values())
@@ -110,7 +118,9 @@ def refused_values() -> dict:
         "timestamp_offset": ("2026-10-09T18:00:00+00:00", "charset"),
         "long": ("a" * (sg.MAX_LEN + 1), "long"), "long_code": ("A" * (sg.CODE_MAX + 1), "shape"),
         "url": ("https://example.com/x", "shape"), "path": ("/about", "shape"), "non_ascii": ("caf\u00e9", "charset"),
-        "brackets": ("[withheld]", "charset"), "host_key_label": (rnd(20).lower() + ".example.com", "host"),
+        # review 2b26d980 SHOULD 1: a platform hash label of up to 20 characters is a host name now; a random
+        # letters-and-digits label of 24+ is still a key
+        "brackets": ("[withheld]", "charset"), "host_key_label": ("a1b2" + rnd(24).lower() + ".example.com", "host"),
         "upper_hex": (rnd(40, "ABCDEF" + digits), "secret"), "unknown_id_prefix": ("seo-zzz-" + hexa(40), "secret"),
         "request_key_bad_target": (f"audit|two words|{uuid.uuid4()}", "space"),
         "request_key_no_uuid": ("audit|acme|" + rnd(12), "shape"),
@@ -179,7 +189,10 @@ def test_depth_is_bounded_and_the_epoch_exemption_is_exact():
     assert sg.violations("prompt_set_version", {"p": [{"vault_id": digits32, "repair_id": digits32}]}) == []
     assert sg.violations("prompt_set_version", {"p": [{"hmac": digits32}]}) == [("/p[]/hmac", "shape")]
     assert sg.violations("prompt_set_version", {"vault_id": digits32 + "1"}) == [("/vault_id", "shape")]
-    assert sg.DIGIT_HEX_KEYS == {"epoch", "vault_id", "repair_id"}
+    # review 2b26d980: the log hash key's 16-hex fingerprint is derived by the service too
+    assert sg.violations("log_ingest_created", {"key_fp": digits16}) == []
+    assert sg.violations("log_ingest_created", {"key_fp": digits16 + "1"}) == [("/key_fp", "shape")]
+    assert sg.DIGIT_HEX_KEYS == {"epoch", "vault_id", "repair_id", "key_fp"}
 
 
 def test_the_guard_is_linear_on_a_two_thousand_row_record():
@@ -340,21 +353,71 @@ def test_there_is_no_legacy_list_and_no_bypass():
 
 # Tests that PROVOKE a refusal on purpose (each asserts it): the only places the guard may refuse during the suite.
 # A refusal in any other test is a record the service tried to write with a non-machine value: a failure.
+# Review 2b26d980 NIT: every entry names its sinks and paths EXACTLY (no wildcard): a refusal of another sink or
+# path in a listed test fails the suite as one in an unlisted test does.
 _PROBE = frozenset((("job_ran", "/job"),))                # the canary tests' direct commits of a canary value
-EXPECTED_SINK_REFUSALS = {                                # test -> the only (sink, path) pairs it may refuse (None: any)
+_KINDS = tuple(sorted(name[3:] for name in dir(SeoService) if name.startswith("_a_")))
+_FORMER_LEGACY = ("/content/prompts[]", "/delta/families/*/templates/{key}", "/fields/name/value",
+                  "/report/envelope/methodology", "/robots_text")
+_T, _R = "test_sink_guard.py::", "test_review_2b26d980.py::"
+EXPECTED_SINK_REFUSALS = {                                # test -> exactly the (sink, path) pairs it may refuse
     "test_canary_all_routes.py::test_every_route_and_every_string_field_with_canaries_leaves_nothing_but_the_"
     "known_limit": _PROBE,
     "test_canary_all_routes.py::test_the_quick_scenario_holds_unmutated": _PROBE,
     "test_sink_job_d.py::test_the_services_own_log_lines_survive_the_sink": _PROBE,
-    "test_sink_job_d.py::test_the_guard_has_no_exceptions": None,
-    "test_review_c0c09bd1.py::test_identifier_validation_is_load_bearing_at_the_endpoint": None,
-    "test_sink_guard.py::test_a_former_legacy_path_is_refused_like_any_other": None,
-    "test_sink_guard.py::test_commit_refuses_a_non_legacy_value_and_writes_nothing": None,
-    "test_sink_guard.py::test_commit_refuses_an_evidence_payload_before_any_ledger_event": None,
-    "test_sink_guard.py::test_properties_hold_unmutated": None,
-    "test_sink_guard.py::test_the_ledger_recorder_refuses_payloads_and_anchors_itself": None,
-    "test_sink_guard.py::test_the_reason_code_is_in_the_catalogue_and_the_api_answers_it": None,
-    "test_sink_guard.py::test_there_is_no_legacy_list_and_no_bypass": None,
+    "test_sink_job_d.py::test_the_guard_has_no_exceptions": frozenset(
+        (k, p) for k in ("entity_created", "log_chunk", "log_ingest_created", "log_ingest_finished",
+                         "prompt_set_version") for p in _FORMER_LEGACY),
+    "test_review_c0c09bd1.py::test_identifier_validation_is_load_bearing_at_the_endpoint": frozenset(
+        ("tenant_created", p) for p in ("/_obj", "/evidence[]/payload/rk", "/evidence[]/payload/tenant_id",
+                                        "/evidence[]/subject_id", "/request_id", "/tenant_id")),
+    _T + "test_a_former_legacy_path_is_refused_like_any_other": frozenset((
+        ("entity_created", "/fields/locality/provenance"), ("entity_created", "/fields/name/value"),
+        ("log_chunk", "/delta/families/anyfamily/templates/{key}"), ("log_ingest_created", "/robots_text"),
+        ("log_ingest_finished", "/report/envelope/methodology"), ("prompt_set_version", "/content/brand_terms[]"))),
+    _T + "test_commit_refuses_a_non_legacy_value_and_writes_nothing": frozenset(
+        ("job_ran", p) for p in ("/job", "/key", "/mail", "/n", "/note", "/raw", "/x[]/y[]", "/{key}")),
+    _T + "test_commit_refuses_an_evidence_payload_before_any_ledger_event": frozenset((
+        ("job_ran", "/evidence[]/payload/why"),)),
+    _T + "test_properties_hold_unmutated": frozenset((("job_ran", "/note"), ("ledger:audit_requested", "/note"))),
+    _T + "test_the_ledger_recorder_refuses_payloads_and_anchors_itself": frozenset((
+        ("ledger:audit_requested", "/note"), ("ledger:audit_requested", "/{key}"), ("ledger:log_anchor", "/line_shaN"),
+        ("ledger:log_anchor", "/raw"))),
+    _T + "test_the_reason_code_is_in_the_catalogue_and_the_api_answers_it": frozenset((("tenant_created", "/x"),)),
+    _T + "test_there_is_no_legacy_list_and_no_bypass": frozenset(
+        [(k, "/x") for k in _KINDS] + [(sg.LEDGER + k, "/x[]") for k in _KINDS]),
+    # review 2b26d980: the mutation tests that reproduce the review's findings, and the nan / inf probes
+    _R + "test_a_non_finite_float_is_not_a_machine_value": frozenset((("job_ran", "/x/y"),)),
+    _R + "test_a_non_finite_float_refuses_the_commit": frozenset((("job_ran", "/ratio"),)),
+    _R + "test_mutation_without_the_key_id_class_a_date_stamped_key_id_breaks_audits": frozenset((
+        ("audit_requested", "/paths[]/key_id"), ("schedule_created", "/paths[]/key_id"))),
+    _R + "test_mutation_without_the_ruling_class_the_digit_heavy_id_stops_paid_runs": frozenset(
+        (k, p) for k in ("audit_requested", "schedule_created")
+        for p in ("/evidence[]/payload/ruling_id", "/invoice_verification/compliance/ruling_id")),
+}
+# The only tests that may replace a guard entry point (``conftest.GUARD_ENTRY_POINTS``): each is a mutation test
+# that shows what the guard, or the observer's record of a mutated service, is for. Test -> exactly the names.
+EXPECTED_GUARD_PATCHES = {
+    "test_canary_all_routes.py::test_mutation_bites": {"OBSERVER", "violations"},
+    "test_canary_all_routes.py::test_with_the_guard_off_and_nothing_inlined_the_scan_is_clean":
+        {"OBSERVER", "violations"},
+    "test_canary_all_routes.py::test_re_inlining_a_migrated_kind_is_refused_by_the_guard_and_found_by_the_scan":
+        {"OBSERVER", "violations"},
+    "test_review_c0c09bd1.py::test_identifier_validation_is_load_bearing_at_the_endpoint": {"enforce"},
+    "test_review_c0c09bd1.py::test_operator_vaulting_is_load_bearing": {"OBSERVER", "violations"},
+    "test_sink_audits.py::test_mutation_the_report_written_inline_again_is_refused_and_nothing_is_written":
+        {"OBSERVER"},
+    "test_sink_audits.py::test_an_old_format_audit_line_replays_and_every_view_works": {"OBSERVER"},
+    "test_sink_audits.py::test_an_old_format_drift_line_replays_and_the_views_work": {"OBSERVER"},
+    "test_sink_citations.py::test_mutation_an_unknown_model_written_raw_is_refused_and_nothing_is_asked":
+        {"OBSERVER"},
+    "test_sink_citations.py::test_mutation_the_result_written_inline_again_is_refused_and_nothing_is_written":
+        {"OBSERVER"},
+    "test_sink_citations.py::test_mutation_evidence_left_in_the_logged_facts_is_refused": {"OBSERVER"},
+    "test_sink_citations.py::test_a_two_thousand_row_run_keeps_the_log_line_small_and_the_lock_light": {"enforce"},
+    _T + "test_the_reason_code_is_in_the_catalogue_and_the_api_answers_it": {"violations"},
+    _T + "test_mutation_bites": {"OBSERVER", "enforce", "refused", "violations"},
+    "test_vault_wiring.py::test_mutation_the_result_written_to_the_log_again_is_caught": {"OBSERVER", "enforce"},
 }
 
 
@@ -362,20 +425,54 @@ EXPECTED_SINK_REFUSALS = {                                # test -> the only (si
 def test_no_violating_path_anywhere_in_the_suite_and_every_kind_passed():
     """Runs LAST. Every record the suite committed went through the guard (conftest's observer). There is no legacy
     list: a violating path refuses its commit where it happens, and here ANY refusal outside the tests that provoke
-    one on purpose fails the suite (names of tests, sinks and paths only). A full run also shows each of the 27
-    kinds was committed and passed."""
+    one on purpose (or of another sink or path in one of them) fails the suite (names of tests, sinks and paths
+    only). No test replaced a guard entry point unless it is listed. A full run also shows each of the 27 kinds was
+    committed and passed, and that every listed test did what it is listed for."""
     seen = conftest.SINK_SEEN
-    stray = {t: sorted(v) for t, v in seen["violations"].items()
-             if t not in EXPECTED_SINK_REFUSALS or (EXPECTED_SINK_REFUSALS[t] is not None
-                                                    and not v <= EXPECTED_SINK_REFUSALS[t])}
+    stray = {t: sorted(v - EXPECTED_SINK_REFUSALS.get(t, frozenset())) for t, v in seen["violations"].items()
+             if not v <= EXPECTED_SINK_REFUSALS.get(t, frozenset())}
     assert stray == {}, f"{len(stray)} test(s) made the sink guard refuse a record: {stray}"
+    silenced = {t: sorted(v - EXPECTED_GUARD_PATCHES.get(t, set())) for t, v in seen["silenced"].items()
+                if not v <= EXPECTED_GUARD_PATCHES.get(t, set())}
+    assert silenced == {}, f"{len(silenced)} unlisted test(s) replaced a guard entry point: {silenced}"
+    assert all(v for v in EXPECTED_SINK_REFUSALS.values()) and all(v for v in EXPECTED_GUARD_PATCHES.values())
     if not seen["full_run"]:
         pytest.skip("a partial run: the kinds are compared with a full run only")
     unused = sorted(set(EXPECTED_SINK_REFUSALS) - set(seen["violations"]))
     assert unused == [], f"listed as provoking a refusal but none happened: {unused}"
+    inexact = {t: sorted(v - seen["violations"][t]) for t, v in EXPECTED_SINK_REFUSALS.items()
+               if v != seen["violations"][t]}
+    assert inexact == {}, f"listed (sink, path) pairs that were not refused: {inexact}"
+    unpatched = {t: sorted(v ^ seen["silenced"].get(t, set())) for t, v in EXPECTED_GUARD_PATCHES.items()
+                 if v != seen["silenced"].get(t, set())}
+    assert unpatched == {}, f"listed as replacing a guard entry point but did not (exactly): {unpatched}"
     kinds = {name[3:] for name in dir(SeoService) if name.startswith("_a_")}
     assert kinds - seen["passed"] == set()
     assert len([k for k in seen["passed"] if k.startswith(sg.LEDGER)]) >= 32
+
+
+def test_the_observer_cannot_be_silenced_unseen(monkeypatch):
+    """Review 2b26d980 NIT: replacing a guard entry point is noted against the test that does it, whether it is
+    assigned, monkeypatched or put back and replaced again; putting the original back is not a replacement."""
+    me = conftest.SINK_SEEN["test"]
+    noted = conftest.SINK_SEEN["silenced"]
+    assert me not in noted
+    original = sg.OBSERVER
+    with monkeypatch.context() as m:
+        m.setattr(sg, "OBSERVER", original)                 # the same object: nothing to note
+    sg.enforce = sg.enforce
+    assert me not in noted
+    with monkeypatch.context() as m:
+        m.setattr(sg, "OBSERVER", None)
+        assert noted[me] == {"OBSERVER"}
+        m.setattr(sg, "refused", lambda kind, data: [])
+    assert noted.pop(me) == {"OBSERVER", "refused"} and sg.OBSERVER is original
+    for name in conftest.GUARD_ENTRY_POINTS:
+        with monkeypatch.context() as m:
+            m.setattr(sg, name, None)
+        assert noted.pop(me) == {name}, name
+    sg.MAX_LEN = sg.MAX_LEN                                  # any other attribute is not an entry point
+    assert me not in noted and type(sg).__name__ == "WatchedGuard"
 
 
 # ------------------------------------------------------------------------------------------------ the blob API
@@ -752,7 +849,7 @@ def prop_key_shapes_refused(tmp_path):
 
 
 def prop_host_keys_refused(tmp_path):
-    assert sg.classify(rnd(20).lower() + ".example.com") is None
+    assert sg.classify("a1b2" + rnd(24).lower() + ".example.com") is None    # (24+: review 2b26d980 SHOULD 1)
 
 
 def prop_digit_hex_refused(tmp_path):

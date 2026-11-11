@@ -503,9 +503,14 @@ def test_an_identifier_the_sink_would_refuse_is_refused_by_its_route(tmp_path):
     for domains in ([ssn_label], ["acme.test", ssn_label]):
         h.refused(h.post("/tenants/acme/domains", {"request_id": rid(), "domains": domains}, andre=True), 422,
                   "IDENTIFIER_WITHHELD")
-    for cid in ("c" * 65, "2026-10.7", "a" + "b" * 99):
-        h.refused(h.post("/tenants/acme/finance-client", {"request_id": rid(), "finance_client_id": cid}, andre=True),
-                  422, "IDENTIFIER_WITHHELD")
+    h.refused(h.post("/tenants/acme/finance-client", {"request_id": rid(), "finance_client_id": "2026-10.7"},
+                     andre=True), 422, "IDENTIFIER_WITHHELD")
+    # review 2b26d980 SHOULD 2: the request model's pattern is what the guard can write (at most 64 characters), so
+    # a longer id is refused by the schema (still 422, still nothing written; it used to be IDENTIFIER_WITHHELD)
+    for cid in ("c" * 65, "a" + "b" * 99):
+        r = h.refused(h.post("/tenants/acme/finance-client", {"request_id": rid(), "finance_client_id": cid},
+                             andre=True), 422)
+        assert [e["type"] for e in r["detail"]] == ["string_pattern_mismatch"]
     assert len(h.svc.log) == n
     h.ok(h.post("/tenants/acme/finance-client", {"request_id": rid(), "finance_client_id": "Acme_Party.7-b"},
                 andre=True))
@@ -700,6 +705,7 @@ HASH_FIELDS = {
     "content_hmac": "keyed", "report_hmac": "keyed", "drift_hmac": "keyed", "result_hmac": "keyed",
     "section_hmac": "keyed", "inputs_hmac": "keyed", "delta_hmac": "keyed", "model_hmac": "keyed",
     "property_hmac": "keyed", "facts_hmac": "keyed", "hmac": "keyed", "audit_report_hmac": "keyed",
+    "ruling_id_hmac": "keyed",                              # review 2b26d980: a ruling id of an unissued shape
     # plain, over machine values that are themselves logged
     "request_sha": "plain: the body with every non-machine string replaced by its keyed HMAC",
     "sha256": "plain or keyed: a prompt-set version's fingerprint as recorded (keyed HMAC since job D)",

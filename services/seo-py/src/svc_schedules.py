@@ -60,6 +60,10 @@ class SchedulesMixin:
                     p = self.prompt_sets.get(body["prompt_set_id"])
                     if p is None or p["tenant_id"] != tid:
                         raise NotFound(R("PROMPT_SET_NOT_FOUND"))
+                    if p["versions"][str(p["current"])].get("vault_unavailable"):
+                        # review 2b26d980 SHOULD 6: the set's text cannot be read (its blob is lost): a schedule
+                        # naming it is refused as an audit and a citation run are, never created to fail every slot
+                        raise Unavailable(R("VAULT_UNAVAILABLE"))
                 sid = derived_id("sch", tid, actor, rk)
                 plan = self._invoice_plan(tid, body, andre, owner=f"schedule:{sid}")
         if prev:

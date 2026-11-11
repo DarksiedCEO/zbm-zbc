@@ -14,31 +14,53 @@ The closed set of classes (``CLASSES``):
   scoped_id    ``<name>:<service id | invoice id | uuid | hash>`` (a ledger subject: ``audit:seo-aud-...``), or a
                service id with 1..3 short ``:part`` suffixes (a prompt id: ``<prompt set id>:v2:7``)
   invoice_id   ``fin-inv-<26 Crockford base32>`` (Finance's invoice id)
+  finance_id   any other id Finance (31) issues: ``fin-<prefix>-<26 Crockford base32>`` (finance-py ``service.rid``) or
+               ``fin-<prefix>-<40 hex>`` (finance-py ``ledger.derived_id``), ``<prefix>`` = a lower-case letter and up
+               to 7 lower-case letters / digits (finance-py ``models.OWN_ID_RE``)
+  ruling_id    ``cmp-rul-<26 lower-case base32>`` (Compliance's ruling id: compliance-py ``service._b32``). Any other
+               ruling id shape is never written: the service writes the code ``RULING_ID_HASHED`` with a keyed HMAC
+  jurisdiction ``US-`` + two capital letters (seo-py ``compliance_client.JURISDICTION``; the territories ``PR``, ``GU``,
+               ``VI``, ``AS``, ``MP`` are codes). Closed by shape: ``US-PW`` reads as a credential label otherwise
+  key_id       a vault key id, ONLY as the value of a ``key_id`` field and ONLY when it equals a key id this process
+               has configured (``register_key_ids``: the current and the previous vault key id; a closed set, as the
+               model ids). A key id is refused at start (``key_id_refusal``) when it is key-shaped
   request_id   a lower-case UUID (models.REQUEST_ID)
   request_key  ``<op>|<target>|<uuid>`` (SeoService.rk; each ``/`` piece of the target is itself a machine value) or
                ``seo|<kind>`` (an internal commit)
   hash         lower-case hex of 16 / 32 / 40 / 64 characters holding at least one of a-f
   timestamp    ISO-8601 UTC date-time ``YYYY-MM-DDTHH:MM[:SS[.f]]Z`` (clock.iso);   date   ``YYYY-MM-DD``
   number       1..8 digits, optionally signed
+  amount       a US-dollar amount as the service writes it: 1..6 digits, ``.``, exactly 6 digits (``str`` of a
+               ``Decimal`` quantised to a millionth: ``spend_usd``, ``reserved_usd``). Review 2b26d980: a run that
+               spent or reserved 100.000000 or more holds 9+ digits and was refused as a number
   version      ``[v]N(.N){1,3}``, a dated revision ``YYYY-MM-DD.N``, or ``<name>/<N | version | date>``
   boolean      ``true`` / ``false``;             actor     the service's closed actor set
-  hostname     a syntactic host name that the strict host check of agents.secret_guard passes (as callum.checked_host)
+  hostname     a syntactically valid host name (labels of 1..63, 253 in all, a letters-only TLD of 2..24 or a
+               punycode TLD, every ``xn--`` label decoding to letters) that ``host_refusal`` passes: no label has a
+               strong-key prefix shape, 32+ hex characters or a 24+ character letters-and-digits token; no run of
+               9+ digits (joined across ``-`` / ``.`` between all-digit pieces), under 12 digits in all-digit pieces;
+               no e-mail form (an ``at`` label before a domain, a mailbox provider's domain after a name). A
+               credential WORD in a label is allowed (``1password.com``): a host name carries no value after it,
+               except a letters-and-digits piece of 6+ right after the word, which is refused
   code         an enum / reason code: 1..64 characters of ``[A-Za-z0-9_.:-]`` holding a letter
   model_id     an answer-engine model id (sink job C): EXACTLY one of ``MODEL_IDS``, the closed set of ids the engine
                adapters declare (their allowlists; a configured model is always one of them). Nothing is matched by
                shape: any other model string is written by the service as the code ``UNKNOWN_MODEL`` with a keyed HMAC
 
-No class admits whitespace or ``@``; no value is longer than ``MAX_LEN``. A value that is not an id, a hash or a
-timestamp must also pass ``secret_guard.check`` (no key prefix, no long random token, no run of 9+ digits).
+No class admits whitespace or ``@``; no value is longer than ``MAX_LEN``. A value that is not an id, a hash, a
+timestamp or a host name must also pass ``secret_guard.check`` (no key prefix, no long random token, no run of 9+
+digits). A float that is not finite (``nan``, ``inf``) is refused: JSON cannot carry it.
 
 ``violations`` reports normalised paths and closed reason names only: never a value, never a dynamic key.
 There is NO exception list (sink job D removed ``LEGACY_PROSE_PATHS``; jobs B-D moved every free-text field into the
 vault): any non-machine value refuses its write. ``scrub`` applies the same judgement to the third sink, Python
-logging (log_sink.py). Everything is linear in the input: no regular expression is used, only ``str`` methods.
+logging (log_sink.py). Everything is linear in the input: only ``str`` methods here; the strict lane's check and
+its strong-key prefix table (agents.secret_guard) are asked about one value or one host label at a time.
 """
 
 from __future__ import annotations
 
+import unicodedata
 from typing import Callable, Optional
 
 from agents import secret_guard
@@ -55,20 +77,26 @@ ACTORS = frozenset(KNOWN_CALLERS) | frozenset(("seo", "andre"))
 # them as it would in prose); a closed list of constants, never data
 SERVICE_WORDS = frozenset(("SECRET_REDACTED", "NOT_FETCHED_SECRET", "secret_guard", "crawler_token")) | frozenset(
     secret_guard.CHECKS)                 # the strict lane's verdict names (``d_token``): what a ``flags`` entry holds
-CLASSES = ("empty", "service_id", "scoped_id", "invoice_id", "request_id", "request_key", "hash", "timestamp", "date", "number",
-           "version", "boolean", "actor", "hostname", "code", "model_id")
-REASONS = ("type", "key_type", "long", "space", "at", "charset", "shape", "secret", "host", "depth", "kind")
+CLASSES = ("empty", "service_id", "scoped_id", "invoice_id", "finance_id", "ruling_id", "jurisdiction", "key_id", "request_id",
+           "amount",
+           "request_key", "hash", "timestamp", "date", "number", "version", "boolean", "actor", "hostname", "code",
+           "model_id")
+REASONS = ("type", "key_type", "long", "space", "at", "charset", "shape", "secret", "host", "depth", "kind", "float")
 LEDGER = "ledger:"                       # the sink name of a ledger event: ``ledger:<event_type>``
 # a hex value of digits only is not a hash anywhere (it reads as a long number), except under these keys, where the
 # service itself derives it: the log epoch (the first 16 hex of a line's SHA-256), a raw vault id (128 random bits)
 # and a vault repair id (32 hex of a SHA-256). Without this, one epoch in about 1,800 would stop its log for good.
-DIGIT_HEX_KEYS = frozenset(("epoch", "vault_id", "repair_id"))
+# Review 2b26d980: ``key_fp`` too (the first 16 hex of the log hash key's SHA-256: one deployment key in about 1,800
+# has a digits-only fingerprint and could never create a log ingest).
+DIGIT_HEX_KEYS = frozenset(("epoch", "vault_id", "repair_id", "key_fp"))
+KEY_ID_KEYS = frozenset(("key_id",))     # the only fields a vault key id is written under (the operator-text stub)
 
 _HEX = "0123456789abcdef"
 _DIGITS = "0123456789"
 _LOWER = "abcdefghijklmnopqrstuvwxyz"
 _UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+_BASE32 = "abcdefghijklmnopqrstuvwxyz234567"   # base64.b32encode(...).lower(): what compliance-py's ``_b32`` emits
 _CODE_CHARS = _LOWER + _UPPER + _DIGITS + "_.:-"
 _STRUCTURE_CHARS = "|/"                  # only inside a request key / a ``name/N`` version (a declared model
 #                                          id is matched whole, before any character rule)
@@ -128,10 +156,212 @@ def _check(value: str) -> Optional[str]:
     return name
 
 
+# ------------------------------------------------------------------------------------------------ host names
+# Review 2b26d980 SHOULD 1: real host names (punycode labels, platform sub-domains with a hex label, hosts whose name
+# holds a credential word) are machine values. The rule is precise and measured (tests/test_review_2b26d980.py):
+HOST_MAX = 253
+HOST_TLD_MAX = 24                        # the longest public TLD has 24 characters
+HOST_HEX_MIN = 32                        # a label holding 32+ hex characters in a row is a key
+HOST_TOKEN_MIN = 24                      # a label of 24+ letters and digits ...
+HOST_TOKEN_CHANGES = 2                   # ... with 2+ letter<->digit changes is a random token
+HOST_DIGIT_RUN = 9                       # 9+ digits in a row (all-digit pieces joined across ``-`` / ``.``)
+HOST_DIGITS_TOTAL = 12                   # digits in all-digit pieces of the whole host
+# a platform hash label (``1a2b3c4d5e6f.ngrok.io``): all hex, 12..31 characters, 2+ hex letters; a digit run of at
+# most 12 inside it is part of the hash (one hex label in about 30 has a run of 9+)
+HOST_HASH_LABEL = (12, 31)
+HOST_HASH_LETTERS = 2
+HOST_HASH_RUN_MAX = 12
+HOST_VALUE_MIN = 6                       # a letters-and-digits piece this long right after a credential word
+HOST_AT_LABEL = "at"                     # ``first.last.at.domain.tld``: an e-mail address without its "@"
+HOST_REASONS = ("syntax", "tld", "idna", "prefix", "hex", "token", "digits", "email", "label_value")
+MAILBOX_PROVIDERS = secret_guard.MAILBOX_PROVIDERS     # ``<name>.<provider domain>``: an e-mail without its "@"
+MAILBOX_SERVICE_LABELS = frozenset(("www", "m", "mail"))    # ``mail.yahoo.com`` is the provider's own site
+_HOST_CACHE: dict = {}                   # host -> reason or None (bounded; a refusal is remembered too)
+_LABEL_PAIRS = frozenset(w for w in secret_guard._LABEL_WORDS if len(w) >= 6)
+
+
+def _idna_label_ok(label: str) -> bool:
+    """An ``xn--`` label that decodes (punycode) to a lower-case label of letters, marks, digits and hyphens with at
+    least one non-ASCII letter, and encodes back to itself."""
+    body = label[4:]
+    if not body:
+        return False
+    try:
+        text = body.encode("ascii").decode("punycode")
+        if not text or text.isascii() or text != text.lower() or text.encode("punycode").decode("ascii") != body:
+            return False
+    except (UnicodeError, ValueError):
+        return False
+    letters = 0
+    for c in text:
+        if c == "-" or c in _LOWER or c in _DIGITS:
+            continue
+        cat = unicodedata.category(c)
+        if cat[0] == "L":
+            letters += 1
+        elif cat not in ("Mn", "Mc", "Nd"):
+            return False
+    return letters > 0
+
+
+def _hex_run(j: str) -> int:
+    """The longest run of hex characters in ``j`` that holds a digit (a hex key of 32+ characters with no digit at
+    all does not occur: 6/16 to the 32nd power; a long name of the letters a-f does)."""
+    best = run = 0
+    digit = False
+    for c in j:
+        if c in _HEX:
+            run += 1
+            digit = digit or c in _DIGITS
+            if digit and run > best:
+                best = run
+        else:
+            run, digit = 0, False
+    return best
+
+
+def _changes(j: str) -> int:
+    """Letter<->digit changes along ``j`` (letters and digits only)."""
+    n, prev = 0, None
+    for c in j:
+        d = c in _DIGITS
+        if prev is not None and d != prev:
+            n += 1
+        prev = d
+    return n
+
+
+def _valueish(piece: str) -> bool:
+    return len(piece) >= HOST_VALUE_MIN and bool(piece.strip(_DIGITS)) and bool(piece.strip(_LOWER))
+
+
+def _label_word(pieces: list, i: int) -> bool:
+    """Piece ``i`` of a label (split at ``-``) is a credential label word, alone or joined with the piece before it
+    (``api-key``, ``access-token``)."""
+    words = secret_guard._LABEL_WORDS
+    return pieces[i] in words or (i > 0 and pieces[i - 1] + pieces[i] in _LABEL_PAIRS)
+
+
+def _hash_piece(piece: str) -> bool:
+    """A platform hash piece: all hex, 12..31 characters, 2+ hex letters."""
+    return (HOST_HASH_LABEL[0] <= len(piece) <= HOST_HASH_LABEL[1] and not piece.strip(_HEX)
+            and sum(1 for c in piece if c in "abcdef") >= HOST_HASH_LETTERS)
+
+
+def _host_digits(labels: list) -> bool:
+    """True when the host's digits read as a number: a run of 9+ (all-digit pieces joined across ``-`` and ``.``;
+    a run inside one piece), or 12+ digits in all-digit pieces. A platform hash piece keeps a run of at most 12."""
+    total = chain = 0
+    for label in labels:
+        for piece in label.split("-"):
+            if piece and not piece.strip(_DIGITS):
+                total += len(piece)
+                chain += len(piece)
+                if chain >= HOST_DIGIT_RUN:
+                    return True
+                continue
+            chain = 0
+            run = best = 0
+            for c in piece:
+                run = run + 1 if c in _DIGITS else 0
+                if run > best:
+                    best = run
+            if best >= HOST_DIGIT_RUN and not (best <= HOST_HASH_RUN_MAX and _hash_piece(piece)):
+                return True
+    return total >= HOST_DIGITS_TOTAL
+
+
+def _host_judge(s: str, labels: list) -> Optional[str]:
+    for label in labels:
+        if label[:4] == "xn--":
+            if not _idna_label_ok(label):
+                return "idna"
+        j = label.replace("-", "")
+        up = label.upper()
+        if (secret_guard._prefix_found(label) or secret_guard._prefix_found(up)
+                or secret_guard._AWS_JOINED.search(j.upper()) or secret_guard._JOINED_PREFIX.match(j)):
+            return "prefix"
+        if len(j) >= HOST_HEX_MIN and _hex_run(j) >= HOST_HEX_MIN:
+            return "hex"
+        if label[:4] != "xn--":
+            # the pieces that are not plain words (letters only), read together: a token split by hyphens too
+            t = "".join(x for x in label.split("-") if x.strip(_LOWER))
+            if len(t) >= HOST_TOKEN_MIN and t.strip(_DIGITS) and _changes(t) >= HOST_TOKEN_CHANGES:
+                return "token"
+    # a key split over labels: adjacent all-hex labels read together
+    run, digit = 0, False
+    for label in labels[:-1]:
+        j = label.replace("-", "")
+        if j.strip(_HEX):
+            run, digit = 0, False
+            continue
+        run += len(j)
+        digit = digit or bool(j.strip("abcdef"))
+        if digit and run >= HOST_HEX_MIN:
+            return "hex"
+    if _host_digits(labels):
+        return "digits"
+    n = len(labels)
+    for i in range(1, n - 2):
+        if labels[i] == HOST_AT_LABEL:
+            return "email"                                  # ``first.last.at.domain.tld``
+    for k in (2, 3):
+        if n > k and ".".join(labels[-k:]) in MAILBOX_PROVIDERS \
+                and not (n == k + 1 and labels[0] in MAILBOX_SERVICE_LABELS):
+            return "email"                                  # ``user.name.gmail.com``
+    # the value of a credential label: a letters-and-digits piece of 6+ right after the word, in the same label
+    # (``password-hunter2``) or as the next label when that is not the registrable name (``token.abc123.site.tld``)
+    for i, label in enumerate(labels):
+        pieces = label.split("-")
+        for k in range(len(pieces) - 1):
+            if _label_word(pieces, k) and _valueish(pieces[k + 1]):
+                return "label_value"
+        if i + 1 < n - 2 and _label_word(pieces, len(pieces) - 1) and all(
+                p in secret_guard._LABEL_WORDS or p in secret_guard.LABEL_ACTION_WORDS for p in pieces) \
+                and _valueish(labels[i + 1].replace("-", "")):
+            return "label_value"
+    return None
+
+
+def host_refusal(s) -> Optional[str]:
+    """Why ``s`` is not an accepted host name (a name from ``HOST_REASONS``), or None. Never raises; linear in
+    ``len(s)`` (at most ``HOST_MAX``)."""
+    if type(s) is not str or not 4 <= len(s) <= HOST_MAX or "." not in s or s.strip(_HOST_CHARS):
+        return "syntax"
+    got = _HOST_CACHE.get(s, "")
+    if got != "":
+        return got
+    labels = s.split(".")
+    if not all(0 < len(x) <= 63 and x[0] != "-" and x[-1] != "-" for x in labels):
+        return "syntax"
+    tld = labels[-1]
+    if not ((2 <= len(tld) <= HOST_TLD_MAX and not tld.strip(_LOWER)) or (tld[:4] == "xn--" and _idna_label_ok(tld))):
+        return "tld"
+    try:
+        reason = _host_judge(s, labels)
+    except Exception:  # noqa: BLE001 - fail closed
+        reason = "syntax"
+    if len(_HOST_CACHE) >= _CACHE_MAX:
+        _HOST_CACHE.clear()
+    _HOST_CACHE[s] = reason
+    return reason
+
+
 def _host_ok(host: str) -> bool:
-    """callum.checked_host's rule: whole and label by label through the strict URL inspection, then the strict check."""
-    u = secret_guard.inspect_url("https://" + host + "/")
-    return bool(u) and bool(u.get("host")) and u.get("host_kind") is None and _check(host) is None
+    return host_refusal(host) is None
+
+
+def host_shaped(s) -> bool:
+    """``s`` has the shape of a host name (so it is judged by ``host_refusal`` and by nothing else)."""
+    return type(s) is str and 0 < len(s) <= MAX_LEN and _is_hostname(s)
+
+
+def _host_like(s) -> bool:
+    return type(s) is str and 4 <= len(s) <= HOST_MAX and _is_hostname(s)
+
+
+# the strict lane and the client-view lane judge a host name by this rule too (agents.secret_guard.host_verdict)
+secret_guard.HOST_RULE, secret_guard.HOST_LIKE = host_refusal, _host_like
 
 
 def _is_date(s: str) -> bool:
@@ -172,6 +402,68 @@ def _is_invoice_id(s: str) -> bool:
     return len(s) == 34 and s[:8] == "fin-inv-" and _only(s[8:], _CROCKFORD)
 
 
+def _is_finance_id(s: str) -> bool:
+    """``fin-<prefix>-<26 Crockford base32 | 40 hex>``: every id Finance (31) issues (finance-py ``models.OWN_ID_RE``:
+    ``service.rid`` and ``ledger.derived_id``)."""
+    if s[:4] != "fin-":
+        return False
+    prefix, sep, body = s[4:].partition("-")
+    if not sep or not 0 < len(prefix) <= 8 or prefix[0] not in _LOWER or not _only(prefix, _LOWER + _DIGITS):
+        return False
+    return (len(body) == 26 and _only(body, _CROCKFORD)) or (len(body) == 40 and _only(body, _HEX))
+
+
+def _is_ruling_id(s: str) -> bool:
+    """``cmp-rul-<26 lower-case base32>``: exactly what Compliance (38) issues (compliance-py ``service._b32``)."""
+    return len(s) == 34 and s[:8] == "cmp-rul-" and _only(s[8:], _BASE32)
+
+
+def _is_jurisdiction(s: str) -> bool:
+    """``US-`` + two capital letters (seo-py ``compliance_client.JURISDICTION``)."""
+    return len(s) == 5 and s[:3] == "US-" and s[3] in _UPPER and s[4] in _UPPER
+
+
+def _is_amount(s: str) -> bool:
+    """``N{1,6}.NNNNNN``: US dollars to a millionth, as ``str`` of the quantised ``Decimal`` the service writes."""
+    return 8 <= len(s) <= 13 and s[-7] == "." and _only(s[:-7] + s[-6:], _DIGITS)
+
+
+RULING_ID_HASHED = "RULING_ID_HASHED"    # what the service writes for a ruling id of any other shape (with its HMAC)
+KEY_ID_MAX = 32                          # vault.KEY_ID: ``[a-z0-9][a-z0-9-]{0,31}``
+KEY_ID_DIGITS_MAX = 12                   # ``k-20261110-0001``: a date and a serial; more digits read as a number
+KEY_IDS: set = set()                     # the vault key ids this process has configured (``register_key_ids``)
+
+
+def key_id_refusal(kid) -> Optional[str]:
+    """Why a configured vault key id cannot be written to the log (a closed reason name), or None. A key id is an
+    operator's NAME for a key (``2026-11``, ``k-20261110-01``, ``prod-2``): date stamps are fine; key material,
+    a strong-key prefix, a long random token or 13+ digits are not."""
+    if type(kid) is not str or not 0 < len(kid) <= KEY_ID_MAX or kid.strip(_LOWER + _DIGITS + "-") or kid[0] == "-":
+        return "shape"
+    j = kid.replace("-", "")
+    if sum(1 for c in j if c in _DIGITS) > KEY_ID_DIGITS_MAX:
+        return "digits"
+    if len(j) >= 16 and not j.strip(_HEX) and j.strip(_DIGITS):
+        return "hex"                                        # 16+ hex characters with a hex letter: key material
+    if len(j) >= 16 and j.strip(_DIGITS) and _changes(j) >= HOST_TOKEN_CHANGES:
+        return "token"
+    if secret_guard.check(kid, frozenset(("e_digits",))) is not None:
+        return "secret"                                     # a credential label, a prefix, a token (digits waived)
+    return None
+
+
+def register_key_ids(ids) -> None:
+    """The service's start: the configured vault key ids (current, previous) join the closed ``key_id`` set. Raises
+    ``ValueError`` naming the reason only (never the id) when one cannot be written to the log."""
+    wanted = [k for k in ids if k is not None]
+    for kid in wanted:
+        reason = key_id_refusal(kid)
+        if reason is not None:
+            raise ValueError(f"a vault key id cannot be written to the log (reason: {reason}); name the key with "
+                             "lower-case letters, digits and hyphens, at most 12 digits, not key material")
+    KEY_IDS.update(wanted)
+
+
 def _is_hash(s: str, digits_ok: bool = False) -> bool:
     if len(s) not in HASH_LENGTHS or not _only(s, _HEX):
         return False
@@ -188,12 +480,15 @@ def _is_version(s: str) -> bool:
 
 
 def _is_hostname(s: str) -> bool:
+    """Host-name SHAPED: dotted labels of host characters ending in a TLD (letters, or a punycode label). A value of
+    this shape is a host name or nothing: one ``host_refusal`` refuses is never read as a code instead."""
     if "." not in s or not _only(s, _HOST_CHARS):
         return False
     labels = s.split(".")
     if not all(0 < len(x) <= 63 and x[0] != "-" and x[-1] != "-" for x in labels):
         return False
-    return len(labels[-1]) >= 2 and _only(labels[-1], _LOWER)
+    tld = labels[-1]
+    return (len(tld) >= 2 and _only(tld, _LOWER)) or tld[:4] == "xn--"
 
 
 def _plain(s: str) -> tuple:
@@ -207,6 +502,12 @@ def _plain(s: str) -> tuple:
         return "request_id", None
     if n == 34 and _is_invoice_id(s):
         return "invoice_id", None
+    if n == 34 and _is_ruling_id(s):
+        return "ruling_id", None
+    if s[:4] == "fin-" and _is_finance_id(s):
+        return "finance_id", None
+    if n == 5 and _is_jurisdiction(s):
+        return "jurisdiction", None
     lead = s[0]
     if lead in _DIGITS or lead == "-":
         if _is_date(s):
@@ -216,6 +517,8 @@ def _plain(s: str) -> tuple:
         digits = s[1:] if lead == "-" else s
         if 0 < len(digits) <= 8 and _only(digits, _DIGITS):
             return "number", None
+        if 8 <= n <= 13 and _is_amount(s):
+            return "amount", None
     if s in ("true", "false"):
         return "boolean", None
     if s in ACTORS:
@@ -228,7 +531,8 @@ def _plain(s: str) -> tuple:
         return ("hostname", None) if _host_ok(s) else (None, "host")
     if ":" in s:
         name, _, rest = s.partition(":")
-        if _is_name(name) and (_is_service_id(rest) or _is_invoice_id(rest) or _is_uuid(rest) or _is_hash(rest)):
+        if _is_name(name) and (_is_service_id(rest) or _is_finance_id(rest) or _is_ruling_id(rest)
+                               or _is_uuid(rest) or _is_hash(rest)):
             return "scoped_id", None
         if len(s) > 49 and s[48] == ":" and _is_service_id(s[:48]):
             parts = s[49:].split(":")                       # a part of a service object: ``<prompt set id>:v2:7``
@@ -311,9 +615,16 @@ def _key(k) -> tuple:
 _SCALARS = frozenset((int, float, bool, type(None)))
 
 
-def violations(kind: str, data) -> list:
+def _key_id_ok(v: str, stored: bool) -> bool:
+    """A ``key_id`` field's value: a key id this process has configured. ``stored`` (a line READ BACK from the log,
+    for the export and the legacy count): also a well-formed key id of a key since retired."""
+    return v in KEY_IDS or (stored and key_id_refusal(v) is None)
+
+
+def violations(kind: str, data, stored: bool = False) -> list:
     """Every (normalised path, reason) in ``data`` that is not a machine value: dict keys and values, lists and tuples
-    are walked; int / float / bool / None pass; bytes and any other object are violations. Sorted, no duplicates."""
+    are walked; int / finite float / bool / None pass; ``nan`` / ``inf``, bytes and any other object are violations.
+    Sorted, no duplicates. ``stored``: ``data`` is a line read back from the log (see ``_key_id_ok``)."""
     out = set()
     if not isinstance(kind, str) or not _is_name(kind.removeprefix(LEDGER)):
         out.add(("", "kind"))
@@ -339,10 +650,12 @@ def violations(kind: str, data) -> list:
                     if len(v) == 64 and not v.strip(hexa) and v.strip(digits):
                         continue                            # the commonest unique value: a SHA-256 / HMAC hex
                     reason = _judge(v)[1]
-                    if reason is not None and not (k in DIGIT_HEX_KEYS and _is_hash(v, True)):
+                    if reason is not None and not (k in DIGIT_HEX_KEYS and _is_hash(v, True)) \
+                            and not (k in KEY_ID_KEYS and _key_id_ok(v, stored)):
                         out.add((path + "/" + seg, reason))
                 elif tv in _SCALARS:
-                    continue
+                    if tv is float and v - v != 0:          # nan / inf: not a machine value (JSON cannot carry it)
+                        out.add((path + "/" + seg, "float"))
                 else:
                     stack.append((v, path + "/" + seg, depth + 1))
         elif isinstance(obj, (list, tuple)):
@@ -361,7 +674,8 @@ def violations(kind: str, data) -> list:
                     if reason is not None:
                         out.add((sub, reason))
                 elif tv in _SCALARS:
-                    continue
+                    if tv is float and v - v != 0:
+                        out.add((sub, "float"))
                 else:
                     stack.append((v, sub, depth + 1))
         elif isinstance(obj, str):
@@ -370,6 +684,8 @@ def violations(kind: str, data) -> list:
                 out.add((path, reason or "type"))
         elif type(obj) not in _SCALARS:
             out.add((path, "type"))
+        elif type(obj) is float and obj - obj != 0:
+            out.add((path, "float"))
     return sorted(out)
 
 
@@ -398,10 +714,57 @@ def scrub(value):
     bool / None as it is; anything else (prose, an e-mail form, a key shape, an object whose text is not a machine
     value) as the code ``WITHHELD``. Never raises."""
     try:
-        if value is None or type(value) in (int, float, bool):
+        if value is None or type(value) in (int, bool):
             return value
+        if type(value) is float:
+            return value if value - value == 0 else WITHHELD   # nan / inf
         if type(value) is str:
             return value if (value in _CACHE or _judge(value)[1] is None) else WITHHELD
         return WITHHELD
     except Exception:  # noqa: BLE001 - fail closed
         return WITHHELD
+
+
+def withhold(data) -> tuple:
+    """A copy of a STORED log line's data as it may be served (review 2b26d980 SHOULD 5), and how many leaves were
+    replaced: every string (a dict key too), non-finite float or other object that is not a machine value becomes
+    the code ``WITHHELD``. A line written since sink job D holds machine values only and comes back unchanged; a
+    line written before it (prose inline) keeps its ids, codes, hashes and numbers and loses its text. Never raises
+    (anything it cannot walk is withheld whole)."""
+    count = [0]
+
+    def leaf_ok(k, v) -> bool:
+        if v in _CACHE or _judge(v)[1] is None:
+            return True
+        return (k in DIGIT_HEX_KEYS and _is_hash(v, True)) or (k in KEY_ID_KEYS and _key_id_ok(v, True))
+
+    def walk(obj, key, depth):
+        t = type(obj)
+        if obj is None or t in (int, bool):
+            return obj
+        if t is float:
+            if obj - obj == 0:
+                return obj
+        elif t is str:
+            if leaf_ok(key, obj):
+                return obj
+        elif t is dict and depth < MAX_DEPTH:
+            out: dict = {}
+            for k, v in obj.items():
+                name = k
+                if type(k) is not str or not (k in _CACHE or _judge(k)[1] is None):
+                    count[0] += 1
+                    name, n = WITHHELD, 2
+                    while name in out:
+                        name, n = f"{WITHHELD}.{n}", n + 1
+                out[name] = walk(v, k if type(k) is str else None, depth + 1)
+            return out
+        elif t in (list, tuple) and depth < MAX_DEPTH:
+            return [walk(v, None, depth + 1) for v in obj]
+        count[0] += 1
+        return WITHHELD
+
+    try:
+        return walk(data, None, 0), count[0]
+    except Exception:  # noqa: BLE001 - fail closed
+        return WITHHELD, count[0] + 1

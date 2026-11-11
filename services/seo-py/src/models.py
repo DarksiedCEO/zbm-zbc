@@ -12,7 +12,11 @@ TENANT = r"^[a-z][a-z0-9-]{1,39}$"
 DOMAIN = r"^[a-z0-9.-]{4,253}$"
 PATH = r"^/[\x21-\x7e]{0,500}$"
 INVOICE = r"^fin-inv-[0-9A-HJKMNP-TV-Z]{26}$"
-FINANCE_CLIENT = r"^[A-Za-z0-9._-]{1,100}$"          # finance-py models.CLIENT_ID_RE (Legal's party reference)
+# Finance (31) does not ISSUE client ids: it accepts a reference of ``[A-Za-z0-9._-]{1,100}`` (finance-py
+# models.CLIENT_ID_RE; Legal's party reference). This service writes the id to its log, so it takes the references
+# its sink guard can write (review 2b26d980 SHOULD 2): a letter or digit first, at most 64 characters (a code). The
+# rest is refused here or by ``svc_tenants.identifier_refused`` with 422, never at the sink with 503.
+FINANCE_CLIENT = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
 # Andre's override of an UNVERIFIABLE invoice check (Finance not configured, down, refusing us, or answering nonsense).
 # It never overrides a definitive answer from Finance, nor a reused invoice (ADR 0017 W3-2).
 InvoiceOverride = Literal["ANDRE_CONFIRMED_PAYMENT", "FINANCE_OUTAGE"]

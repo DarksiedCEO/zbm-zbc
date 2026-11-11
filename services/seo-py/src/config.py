@@ -417,6 +417,18 @@ def _vault(env, s: "Settings") -> None:
         raise RuntimeError(str(exc)) from None
     finally:
         merged = None
+    # review 2b26d980 MUST 2: a key id is written to the log (an operator-text stub's ``key_id``), so one the sink
+    # guard would refuse there (key material, a strong-key prefix, 13+ digits) refuses START, naming the variable
+    # and the reason only; a date-stamped id (``2026-11``, ``k-20261110-01``) is a name and is accepted
+    if s.vault_key is not None:
+        import sink_guard
+        for name, kid in ((vault.ENV_KEY_ID, s.vault_key.key_id), (vault.ENV_PREVIOUS_KEY_ID,
+                                                                    s.vault_key.previous_key_id)):
+            reason = sink_guard.key_id_refusal(kid) if kid is not None else None
+            if reason is not None:
+                s.vault_key = None
+                raise RuntimeError(f"{name} cannot be written to the log (reason: {reason}): name the key with "
+                                   "lower-case letters, digits and hyphens, at most 12 digits, not key material")
 
 
 def _perplexity(env, s: "Settings") -> None:

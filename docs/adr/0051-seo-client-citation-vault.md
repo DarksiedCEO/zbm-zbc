@@ -404,6 +404,10 @@ service, adds a dependency and a network hop the department does not otherwise n
 46. **Idempotency hash.** `request_sha` is the SHA-256 of the request body with every non-machine string replaced
     by its keyed HMAC (`request_text`, `SeoService._machine_body`); a body of machine values only hashes as before
     (lines written earlier stay idempotent). No vault key and a non-machine string: `VAULT_UNAVAILABLE`.
+    Review 2b26d980: a request a release up to 8bd9e29e recorded carries the LEGACY hash (the plain SHA-256 of the
+    body, free text included). A retry of it after the deploy is compared with the legacy computation as well
+    (`SeoService._legacy_request_sha`: compared only, never written), so it answers what the first call did
+    instead of 409; a different body is still `REQUEST_ID_REUSED`.
 47. **Hash fields: every one and its decision (supersedes the last sentence of decision 38).**
 
     | Field (log / ledger) | Input | Decision |
@@ -413,6 +417,7 @@ service, adds a dependency and a network hop the department does not otherwise n
     | `facts_hmac` (`invoice_verified`, the audit's verification) | Finance's facts about the invoice | keyed HMAC (new; was plain `facts_sha256`) |
     | `property_hmac` (URL-prefix property) | the property URL | keyed HMAC (new on the ledger and in `gsc_read_started`; was a plain SHA-256 of the HMAC / of the kept URL) |
     | `report_hmac`, `drift_hmac`, `result_hmac`, `section_hmac`, `audit_report_hmac`, `model_hmac`, stub `hmac` | client documents, a model string, operator texts | keyed HMAC (jobs B, C, review c0c09bd1) |
+    | `ruling_id_hmac` | a Compliance ruling id of a shape Compliance does not issue | keyed HMAC, bound to the tenant (review 2b26d980, decision 52); absent when the id has the issued shape |
     | `request_sha` | the request body | plain SHA-256 over machine values and keyed HMACs (decision 46) |
     | `sha256` (prompt-set reference in `audit_requested`), `prompt_set_sha256` | the prompt-set fingerprint | that fingerprint as recorded: the keyed `content_hmac` for a version created since job D; for an older version the plain SHA-256 it was created with (name kept so old lines and readers still agree) |
     | `domain_sha256` | a registered domain | plain: the domain is logged as a host name |
@@ -432,8 +437,10 @@ service, adds a dependency and a network hop the department does not otherwise n
     `app.routes` (41; none exempt; a new route without a builder or an exemption fails), every string field from
     the request models' schemas, the path and query parameters and the four headers the service reads (279 fields).
     Each gets unique run-time canaries in six families (prose, e-mail, key prefix, 16-digit Luhn, SSN shape, short
-    token) and three disguises (raw, base64, percent-encoded), plus a syntax-fitted form where a field has one
-    (5,235 canaries, 5,231 requests), in an otherwise valid call as the owning caller. The persisting flows run
+    token) and three disguises (raw, base64, percent-encoded), plus a syntax-fitted form where a field has one,
+    and (review 2b26d980) four more families planted raw and syntax-fitted: an e-mail address without "@",
+    separator-formatted digits, 32 hex characters, a JSON number (6,474 canaries, 6,413 requests in all), in an
+    otherwise valid call as the owning caller. The persisting flows run
     with canaries in operator text and in engine- and crawl-originated text (answers, citation titles, hints and
     URLs, page titles and text, canonical and redirect URLs, robots.txt, sitemap URLs, llms.txt, uploaded log
     lines, Search Console pages and queries), then a restart. The scan covers every data-directory file (the log,
@@ -444,12 +451,25 @@ service, adds a dependency and a network hop the department does not otherwise n
     Mutations that make it fail: the guard disabled; any one of the six migrated kinds written inline again
     (refused by the guard, and found by the scan with the guard off; with the guard off and nothing inlined the
     scan is clean); the logging sink disabled; the validation `input` echo restored.
-49. **Known limit (asserted, not hidden).** A short token with no whitespace that is not key-, e-mail- or
-    9+-digit-shaped, accepted into an IDENTIFIER field, is a machine value by definition and is logged as such. The
-    canary test asserts the exact (route, field) pairs where that happens: `POST /tenants` `tenant_id`,
-    `POST /tenants/{tid}/domains` `domains[]` (a host name), `POST /tenants/{tid}/finance-client`
-    `finance_client_id`; and that it happens nowhere else. A prompt-set name and an entity source are identifiers
-    too, but they are now inside the blobs and reach no log.
+49. **Known limit (asserted, not hidden; wording corrected by review 2b26d980).** What an IDENTIFIER field
+    still accepts, and therefore logs as a machine value, is exactly this:
+    - `POST /tenants` `tenant_id` and `POST /tenants/{tid}/finance-client` `finance_client_id`: a token of the
+      field's own pattern (40 / 64 characters at most) that holds no strong-key prefix, no 9+ digit run, no
+      credential label with a value, no random token of 16+ mixed characters or 32+ hex, no e-mail form (with
+      "@", spelled, or WITHOUT "@": `mailto...`, `email:...`, an `at` piece before a domain ending in a known
+      TLD, a name before one of 40 mailbox providers' domains, each with `.`, `-` or `_` as the separator) and
+      is not prose folded with `-` / `.` / `_` (6+ segments of which 4+ are words). So a single made-up word
+      (`zqkdbwhfmxpt`), up to five joined words (`acme-co-uk-retail-west`) and a name without a provider
+      (`john-smith`) are accepted.
+    - `POST /tenants/{tid}/domains` `domains[]` (and a prompt set's `competitor_domains[]`, which is in the blob
+      and reaches no log): a syntactically valid host name that `sink_guard.host_refusal` passes (decision 55).
+      So a host whose labels are words is accepted whatever the words say (`call.me.tomorrow.example`,
+      `great-at-work.example`: an `at` joined with hyphens inside ONE label is a name), as is a credential word
+      followed by letters only (`password-correcthorse.example`) and a random label of letters only.
+    The canary test asserts the exact (route, field) pairs where a planted short token is found afterwards (these
+    three) and that it is found nowhere else; its e-mail-without-"@", separator-formatted-digits, 32-hex and
+    JSON-number families are found nowhere at all. A prompt-set name and an entity source are identifiers too
+    (same rules, without the folded-prose rule), but they are inside the blobs and reach no log.
 50. **Guard cost per commit (re-measured).** Measured on the final code: `sink_guard.enforce` on the largest real
     record of each kind (0.4-2.9 kB each now that the content is in blobs); cold = the first call in a fresh
     process (median of 3 processes), warm = the median of 300 further calls. Log kinds (26 of 27;
@@ -463,6 +483,112 @@ service, adds a dependency and a network hop the department does not otherwise n
     `log_chunk` with `delta`, a `log_ingest_finished` with `report` / `report_sha256`, a
     `tenant_gsc_property_set` with a `sc-domain:` string. An ingest opened before job D keeps its full totals in
     memory and takes later chunks as blobs.
+
+## Review 2b26d980: legitimate values are no longer refused (availability)
+
+The review passed the structural leak bar, the vault, the client view and the cost, and rejected the commit
+because the guard refused LEGITIMATE values (503 `SINK_REFUSED`, skipped paid schedule slots). The guard is not
+weakened for prose: each fix is a narrow closed class, a precise rule, or a keyed hash.
+
+52. **Compliance ruling ids (MUST 1).** Compliance (38) issues `cmp-rul-` + the first 26 lower-case base32
+    characters of a SHA-256 (compliance-py `service._b32`); about 1.3% of them hold 9+ digits and the strict check
+    read them as a number (measured: 128 of 10,000). The guard has a closed `ruling_id` class for exactly that
+    shape. The client (`compliance_client.RULING_ID`) still ACCEPTS any `[A-Za-z0-9._:-]{1,128}`; an id of any
+    other shape is never written: the record carries the code `RULING_ID_HASHED` and `ruling_id_hmac` (the vault's
+    log-field sub-key, field `compliance_ruling_id`, bound to the tenant; null without a vault key). The service
+    never compares ruling ids (it records them), so there is no comparison to move to the HMAC.
+53. **Every externally issued identifier, audited.** For each value that reaches the log or a ledger payload and
+    is not derived by this service from its own machine values, the issuing format was read from the issuer and
+    10,000 values of that format are generated at run time by `tests/test_review_2b26d980.py` and judged by the
+    guard as a log value and as a ledger payload value: 0 refused, each row.
+
+    | Identifier | Issuer and format | Generated | Refused |
+    |---|---|---|---|
+    | ruling id | compliance-py `"cmp-rul-" + _b32(...)`: 26 base32 | 10,000 | 0 (128 before) |
+    | jurisdiction | compliance-py activation: `US-[A-Z]{2}`, `PR`, `GU`, `VI`, `AS`, `MP` | 681 (all) | 0 (`US-PW` before: read as a credential label; closed class `jurisdiction`) |
+    | invoice id | finance-py `service.rid("inv", ...)`: `fin-inv-` + 26 Crockford base32 | 10,000 | 0 |
+    | Finance record ids | finance-py `service.rid`, 28 prefixes: `fin-<prefix>-` + 26 Crockford base32 | 10,000 | 0 (closed class `finance_id`; only `fin-inv-` was a class) |
+    | Finance event ids | finance-py `ledger.derived_id`: `fin-<prefix>-` + 40 hex | 10,000 | 0 (`finance_id`) |
+    | Finance client reference | NOT issued by Finance: a reference it accepts, `[A-Za-z0-9._-]{1,100}`; in use `<slug>-<serial>` | 10,000 | 0 (decision 56) |
+    | ledger event id / payload hash | seo-py `derived_id("evd" / "anc", ...)`; SHA-256 hex | 10,000 each | 0 |
+    | service ids, vault refs, request ids, request keys | seo-py `derived_id` (11 prefixes), `vault.ref` / `blob_ref`, a UUID, `op|target|uuid` | 10,000 each | 0 |
+    | log epoch, key fingerprint, vault record id, repair id | 16 / 16 / 32 / 32 hex, digits-only values included | 10,000 each | 0 (`key_fp` added to the digits-only exemption: one log hash key in about 1,800 could never create an ingest) |
+    | keyed HMACs, timestamps, Search Console window dates and property hosts | 64 hex; `clock.iso`; `YYYY-MM-DD`; a host name | 10,000 each | 0 |
+    | engine model id | the adapters' allowlists | 8 (all) | 0 |
+    | engine spend | seo-py `str(Decimal)` to a millionth, up to 999,999.999999 | 10,000 | 0 (a run that spent or reserved 100.000000 or more was refused as a 9-digit number; closed class `amount`: `N{1,6}.NNNNNN`) |
+
+    Engine request ids and Search Console identifiers other than the property host are not written to the log or
+    the ledger (the results are in the vault). `tests/test_review_2b26d980.py::
+    test_the_issuing_formats_are_the_other_services_own` reads the formats from compliance-py and finance-py and
+    fails when one changes.
+54. **Vault key ids (MUST 2).** A key id is written to the log in every operator-text stub. A date-stamped id
+    (`2026-11`, `k-20261110-01`) started the service and then refused every audit and schedule. The guard has a
+    `key_id` class: a value is accepted ONLY as the value of a `key_id` field and ONLY when it equals a key id this
+    process has configured (`sink_guard.register_key_ids`: the current and the previous id; a closed set, as the
+    model ids). Start validates every configured id (`sink_guard.key_id_refusal`, in `config._vault` and again in
+    `SeoService.__init__`): an id that is key material (16+ hex with a hex letter), a random token, holds a
+    strong-key prefix or a credential label, or more than 12 digits, refuses START with a closed configuration
+    error naming the variable and the reason, never the id. A line read back (replay, export) may carry a retired
+    key's id of a valid shape.
+55. **Host names (SHOULD 1).** One rule, `sink_guard.host_refusal`, in every lane (the guard's `hostname` class,
+    the domain fields, and the strict lane's host judgement: `secret_guard.host_verdict`; before, a tenant whose
+    own domain held a credential word or a hash label had every URL of its site withheld, and its audit refused at
+    the sink). A host is accepted when it is syntactically valid (labels of 1..63, 253 in all, a letters-only TLD
+    of 2..24 or a punycode TLD, every `xn--` label decoding to a lower-case label of letters, marks and digits
+    with a non-ASCII letter, and encoding back to itself) and:
+    - no label has a strong-key prefix shape (the prefix table on the label as written, upper-cased and with its
+      hyphens removed);
+    - no label holds 32+ hex characters in a row with a digit among them, and adjacent all-hex labels do not add
+      up to 32+;
+    - the letters-and-digits pieces of a label, joined, are not a token of 24+ characters with 2+ letter-digit
+      changes (a punycode label is exempt: it must decode instead);
+    - no run of 9+ digits (all-digit pieces joined across `-` and `.`; a run inside one piece), and under 12
+      digits in all-digit pieces in the whole host. One exception, measured: a piece that is all hex, 12..31
+      characters with 2+ hex letters, keeps a digit run of at most 12 (a platform hash);
+    - no e-mail form: an `at` label after the first with two or more labels after it, or a mailbox provider's
+      domain (the closed list of 40) after a name (`www.` / `m.` / `mail.` + the provider is the provider's site);
+    - no value after a credential word: a letters-and-digits piece of 6+ right after the word in the same label
+      (`password-hunter2`), or as the next label when that is not the registrable name.
+    A credential WORD in a label is a name (`1password.com`, `pin.it`, `secret-sale.shop`, `apikey.dev`).
+    Measured false refusals (generated at run time, the test asserts at most 1% each): neutral domains 0 of
+    4,000; IDN / punycode 0 of 600; platform-hash hosts (a label of 6..20 hex or letters-and-digits characters,
+    alone or after words) 7 of 1,200 (0.58%: a 9+ digit run in a piece shorter than 12, or with fewer than two hex
+    letters); label-word hosts 0 of 400. Still refused, 0 accepted of 2,000 each: strong-key prefixes as labels
+    (6 families), 32 / 40 / 63-hex labels and 64 hex over two labels, 32- and 40-character tokens, card / SSN /
+    phone digit labels (plain, dashed, dotted, after a word), `first.last.at.domain.tld`,
+    `user.name.<mailbox provider>`, the value after a credential word. A uniformly random 24-character label is
+    refused except when it holds almost no digits: about 0.07% accepted (13 of 20,000 in one run; the test
+    bounds it at 0.5%). A random label of 21..23 letters and digits is NOT refused any more (the strict lane used
+    to refuse 16+ with 4+ changes): it cannot be told from a platform hash. Not accepted, on purpose: a host
+    that embeds an IPv4 address of 9+ digits (`ec2-203-0-113-125...`), a 24+ character deploy hash label.
+56. **Finance client id (SHOULD 2).** Finance (31) does not issue client ids: it accepts a reference of
+    `[A-Za-z0-9._-]{1,100}` (finance-py `models.CLIENT_ID_RE`). The request model takes what the guard can write
+    (`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`) and `svc_tenants.identifier_refused` refuses the rest. Measured on 10,000
+    ids of that pattern: 7,884 accepted, 2,116 refused with 422, 0 accepted and then refused at the sink (503).
+57. **The operator vault's torn tail (SHOULD 4).** Both vault files are treated alike at start: the repair is
+    recorded (`operator_vault_tail_repaired`, subject `operator_vault`, the marker's counts only), the marker is
+    cleared once recorded, and `/seo/v1/status` shows it (`operator_vault.tail_repair`, as
+    `citation_vault.tail_repair`; `/health` is unauthenticated and answers the status only).
+58. **Lines written before sink job D (SHOULD 5).** `GET /audit/export` is the one route that serves log lines:
+    every served line passes `sink_guard.withhold` first, which replaces each string (a dict key too), non-finite
+    float or other object that is not a machine value by the code `WITHHELD` and counts them (`withheld` in the
+    answer). A line written since job D comes back unchanged. No rewrite tool is provided: every log line is
+    chained by its SHA-256 and anchored on the ledger, so a line cannot be rewritten without breaking the
+    anchoring. A data directory written by a release up to 8bd9e29e therefore still holds its prose ON DISK (and
+    in backups): it must be retired, or the service started on a fresh directory, before the log file is handed
+    to anyone. Start counts such lines and `/seo/v1/status` shows `legacy_prose_lines` (0 on a directory written
+    since job D).
+59. **A schedule naming a prompt set whose blob is lost (SHOULD 6)** answers 503 `VAULT_UNAVAILABLE`, as an audit
+    and a citation run do; it used to be created (201) and skip every slot.
+60. **Identifiers (SHOULD 9).** `secret_guard.atless_email` (in `identifier_refusal`: tenant id, Finance client
+    id, prompt-set name, entity source; the host rule covers the domain fields) and `secret_guard.folded_prose`
+    (tenant id and Finance client id): 422 `IDENTIFIER_WITHHELD`. Decision 49 says exactly what remains accepted.
+61. **Small fixes.** The guard refuses `nan` / `inf` (JSON cannot carry them); `do[opr]_v1_` + any body of 8+ is
+    a strong-key prefix in both lanes (it needed 32 hex before); the logging sink scrubs the attributes a caller
+    attaches with `extra=`; the canary test pages `/audit/export` and `/audit/evidence` with the routes' real
+    keys to the last line and plants four more families; `EXPECTED_SINK_REFUSALS` names each test's sinks and
+    paths exactly, and a test that replaces a guard entry point (`OBSERVER`, `enforce`, `refused`, `violations`)
+    without being listed fails the suite.
 
 ## Threat model
 

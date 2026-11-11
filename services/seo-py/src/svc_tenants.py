@@ -31,7 +31,8 @@ import sink_guard
 from svc_optext import url_view
 
 TENANT_KINDS = ("own", "client")
-DOMAIN = re.compile(r"(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}")
+# review 2b26d980 SHOULD 1: a punycode TLD (``xn--p1ai``) is a TLD too (an IDN domain is registered as A-labels)
+DOMAIN = re.compile(r"(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,63}|xn--[a-z0-9-]{1,58}[a-z0-9])")
 DOMAINS_MAX = 20
 OWN_TENANT = "zbm"
 
@@ -44,15 +45,28 @@ def valid_domain(d) -> bool:
         and not domain_match.is_public_suffix(d)
 
 
-def identifier_refused(x) -> bool:
-    """Review c0c09bd1: an identifier (tenant id, domain, Finance client id) holding a key, a 9+ digit run, an e-mail
-    form, or failing the strict check (secret_guard.identifier_refusal)."""
+def identifier_refused(x, prose: bool = False) -> bool:
+    """Review c0c09bd1: an identifier (tenant id, Finance client id) holding a key, a 9+ digit run, an e-mail form
+    (review 2b26d980: also one written without its "@"), or failing the strict check (secret_guard.identifier_refusal).
+    ``prose`` (a tenant id, a Finance client id): also prose folded with hyphens / dots (secret_guard.folded_prose)."""
     if secret_guard.identifier_refusal(x) is not None:
         return True
-    # sink job D: an identifier is LOGGED, so it must be a machine value of the sink guard (a host name the strict
-    # host check takes, a code of at most 64 characters holding a letter, a small number). One that is not is
+    if prose and secret_guard.folded_prose(x):
+        return True
+    # sink job D: an identifier is LOGGED, so it must be a machine value of the sink guard (a host name the host rule
+    # takes, a code of at most 64 characters holding a letter, a small number). One that is not is
     # refused here (422 IDENTIFIER_WITHHELD) instead of being accepted and then refused at the sink (503)
     return sink_guard.classify(x) is None
+
+
+def domain_refused(d) -> bool:
+    """Review 2b26d980 SHOULD 1: a DOMAIN field (a tenant's domain, a competitor domain) is judged as a host name by
+    the sink guard's host rule and by nothing else (``sink_guard.host_refusal``: a credential word in a label is a
+    name, ``1password.com``; a key-shaped, number-shaped or e-mail-shaped host is refused). A value that does not
+    have a host name's shape is judged as any identifier."""
+    if sink_guard.host_shaped(d):
+        return sink_guard.classify(d) != "hostname"
+    return identifier_refused(d)
 
 
 def _site(d: str) -> str:
@@ -191,7 +205,7 @@ class TenantsMixin:
         tid, kind = body["tenant_id"], body["kind"]
         if kind not in TENANT_KINDS:
             raise Invalid(R("TENANT_KIND_INVALID"))
-        if identifier_refused(tid):                       # review c0c09bd1: an identifier, not prose
+        if identifier_refused(tid, prose=True):           # review c0c09bd1: an identifier, not prose
             raise Invalid(R("IDENTIFIER_WITHHELD"))
         with self.lock:
             self._gate()
@@ -217,7 +231,7 @@ class TenantsMixin:
             raise Invalid(R("DOMAIN_LIMIT"))
         if not all(valid_domain(d) for d in domains) or len(set(domains)) != len(domains):
             raise Invalid(R("DOMAIN_INVALID"))
-        if any(identifier_refused(d) for d in domains):   # review c0c09bd1: a registrable host name, not prose
+        if any(domain_refused(d) for d in domains):       # review c0c09bd1: a registrable host name, not prose
             raise Invalid(R("IDENTIFIER_WITHHELD"))
         with self.lock:
             self._gate()
@@ -244,7 +258,7 @@ class TenantsMixin:
         """Andre binds a client tenant to its Finance (31) client id (Legal's party reference at Finance), so a paid
         run can check that the invoice is this client's (ADR 0017 W3-2). Re-binding is allowed and recorded; the
         id is never read from a page, an invoice or a caller other than Andre."""
-        if identifier_refused(body["finance_client_id"]):  # review c0c09bd1: an identifier, not prose
+        if identifier_refused(body["finance_client_id"], prose=True):  # review c0c09bd1: an identifier, not prose
             raise Invalid(R("IDENTIFIER_WITHHELD"))
         with self.lock:
             self._gate()

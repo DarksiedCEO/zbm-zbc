@@ -128,6 +128,14 @@ def base_env(**over) -> dict:
     return env
 
 
+def ruling_id(client_id: str) -> str:
+    """A ruling id in the shape Compliance (38) issues (compliance-py ``service._b32``): ``cmp-rul-`` + the first 26
+    lower-case base32 characters of a SHA-256."""
+    import base64
+    raw = hashlib.sha256(f"seo-py test-only ruling {client_id}".encode()).digest()
+    return "cmp-rul-" + base64.b32encode(raw).decode("ascii").lower()[:26]
+
+
 class PassingCompliance:
     """TEST-ONLY (ADR 0024): Compliance answers a current ALLOW for every client unless told otherwise. The default
     harness installs it in place of the production stand-in (NotConnectedCompliance refuses every client run), as
@@ -148,7 +156,7 @@ class PassingCompliance:
             raise cc.ComplianceCheckError(self.error)
         if client_id in self.refuse:
             raise cc.ComplianceCheckError(cc.NOT_ACTIVATED)
-        return {"verdict": cc.ALLOW, "ruling_id": f"cmp-rul-{client_id}", "jurisdiction": "US-CA"}
+        return {"verdict": cc.ALLOW, "ruling_id": ruling_id(client_id), "jurisdiction": "US-CA"}
 
 
 class Harness:

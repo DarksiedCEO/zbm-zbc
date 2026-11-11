@@ -781,7 +781,7 @@ PROVIDERS = (
     ("mailgun", r"key-[0-9a-zA-Z]{32}"),
     ("digitalocean", r"do[opr]_v1_[a-f0-9]{32,}"),
     ("misc_saas", (r"(?:lin_api_|secret_[A-Za-z0-9]{40}|ntn_|xai-|gsk_|r8_|dapi[a-f0-9]{32}|pat[A-Za-z0-9]{14}\."
-                   r"|glc_|sntrys_|figd_|shpat_|rnd_|tskey-|pscale_tkn_|dp\.pt\.|fo1_|phc_|phx_)[A-Za-z0-9_\-]{8,}")),
+                   r"|glc_|sntrys_|figd_|shpat_|rnd_|tskey-|pscale_tkn_|dp\.pt\.|fo1_|phc_|phx_|do[opr]_v1_)[A-Za-z0-9_\-]{8,}")),      # review 2b26d980 NIT: ``dop_v1_`` with any body (both lanes)
     ("db_uri", (r"(?i:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|rediss?|amqps?|mssql|sqlserver|jdbc:[a-z]+)"
                 r"://[^\s/@]{1,256}@")),
     ("pem_pgp", r"-----BEGIN [A-Z0-9 ]{0,40}(?:PRIVATE KEY|PGP|OPENSSH|ENCRYPTED|CERTIFICATE REQUEST)[A-Z0-9 ]{0,20}-----"),
@@ -1019,7 +1019,8 @@ _JOINED_PREFIX = re.compile(
     r"|xox[abposre][A-Za-z0-9]{15,}|shp(?:at|ss|ca|pa)[a-fA-F0-9]{28,}|sq0(?:atp|csp|idp)[A-Za-z0-9]{16,}"
     r"|hv[sbr][A-Za-z0-9]{20,}|pplx[A-Za-z0-9]{20,}|npm[A-Za-z0-9]{30,}|hf[A-Za-z0-9]{30,}"
     r"|sk(?:proj|ant|live|test|svcacct|admin)[A-Za-z0-9]{16,}|[rp]k(?:live|test)[A-Za-z0-9]{10,}|whsec[A-Za-z0-9]{20,}"
-    r"|ya29[A-Za-z0-9]{20,}|amzn1oa2cs[A-Za-z0-9]{8,}|SG[A-Za-z0-9]{40,}|eyJ[A-Za-z0-9]{30,}")
+    r"|ya29[A-Za-z0-9]{20,}|amzn1oa2cs[A-Za-z0-9]{8,}|SG[A-Za-z0-9]{40,}|eyJ[A-Za-z0-9]{30,}"
+    r"|do[opr]v1[A-Za-z0-9]{16,}")
 
 
 def _nonword(pieces) -> str:
@@ -1669,6 +1670,43 @@ def _check(text: str, waive=frozenset(), urls: bool = True) -> str | None:
     return personal                                        # a credential failure on any view wins over personal data
 
 
+# Review 2b26d980 SHOULD 1: ONE rule for a host name, in every lane. A text that is, whole, a syntactically valid host
+# name (lower case, dotted labels, a TLD) is judged by the host rule the sink guard defines (``sink_guard.
+# host_refusal``, registered here at its import: this module cannot import it) and by nothing else: a credential WORD
+# in a label is a name (``1password.com``), a platform hash label is a name; a key-shaped, number-shaped or
+# e-mail-shaped host fails the matching check. Before, a tenant whose own domain held such a label had every URL of
+# its site withheld (and its audits refused at the sink).
+HOST_RULE = None                         # (host) -> a reason name or None
+HOST_LIKE = None                         # (text) -> the text has a host name's shape
+_HOST_RULE_TRIED: list = []
+# (an ``xn--`` label that does not decode to a label of letters is not a name: read as a token, so that the lanes
+# agree on every host-shaped text; a host that fails on syntax or its TLD alone is left to the ordinary checks)
+_HOST_CHECK = {"prefix": "c_prefix", "hex": "d_token", "token": "d_token", "idna": "d_token",
+               "label_value": "a_label", "digits": "e_digits", "email": "f_email"}
+
+
+def host_verdict(text) -> tuple:
+    """(True, the failing check name or None) when ``text`` is a host name judged by the host rule; (False, None) when
+    it is not one (the ordinary checks apply)."""
+    if len(text) > 253 or "." not in text:
+        return False, None
+    rule, like = globals()["HOST_RULE"], globals()["HOST_LIKE"]
+    if rule is None and not _HOST_RULE_TRIED:
+        _HOST_RULE_TRIED.append(True)                      # once: the same verdicts whichever module came first
+        try:
+            import sink_guard  # noqa: F401 - registers the rule (it imports this module, so it cannot be at the top)
+        except Exception:  # noqa: BLE001 - the core used alone, without the service's sink guard
+            pass
+        rule, like = globals()["HOST_RULE"], globals()["HOST_LIKE"]
+    if rule is None or like is None or not like(text):
+        return False, None
+    reason = rule(text)
+    if reason is None:
+        return True, None
+    name = _HOST_CHECK.get(reason)
+    return (True, name) if name is not None else (False, None)
+
+
 def check(text, waive=frozenset()) -> str | None:
     """The failing check for ``text`` (``"cap"``, ``"type"``, ``"error"`` or one of ``CHECKS``; a credential check
     (a)-(d) is reported before a personal-data check (e)/(f)), or None when the text is clearly safe. Every check runs
@@ -1680,6 +1718,9 @@ def check(text, waive=frozenset()) -> str | None:
     if not text:
         return None
     try:
+        applies, name = host_verdict(text)
+        if applies:
+            return name
         return _check(text, frozenset(waive) & WAIVABLE)
     except Exception:  # noqa: BLE001 - fail closed: an input the checks cannot read is withheld
         return "error"
@@ -1752,6 +1793,53 @@ def operator_url_refusal(url) -> str | None:
 _ID_DIGITS = re.compile(r"[0-9]{9,}")
 
 
+# Review 2b26d980 SHOULD 9: an e-mail address written WITHOUT its "@" in an identifier, and prose folded with
+# hyphens / dots into a tenant id or a Finance client id.
+# mailbox providers (a closed list): ``<name>.<provider domain>`` is an e-mail address written without its "@"
+MAILBOX_PROVIDERS = frozenset((
+    "gmail.com", "googlemail.com", "yahoo.com", "yahoo.co.uk", "yahoo.co.jp", "ymail.com", "outlook.com",
+    "hotmail.com", "hotmail.co.uk", "live.com", "msn.com", "icloud.com", "me.com", "mac.com", "aol.com",
+    "proton.me", "protonmail.com", "pm.me", "gmx.com", "gmx.de", "gmx.net", "web.de", "mail.com", "mail.ru",
+    "yandex.ru", "yandex.com", "zoho.com", "fastmail.com", "hey.com", "tutanota.com", "tuta.io", "qq.com",
+    "163.com", "126.com", "comcast.net", "verizon.net", "att.net", "sbcglobal.net", "naver.com", "t-online.de"))
+_MAILBOX_FOLDED = tuple(sorted({p.replace("-", ".") for p in MAILBOX_PROVIDERS}))   # ``t-online.de`` -> ``t.online.de``
+_ID_SPLIT = re.compile(r"[-_.:=/\s]+")
+_ID_MAILTO = re.compile(r"(?i)\s*(?:mailto(?![a-z0-9])|e-?mail\s?[:=])")
+FOLDED_SEGMENTS_MIN = 6                  # "more than 5 segments" ...
+FOLDED_WORDS_MIN = 4                     # ... of which 4+ are word-like: prose folded into an identifier
+_FOLDED_WORD = re.compile(r"(?=[a-z]*[aeiouy])[a-z]{2,15}")
+
+
+def atless_email(text) -> bool:
+    """An e-mail address written without "@" in an identifier: ``mailto...``, ``email:...``, ``first.last.at.
+    domain.tld`` (an ``at`` piece before a domain ending in a known TLD) or ``user.name.gmail.com`` (a closed list of
+    mailbox providers' domains after a name), with ``.``, ``-`` or ``_`` as the separator. Never raises."""
+    if not isinstance(text, str) or not text:
+        return False
+    try:
+        low = text.lower()
+        if _ID_MAILTO.match(low):
+            return True
+        parts = [x for x in _ID_SPLIT.split(low) if x]
+        n = len(parts)
+        for i in range(1, n - 2):
+            if parts[i] == "at" and parts[-1] in _TLDS:
+                return True
+        folded = ".".join(parts)
+        return any(folded.endswith("." + p) for p in _MAILBOX_FOLDED)
+    except Exception:  # noqa: BLE001 - fail closed
+        return True
+
+
+def folded_prose(text) -> bool:
+    """Prose folded into an identifier with hyphens / dots / underscores (a tenant id, a Finance client id): 6+
+    segments of which 4+ are word-like (2..15 letters with a vowel). ``acme-co-uk-retail-west`` (5) is an id."""
+    if not isinstance(text, str):
+        return False
+    parts = [x for x in _ID_SPLIT.split(text.lower()) if x]
+    return len(parts) >= FOLDED_SEGMENTS_MIN and sum(1 for x in parts if _FOLDED_WORD.fullmatch(x)) >= FOLDED_WORDS_MIN
+
+
 def identifier_refusal(text) -> str | None:
     """The reason an identifier is refused (a check name), or None. Never raises."""
     if not isinstance(text, str) or not text:
@@ -1761,7 +1849,7 @@ def identifier_refusal(text) -> str | None:
         return r
     if _ID_DIGITS.search(text):
         return "e_digits"
-    if "@" in text or _email_hit(text):
+    if "@" in text or _email_hit(text) or globals()["atless_email"](text):
         return "f_email"
     return check(text)
 
@@ -2009,11 +2097,15 @@ def _inspect(url, urls: bool, fetch: bool = False) -> dict | None:
             return "error"
     raw_host = re.sub(r":\d*$", "", (p.netloc or "").rsplit("@", 1)[-1])
     host_kind = None
-    for part in [raw_host] + raw_host.split("."):
-        k = _kind(chk(part)) or (CREDENTIAL if part and _host_label_key(part) else None)
-        if k is not None:
-            host_kind = k
-            break
+    applies, name = globals()["host_verdict"](raw_host.lower())    # review 2b26d980: the one host rule
+    if applies:
+        host_kind = _kind(name)
+    else:
+        for part in [raw_host] + raw_host.split("."):
+            k = _kind(chk(part)) or (CREDENTIAL if part and _host_label_key(part) else None)
+            if k is not None:
+                host_kind = k
+                break
     ch = canon_host(host)
     segs = (p.path or "").split("/")
     waived = [globals()["position"](ch, segs, i) if s else None for i, s in enumerate(segs)]

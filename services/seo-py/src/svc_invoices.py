@@ -34,9 +34,12 @@ import compliance_client
 import vault as vault_mod
 from finance_client import DEFINITIVE, PAID, FinanceLookupError, assess
 from reasons import R
+import sink_guard
 from svc_vaulted import normalised
 
 INVOICE_FACTS_FIELD = "invoice_facts"
+RULING_FIELD = "compliance_ruling_id"        # the keyed HMAC's field name for a ruling id of an unissued shape
+RULING_TENANT = "seo"                        # its binding when no tenant is at hand
 
 
 class InvoicesMixin:
@@ -72,20 +75,35 @@ class InvoicesMixin:
         return {"mode": "finance", "invoice_id": body["invoice_id"], "client_id": client, "tenant_id": tid,
                 "override": override if andre else None, "owner": owner}
 
-    def _verify_compliance(self, client_id: Optional[str]) -> dict:
-        """Outside the lock (ADR 0024): Compliance's current ALLOW for the client, or the refusal (never overridden)."""
+    def _verify_compliance(self, client_id: Optional[str], tid: Optional[str] = None) -> dict:
+        """Outside the lock (ADR 0024): Compliance's current ALLOW for the client, or the refusal (never overridden).
+        Review 2b26d980 MUST 1: the ruling id is kept only in the shape Compliance issues (``cmp-rul-`` + 26 base32
+        characters: the guard's closed ``ruling_id`` class). An id of any other shape the client accepts
+        (``compliance_client.RULING_ID``) is never written: the record carries the code ``RULING_ID_HASHED`` and
+        ``ruling_id_hmac``, its keyed HMAC bound to the tenant (None without a vault key)."""
         try:
-            return compliance_client.check(self.ports.compliance, client_id)
+            got = compliance_client.check(self.ports.compliance, client_id)
         except compliance_client.ComplianceCheckError as exc:
             if exc.code == compliance_client.NOT_ACTIVATED:
                 raise Conflict(R(exc.code), override_allowed=False) from None
             raise Unavailable(R(exc.code), override_allowed=False) from None
+        return self._ruling_fields(got, tid)
+
+    def _ruling_fields(self, cmp_: dict, tid: Optional[str]) -> dict:
+        rid = cmp_.get("ruling_id")
+        if rid is None or sink_guard.classify(rid) == "ruling_id":
+            return cmp_
+        try:
+            mac = self.vault.field_hash(tid or RULING_TENANT, RULING_FIELD, str(rid))[1]
+        except vault_mod.VaultError:
+            mac = None
+        return {**cmp_, "ruling_id": sink_guard.RULING_ID_HASHED, "ruling_id_hmac": mac}
 
     def _verify_invoice(self, plan: Optional[dict]) -> Optional[dict]:
         """Outside the lock: ask Finance. Returns the verification record, or raises the refusal."""
         if plan is None:
             return None
-        cmp_ = self._verify_compliance(plan["client_id"])     # ADR 0024: first, and never overridden
+        cmp_ = self._verify_compliance(plan["client_id"], plan["tenant_id"])   # ADR 0024: first, never overridden
         if plan["mode"] == "trust":
             return {"mode": "trust", "verdict": "UNCHECKED", "compliance": cmp_}
         facts = None
@@ -133,7 +151,8 @@ class InvoicesMixin:
             return []
         cmp_ = verification.get("compliance")
         out = [("compliance_activation_confirmed", subject,
-                {**ids, "ruling_id": cmp_["ruling_id"], "jurisdiction": cmp_["jurisdiction"]}, (actor, rk))] \
+                {**ids, "ruling_id": cmp_["ruling_id"], "jurisdiction": cmp_["jurisdiction"],
+                 **({"ruling_id_hmac": cmp_["ruling_id_hmac"]} if "ruling_id_hmac" in cmp_ else {})}, (actor, rk))] \
             if cmp_ else []
         if verification["mode"] != "finance":
             return out

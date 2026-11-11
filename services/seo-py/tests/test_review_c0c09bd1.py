@@ -795,7 +795,7 @@ def test_identifier_validation_is_load_bearing_at_the_endpoint(tmp_path, monkeyp
     rng = random.Random(SEED + 39)
     h = _harness(tmp_path, data=False)
     import sink_guard
-    monkeypatch.setattr(svc_tenants, "identifier_refused", lambda x: False)   # mutation
+    monkeypatch.setattr(svc_tenants, "identifier_refused", lambda x, prose=False: False)   # mutation
     tid = f"acme-{_r(rng, string.digits, 9)}"
     # sink job A: with the endpoint's check removed the sink guard still refuses the id (nothing is written) ...
     h.refused(h.post("/tenants", {"request_id": rid(), "tenant_id": tid, "kind": "client"}, andre=True), 503,

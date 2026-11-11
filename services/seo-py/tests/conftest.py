@@ -67,7 +67,12 @@ def pytest_configure(config):
 # the sinks whose records passed and, per test, the (sink, path) pairs the guard REFUSED. There is no legacy list any
 # more (sink job D): tests/test_sink_guard.py reads this LAST and fails when a refusal happened anywhere but in a test
 # that provokes one on purpose (``EXPECTED_SINK_REFUSALS`` there). Paths and sink names only: never a value.
-SINK_SEEN = {"passed": set(), "violations": {}, "full_run": False, "test": "(outside a test)"}
+# Review 2b26d980 NIT: a test cannot silence the observer unseen. ``SINK_SEEN["silenced"]`` keeps, per test, the guard
+# entry points (``GUARD_ENTRY_POINTS``) it replaced, however it did so (assignment, ``monkeypatch.setattr``): the
+# sink_guard module is given a class whose ``__setattr__`` notes it. tests/test_sink_guard.py lists the only tests
+# that may (``EXPECTED_GUARD_PATCHES``) and fails on any other.
+SINK_SEEN = {"passed": set(), "violations": {}, "silenced": {}, "full_run": False, "test": "(outside a test)"}
+GUARD_ENTRY_POINTS = ("OBSERVER", "enforce", "refused", "violations")
 
 
 def _sink_observer(kind, found, bad):
@@ -86,8 +91,24 @@ def _sink_current_test(request):
 
 
 def _install_sink_observer():
+    import types
+
     import sink_guard
     sink_guard.OBSERVER = _sink_observer
+    original = {name: getattr(sink_guard, name) for name in GUARD_ENTRY_POINTS}
+
+    class WatchedGuard(types.ModuleType):
+        def __setattr__(self, name, value):
+            if name in original and value is not original[name]:
+                SINK_SEEN["silenced"].setdefault(SINK_SEEN["test"], set()).add(name)
+            super().__setattr__(name, value)
+
+        def __delattr__(self, name):
+            if name in original:
+                SINK_SEEN["silenced"].setdefault(SINK_SEEN["test"], set()).add(name)
+            super().__delattr__(name)
+
+    sink_guard.__class__ = WatchedGuard
 
 
 _install_sink_observer()

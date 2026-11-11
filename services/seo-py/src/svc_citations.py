@@ -72,7 +72,7 @@ class CitationsMixin:
                 client = self._citation_rules(t, tid, body, andre)
         if prev:                                     # review 601e328a SHOULD 1: the replay's view outside the lock
             return self.citation_run_view(tid, prev[1])
-        cmp_ = self._verify_compliance(client) if client is not None else None     # ADR 0024, outside the lock
+        cmp_ = self._verify_compliance(client, tid) if client is not None else None   # ADR 0024, outside the lock
         with self.lock:
             self._gate()
             t = self._get(self.tenants, tid, "TENANT_NOT_FOUND")
@@ -100,8 +100,9 @@ class CitationsMixin:
         ref = {"prompt_set_id": ps["prompt_set_id"], "version": ps["version"], "sha256": ps["sha256"]}
         data = {"citation_run_id": cid, "tenant_id": tid, "tenant_kind": t["kind"], "domain": body["domain"],
                 "prompt_set": ref, "engines": ps["engines"], "andre_approved": bool(andre),
-                "compliance": None if cmp_ is None else {"ruling_id": cmp_.get("ruling_id"),
-                                                         "verdict": cmp_.get("verdict")}}
+                "compliance": None if cmp_ is None else {
+                    "ruling_id": cmp_.get("ruling_id"), "verdict": cmp_.get("verdict"),
+                    **({"ruling_id_hmac": cmp_["ruling_id_hmac"]} if "ruling_id_hmac" in cmp_ else {})}}
         ev = [("citation_run_requested", f"citation_run:{cid}",
                {"citation_run_id": cid, "tenant_id": tid, "kind": t["kind"], "domain_sha256": sha(body["domain"]),
                 "prompt_set_id": ref["prompt_set_id"], "prompt_set_version": ref["version"],

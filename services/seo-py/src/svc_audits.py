@@ -107,14 +107,19 @@ def _strict_prompt_set(body: dict) -> None:
     ``PROMPT_SECRET``, personal data ``PROMPT_PERSONAL_DATA``). Review c0c09bd1: the FREE TEXT (prompts, a rule's
     context / negative terms) is no longer refused for failing the strict check (it is vaulted; see svc_optext.py):
     only a strong-key prefix, a PEM / PGP block or URL user info in it is refused ``PROMPT_SECRET``."""
-    ids = {k: v for k, v in body.items() if k not in ("request_id", "prompts", "brand_term_rules")}
+    # review 2b26d980 SHOULD 1: a competitor DOMAIN is a host name, judged by the host rule alone (a credential word
+    # in a label is a name: ``1password.com``); the strict check is for the other identifier fields
+    ids = {k: v for k, v in body.items() if k not in ("request_id", "prompts", "brand_term_rules",
+                                                      "competitor_domains")}
     ids["rule_terms"] = [r.get("term") for r in body.get("brand_term_rules") or []]
     for s in _strings(ids):
         name = secret_guard.check(s)
         if name is not None:
             raise Invalid(R("PROMPT_PERSONAL_DATA" if name in _PERSONAL_CHECKS else "PROMPT_SECRET"))
-    for d in [body.get("name")] + list(body.get("competitor_domains") or []):
-        if isinstance(d, str) and globals()["_identifier_refused"](d):
+    if isinstance(body.get("name"), str) and globals()["_identifier_refused"](body["name"]):
+        raise Invalid(R("IDENTIFIER_WITHHELD"))
+    for d in list(body.get("competitor_domains") or []):
+        if isinstance(d, str) and globals()["_domain_refused"](d):
             raise Invalid(R("IDENTIFIER_WITHHELD"))
     free = list(body.get("prompts") or []) + [w for r in body.get("brand_term_rules") or []
                                                for k in ("context_terms", "negative_terms") for w in r.get(k) or []]
@@ -128,6 +133,11 @@ def _operator_refused(text: str) -> bool:
 
 def _identifier_refused(text: str) -> bool:
     return secret_guard.identifier_refusal(text) is not None
+
+
+def _domain_refused(text: str) -> bool:
+    from svc_tenants import domain_refused
+    return domain_refused(text)
 
 
 def path_refused(scheme: str, domain: str, path: str) -> bool:

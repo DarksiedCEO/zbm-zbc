@@ -46,7 +46,13 @@ from helpers import base_env, invoice_id, rid
 from ports import Ports, ProviderAnswer
 
 DOMAIN = sa.DOMAIN
-FAMILIES = ("prose", "email", "key", "luhn", "ssn", "token")
+# review 2b26d980 NIT: four more families (an e-mail address written without "@", digits formatted with
+# separators, a 32-hex key, a JSON number); each is planted raw (and syntax-fitted), not in the three disguises
+EXTRA_FAMILIES = ("atless", "sepdigits", "hex", "number")
+FAMILIES = ("prose", "email", "key", "luhn", "ssn", "token") + EXTRA_FAMILIES
+# a family whose value is a machine value by definition wherever no route rule refuses it: a short token (the
+# known limit) and 32 hex characters (the guard's ``hash`` class; the identifier fields refuse it themselves)
+MACHINE_FAMILIES = ("token", "hex")
 DISGUISES = ("raw", "base64", "percent")
 HEADERS_READ = ("Authorization", api.CALLER_HEADER, api.TENANT_HEADER, api.FOUNDER_HEADER)
 P = "/seo/v1"
@@ -97,15 +103,26 @@ class Canaries:
             return f"{self.rng.randrange(100, 665):03d}-{self.rng.randrange(10, 99):02d}-{self.rng.randrange(1000, 9999)}"
         if family == "token":
             return "zq" + self._tag(12)
+        if family == "atless":
+            return f"{self._tag(6)}.{self._tag(7)}.at.{self._tag(8)}.com"
+        if family == "sepdigits":
+            return f"{self.rng.randrange(200, 999)}.{self.rng.randrange(200, 999)}.{self.rng.randrange(1000, 9999)}"
+        if family == "hex":
+            return "a" + self._tag(30, "0123456789abcdef") + "7"
+        if family == "number":
+            return str(self.rng.randrange(10 ** 14, 10 ** 15))
         raise AssertionError(family)
 
-    def new(self, route: str, field: str, family: str, disguise: str = "raw") -> str:
-        """A fresh canary of ``family`` registered for (route, field); returns the string to plant."""
+    def new(self, route: str, field: str, family: str, disguise: str = "raw", as_json: bool = False):
+        """A fresh canary of ``family`` registered for (route, field); returns the string to plant (``as_json``: a
+        ``number`` canary as a JSON number, an int)."""
         value = self.make(family)
         while value in self.values:
             value = self.make(family)
         self.values[value] = (route, field, family, disguise)
         self.planted += 1
+        if as_json and family == "number" and disguise == "raw":
+            return int(value)
         if disguise == "base64":
             return base64.b64encode(value.encode()).decode()
         if disguise == "percent":
@@ -435,7 +452,7 @@ class World:
             self.ok(post(f"/jobs/{job}/run", {"request_id": rid()}, caller="scheduler"))
         # the guard is the backstop: a record carrying a canary is refused whatever tried to write it
         for fam in FAMILIES:
-            if fam == "token" or not self.probe_guard:      # (a short token IS a machine value: the known limit)
+            if fam in MACHINE_FAMILIES or not self.probe_guard:    # (a short token / 32 hex IS a machine value)
                 continue
             with pytest.raises(Exception) as caught:
                 h.svc._commit("job_ran", {"job": c.new("flow", "direct_commit", fam)}, "scheduler")
@@ -648,9 +665,10 @@ def plant_everything(w: World, routes: dict, families=FAMILIES, disguises=DISGUI
                 fields.append("body:" + norm)
                 wrap = FITTED.get(norm)
                 for fam in families:
-                    for dis in disguises:
+                    for dis in (disguises if fam not in EXTRA_FAMILIES else ("raw",)):
                         spec = w.spec(key)
-                        spec["body"] = with_value(spec["body"], path, w.c.new(key, "body:" + norm, fam, dis))
+                        spec["body"] = with_value(spec["body"], path, w.c.new(key, "body:" + norm, fam, dis,
+                                                                              as_json=True))
                         w.send(key, spec)
                     if wrap is not None:
                         spec = w.spec(key)
@@ -660,7 +678,7 @@ def plant_everything(w: World, routes: dict, families=FAMILIES, disguises=DISGUI
             for name in info["path_params"]:
                 fields.append("path:" + name)
                 for fam in families:
-                    for dis in disguises:
+                    for dis in (disguises if fam not in EXTRA_FAMILIES else ("raw",)):
                         spec = w.spec(key)
                         spec["params"][name] = w.c.new(key, "path:" + name, fam, dis)
                         w.send(key, spec)
@@ -668,7 +686,7 @@ def plant_everything(w: World, routes: dict, families=FAMILIES, disguises=DISGUI
             for name in info["query_params"]:
                 fields.append("query:" + name)
                 for fam in families:
-                    for dis in disguises:
+                    for dis in (disguises if fam not in EXTRA_FAMILIES else ("raw",)):
                         spec = w.spec(key)
                         spec["query"][name] = w.c.new(key, "query:" + name, fam, dis)
                         w.send(key, spec)
@@ -676,13 +694,16 @@ def plant_everything(w: World, routes: dict, families=FAMILIES, disguises=DISGUI
             for name in HEADERS_READ:
                 fields.append("header:" + name)
                 for fam in families:
-                    for dis in disguises:
+                    for dis in (disguises if fam not in EXTRA_FAMILIES else ("raw",)):
                         value = w.c.new(key, "header:" + name, fam, dis)
                         spec = w.spec(key)
                         if name == api.TENANT_HEADER:
                             spec["caller"] = "hub"
                         w.send(key, spec, headers={name: ("Bearer " + value) if name == "Authorization" else value})
     return covered
+
+
+EXPORT_PAGE = 50                         # small pages: the paging itself is exercised
 
 
 def non_owner_reads(w: World) -> dict:
@@ -716,20 +737,30 @@ def non_owner_reads(w: World) -> dict:
     take("/health", None)
     for path in ("/status", "/department", "/kill-switches", "/audit/integrity"):
         assert take(path, "dashboard").status_code == 200, path
-    since = 1
+    # review 2b26d980 NIT: paged with the routes' REAL keys (``events`` / ``evidence``), to the last line: the scan
+    # reads the whole export and the whole evidence view, not their first page
+    since, exported = 1, 0
     while True:
-        page = take("/audit/export", "compliance_38", since=since, limit=1000).json()
-        rows = page.get("records") or page.get("lines") or []
-        if len(rows) < 1000:
+        r = take("/audit/export", "compliance_38", since=since, limit=EXPORT_PAGE)
+        assert r.status_code == 200, r.status_code
+        page = r.json()
+        rows = page["events"]
+        exported += len(rows)
+        if len(rows) < EXPORT_PAGE:
             break
-        since += 1000
-    offset = 0
+        since = rows[-1]["seq"] + 1
+    assert exported == page["log_length"] == len(w.h.svc.log) and exported > EXPORT_PAGE, (exported, len(w.h.svc.log))
+    offset, listed = 0, 0
     while True:
-        page = take("/audit/evidence", "compliance_38", limit=1000, offset=offset).json()
-        rows = page.get("events") or page.get("evidence") or []
-        if len(rows) < 1000:
+        r = take("/audit/evidence", "compliance_38", limit=EXPORT_PAGE, offset=offset)
+        assert r.status_code == 200, r.status_code
+        page = r.json()
+        rows = page["evidence"]
+        listed += len(rows)
+        if len(rows) < EXPORT_PAGE:
             break
-        offset += 1000
+        offset += EXPORT_PAGE
+    assert listed == page["total"] > EXPORT_PAGE, (listed, page["total"])
     return out
 
 
@@ -859,7 +890,7 @@ def test_the_scan_finds_every_form_of_a_canary():
 # ------------------------------------------------------------------------------------------------ mutations
 
 def _guard_off(mp):
-    mp.setattr(sg, "violations", lambda kind, data: [])
+    mp.setattr(sg, "violations", lambda kind, data, stored=False: [])
 
 
 def _inline(kind: str):

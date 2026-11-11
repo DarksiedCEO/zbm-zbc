@@ -15,6 +15,10 @@ later, a record passes ``scrub_record`` first:
   * EXCEPTION text, tracebacks and stack text are dropped; the record keeps the exception's type name and the
     ``module:function:line`` of the innermost frame inside this service (``svc_audits.where_code``) and nothing else;
   * a template its scrubbed arguments no longer fit (``%d`` given ``WITHHELD``) is written without arguments.
+  * every attribute a caller attached with ``extra=`` (review 2b26d980 NIT: a formatter or a JSON handler prints
+    them) is judged as an argument: a machine value stays, a dict / list keeps its machine leaves
+    (``sink_guard.withhold``), anything else is ``WITHHELD``; an attribute whose NAME is not a machine value is
+    removed. They are judged at every pass (``logging`` attaches them after the record factory has run).
 
 Installed three times, on purpose: as the process's log-record FACTORY (every record of every logger is scrubbed
 when it is created, whichever handlers exist or are added later, pytest's capture included); as a ``logging.Filter``
@@ -37,6 +41,26 @@ NUMBER_MAX = 10 ** 8                     # an int / float argument below this pr
 _MARK = "_seo_sink_done"
 _FRAMES_MAX = 40
 _STATE = {"factory": None, "previous": None, "handle": None, "enabled": True}
+# the attributes ``logging`` itself puts on a record; any other one came from ``extra=``
+_STANDARD = frozenset(logging.makeLogRecord({}).__dict__) | frozenset(("message", "asctime", "taskName", _MARK))
+
+
+def _scrub_extra(record: logging.LogRecord) -> None:
+    """The ``extra=`` attributes of ``record`` scrubbed in place. Never raises."""
+    d = record.__dict__
+    if len(d) <= len(_STANDARD) and all(k in _STANDARD for k in d):
+        return
+    for k in [k for k in d if k not in _STANDARD]:
+        try:
+            v = d[k]
+            if type(k) is not str or sink_guard.classify(k) is None:
+                del d[k]
+            elif type(v) in (dict, list, tuple):
+                d[k] = sink_guard.withhold(v)[0]
+            else:
+                d[k] = scrub_arg(v)
+        except Exception:  # noqa: BLE001 - fail closed
+            d.pop(k, None)
 
 
 def _number(x):
@@ -102,6 +126,7 @@ def scrub_record(record: logging.LogRecord) -> logging.LogRecord:
     """``record`` scrubbed in place (once). Never raises."""
     if not _STATE["enabled"]:
         return record
+    _scrub_extra(record)
     done = record.__dict__.get(_MARK)
     if done is not None and record.msg is done[0] and record.args is done[1] and not record.exc_info \
             and not record.exc_text and not record.stack_info:

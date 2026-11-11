@@ -124,6 +124,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
         self._evidence_lock = threading.Lock()
         self._evidence_cache: dict = {"n": 0, "epoch": None, "lines": []}
         self._closed = False
+        self.legacy_prose_lines = 0                      # log lines holding a non-machine value (written before job D)
         self._dir_lock = getattr(settings, "data_dir_lock", None)
         self._lock_token: Optional[str] = None
         if self._dir_lock is not None:
@@ -140,6 +141,14 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
             self.vault = self._open_vault(settings, repair=not observe_existing_on_start)
             # review c0c09bd1: operator free text (svc_optext.py) in its own vault file, same key and scheme
             self.optext_vault = self._open_vault(settings, repair=not observe_existing_on_start, operator=True)
+            # review 2b26d980 MUST 2: the configured vault key ids are written to the log (the operator-text stub's
+            # ``key_id``), so each must be one the sink guard takes: checked now (a closed configuration error, no
+            # id in it), never found out at the first audit. They join the guard's closed ``key_id`` set.
+            key = getattr(settings, "vault_key", None)
+            try:
+                sink_guard.register_key_ids([getattr(key, "key_id", None), getattr(key, "previous_key_id", None)])
+            except ValueError as exc:
+                raise RuntimeError(f"SEO_VAULT_KEY_ID / SEO_VAULT_KEY_PREVIOUS_ID: {exc}") from None
             import client_report
             if not isinstance(getattr(settings, "report_branding", None), client_report.Branding):
                 # AEGIS L-8: refuse to start rather than answer the client-report route with a 500
@@ -152,27 +161,32 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
 
     def _record_vault_repair(self) -> None:
         """Review 601e328a SHOULD 3: a torn final vault line cut at open is recorded as a typed audit event with its
-        counts only (never content); a ledger that cannot take it leaves the repair visible in health as unrecorded."""
-        rep = getattr(self.vault, "tail_repair", None)
-        if not rep or not getattr(self.vault, "repairs", True):
+        counts only (never content); a ledger that cannot take it leaves the repair visible in health as unrecorded.
+        Review 2b26d980 SHOULD 4: the same for BOTH vault files (the citation vault and the operator text vault):
+        the event, the marker cleared once it is recorded, the repair in /health."""
+        self._record_one_vault_repair(self.vault, "citation_vault_tail_repaired", "citation_vault")
+        self._record_one_vault_repair(self.optext_vault, "operator_vault_tail_repaired", "operator_vault")
+
+    def _record_one_vault_repair(self, vault, event_type: str, subject: str) -> None:
+        rep = getattr(vault, "tail_repair", None)
+        if not rep or not getattr(vault, "repairs", True):
             return
         import logging
-        logging.getLogger("seo.vault").warning("citation vault: the final line was repaired at open (%d bytes removed, "
+        logging.getLogger("seo.vault").warning("vault: the final line was repaired at open (%d bytes removed, "
                                                "%d records removed, %d records kept)", rep["bytes_removed"],
                                                rep.get("records_removed", 0), rep["records_kept"])
         # review 08eea6e1 SHOULD 2: the payload is the repair marker's counts only (no log length), so the event a
         # start records after a repair an EARLIER, failed start made is the same event (the ledger is idempotent)
         import vault as _vault
         payload = {k: rep[k] for k in _vault.REPAIR_FIELDS if k in rep}
-        eid = derived_id("evd", "citation_vault_tail_repaired", payload_sha256(payload))
+        eid = derived_id("evd", event_type, payload_sha256(payload))
         try:
-            self._record_twice(eid, "citation_vault_tail_repaired", "seo", "citation_vault", payload,
-                               "citation_vault_tail_repaired citation_vault")
+            self._record_twice(eid, event_type, "seo", subject, payload, f"{event_type} {subject}")
             rep["recorded"] = True
         except LedgerRecordError:
             rep["recorded"] = False
             return
-        clear = getattr(self.vault, "clear_repair_marker", None)
+        clear = getattr(vault, "clear_repair_marker", None)
         if clear is not None:
             clear()
 
@@ -206,8 +220,14 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
         return self._closed
 
     def _start(self, *, observe_existing_on_start: bool = False) -> None:
+        legacy = 0
         for r in self.log.iter_records():
             self._apply(r["kind"], r["data"], r["at"])
+            # review 2b26d980 SHOULD 5: a line a release up to 8bd9e29e wrote may hold prose inline. Such lines are
+            # counted (``legacy_prose_lines`` in /health) and never served raw (``audit_export`` withholds the text)
+            if sink_guard.violations(r["kind"], r["data"], stored=True):
+                legacy += 1
+        self.legacy_prose_lines = legacy
         self._sweep_ingests()                    # expired log ingests keep counts only (AEGIS 4c0a805 T4)
         if observe_existing_on_start:
             # Constructor-only: refuse provisioning/repair, but retain normal lock
@@ -345,8 +365,21 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
         if prev is None:
             return None
         if prev[0] != request_sha(self._machine_body(body)):
-            raise Conflict(R("REQUEST_ID_REUSED"))
+            # review 2b26d980 SHOULD 3: a request recorded by a release before sink job D carries the LEGACY hash
+            # (the plain SHA-256 of the body as it was sent). A retry of it after the deploy is the same request:
+            # compared with the legacy computation, and only when the body holds a non-machine string (otherwise
+            # the two computations are the same and the mismatch is a different body)
+            if prev[0] != self._legacy_request_sha(body):
+                raise Conflict(R("REQUEST_ID_REUSED"))
         return prev
+
+    def _legacy_request_sha(self, body: dict) -> Optional[str]:
+        """The idempotency hash a release up to 8bd9e29e recorded for ``body`` (the plain SHA-256 of the body), or
+        None when it cannot be computed. Only ever COMPARED with a stored hash: never written, never returned."""
+        try:
+            return request_sha(body)
+        except Exception:  # noqa: BLE001 - a body the legacy hash could not take was never recorded
+            return None
 
     @staticmethod
     def rk(op: str, target: str, body: dict) -> str:
@@ -645,6 +678,10 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
                 "audits_total": len(self.audits),
                 "log_length": len(self.log),
                 "citation_vault": self.vault.status(),        # counts only (review 601e328a SHOULD 2 / 3)
+                "operator_vault": self.optext_vault.status(),  # review 2b26d980 SHOULD 4: the same counts
+                # review 2b26d980 SHOULD 5: log lines holding a non-machine value (prose a release before sink job D
+                # wrote inline), counted at start. Not 0: the export withholds their text; retire the directory
+                "legacy_prose_lines": self.legacy_prose_lines,
             }
 
     # ================================================================================================ jobs
@@ -749,11 +786,14 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
     def audit_export(self, since_seq: int, limit: int) -> dict:
         """The local log (it holds ids, codes, hashes and the tenants' registered domains; no raw page body is ever
         stored). Sink job B: an audit's report and a drift report are in the tenant's vault, and their lines hold a
-        ref, a keyed hash and machine facts; only a line written before it still carries the report."""
+        ref, a keyed hash and machine facts. Review 2b26d980 SHOULD 5: EVERY served line passes the sink guard
+        first (``sink_guard.withhold``): a string that is not a machine value (the prose a line written before sink
+        job D holds inline: a report, entity values, prompts, robots.txt) is served as the code ``WITHHELD``, and
+        the answer counts them (``withheld``)."""
         with self.lock:
             if self._closed:
                 raise Unavailable(R("SERVICE_CLOSED"))
-        out = []
+        out, withheld = [], 0
         for r in self.log.iter_records(max(1, since_seq)):
             d = {k: v for k, v in r["data"].items() if k not in ("_obj", "request_sha")}
             if r["kind"] == "audit_completed" and isinstance(d.get("report"), dict):
@@ -762,7 +802,11 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
                 # ``expired``; report_sha256 is still the hash of the report as recorded). Lines written before sink
                 # job B only: later ones carry no report
                 d["report"] = self.gsc_retained(d["report"], r["at"])
-            out.append({"seq": r["seq"], "kind": r["kind"], "at": r["at"], "data": d})
+            d, n = sink_guard.withhold(d)
+            withheld += n
+            kind = r["kind"] if sink_guard.classify(r["kind"]) is not None else sink_guard.WITHHELD
+            at = r["at"] if sink_guard.classify(r["at"]) is not None else sink_guard.WITHHELD
+            out.append({"seq": r["seq"], "kind": kind, "at": at, "data": d})
             if len(out) >= limit:
                 break
-        return {"events": out, "log_length": len(self.log)}
+        return {"events": out, "log_length": len(self.log), "withheld": withheld}

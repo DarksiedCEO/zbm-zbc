@@ -476,7 +476,7 @@ def test_a_failed_commit_after_the_blob_write_counts_an_orphan(tmp_path, caplog)
     assert sa.found(blob, v) == [] and vw.MARK not in blob
 
 
-def test_a_kill_switch_engaged_mid_run_writes_no_blob(tmp_path):
+def test_a_kill_switch_engaged_mid_run_writes_no_blob(tmp_path, monkeypatch):
     h, v, port = started(tmp_path)
     psid = tc.prompt_set(h, engines=("openai",))
     real = SeoService._prepare_citation_result
@@ -485,11 +485,14 @@ def test_a_kill_switch_engaged_mid_run_writes_no_blob(tmp_path):
         out = real(self, env, sink)
         self.switches["capability"]["audit"] = True          # engaged after the run, before the record (memory only)
         return out
-    SeoService._prepare_citation_result = prepare
-    try:
+    # review 2b26d980 SHOULD 8: patched with ``monkeypatch`` (which removes the attribute it added). Assigning
+    # ``real`` back by hand left the mixin's method on ``SeoService`` itself, shadowing the mixin for every later
+    # test that patches ``CitationsMixin`` (tests/test_review_adacb2ca.py failed when run after this file)
+    assert "_prepare_citation_result" not in vars(SeoService)
+    with monkeypatch.context() as m:
+        m.setattr(SeoService, "_prepare_citation_result", prepare)
         run = h.ok(tc.run(h, psid), 201)
-    finally:
-        SeoService._prepare_citation_result = real
+    assert "_prepare_citation_result" not in vars(SeoService)
     assert run["status"] == "interrupted" and run["interrupted_reason"].startswith("KILLED")
     assert sa.vault_lines(h) == 0 and h.svc.vault.status()["orphaned_records"] == 0
     assert records(h, "citation_run_recorded") == []
