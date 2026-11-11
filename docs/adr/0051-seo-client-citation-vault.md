@@ -626,9 +626,14 @@ this round is differential, against release 2b26d980 (the last one before the ho
     - the registration lane (`svc_tenants.domain_refused`): `(rule takes it and it holds no e-mail form of
       2b26d980) or (identifier_refusal without the "@"-less forms passes and the guard takes it)`.
     Consequence, stated plainly: for a host the rule REFUSES the lanes are again as different as they were at
-    2b26d980 (the strict check read the whole host, the URL inspection each label too). What holds for every
-    host: the guard takes it exactly when both strict lanes keep it; a host kept for the log
-    (`callum.checked_host`) is one the guard takes.
+    2b26d980 (the strict check read the whole host, the URL inspection each label too). What holds: the guard
+    takes a host exactly when both strict lanes keep it, EXCEPT a value whose last label is an `xn--` label
+    that is not an IDN label: the guard judges it as a code (the strict check of the whole value, as at
+    2b26d980) and takes it, while the URL inspection reads that label as a token and withholds the host
+    (corrected by review ffd28ca8; measured on 8,100 generated hosts, 27 families of 300: the guard takes and a
+    strict lane withholds 285, every one in the two families ending in such a label, 94 and 191 of 300; both
+    strict lanes keep and the guard refuses: 0). A host kept for the log (`callum.checked_host`) is one the
+    guard takes.
     Measured against the code of 2b26d980 loaded from git, offline (lanes: guard class, tenant-domain
     registration, competitor-domain registration, URL inspection, strict check, `callum.checked_host`):
 
@@ -638,6 +643,18 @@ this round is differential, against release 2b26d980 (the last one before the ho
     | real well-known hosts (portal and mailbox-provider sub-domains, news, shops, SaaS, government) | 648 | 0 | 641 / 648 |
 
     At 98b76cde the same comparison gave 13,097 (generated) and 254 (real) hosts accepted before and refused.
+
+    Corrected by review ffd28ca8: the table compares the lane FUNCTIONS. At ROUTE level the competitor-domain
+    lane is not differential. The prompt-set route of 2b26d980 judged a competitor domain by the strict check
+    and `secret_guard.identifier_refusal` only (the set is one vaulted blob; the guard never saw the domain);
+    the route now judges it by `svc_tenants.domain_refused`, which also asks the guard. Measured through both
+    routes on the same 8,100 generated hosts: 1,164 answered 201 at 2b26d980 and answer 422
+    `IDENTIFIER_WITHHELD` now, in seven families: a random label of 24 characters (279 of 300), of 28 (257), of
+    32 (3), an all-hex label of 24 (19), a strong-key-prefix shape (26), an AWS key-id shape (299), a token
+    split over two labels (281). Mostly key and token shapes; a random label of 24+ letters and digits is also
+    what some platforms issue as a deploy id (decision 70). The other 20 families (neutral names, platform
+    deploy ids of 6..23 characters, preview numbers, hex labels of 12..20, digit runs): 0. The tenant-domain
+    route: 0 of 8,100.
 64. **The hash exemption needs 4+ hex letters; `-at-` at registration as before (MUST 3 / P2).** A piece that is
     all hex, 12..31 characters, keeps a digit run of 9..12 only when it holds 4+ hex letters (it was 2+).
     Chosen by measurement between three variants on 26,000 hex labels of 6..31 characters and on the P2 shapes:
@@ -659,15 +676,35 @@ this round is differential, against release 2b26d980 (the last one before the ho
     98b76cde). Only at registration: the same host met in a URL, a citation or crawl data is a host name (the
     guard takes it). A directory written by 98b76cde that holds such a domain keeps working (measured: audits,
     citation runs, slots, ingests succeed); submitting the domain list again with that domain in it is a 422.
+    Added by review ffd28ca8 (measured on the final code):
+    - A directory written by 98b76cde (never deployed) may hold a domain this release's guard refuses: a
+      platform hash label with 2 or 3 hex letters and a digit run of 9..12 (generated labels of 11..14
+      characters: the rule, the guard and the registration lane of 98b76cde took 1,501 of 2,000 with 2 letters
+      and 2,000 of 2,000 with 3; this release takes 0 of either, and all 2,000 with 4 letters). On such a
+      directory this release starts (the lines naming the domain are counted in `legacy_prose_lines`) and a
+      write of that tenant that names the domain answers 503 `SINK_REFUSED` (measured: a citation run on each
+      of two such domains). A citation run on another domain of the same tenant succeeds; the same domain list
+      submitted again is a 422; the list without those domains is accepted (200), which is the way out.
+    - The false-refusal cost is not even over label lengths. All-hex labels refused for digits, 2,000 labels
+      per length: none at 6..8; 35, 38, 58 at 9..11; 57, 70, 73, 76, 65, 63, 58, 33, 41 at 12..20 (536 of
+      18,000, 2.98%); 43, 22, 21 at 21..23; 24..31 are refused as tokens. Over 6..31: 753 of 52,000 (1.448%;
+      98b76cde: 339, 0.652%). The cost at 12..20 is more than twice the average the table above reports.
 65. **Client view: the verb in any case (MUST 2).** `_CV_AFTER` matched ` is `, ` was `, ` are `, ` would be `,
     ` will be `, ` remains ` in lower case only: `the password IS <value>` was shown to the owner. All six are
     matched in any case mix. The other alternations of section 5 were checked for the same gap: `_CV_SCRIPT`
     (the labels in scripts without word spacing) holds three labels in cased scripts (Cyrillic, Greek) and
-    matched them in lower case only, while the strict lane folds case: fixed (`re.IGNORECASE`). Not gaps:
-    `_CV_LABEL` (built per letter in both cases), `_CV_BEARER`, the SSN label, the spelled `at` / `dot` / `sign`
-    forms, the number words (all case-insensitive already), `_CV_PEM` (a PEM header is upper case by format).
-    Found and NOT fixed (not a case gap): a Greek label followed by its inflection ending before the separator
-    is not matched in either case. False masking for a label and a value on neutral prose (636 units of the
+    matched them in lower case only, while the strict lane folds case: fixed (`re.IGNORECASE`). Checked and
+    case-insensitive already: `_CV_BEARER`, the SSN label, the spelled `at` / `dot` / `sign` forms, the number
+    words; `_CV_PEM` (a PEM header is upper case by format).
+    Corrected by review ffd28ca8: this decision said there was no other case gap. There was one: `_CV_LABEL`
+    is built per letter in both cases, but the view it reads was folded by a table that turned the upper-case
+    stroked L into a capital I, so the Polish label in upper case was shown; and the Hindi and Thai labels
+    matched in no case at all. What holds now is decision 71: one normalisation for a label entry and for the
+    text, and a test over every entry in every spelling (as listed, lower, UPPER, Title, natural diacritics or
+    marks present and absent, NFC and NFD, before a colon, an equals sign and every case mix of every verb): 0
+    misses in the client view and in the strict lane. The Greek label in its natural nominative form is matched
+    now; what remains is listed in decision 71 (another inflected form of the Russian and Greek labels).
+    False masking for a label and a value on neutral prose (636 units of the
     utility corpus): 0 before and after, as written, in Title Case and in UPPER CASE. On 20 hand-written
     sentences that put a credential word before the verb (`The token was revoked`): 5 masked before and after
     as written; in Title Case 0 before, 5 after (the same 5); in UPPER CASE 0 before, 14 after (an all-capitals
@@ -696,6 +733,17 @@ this round is differential, against release 2b26d980 (the last one before the ho
     - what P1 keeps: a letters-heavy 32-character label with its few digits together (2 of 2,000 random
       32-character tokens; 2b26d980 took the same 2), and a uniformly random 24-character label (about 1.5% at
       2b26d980, so now).
+    Added by review ffd28ca8: further residuals of the same owner-accepted known limit for identifier fields
+    (decision 49), each measured on 2,000 generated hosts on the final code (accepted by the rule, by the
+    guard and by the registration lane alike; the guard and the registration lane of 2b26d980 took none):
+    - a token whose halves are separated by a WORD label (`<12 letters and digits>.shop.<12>`: 1,999;
+      `<16>.shop.<16>`: 2,000). Only 32 hex characters split by a word label are refused;
+    - a credential word, a link word that is not `is` / `was` / `are` / `equals`, and a value
+      (`password-for-<value>`, `-of-`, `-to-`, `-equal-`, `-set-`, `-eq-`: 2,000 each; with `-is-`: 0);
+    - a credential word and 4 to 8 digits (`pin-<4 digits>`, `password-<8 digits>`: 2,000 each at 4, 6 and 8;
+      at 9 digits: 0);
+    - a telephone number or an SSN with FOUR or more hex letters attached on either side (2,000 each), or
+      split by a word (`<3 digits>-call-<3>-<4>`, `<6>-ext-<4>`, `<3>-<2>-and-<4>`: 2,000 each).
 68. **Tests (SHOULD 3 / 4).** `tests/test_review_98b76cde.py`. The two surviving mutants are killed: the export
     serving a line's `kind` / time that is not a machine value; the citation run's line dropping
     `ruling_id_hmac`. The random-label refusal is asserted at the rule's own threshold, 2,000 generated labels
@@ -713,6 +761,13 @@ this round is differential, against release 2b26d980 (the last one before the ho
     evidence, prompt sets, entity values); then start this release with a new accepted id (for example
     `k-2026-12`) and a new key, and enter the prompt sets and entity values again (those whose text is in the
     old records answer 503 `VAULT_UNAVAILABLE`). No live deployment holds a vault key yet (Deployment below).
+    Added by review ffd28ca8 (measured: a service restarted with a new key under a new id): two more steps
+    follow a key loss. SCHEDULES must be created again: a schedule's paths are in the old records, its slot is
+    refused at every tick (`refused` in the tick summary, `vault_unavailable: true` in its view), and a new
+    schedule or audit naming the old prompt set answers 503 until the set is entered again. A NEW AUDIT of a
+    domain must complete before a log ingest of that domain: an ingest reads the sitemap sample of the
+    domain's latest audit, and while that report is in the old records the ingest answers 503
+    `VAULT_UNAVAILABLE` (a domain never audited is not affected: 201).
 70. **Known limits, restated.**
     - A tenant id or a Finance client reference that holds a credential word followed by more
       (`token-coffee`, `secret-santa-2`) answers 422 `IDENTIFIER_WITHHELD`: the identifier check has no
@@ -720,6 +775,126 @@ this round is differential, against release 2b26d980 (the last one before the ho
     - Infrastructure-shaped hosts are refused by design in every lane (as a tenant domain: 422; in a citation:
       the host is withheld): an ELB name with its 9+ digit serial, a Cloud Run URL with a project number, an
       EC2 public DNS name or `nip.io` name embedding an IPv4 address of 9+ digits, a deploy-hash label of 24+.
+
+## Review ffd28ca8: a label entry and the text share one normalisation
+
+The review found the client view showing a labelled credential (a label, a separator, a value) to the owning
+tenant for three label forms, and the strict lane missing two of them. The owner asked for the cause to be
+fixed, not the three forms.
+
+71. **One normalisation for both sides of every credential-label list (MUST 1).** The cause: a list entry was
+    compared as written with a text that had been folded. An entry holding a combining mark the inspection
+    views remove (the Hindi and Thai labels: the views drop the virama, the vowel signs and the tone marks)
+    could never equal the text, in either lane; and the client view folded its text with a table of its own
+    that read the upper-case stroked L as a capital I, so the Polish label in upper case read as another word
+    (lower case, Title Case and plain-ASCII upper case were masked; the strict lane, which folds through
+    `lookalikes`, flagged all of them).
+    - `secret_guard._label_norm(text, latin)` is THE normal form, applied to every list entry and to the
+      text it is matched against (in the strict lane, and for the script labels in the client view; the
+      client view's text view for the Latin labels is tied to it, below): invisible characters out and NFKC,
+      case folded (the dotted capital I, the final sigma and the sharp s included), NFKD with every combining
+      mark dropped (accents, the Greek tonos, Arabic and Hebrew points, the Devanagari virama and vowel signs,
+      Thai vowel and tone marks, the kana voicing marks) and the Arabic tatweel with them, NFC again (a Hangul
+      syllable stays whole). Two alphabets: for the Latin lists (`_JOINED`, `_PIECES`) lookalike letters are
+      read as the ASCII letters they resemble, before and after the marks are dropped; for the script list
+      (`_SCRIPT`) the script is kept. The letters NFKD does not decompose: the stroked l, o and d and the dotless i are
+      folded by `lookalikes`, the sharp s reads `ss` by case folding; the ae / oe ligatures are not folded
+      (no entry and no natural spelling of one holds a ligature or a sharp s; the test asserts it, and the
+      client view's table leaves the sharp s as written, so an entry holding one would stop the import).
+    - The matching tables are DERIVED from the lists through that function at import (`_label_keys` ->
+      `_JOINED_KEYS`, `_PIECE_KEYS`, `_SCRIPT_KEYS`, `_CV_SCRIPT_KEYS`, and from them `_JOINED_RX`,
+      `_PIECES_IN`, `_SCRIPT_RX`, `_CV_LABEL`, `_CV_SCRIPT`). An entry no text could match after it stops
+      the import (a Latin entry whose key is not ASCII letters, a script entry without a non-ASCII letter, a
+      piece label of two words, a key of one letter): an entry cannot be added in an unmatchable form, and
+      one written with its diacritics, capitals or spaces is listed as its key.
+    - The strict lane reads the letters of the normal form (`_letters_view`, `_fold_piece`, `label_only`,
+      `_script_letters`).
+    - The client view's rules read case (a camelCase boundary before a label, a capital inside a value after
+      ` was `), so its text views keep it. For the SCRIPT labels the view is the normal form one character at
+      a time in the character's case (`_cv_script_view`); the label is looked for there and what follows it
+      (the separator and the value) is read on the view as written (`_cv_script_ends`), exactly as before.
+      For the LATIN labels the view (`_cv_label_view`) is the client view's own character table, kept as it
+      was (NFKD, the marks dropped, a lookalike letter as the ASCII letter it resembles in its own case) with
+      the one wrong letter corrected: an upper-case LATIN letter that folds to `l` is an L (a lookalike of a
+      capital I from another script, the Greek iota or the Cyrillic palochka, still reads I). It was not
+      replaced by the normal form: a first version that did so showed, in a differential test against
+      ffd28ca8, forms the client view masked before (a label in Greek or Cyrillic capitals whose upper-case
+      lookalike differs from the lower-case one, a value glued to a word with a spacing mark). Instead the
+      two are tied at import: `_cv_latin_keys` runs every Latin entry through the client view's table, as
+      listed and in upper case, and stops the import unless the result is the entry's key; the test checks
+      the same for every character of every natural spelling.
+    - Two `_SCRIPT` entries are stems (Russian, Greek): the strict lane finds a stem inside the word, the
+      client view needs the label to end before the separator. The nominative form of each is listed for
+      the client view (`_CV_SCRIPT_FULL`; the Russian one always was, as a literal; the Greek one is new).
+
+    **What the test guarantees** (`tests/test_review_ffd28ca8.py`, the property for every entry, not three
+    cases): 96 entries (`_JOINED` 44, `_PIECES` 27, `_SCRIPT` 23, `_CV_SCRIPT_FULL` 2) in 398 spellings (as
+    listed, lower, UPPER, Title, capitalised, the natural spelling with its diacritics, spaces or marks, the
+    marks absent, the Turkish dotted capital, the Arabic elongation; each in NFC and NFD), each before 344
+    separators (`: `, `:`, `=`, ` = `, and every case mix of ` is `, ` was `, ` are `, ` would be `,
+    ` will be `, ` remains `) with a value generated at run time: 136,912 cells, each one masked in the client
+    view AND flagged as a label by the strict lane.
+
+    | The same matrix | Client view: cells shown (entry spellings, entries) | Strict lane: cells not flagged as a label (entry spellings, entries) |
+    |---|---|---|
+    | ffd28ca8 | 8,256 (24, 8) | 7,912 (23, 7) |
+    | this release | 0 | 0 |
+
+    At ffd28ca8 the misses were: the Polish label in upper case with the stroked L (client view only); the
+    Hindi and the Thai label in every spelling; the Greek label in its natural form (the tonos and the final
+    sigma) in every spelling; the three Arabic and Persian labels with a tatweel; the Japanese label with its
+    voicing marks absent. With the tables of ffd28ca8 put back, the test reports the reported entries and a
+    citation run shows its owner the values.
+    End to end: a citation run whose answer text, cited title and hint carry the three reported forms and 20
+    other entries in upper case (69 planted values, 72 evidence fields read by the owning tenant): 72 masked
+    with an alert, 0 values shown.
+
+    **Residuals (asserted in the test, not hidden).**
+    - An inflected form of the two stem entries other than the listed nominative, before a separator and a
+      value: the client view shows it. Russian (genitive, instrumental, dative): 3 of 3 shown, 3 of 3 flagged
+      by the strict lane. Greek with the FIRST word inflected (genitive, accusative): 2 of 2 shown and 2 of 2
+      not flagged, in either lane, as before (the stem is the nominative of the first word).
+    - The word `key` alone is not a list entry: the strict lane has its own rule for it (`key`, a separator,
+      a value); the client view masks it only inside a listed label (`api key`, `secret key`). Unchanged.
+    - Not a label finding and not changed: an all-capitals sentence can read as a strong-key shape (the AWS
+      key-id rule on the text with its spaces removed). 39 of 320 generated Polish sentences in UPPER CASE
+      are masked for it, and 39 at ffd28ca8.
+
+    **What the normal form widens (on purpose):** in both lanes the Japanese label without its voicing
+    marks and an Arabic or Persian label with a tatweel; in the strict lane a lookalike letter that carried
+    a mark (a Greek letter with a tonos standing for a Latin one), which the client view already read.
+    Differential test against ffd28ca8, 120,000 generated texts (labels in every script of the lists with
+    case, NFD, lookalike, mark and separator mutations, values in several scripts, neutral words around
+    them): the strict lane flags 14,846 texts it let through and none fewer (92 more change their reason to
+    a label); the client view masks 9,073 more for a label and a value and none fewer; no other client-view
+    finding changes.
+
+    **No regression on the other side** (the same corpora at ffd28ca8 and at this release; identical in
+    every cell):
+
+    | Corpus (units) | Client view masked: as written / Title Case / UPPER CASE | Of them for a label and a value |
+    |---|---|---|
+    | generated English e-commerce prose, some with a credential word in prose (3,200) | 0 / 0 / 0 | 0 / 0 / 0 |
+    | the utility corpus of the earlier rounds, answers and their sentences (324) | 0 / 0 / 2 (strong-key shape) | 0 / 0 / 0 |
+    | generated Polish (320) | 0 / 0 / 39 (strong-key shape, above) | 0 / 0 / 0 |
+    | generated Hindi, Thai, Japanese, Russian, Greek (320 each) | 0 / 0 / 0 | 0 / 0 / 0 |
+
+    Mixed-case rise: 0.0 points. The strict lane on the same corpora is unchanged too (English: 935 of 3,200
+    withheld in each casing, 870 for a credential word in prose, as it always did; the utility corpus: 20 / 20
+    / 22; the other languages: 0, and 39 Polish in UPPER CASE). The entries whose key differs from the entry
+    as listed (Hindi, Thai, Japanese): the key is found in 0 of 960 generated units of its language each, and
+    in 0 of 2,207 (Hindi), 2,412 (Thai) and 2,440 (Japanese) real-language strings (the CLDR names shipped
+    with Babel) and 0 of 200,000 random joins of three of them; no script key in any of the Arabic, Persian,
+    Hebrew, Greek, Russian, Korean and Chinese ones (2,205..2,472 strings each). The generated corpora have
+    small vocabularies (about 45 words a language) and no larger real-text corpus was available offline: a
+    rare ordinary word that holds a stripped key is not excluded by these figures. The client view asks for a
+    separator and a value after the label, as before; the strict lane withholds on the label alone, as for
+    every other entry.
+    Cost, client view, microseconds of CPU per unit, the best of three interleaved runs of each release on
+    one box (a single run of the same code can differ by 20% there): English 64.9 -> 64.2, the utility
+    corpus 138.2 -> 138.8, Polish 103.8 -> 103.5, Hindi 51.1 -> 50.8, Thai 25.4 -> 25.1, Japanese 22.8 ->
+    23.8 (+4.4%, the largest), Russian 102.4 -> 100.7, Greek 115.2 -> 113.5.
+    `tests/test_secret_guard_perf.py` passes.
 
 ## Threat model
 
