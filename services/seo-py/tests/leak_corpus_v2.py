@@ -147,6 +147,18 @@ def label_forms(label, value):
     }
 
 
+def cased_verb_forms(label, value):
+    """Review 98b76cde MUST 2: the verb between a label and its value in any case (the client view matched it in
+    lower case only). Their cases are appended at the END of ``corpus()``, so that no earlier case moves."""
+    return {
+        "is_title": f"the {label} Is {value}", "is_upper": f"the {label} IS {value}", "is_mixed": f"the {label} iS {value}",
+        "was_title": f"the {label} Was {value} then", "was_upper": f"the {label} WAS {value} then",
+        "are_title": f"the {label} Are {value} now", "are_upper": f"the {label} ARE {value} now",
+        "would_be_upper": f"for the admin the {label} WOULD BE {value} today",
+        "will_be_title": f"the {label} Will Be {value} tomorrow", "remains_upper": f"{label} REMAINS {value} after the reset",
+    }
+
+
 def _zw(s, ch):
     return ch.join(s)
 
@@ -241,6 +253,13 @@ def corpus(seed: int = 7) -> list:
         value = _r(lrng, 7, string.ascii_lowercase) + str(lrng.randint(10, 99))
         cases.append(Case(f"homoglyph/{label}", "labelled", "homoglyph_label", f"Z Best Media. {label}: {value}",
                           (value,), value))
+    # review 98b76cde MUST 2: every label x every cased verb form (appended last: see ``cased_verb_forms``)
+    crng = random.Random(seed + 2)
+    for label in LABELS:
+        for fname, text in cased_verb_forms(label, "VALUEPLACEHOLDER").items():
+            value = _r(crng, 6, string.ascii_lowercase) + str(crng.randint(10, 99))
+            cases.append(Case(f"label/{label}/{fname}", "labelled", fname, "Z Best Media. " + text.replace(
+                "VALUEPLACEHOLDER", value), (value,), value))
     return cases
 
 

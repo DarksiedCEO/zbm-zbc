@@ -24,6 +24,7 @@ builder nor an exemption fails. Failures print route names, field names, family 
 from __future__ import annotations
 
 import base64
+import collections
 import json
 import logging
 import os
@@ -51,8 +52,11 @@ DOMAIN = sa.DOMAIN
 EXTRA_FAMILIES = ("atless", "sepdigits", "hex", "number")
 FAMILIES = ("prose", "email", "key", "luhn", "ssn", "token") + EXTRA_FAMILIES
 # a family whose value is a machine value by definition wherever no route rule refuses it: a short token (the
-# known limit) and 32 hex characters (the guard's ``hash`` class; the identifier fields refuse it themselves)
-MACHINE_FAMILIES = ("token", "hex")
+# known limit) and 32 hex characters (the guard's ``hash`` class; the identifier fields refuse it themselves).
+# Review 98b76cde MUST 1: the ``atless`` value (``first.last.at.domain.com``) is a HOST NAME with an ``at`` label,
+# a machine value as at 2b26d980: the guard takes it, the identifier fields still refuse it as an e-mail form, and
+# a DOMAIN field takes it (``HOST_LIMIT``: exactly where it may be found afterwards)
+MACHINE_FAMILIES = ("token", "hex", "atless")
 DISGUISES = ("raw", "base64", "percent")
 HEADERS_READ = ("Authorization", api.CALLER_HEADER, api.TENANT_HEADER, api.FOUNDER_HEADER)
 P = "/seo/v1"
@@ -67,6 +71,11 @@ KNOWN_LIMIT = frozenset((
     "POST /seo/v1/tenants/{tid}/domains body:domains[]",
     "POST /seo/v1/tenants/{tid}/finance-client body:finance_client_id",
 ))
+
+
+# Review 98b76cde MUST 1: the one (route, field) pair where the ``atless`` family (a host name with an ``at`` label)
+# is accepted and therefore logged as a machine value: a tenant's DOMAIN. Nowhere else.
+HOST_LIMIT = frozenset(("POST /seo/v1/tenants/{tid}/domains body:domains[]",))
 
 
 # ================================================================================================ canaries
@@ -822,8 +831,11 @@ def summarise(hits: list) -> dict:
 
 
 def stray_of(found: dict) -> dict:
-    """The hits that are not the known limit (a token family value in a ``KNOWN_LIMIT`` pair)."""
-    return {k: v for k, v in found.items() if k[2] != "token" or f"{k[0]} {k[1]}" not in KNOWN_LIMIT}
+    """The hits that are not the known limit (a token family value in a ``KNOWN_LIMIT`` pair; review 98b76cde: a
+    host name with an ``at`` label in a ``HOST_LIMIT`` pair)."""
+    return {k: v for k, v in found.items()
+            if not ((k[2] == "token" and f"{k[0]} {k[1]}" in KNOWN_LIMIT)
+                    or (k[2] == "atless" and f"{k[0]} {k[1]}" in HOST_LIMIT))}
 
 
 # ================================================================================================ the tests
@@ -856,6 +868,13 @@ def test_every_route_and_every_string_field_with_canaries_leaves_nothing_but_the
     assert not stray, f"{len(stray)} canary leak(s): " + "; ".join(f"{k} in {v}" for k, v in sorted(stray.items()))
     accepted = {f"{route} {field}" for route, field, _family in found}
     assert accepted == set(KNOWN_LIMIT), (sorted(accepted - set(KNOWN_LIMIT)), sorted(set(KNOWN_LIMIT) - accepted))
+    # review 98b76cde: the host name with an ``at`` label is found exactly in the DOMAIN pair, a short token in
+    # the three pairs, and no other family anywhere
+    by_family = collections.defaultdict(set)
+    for route, field, family in found:
+        by_family[family].add(f"{route} {field}")
+    assert dict(by_family) == {"token": set(KNOWN_LIMIT), "atless": set(HOST_LIMIT)}, {
+        k: sorted(v) for k, v in by_family.items()}
     print("canary coverage: routes=%d covered=%d exempt=%d fields=%d planted=%d calls=%d known_limit_pairs=%d files=%d"
           % (len(routes), len(covered), len(EXEMPT), sum(len(v) for v in covered.values()), res["planted"],
              res["calls"], len(accepted), len(res["files"])))

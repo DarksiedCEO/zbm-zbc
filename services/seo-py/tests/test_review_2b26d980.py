@@ -62,6 +62,7 @@ CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 def clear_guard_caches() -> None:
     sg._CACHE.clear()
     sg._HOST_CACHE.clear()
+    sg._LEGACY_CACHE.clear()
     sg._KEYS.clear()
 
 
@@ -359,9 +360,8 @@ SECRET_HOSTS = {
     "phone_10": lambda: digits(10) + ".example.com",
     "phone_dashed": lambda: "-".join((digits(3), digits(3), digits(4))) + ".example.com",
     "phone_after_a_word": lambda: "tel" + digits(10) + ".example.com",
-    # e-mail forms without "@"
-    "email_at_label": lambda: ".".join((letters(5), letters(6), "at", letters(7), secrets.choice(("com", "org")))),
-    "email_mailbox_provider": lambda: ".".join((letters(5), letters(6), secrets.choice(sorted(sg.MAILBOX_PROVIDERS)))),
+    # (review 98b76cde MUST 1: a host with an ``at`` label and a sub-domain of a mailbox provider are host names, as
+    # they were at 2b26d980; tests/test_review_98b76cde.py asserts they are ACCEPTED in every lane)
     # the value of a credential label
     "label_value_in_label": lambda: "pass" + "word-" + letters(4) + digits(3) + ".example.com",
     "label_value_next_label": lambda: "tok" + "en." + letters(4) + digits(4) + ".shop.example.com",
@@ -985,18 +985,16 @@ HOST_MUTATIONS = {
                           m.setattr(secret_guard, "_JOINED_PREFIX", re.compile(r"(?!)")),
                           m.setattr(secret_guard, "_AWS_JOINED", re.compile(r"(?!)"))),
                lambda: "sk-proj-" + letters(14) + ".example.com"),
+    # (review 98b76cde: a word label between the two halves, so that only the hex rule reads them together; two
+    # ADJACENT halves are now also a token split over two labels)
     "hex": (lambda m: m.setattr(sg, "HOST_HEX_MIN", 10 ** 6),
-            lambda: secrets.token_hex(8) + "." + secrets.token_hex(8) + ".example.com"),
+            lambda: secrets.token_hex(8) + ".shop." + secrets.token_hex(8) + ".example.com"),
     "token": (lambda m: m.setattr(sg, "HOST_TOKEN_MIN", 10 ** 6), lambda: mixed_token(26) + ".example.com"),
     "digit_run": (lambda m: m.setattr(sg, "HOST_DIGIT_RUN", 10 ** 6), lambda: digits(10) + ".example.com"),
     "digit_total": (lambda m: m.setattr(sg, "HOST_DIGITS_TOTAL", 10 ** 6),
                     lambda: "a" + digits(4) + "." + digits(4) + ".b." + digits(4) + ".c." + digits(4) + ".example.com"),
     "hash_run_cap": (lambda m: m.setattr(sg, "HOST_HASH_RUN_MAX", 10 ** 6),
                      lambda: "ab" + digits(14) + "cd.example.com"),
-    "email_at": (lambda m: m.setattr(sg, "HOST_AT_LABEL", "\x00"),
-                 lambda: ".".join((letters(5), letters(6), "at", letters(7), "com"))),
-    "email_provider": (lambda m: m.setattr(sg, "MAILBOX_PROVIDERS", frozenset()),
-                       lambda: ".".join((letters(5), letters(6), sorted(secret_guard.MAILBOX_PROVIDERS)[0]))),
     "label_value": (lambda m: m.setattr(sg, "HOST_VALUE_MIN", 10 ** 6),
                     lambda: "pass" + "word-" + letters(4) + digits(3) + ".example.com"),
     "idna": (lambda m: m.setattr(sg, "_idna_label_ok", lambda label: True), lambda: undecodable_label() + ".example.com"),
@@ -1018,21 +1016,30 @@ def test_each_host_rule_bites(name, monkeypatch):
 
 
 def test_every_lane_judges_a_host_alike():
-    """The guard's ``hostname`` class, the strict check and the strict URL inspection agree on every host: one the
-    sink takes is kept in a URL (a tenant's own site is not withheld), one it refuses is withheld."""
+    """A host the host rule takes is kept in every lane: the guard's ``hostname`` class, the strict check, the strict
+    URL inspection (a tenant's own site is not withheld). Review 98b76cde (P1): a host the rule REFUSES is judged in
+    each lane as release 2b26d980 judged it there, and those lanes never were one rule (the strict check read the
+    whole host, the URL inspection each label too). What holds for every host: the sink takes a host exactly when
+    BOTH strict lanes keep it, and a host kept for the log (``callum.checked_host``) is one the sink takes."""
     from agents import callum
     r = random.Random(SEED + 3)
     hosts = [gen(r) for gen, _n in HOST_CORPORA.values() for _ in range(250)] + named_label_word_hosts() + \
-        [gen() for gen in SECRET_HOSTS.values() for _ in range(40)] + [undecodable_label() + ".com" for _ in range(40)]
+        [gen() for gen in SECRET_HOSTS.values() for _ in range(45)] + [undecodable_label() + ".com" for _ in range(40)]
     split = collections.Counter()
+    lanes_differ = 0
     for h in hosts:
         ok = sg.classify(h) == "hostname"
         split[ok] += 1
         u = secret_guard.inspect_url(f"https://{h}/about?x=1")
-        assert (secret_guard.check(h) is None) == ok, (ok, sg.host_refusal(h))
-        assert (u["host_kind"] is None) == ok, (ok, sg.host_refusal(h))
-        assert (secret_guard.safe_url(f"https://{h}/about") == f"https://{h}/about") == ok, (ok, sg.host_refusal(h))
+        checked, kept = secret_guard.check(h) is None, u["host_kind"] is None
+        if sg.host_refusal(h) is None:
+            assert ok and checked and kept, sg.host_refusal(h)
+        assert (checked and kept) == ok, (ok, checked, kept, sg.host_refusal(h))
+        assert (secret_guard.safe_url(f"https://{h}/about") == f"https://{h}/about") == kept, (kept, sg.host_refusal(h))
         assert (callum.checked_host(h)["host"] == h) == ok, (ok, sg.host_refusal(h))
+        lanes_differ += checked != kept
+    print(f"lanes: hosts={len(hosts)} sink_takes={split[True]} sink_refuses={split[False]} "
+          f"strict_check_and_url_inspection_differ={lanes_differ}")
     assert split[True] >= 1000 and split[False] >= 1000, dict(split)
     for h in ("EXAMPLE.com", "Shop.Example.COM"):            # a URL's host is read in lower case
         assert secret_guard.inspect_url(f"https://{h}/")["host_kind"] is None
@@ -1051,7 +1058,7 @@ def test_the_host_rule_edges():
     for host, reason in bad.items():
         assert sg.host_refusal(host) == reason, (len(host), reason)
     # a host-shaped value is a host name or nothing: a refused one is never read as a code instead
-    for name in ("email_at_label", "hex_32", "ssn_dashed"):
+    for name in ("phone_10", "hex_32", "ssn_dashed"):       # (review 98b76cde: the e-mail host rule is gone)
         assert sg._judge(SECRET_HOSTS[name]()) == (None, "host")
 
 
@@ -1411,6 +1418,7 @@ def test_identifier_fields_refuse_atless_email_forms_and_folded_prose(tmp_path):
     prose = "-".join(letters(k) + "e" for k in (3, 5, 4, 6, 3, 5))
     tenant_rx, name_rx = re.compile(models.TENANT), re.compile(r"^[a-z0-9][a-z0-9_-]{1,63}$")
     tried = collections.Counter()
+    accepted_writes = 0                                      # log lines of the accepted DOMAIN forms (see below)
     for key, v in sorted(forms.items()) + [("prose", prose)]:
         if tenant_rx.fullmatch(v):
             tried["tenant_id"] += 1
@@ -1421,13 +1429,15 @@ def test_identifier_fields_refuse_atless_email_forms_and_folded_prose(tmp_path):
             h.refused(h.post("/tenants/acme/finance-client", {"request_id": rid(), "finance_client_id": v},
                              andre=True), 422, "IDENTIFIER_WITHHELD")
         if key != "prose" and re.fullmatch(models.DOMAIN, v) and svc_tenants.valid_domain(v):
+            # review 98b76cde MUST 1: a DOMAIN is a host name, never an "@"-less e-mail form (an ``at`` label, a
+            # mailbox provider's sub-domain): accepted here, as at 2b26d980 (the rule stays on the identifiers)
             tried["domains"] += 1
-            h.refused(h.post("/tenants/acme/domains", {"request_id": rid(), "domains": [v]}, andre=True), 422,
-                      "IDENTIFIER_WITHHELD")
+            h.ok(h.post("/tenants/acme/domains", {"request_id": rid(), "domains": [v]}, andre=True))
             tried["competitor_domains"] += 1
-            h.refused(h.post("/tenants/acme/prompt-sets", {
+            h.ok(h.post("/tenants/acme/prompt-sets", {
                 "request_id": rid(), "name": "n" + letters(5), "brand_terms": ["Acme"], "prompts": ["who cleans"],
-                "competitor_domains": [v], "engines": ["openai"]}, caller="dashboard"), 422, "IDENTIFIER_WITHHELD")
+                "competitor_domains": [v], "engines": ["openai"]}, caller="dashboard"), 201)
+            accepted_writes += len(h.svc.log) - n - accepted_writes
         if key != "prose" and name_rx.fullmatch(v):
             tried["prompt_set_name"] += 1
             h.refused(h.post("/tenants/acme/prompt-sets", {
@@ -1443,14 +1453,17 @@ def test_identifier_fields_refuse_atless_email_forms_and_folded_prose(tmp_path):
                 h.refused(r, 422, "IDENTIFIER_WITHHELD")
             else:                                          # any other shape: the field's format refuses it first
                 h.refused(r, 422, "ENTITY_VALUE_INVALID")
-    assert len(h.svc.log) == n
+    assert len(h.svc.log) == n + accepted_writes and accepted_writes == 2 * tried["domains"] > 0
     assert min(tried[k] for k in ("tenant_id", "finance_client_id", "domains", "competitor_domains",
                                   "prompt_set_name", "entity_source")) >= 2, dict(tried)
-    # what remains accepted (ADR 0051's known limit): a short token, a five-segment id, a hyphenated "at" in a host
+    # what remains accepted (ADR 0051's known limit): a short token, a five-segment id
     h.ok(h.post("/tenants", {"request_id": rid(), "tenant_id": "acme-co-uk-retail-west", "kind": "client"},
                 andre=True), 201)
-    h.ok(h.post("/tenants/acme/domains", {"request_id": rid(), "domains": ["acme.test", "great-at-work.test"]},
-                andre=True))
+    # review 98b76cde MUST 3: a hyphenated "at" in a DOMAIN is refused at registration, exactly as at 2b26d980
+    # (98b76cde had begun to accept it); the same host met in a URL or a citation is kept (the sink lane)
+    h.refused(h.post("/tenants/acme/domains", {"request_id": rid(), "domains": ["acme.test", "great-at-work.test"]},
+                     andre=True), 422, "IDENTIFIER_WITHHELD")
+    assert sg.classify("great-at-work.test") == "hostname"
 
 
 def test_mutation_without_the_atless_rule_the_forms_are_accepted(tmp_path, monkeypatch):

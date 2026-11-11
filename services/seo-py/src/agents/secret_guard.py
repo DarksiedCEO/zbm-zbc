@@ -1671,23 +1671,27 @@ def _check(text: str, waive=frozenset(), urls: bool = True) -> str | None:
 
 
 # Review 2b26d980 SHOULD 1: ONE rule for a host name, in every lane. A text that is, whole, a syntactically valid host
-# name (lower case, dotted labels, a TLD) is judged by the host rule the sink guard defines (``sink_guard.
-# host_refusal``, registered here at its import: this module cannot import it) and by nothing else: a credential WORD
-# in a label is a name (``1password.com``), a platform hash label is a name; a key-shaped, number-shaped or
-# e-mail-shaped host fails the matching check. Before, a tenant whose own domain held such a label had every URL of
-# its site withheld (and its audits refused at the sink).
+# name (lower case, dotted labels, a TLD) is first judged by the host rule the sink guard defines (``sink_guard.
+# host_refusal``, registered here at its import: this module cannot import it): a credential WORD in a label is a
+# name (``1password.com``), a platform hash label is a name. Before, a tenant whose own domain held such a label had
+# every URL of its site withheld (and its audits refused at the sink).
+# Review 98b76cde (P1): the rule only ever ADDS host names. A host it refuses is judged by the checks that judged it
+# before the rule existed (release 2b26d980: ``_check`` on the whole text; in a URL, on the host and on each label),
+# so no host that release kept is withheld now. The rule holds no e-mail form: a sub-domain of a mailbox provider
+# (``finance.yahoo.com``) and a host with an ``at`` label are host names, as they were.
 HOST_RULE = None                         # (host) -> a reason name or None
 HOST_LIKE = None                         # (text) -> the text has a host name's shape
 _HOST_RULE_TRIED: list = []
 # (an ``xn--`` label that does not decode to a label of letters is not a name: read as a token, so that the lanes
 # agree on every host-shaped text; a host that fails on syntax or its TLD alone is left to the ordinary checks)
 _HOST_CHECK = {"prefix": "c_prefix", "hex": "d_token", "token": "d_token", "idna": "d_token",
-               "label_value": "a_label", "digits": "e_digits", "email": "f_email"}
+               "label_value": "a_label", "digits": "e_digits"}
 
 
 def host_verdict(text) -> tuple:
     """(True, the failing check name or None) when ``text`` is a host name judged by the host rule; (False, None) when
-    it is not one (the ordinary checks apply)."""
+    it is not one. Only ``(True, None)`` is a verdict (the host is kept): for every other answer the caller runs the
+    ordinary checks, as release 2b26d980 did (review 98b76cde, P1)."""
     if len(text) > 253 or "." not in text:
         return False, None
     rule, like = globals()["HOST_RULE"], globals()["HOST_LIKE"]
@@ -1719,9 +1723,9 @@ def check(text, waive=frozenset()) -> str | None:
         return None
     try:
         applies, name = host_verdict(text)
-        if applies:
-            return name
-        return _check(text, frozenset(waive) & WAIVABLE)
+        if applies and name is None:
+            return None                                    # a host name the host rule takes
+        return _check(text, frozenset(waive) & WAIVABLE)   # else the ordinary checks (review 98b76cde, P1)
     except Exception:  # noqa: BLE001 - fail closed: an input the checks cannot read is withheld
         return "error"
 
@@ -1840,8 +1844,19 @@ def folded_prose(text) -> bool:
     return len(parts) >= FOLDED_SEGMENTS_MIN and sum(1 for x in parts if _FOLDED_WORD.fullmatch(x)) >= FOLDED_WORDS_MIN
 
 
-def identifier_refusal(text) -> str | None:
-    """The reason an identifier is refused (a check name), or None. Never raises."""
+def email_form(text) -> bool:
+    """An e-mail form as release 2b26d980 read one in an identifier: an "@", or a form the strict e-mail check hits
+    (``first-last-at-domain.tld``: `` at `` between words once separators read as spaces). Never raises."""
+    try:
+        return isinstance(text, str) and ("@" in text or _email_hit(text))
+    except Exception:  # noqa: BLE001 - fail closed
+        return True
+
+
+def identifier_refusal(text, atless: bool = True) -> str | None:
+    """The reason an identifier is refused (a check name), or None. Never raises. ``atless=False``: without the
+    "@"-less e-mail forms of review 2b26d980 (``atless_email``), which are for a tenant id and a Finance client id:
+    a DOMAIN is never refused for being a mailbox provider's sub-domain or for an ``at`` label (review 98b76cde)."""
     if not isinstance(text, str) or not text:
         return "type"
     r = globals()["operator_refusal"](text)
@@ -1849,7 +1864,7 @@ def identifier_refusal(text) -> str | None:
         return r
     if _ID_DIGITS.search(text):
         return "e_digits"
-    if "@" in text or _email_hit(text) or globals()["atless_email"](text):
+    if "@" in text or _email_hit(text) or (atless and globals()["atless_email"](text)):
         return "f_email"
     return check(text)
 
@@ -2098,9 +2113,8 @@ def _inspect(url, urls: bool, fetch: bool = False) -> dict | None:
     raw_host = re.sub(r":\d*$", "", (p.netloc or "").rsplit("@", 1)[-1])
     host_kind = None
     applies, name = globals()["host_verdict"](raw_host.lower())    # review 2b26d980: the one host rule
-    if applies:
-        host_kind = _kind(name)
-    else:
+    if not (applies and name is None):
+        # review 98b76cde (P1): a host the rule does not take is judged as before the rule (whole, then by label)
         for part in [raw_host] + raw_host.split("."):
             k = _kind(chk(part)) or (CREDENTIAL if part and _host_label_key(part) else None)
             if k is not None:
@@ -2451,14 +2465,17 @@ def _cv_label_rx() -> re.Pattern:
 _CV_LABEL = _cv_label_rx()
 # review c13529af S5: the letters of a non-Latin label may be joined by a space or "_" (``<label_word>value``, XML tag
 # form)
+# (review 98b76cde MUST 2: in any case; three of the labels are in a cased script, Cyrillic and Greek)
 _CV_SCRIPT = re.compile("|".join("[ _]?".join(re.escape(c) for c in s.replace(" ", ""))
                                  for s in sorted(set(_SCRIPT) | {"\u043f\u0430\u0440\u043e\u043b\u044c"},
-                                                 key=len, reverse=True)))
+                                                 key=len, reverse=True)), re.IGNORECASE)
 # what follows a label: closing quotes / brackets / emphasis, then a separator, then opening quotes / brackets, then a
-# value of 4+ characters (stopped by a space, a quote, a bracket, ``|`` ``,`` ``;`` ``&``)
+# value of 4+ characters (stopped by a space, a quote, a bracket, ``|`` ``,`` ``;`` ``&``). Review 98b76cde MUST 2: the
+# words are matched in ANY case (`` Is ``, `` IS ``, `` Was ``, `` WOULD BE ``): a label and its value were shown
+# to the owner when the verb between them had a capital
 _CV_AFTER = re.compile(
     " ?[\"'\\]\\)>*`]{0,3} ?(?:(?P<p>:|=>|=|->|\u2192|\u21d2|\\||>)"
-    "| (?:is|-|\u2013|\u2014) |(?P<w> (?:was|are|would be|will be|remains) ))"
+    "| (?:(?i:is)|-|\u2013|\u2014) |(?P<w> (?i:was|are|would be|will be|remains) ))"
     " ?[\"'`<\\[(*|]{0,3} ?(?P<val>[^\\s\"'`<>|,;&)\\]]{4,}|[^\\s\"'`<>|,;&)\\]]{1,3} [^\\s\"'`<>|,;&)\\]]{1,16})")
 
 

@@ -38,10 +38,12 @@ The closed set of classes (``CLASSES``):
   hostname     a syntactically valid host name (labels of 1..63, 253 in all, a letters-only TLD of 2..24 or a
                punycode TLD, every ``xn--`` label decoding to letters) that ``host_refusal`` passes: no label has a
                strong-key prefix shape, 32+ hex characters or a 24+ character letters-and-digits token; no run of
-               9+ digits (joined across ``-`` / ``.`` between all-digit pieces), under 12 digits in all-digit pieces;
-               no e-mail form (an ``at`` label before a domain, a mailbox provider's domain after a name). A
-               credential WORD in a label is allowed (``1password.com``): a host name carries no value after it,
-               except a letters-and-digits piece of 6+ right after the word, which is refused
+               9+ digits (joined across ``-`` / ``.`` between all-digit pieces), under 12 digits in all-digit pieces.
+               A credential WORD in a label is allowed (``1password.com``): a host name carries no value after it,
+               except a letters-and-digits piece of 6+ right after the word, which is refused. Review 98b76cde:
+               the rule holds NO e-mail form (``finance.yahoo.com`` and ``look.at.example.org`` are host names),
+               and a host this rule refuses is still a host name when the release before the rule (2b26d980)
+               took it (``_legacy_host_ok``): the rule only ever ADDS host names, it never takes one away
   code         an enum / reason code: 1..64 characters of ``[A-Za-z0-9_.:-]`` holding a letter
   model_id     an answer-engine model id (sink job C): EXACTLY one of ``MODEL_IDS``, the closed set of ids the engine
                adapters declare (their allowlists; a configured model is always one of them). Nothing is matched by
@@ -166,17 +168,20 @@ HOST_TOKEN_MIN = 24                      # a label of 24+ letters and digits ...
 HOST_TOKEN_CHANGES = 2                   # ... with 2+ letter<->digit changes is a random token
 HOST_DIGIT_RUN = 9                       # 9+ digits in a row (all-digit pieces joined across ``-`` / ``.``)
 HOST_DIGITS_TOTAL = 12                   # digits in all-digit pieces of the whole host
-# a platform hash label (``1a2b3c4d5e6f.ngrok.io``): all hex, 12..31 characters, 2+ hex letters; a digit run of at
-# most 12 inside it is part of the hash (one hex label in about 30 has a run of 9+)
+# a platform hash label (``1a2b3c4d5e6f.ngrok.io``): all hex, 12..31 characters; a digit run of at most 12 inside
+# it is part of the hash (one hex label in about 30 has a run of 9+) ONLY when the piece holds 4+ hex letters
+# (review 98b76cde MUST 3: a telephone number or an SSN with one to three hex letters attached, before it, after
+# it or around it, is a number, not a hash; with 2+ letters, as before, 35..100% of those passed). Measured in
+# tests/test_review_98b76cde.py and ADR 0051: the cost is hash labels with a 9+ digit run and under 4 letters
 HOST_HASH_LABEL = (12, 31)
-HOST_HASH_LETTERS = 2
+HOST_HASH_LETTERS = 4
 HOST_HASH_RUN_MAX = 12
 HOST_VALUE_MIN = 6                       # a letters-and-digits piece this long right after a credential word
-HOST_AT_LABEL = "at"                     # ``first.last.at.domain.tld``: an e-mail address without its "@"
-HOST_REASONS = ("syntax", "tld", "idna", "prefix", "hex", "token", "digits", "email", "label_value")
-MAILBOX_PROVIDERS = secret_guard.MAILBOX_PROVIDERS     # ``<name>.<provider domain>``: an e-mail without its "@"
-MAILBOX_SERVICE_LABELS = frozenset(("www", "m", "mail"))    # ``mail.yahoo.com`` is the provider's own site
+# ``password-is-<value>``: the words that may stand between a credential word and its value (review 98b76cde)
+HOST_VALUE_LINKS = frozenset(("is", "was", "are", "equals"))
+HOST_REASONS = ("syntax", "tld", "idna", "prefix", "hex", "token", "digits", "label_value")
 _HOST_CACHE: dict = {}                   # host -> reason or None (bounded; a refusal is remembered too)
+_LEGACY_CACHE: dict = {}                 # host the rule refuses -> the 2b26d980 verdict (bounded)
 _LABEL_PAIRS = frozenset(w for w in secret_guard._LABEL_WORDS if len(w) >= 6)
 
 
@@ -243,14 +248,16 @@ def _label_word(pieces: list, i: int) -> bool:
 
 
 def _hash_piece(piece: str) -> bool:
-    """A platform hash piece: all hex, 12..31 characters, 2+ hex letters."""
+    """A platform hash piece, whose digit run of up to 12 is part of the hash: all hex, 12..31 characters, 4+ hex
+    letters."""
     return (HOST_HASH_LABEL[0] <= len(piece) <= HOST_HASH_LABEL[1] and not piece.strip(_HEX)
             and sum(1 for c in piece if c in "abcdef") >= HOST_HASH_LETTERS)
 
 
 def _host_digits(labels: list) -> bool:
     """True when the host's digits read as a number: a run of 9+ (all-digit pieces joined across ``-`` and ``.``;
-    a run inside one piece), or 12+ digits in all-digit pieces. A platform hash piece keeps a run of at most 12."""
+    a run inside one piece), or 12+ digits in all-digit pieces. A platform hash piece (``_hash_piece``) keeps a run
+    of at most 12."""
     total = chain = 0
     for label in labels:
         for piece in label.split("-"):
@@ -288,12 +295,22 @@ def _host_judge(s: str, labels: list) -> Optional[str]:
             t = "".join(x for x in label.split("-") if x.strip(_LOWER))
             if len(t) >= HOST_TOKEN_MIN and t.strip(_DIGITS) and _changes(t) >= HOST_TOKEN_CHANGES:
                 return "token"
-    # a key split over labels: adjacent all-hex labels read together
+    # a token split over two adjacent labels (review 98b76cde): their non-word pieces read together
+    prev = ""
+    for label in labels[:-1]:
+        t = "" if label[:4] == "xn--" else "".join(x for x in label.split("-") if x.strip(_LOWER))
+        if prev and t and len(prev) + len(t) >= HOST_TOKEN_MIN and (prev + t).strip(_DIGITS) \
+                and _changes(prev + t) >= HOST_TOKEN_CHANGES:
+            return "token"
+        prev = t
+    # a key split over labels: all-hex labels read together; a plain word label between two of them does not end
+    # the key (review 98b76cde: ``<16 hex>.shop.<16 hex>``)
     run, digit = 0, False
     for label in labels[:-1]:
         j = label.replace("-", "")
         if j.strip(_HEX):
-            run, digit = 0, False
+            if j.strip(_LOWER):
+                run, digit = 0, False
             continue
         run += len(j)
         digit = digit or bool(j.strip("abcdef"))
@@ -302,19 +319,18 @@ def _host_judge(s: str, labels: list) -> Optional[str]:
     if _host_digits(labels):
         return "digits"
     n = len(labels)
-    for i in range(1, n - 2):
-        if labels[i] == HOST_AT_LABEL:
-            return "email"                                  # ``first.last.at.domain.tld``
-    for k in (2, 3):
-        if n > k and ".".join(labels[-k:]) in MAILBOX_PROVIDERS \
-                and not (n == k + 1 and labels[0] in MAILBOX_SERVICE_LABELS):
-            return "email"                                  # ``user.name.gmail.com``
-    # the value of a credential label: a letters-and-digits piece of 6+ right after the word, in the same label
-    # (``password-hunter2``) or as the next label when that is not the registrable name (``token.abc123.site.tld``)
+    # the value of a credential label: a letters-and-digits piece of 6+ right after the word (or after the word and
+    # ``is`` / ``was`` / ``are`` / ``equals``), in the same label (``password-hunter2``) or as the next label when
+    # that is not the registrable name (``token.abc123.site.tld``)
     for i, label in enumerate(labels):
         pieces = label.split("-")
         for k in range(len(pieces) - 1):
-            if _label_word(pieces, k) and _valueish(pieces[k + 1]):
+            if not _label_word(pieces, k):
+                continue
+            m = k + 1
+            if m < len(pieces) - 1 and pieces[m] in HOST_VALUE_LINKS:
+                m += 1                                      # ``password-is-<value>`` (review 98b76cde)
+            if _valueish(pieces[m]):
                 return "label_value"
         if i + 1 < n - 2 and _label_word(pieces, len(pieces) - 1) and all(
                 p in secret_guard._LABEL_WORDS or p in secret_guard.LABEL_ACTION_WORDS for p in pieces) \
@@ -347,8 +363,32 @@ def host_refusal(s) -> Optional[str]:
     return reason
 
 
+def _legacy_host_ok(host: str) -> bool:
+    """What release 2b26d980 (before the host rule) decided for a host-shaped value, kept so that the rule never
+    refuses a host that release took (review 98b76cde, P1): the strict URL inspection of ``https://<host>/`` and
+    the strict check of the whole host; a value whose last label is an ``xn--`` label was not a host name there
+    and was judged as a code. In both, the strict lane falls back to its own 2b26d980 checks for a host the rule
+    refuses (``secret_guard.check`` / ``_inspect``), so nothing here asks the rule again."""
+    if host.rsplit(".", 1)[-1][:4] == "xn--":
+        return len(host) <= CODE_MAX and _check(host) is None
+    u = secret_guard.inspect_url("https://" + host + "/")
+    return bool(u) and bool(u.get("host")) and u.get("host_kind") is None and _check(host) is None
+
+
 def _host_ok(host: str) -> bool:
-    return host_refusal(host) is None
+    """The hostname class: a host the rule takes, or one the release before the rule took."""
+    if host_refusal(host) is None:
+        return True
+    got = _LEGACY_CACHE.get(host)
+    if got is None:
+        try:
+            got = _legacy_host_ok(host)
+        except Exception:  # noqa: BLE001 - fail closed
+            got = False
+        if len(_LEGACY_CACHE) >= _CACHE_MAX:
+            _LEGACY_CACHE.clear()
+        _LEGACY_CACHE[host] = got
+    return got
 
 
 def host_shaped(s) -> bool:

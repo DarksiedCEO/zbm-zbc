@@ -41,6 +41,18 @@ def hexa(n: int, seed: int = 1) -> str:
     return out if any(c in "abcdef" for c in out) else "a" + out[1:]
 
 
+def host_token_label(n: int, r) -> str:
+    """A random host label of EXACTLY ``n`` letters and digits: a letter beyond ``f`` (not a hex run), 4..10 digits,
+    4+ letter<->digit changes, no run of 9 digits. Review 98b76cde SHOULD 4: the refusal of such a label is asserted
+    at the rule's own threshold (``sg.HOST_TOKEN_MIN``), on both sides of it, not four characters above it."""
+    chars = string.ascii_lowercase + string.digits
+    while True:
+        t = "".join(r.choice(chars) for _ in range(n))
+        if any(c in "ghijklmnopqrstuvwxyz" for c in t) and 4 <= sum(c.isdigit() for c in t) <= 10 \
+                and sg._changes(t) >= 4 and not any(t[i:i + 9].isdigit() for i in range(n - 8)):
+            return t
+
+
 def marker() -> str:
     """Two words unique to this run: prose, and something to scan the disk for."""
     return "zq" + uuid.uuid4().hex[:10] + " wv" + uuid.uuid4().hex[:10]
@@ -119,8 +131,10 @@ def refused_values() -> dict:
         "long": ("a" * (sg.MAX_LEN + 1), "long"), "long_code": ("A" * (sg.CODE_MAX + 1), "shape"),
         "url": ("https://example.com/x", "shape"), "path": ("/about", "shape"), "non_ascii": ("caf\u00e9", "charset"),
         # review 2b26d980 SHOULD 1: a platform hash label of up to 20 characters is a host name now; a random
-        # letters-and-digits label of 24+ is still a key
-        "brackets": ("[withheld]", "charset"), "host_key_label": ("a1b2" + rnd(24).lower() + ".example.com", "host"),
+        # letters-and-digits label of 24+ is still a key (review 98b76cde SHOULD 4: a label of exactly the
+        # threshold, ``sg.HOST_TOKEN_MIN`` = 24 characters; it was 28)
+        "brackets": ("[withheld]", "charset"),
+        "host_key_label": (host_token_label(sg.HOST_TOKEN_MIN, random.Random(24)) + ".example.com", "host"),
         "upper_hex": (rnd(40, "ABCDEF" + digits), "secret"), "unknown_id_prefix": ("seo-zzz-" + hexa(40), "secret"),
         "request_key_bad_target": (f"audit|two words|{uuid.uuid4()}", "space"),
         "request_key_no_uuid": ("audit|acme|" + rnd(12), "shape"),
@@ -384,6 +398,9 @@ EXPECTED_SINK_REFUSALS = {                                # test -> exactly the 
         ("ledger:audit_requested", "/note"), ("ledger:audit_requested", "/{key}"), ("ledger:log_anchor", "/line_shaN"),
         ("ledger:log_anchor", "/raw"))),
     _T + "test_the_reason_code_is_in_the_catalogue_and_the_api_answers_it": frozenset((("tenant_created", "/x"),)),
+    # review 98b76cde: the e-mail host rules put back on purpose (the 503 of a mailbox provider's sub-domain)
+    "test_review_98b76cde.py::test_mutation_with_the_e_mail_host_rules_back_the_same_tenant_is_refused_at_the_sink":
+        frozenset((("audit_requested", "/domain"),)),
     _T + "test_there_is_no_legacy_list_and_no_bypass": frozenset(
         [(k, "/x") for k in _KINDS] + [(sg.LEDGER + k, "/x[]") for k in _KINDS]),
     # review 2b26d980: the mutation tests that reproduce the review's findings, and the nan / inf probes
@@ -849,7 +866,28 @@ def prop_key_shapes_refused(tmp_path):
 
 
 def prop_host_keys_refused(tmp_path):
-    assert sg.classify("a1b2" + rnd(24).lower() + ".example.com") is None    # (24+: review 2b26d980 SHOULD 1)
+    # (24+: review 2b26d980 SHOULD 1; review 98b76cde SHOULD 4: at the threshold itself, and one below it)
+    r = random.Random(sg.HOST_TOKEN_MIN)
+    assert sg.classify(host_token_label(sg.HOST_TOKEN_MIN, r) + ".example.com") is None
+    assert sg.classify(host_token_label(sg.HOST_TOKEN_MIN - 1, r) + ".example.com") == "hostname"
+
+
+def test_the_host_token_threshold_is_exact_on_both_sides():
+    """Review 98b76cde SHOULD 4: a random letters-and-digits label is a host name at ``HOST_TOKEN_MIN - 1``
+    characters and a token at ``HOST_TOKEN_MIN``, over 2,000 generated labels on each side (the rule, the guard's
+    class and a record bound for the log)."""
+    assert sg.HOST_TOKEN_MIN == 24 and sg.HOST_TOKEN_CHANGES == 2
+    r = random.Random(20261111)
+    below = [host_token_label(sg.HOST_TOKEN_MIN - 1, r) + ".example.com" for _ in range(2000)]
+    at = [host_token_label(sg.HOST_TOKEN_MIN, r) + ".example.com" for _ in range(2000)]
+    assert len(set(below)) == len(set(at)) == 2000
+    assert all(len(h.split(".")[0]) == 23 for h in below) and all(len(h.split(".")[0]) == 24 for h in at)
+    assert sum(1 for h in below if sg.host_refusal(h) is not None) == 0
+    assert sum(1 for h in below if sg.classify(h) != "hostname") == 0
+    assert sum(1 for h in at if sg.host_refusal(h) != "token") == 0
+    assert sum(1 for h in at if sg.classify(h) is not None) == 0
+    assert all(sg.violations("job_ran", {"host": h}) == [("/host", "host")] for h in at[:200])
+    assert all(sg.violations("job_ran", {"host": h}) == [] for h in below[:200])
 
 
 def prop_digit_hex_refused(tmp_path):

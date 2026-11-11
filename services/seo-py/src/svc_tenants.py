@@ -61,12 +61,18 @@ def identifier_refused(x, prose: bool = False) -> bool:
 
 def domain_refused(d) -> bool:
     """Review 2b26d980 SHOULD 1: a DOMAIN field (a tenant's domain, a competitor domain) is judged as a host name by
-    the sink guard's host rule and by nothing else (``sink_guard.host_refusal``: a credential word in a label is a
-    name, ``1password.com``; a key-shaped, number-shaped or e-mail-shaped host is refused). A value that does not
-    have a host name's shape is judged as any identifier."""
-    if sink_guard.host_shaped(d):
-        return sink_guard.classify(d) != "hostname"
-    return identifier_refused(d)
+    the sink guard's host rule (``sink_guard.host_refusal``: a credential word in a label is a name,
+    ``1password.com``; a key-shaped or number-shaped host is refused).
+    Review 98b76cde: the registration lane keeps exactly what release 2b26d980 did with an e-mail form in a domain
+    (``first-last-at-domain.tld`` is refused; a mailbox provider's sub-domain and an ``at`` LABEL are not e-mail
+    forms), and a domain that release registered is never refused now (P1): one the rule does not take is judged
+    by that release's identifier rules (``secret_guard.identifier_refusal`` without the "@"-less forms, which are
+    for a tenant id and a Finance client id, then the sink guard)."""
+    if not sink_guard.host_shaped(d):
+        return identifier_refused(d)
+    if sink_guard.host_refusal(d) is None and not secret_guard.email_form(d):
+        return False
+    return secret_guard.identifier_refusal(d, atless=False) is not None or sink_guard.classify(d) is None
 
 
 def _site(d: str) -> str:

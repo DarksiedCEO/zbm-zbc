@@ -463,13 +463,17 @@ service, adds a dependency and a network hop the department does not otherwise n
       (`john-smith`) are accepted.
     - `POST /tenants/{tid}/domains` `domains[]` (and a prompt set's `competitor_domains[]`, which is in the blob
       and reaches no log): a syntactically valid host name that `sink_guard.host_refusal` passes (decision 55).
-      So a host whose labels are words is accepted whatever the words say (`call.me.tomorrow.example`,
-      `great-at-work.example`: an `at` joined with hyphens inside ONE label is a name), as is a credential word
-      followed by letters only (`password-correcthorse.example`) and a random label of letters only.
+      So a host whose labels are words is accepted whatever the words say (`call.me.tomorrow.example`), as is a
+      credential word followed by letters only (`password-correcthorse.example`) and a random label of letters
+      only. (Review 98b76cde, decision 64: `great-at-work.example`, an `at` joined with hyphens inside ONE
+      label, is refused at registration again, as at 2b26d980; it had been listed here as accepted.)
     The canary test asserts the exact (route, field) pairs where a planted short token is found afterwards (these
     three) and that it is found nowhere else; its e-mail-without-"@", separator-formatted-digits, 32-hex and
     JSON-number families are found nowhere at all. A prompt-set name and an entity source are identifiers too
     (same rules, without the folded-prose rule), but they are inside the blobs and reach no log.
+    (Review 98b76cde, decision 62: the canary's e-mail-without-"@" value is `first.last.at.domain.com`, which
+    is a host name with an `at` label. The guard takes it; the identifier fields still refuse it; it is found
+    afterwards in exactly one pair, `POST /tenants/{tid}/domains` `domains[]`, and the test asserts that.)
 50. **Guard cost per commit (re-measured).** Measured on the final code: `sink_guard.enforce` on the largest real
     record of each kind (0.4-2.9 kB each now that the content is in blobs); cold = the first call in a fresh
     process (median of 3 processes), warm = the median of 300 further calls. Log kinds (26 of 27;
@@ -545,8 +549,8 @@ weakened for prose: each fix is a narrow closed class, a precise rule, or a keye
     - no run of 9+ digits (all-digit pieces joined across `-` and `.`; a run inside one piece), and under 12
       digits in all-digit pieces in the whole host. One exception, measured: a piece that is all hex, 12..31
       characters with 2+ hex letters, keeps a digit run of at most 12 (a platform hash);
-    - no e-mail form: an `at` label after the first with two or more labels after it, or a mailbox provider's
-      domain (the closed list of 40) after a name (`www.` / `m.` / `mail.` + the provider is the provider's site);
+    - (REMOVED by review 98b76cde, decision 62: no e-mail form: an `at` label after the first with two or more
+      labels after it, or a mailbox provider's domain after a name. These refused real hosts.)
     - no value after a credential word: a letters-and-digits piece of 6+ right after the word in the same label
       (`password-hunter2`), or as the next label when that is not the registrable name.
     A credential WORD in a label is a name (`1password.com`, `pin.it`, `secret-sale.shop`, `apikey.dev`).
@@ -589,6 +593,133 @@ weakened for prose: each fix is a narrow closed class, a precise rule, or a keye
     keys to the last line and plants four more families; `EXPECTED_SINK_REFUSALS` names each test's sinks and
     paths exactly, and a test that replaces a guard entry point (`OBSERVER`, `enforce`, `refused`, `violations`)
     without being listed fails the suite.
+
+## Review 98b76cde: the host rule keeps every host accepted before
+
+The review of the fix round rejected it: rules added beyond the brief refused real hosts. The governing rule of
+this round is differential, against release 2b26d980 (the last one before the host rule):
+
+- **P1 (availability).** A host that 2b26d980 took in a lane is taken now in that lane.
+- **P2 (no loosening for personal-data shapes).** In the domain REGISTRATION lane (tenant domains, competitor
+  domains) a telephone number or an SSN with one to three hex letters attached, 16 card digits with letters
+  attached, `first-last-at-domain.tld` and `first.last-at-domain.tld` are refused as often as at 2b26d980.
+
+62. **No e-mail form in the host rule (MUST 1).** The `at`-label rule and the mailbox-provider rule are removed
+    from `sink_guard.host_refusal` (every lane). They refused `finance.yahoo.com`, `mp.weixin.qq.com`,
+    `blog.naver.com`, `outlook.live.com`, `look.at.example.org`, and with them every
+    write of a tenant whose domain was one (503 at the sink) and every such host in a citation (withheld as
+    `PERSONAL_DATA`). Measured: on a directory built by 2b26d980 with four such tenant domains, 98b76cde
+    answered the first audit with 503 `SINK_REFUSED`, and in a citation run of its own it withheld 730 of 730
+    rows citing portal hosts; this release starts on that directory (`legacy_prose_lines` 0), every audit,
+    citation run, schedule slot and log ingest succeeds, the same domains are registered again with 200, and
+    730 of 730 rows keep their host. The
+    "@"-less e-mail forms (`secret_guard.atless_email`) stay where they are identifiers: tenant id, Finance
+    client id, prompt-set name, entity source. A DOMAIN is never judged by them
+    (`identifier_refusal(..., atless=False)`).
+63. **P1 by construction: the rule only adds.** `host_refusal` is the rule; no lane refuses on it alone. Each
+    lane answers "the rule takes it, or the checks of 2b26d980 take it":
+    - the guard's `hostname` class: `host_refusal(h) is None or _legacy_host_ok(h)` (the strict URL inspection
+      of `https://<h>/` and the strict check of the whole host, as `_host_ok` was; a value whose last label is
+      an `xn--` label was a code there and is judged as one);
+    - `secret_guard.check` and the host part of `secret_guard._inspect`: a host the rule takes is kept; any
+      other is judged by `_check` (whole, and in a URL label by label), exactly the code path of 2b26d980;
+    - the registration lane (`svc_tenants.domain_refused`): `(rule takes it and it holds no e-mail form of
+      2b26d980) or (identifier_refusal without the "@"-less forms passes and the guard takes it)`.
+    Consequence, stated plainly: for a host the rule REFUSES the lanes are again as different as they were at
+    2b26d980 (the strict check read the whole host, the URL inspection each label too). What holds for every
+    host: the guard takes it exactly when both strict lanes keep it; a host kept for the log
+    (`callum.checked_host`) is one the guard takes.
+    Measured against the code of 2b26d980 loaded from git, offline (lanes: guard class, tenant-domain
+    registration, competitor-domain registration, URL inspection, strict check, `callum.checked_host`):
+
+    | Corpus | Hosts | Accepted at 2b26d980 and refused now (each of the 6 lanes) | Accepted at 2b26d980 / now (guard class) |
+    |---|---|---|---|
+    | generated (11 families: neutral, portal sub-domains, `at` forms, words with digits, hash labels, random labels, IDN, credential-word brands, infrastructure names, numeric, long chains) | 103,448 | 0 | 63,135 / 87,384 |
+    | real well-known hosts (portal and mailbox-provider sub-domains, news, shops, SaaS, government) | 648 | 0 | 641 / 648 |
+
+    At 98b76cde the same comparison gave 13,097 (generated) and 254 (real) hosts accepted before and refused.
+64. **The hash exemption needs 4+ hex letters; `-at-` at registration as before (MUST 3 / P2).** A piece that is
+    all hex, 12..31 characters, keeps a digit run of 9..12 only when it holds 4+ hex letters (it was 2+).
+    Chosen by measurement between three variants on 26,000 hex labels of 6..31 characters and on the P2 shapes:
+
+    | Variant | P2 shapes accepted by the rule (of 2,000 each) | Hash labels refused for digits |
+    |---|---|---|
+    | 2+ letters (98b76cde) | phone 1,343 / 1,354 / 2,000 (before / after / around), SSN 696 / 705 / 953 | 155 (0.596%) |
+    | 4+ letters (chosen) | 0 in all six | 340 (1.308%) |
+    | 4+ letters and a letter on each side of the run | 0 in all six | 479 (1.842%) |
+
+    The stricter third variant was not taken: it breaks the 1% bound the existing test asserts on its
+    platform-host corpus (14 of 1,200) and P2 does not need it. The cost of the chosen one is over 1% on a pure
+    hex-label corpus and is not hidden: 1.308% there (0.75% on the existing test's 1,200 platform hosts, 1.10-1.12% on
+    60,000 of them; 0.47-0.50% before). Every hex label of 24..31 characters was and is refused as a token (7,999 of
+    the 26,000). Residual: a number with FOUR or more hex letters attached on one side
+    (`<10 digits>` + `cafe`) passes the rule, as at 98b76cde; 2b26d980 refused it.
+    `first-last-at-domain.tld` in a DOMAIN field is refused again (422), exactly as 2b26d980 did (its strict
+    e-mail check reads the hyphens as spaces): 0 of 2,000 accepted for each of the two forms (2,000 of 2,000 at
+    98b76cde). Only at registration: the same host met in a URL, a citation or crawl data is a host name (the
+    guard takes it). A directory written by 98b76cde that holds such a domain keeps working (measured: audits,
+    citation runs, slots, ingests succeed); submitting the domain list again with that domain in it is a 422.
+65. **Client view: the verb in any case (MUST 2).** `_CV_AFTER` matched ` is `, ` was `, ` are `, ` would be `,
+    ` will be `, ` remains ` in lower case only: `the password IS <value>` was shown to the owner. All six are
+    matched in any case mix. The other alternations of section 5 were checked for the same gap: `_CV_SCRIPT`
+    (the labels in scripts without word spacing) holds three labels in cased scripts (Cyrillic, Greek) and
+    matched them in lower case only, while the strict lane folds case: fixed (`re.IGNORECASE`). Not gaps:
+    `_CV_LABEL` (built per letter in both cases), `_CV_BEARER`, the SSN label, the spelled `at` / `dot` / `sign`
+    forms, the number words (all case-insensitive already), `_CV_PEM` (a PEM header is upper case by format).
+    Found and NOT fixed (not a case gap): a Greek label followed by its inflection ending before the separator
+    is not matched in either case. False masking for a label and a value on neutral prose (636 units of the
+    utility corpus): 0 before and after, as written, in Title Case and in UPPER CASE. On 20 hand-written
+    sentences that put a credential word before the verb (`The token was revoked`): 5 masked before and after
+    as written; in Title Case 0 before, 5 after (the same 5); in UPPER CASE 0 before, 14 after (an all-capitals
+    word after ` WAS ` / ` ARE ` counts as a value, as `HunterX` does after ` was `).
+66. **Start (SHOULD 1).** The legacy-line count ran the guard over every log line at start. It is computed on the
+    first status read (`legacy_prose_lines`, outside the service lock), over the lines the log held at start,
+    and remembered. `SeoService(...)` on a 1,200-line log (1.78 MB), 5 cold starts each, same box, seconds:
+    2b26d980 0.137-0.179 (median 0.167); 98b76cde 0.216-0.253 (median 0.237, 1.42x); this release 0.125-0.184
+    (median 0.153, 0.92x).
+67. **Host token capacity (SHOULD 2).** In the rule (so in every lane, since 2b26d980 refused these too):
+    - a token of 24+ characters split over two ADJACENT labels: the non-word pieces of two adjacent labels are
+      read together (0 of 2,000 accepted by the rule when each half holds letters and digits; 98b76cde: all);
+    - 32 hex characters split by a WORD label (`<16 hex>.shop.<16 hex>`): a letters-only label between all-hex
+      labels no longer ends the run (0 of 2,000; 98b76cde: 1,972);
+    - a value after `password-is-`: `is`, `was`, `are`, `equals` may stand between the credential word and its
+      value (0 of 2,000; 98b76cde: 2,000).
+    False refusals added by these three on the real-world corpora: 0 (neutral 8,980, IDN 8,212, credential-word
+    brands 8,900, portal sub-domains 9,620, the 648 real hosts). On synthetic corpora they refuse what they
+    are meant to: two adjacent hash labels adding up to 24+ (`<hash>.<hash>.<platform>`).
+    Residual of the known limit (decision 49), not fixed:
+    - a punycode label. The label must decode to a lower-case label with a non-ASCII letter and encode back to
+      itself (it did already at 98b76cde). A random 31-character token after `xn--` still passes for about one
+      token in six (313 of 2,000; 3 at 2b26d980): it decodes to a valid label of CJK letters, which cannot be
+      told from a long Chinese name (270 of the 313 are single-script). A real IDN corpus: 0 of 8,212 refused;
+    - a token split over two labels when one half is letters only (a word): 56 of 2,000 (5 at 2b26d980);
+    - what P1 keeps: a letters-heavy 32-character label with its few digits together (2 of 2,000 random
+      32-character tokens; 2b26d980 took the same 2), and a uniformly random 24-character label (about 1.5% at
+      2b26d980, so now).
+68. **Tests (SHOULD 3 / 4).** `tests/test_review_98b76cde.py`. The two surviving mutants are killed: the export
+    serving a line's `kind` / time that is not a machine value; the citation run's line dropping
+    `ruling_id_hmac`. The random-label refusal is asserted at the rule's own threshold, 2,000 generated labels
+    on each side: 23 characters accepted, 24 refused (the tests asserted it at 28).
+69. **Vault key ids that start now refuses (SHOULD 5, migration).** A record names its key id, the key is looked
+    up by that id, and the id is part of the record's associated data (`vault._aad`, `VaultKey._material`). So:
+    - an id cannot be renamed. The same key bytes under another id do not open the records written under the
+      old id (verified: the service starts, new writes succeed, every older record is `vault_unavailable`);
+    - a refused id cannot be kept as the PREVIOUS key either: start validates both ids (`config._vault`,
+      `sink_guard.register_key_ids`) and refuses either one that is key-shaped (16+ hex with a hex letter, a
+      random token, a strong-key prefix, a credential label, more than 12 digits).
+    A deployment whose key id is of such a shape therefore cannot read its existing vault records with this
+    release, and no re-encryption helper exists. What the operator must do: BEFORE upgrading, with the release
+    that wrote them (2b26d980 or earlier) and the old id, read out whatever must be kept (reports, citation
+    evidence, prompt sets, entity values); then start this release with a new accepted id (for example
+    `k-2026-12`) and a new key, and enter the prompt sets and entity values again (those whose text is in the
+    old records answer 503 `VAULT_UNAVAILABLE`). No live deployment holds a vault key yet (Deployment below).
+70. **Known limits, restated.**
+    - A tenant id or a Finance client reference that holds a credential word followed by more
+      (`token-coffee`, `secret-santa-2`) answers 422 `IDENTIFIER_WITHHELD`: the identifier check has no
+      "a word is a name" rule (the host rule has one, for hosts).
+    - Infrastructure-shaped hosts are refused by design in every lane (as a tenant domain: 422; in a citation:
+      the host is withheld): an ELB name with its 9+ digit serial, a Cloud Run URL with a project number, an
+      EC2 public DNS name or `nip.io` name embedding an IPv4 address of 9+ digits, a deploy-hash label of 24+.
 
 ## Threat model
 

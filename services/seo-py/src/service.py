@@ -124,7 +124,10 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
         self._evidence_lock = threading.Lock()
         self._evidence_cache: dict = {"n": 0, "epoch": None, "lines": []}
         self._closed = False
-        self.legacy_prose_lines = 0                      # log lines holding a non-machine value (written before job D)
+        # log lines holding a non-machine value (written before sink job D): counted on the first status read, over
+        # the lines the log held at start, and remembered (review 98b76cde SHOULD 1: not on the start path)
+        self._legacy_prose: Optional[int] = None
+        self._legacy_scan_len = 0
         self._dir_lock = getattr(settings, "data_dir_lock", None)
         self._lock_token: Optional[str] = None
         if self._dir_lock is not None:
@@ -219,15 +222,27 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
     def closed(self) -> bool:
         return self._closed
 
+    @property
+    def legacy_prose_lines(self) -> int:
+        """Review 2b26d980 SHOULD 5: a line a release up to 8bd9e29e wrote may hold prose inline. Such lines are
+        counted (``legacy_prose_lines`` in /health) and never served raw (``audit_export`` withholds the text).
+        Review 98b76cde SHOULD 1: counted on the first read, not at start (the guard over every line made a start
+        2 to 2.7 times slower), over the lines the log held at start (a line this process writes has passed the
+        guard), and remembered. Read outside the service lock: the count walks a copy of the lines."""
+        n = self._legacy_prose
+        if n is None:
+            n = 0
+            for ln in self.log.raw_lines()[:self._legacy_scan_len]:
+                r = json.loads(ln)
+                if sink_guard.violations(r["kind"], r["data"], stored=True):
+                    n += 1
+            self._legacy_prose = n
+        return n
+
     def _start(self, *, observe_existing_on_start: bool = False) -> None:
-        legacy = 0
         for r in self.log.iter_records():
             self._apply(r["kind"], r["data"], r["at"])
-            # review 2b26d980 SHOULD 5: a line a release up to 8bd9e29e wrote may hold prose inline. Such lines are
-            # counted (``legacy_prose_lines`` in /health) and never served raw (``audit_export`` withholds the text)
-            if sink_guard.violations(r["kind"], r["data"], stored=True):
-                legacy += 1
-        self.legacy_prose_lines = legacy
+        self._legacy_scan_len = len(self.log)
         self._sweep_ingests()                    # expired log ingests keep counts only (AEGIS 4c0a805 T4)
         if observe_existing_on_start:
             # Constructor-only: refuse provisioning/repair, but retain normal lock
@@ -657,6 +672,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
     # ================================================================================================ status
 
     def health(self) -> dict:
+        legacy = self.legacy_prose_lines                 # outside the lock (the first read counts; see the property)
         with self.lock:
             closed = self._closed
             s = self.settings
@@ -680,8 +696,9 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
                 "citation_vault": self.vault.status(),        # counts only (review 601e328a SHOULD 2 / 3)
                 "operator_vault": self.optext_vault.status(),  # review 2b26d980 SHOULD 4: the same counts
                 # review 2b26d980 SHOULD 5: log lines holding a non-machine value (prose a release before sink job D
-                # wrote inline), counted at start. Not 0: the export withholds their text; retire the directory
-                "legacy_prose_lines": self.legacy_prose_lines,
+                # wrote inline), counted on the first read. Not 0: the export withholds their text; retire the
+                # directory
+                "legacy_prose_lines": legacy,
             }
 
     # ================================================================================================ jobs
