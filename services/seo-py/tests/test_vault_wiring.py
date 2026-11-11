@@ -19,7 +19,7 @@ import urllib.parse
 
 import pytest
 import utility_corpus_v2 as uc
-from helpers import Harness, rid, write_vault_key
+from helpers import Harness, citation_document, rid, write_vault_key
 
 import config as config_mod
 import svc_citations
@@ -140,6 +140,7 @@ class Fetcher:
 
 
 def harness(tmp_path, data_dir=True, **env) -> Harness:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     d = str(tmp_path / "data") if data_dir else None
     return Harness(tmp_path, data_dir=d, SEO_PROBE_SAMPLES="3", **env)
 
@@ -211,27 +212,37 @@ def test_a_real_run_logs_ids_and_hashes_only_and_the_owner_sees_full_evidence(tm
     assert found(blob, v) == []
     assert MARK not in blob and MARK.encode().hex() not in blob
     assert os.path.exists(os.path.join(h.settings.data_dir, vault.VAULT_NAME))
-    assert len(h.svc.vault) == len(run["result"]["facts"]["rows"])
+    # sink job C: the run's evidence is ONE vaulted document (a record per row no longer exists): its envelope keeps
+    # an evidence id, the host and the verdict flags per row, and the evidence records sit beside it
+    doc = citation_document(h, cid)
+    assert len(doc["evidence"]) == len(run["result"]["facts"]["rows"]) and len(h.svc.vault) == 2
+    assert h.svc.citation_runs[cid]["result"] is None                # memory (and the log line) hold no result
+    (line,) = [r for r in h.svc.log.iter_records() if r["kind"] == "citation_run_recorded"]
+    assert set(line["data"]) == {"citation_run_id", "result_ref", "result_hmac", "facts", "actor", "evidence"}
 
-    # the logged row: vault reference, keyed hashes (job 3: HMAC-SHA256 under the vault's log-field sub-key, was a
-    # plain SHA-256), host only, verdict flags
-    logged = h.svc.citation_runs[cid]["result"]["facts"]["rows"]
+    # the stored row: the evidence id, host only, verdict flags; no hash of any field (job 3 wrote a keyed hash per
+    # field into the log; now the log holds ONE keyed HMAC of the whole document and no per-field value at all)
+    logged = doc["result"]["facts"]["rows"]
     for row in logged:
         assert "url" not in row and "engine_hint_unverified" not in row and "evidence_ref" not in row
         ev = row["evidence"]
-        assert vault.parse_ref(ev["vault_id"]) is not None
-        assert set(ev) == {"vault_id", "basis", "hash_key_id", "fields"} and ev["hash_key_id"] == h.svc.vault._key.key_id
-        assert all(set(f) == {"hmac_sha256", "flag"} for f in ev["fields"].values())
-        record = h.svc.vault.get("zbm", vault.parse_ref(ev["vault_id"]))
-        for name, f in ev["fields"].items():
-            assert f["hmac_sha256"] == h.svc.vault.field_hash("zbm", name, record[name])[1], name
-            assert f["hmac_sha256"] != hashlib.sha256(record[name].encode()).hexdigest(), name
+        assert set(ev) == {"evidence_id", "basis", "fields"} and ev["evidence_id"] in doc["evidence"]
+        assert all(set(f) == {"flag"} for f in ev["fields"].values())
+        record = doc["evidence"][ev["evidence_id"]]
+        for name in ev["fields"]:
+            # neither the keyed hash of a field nor its plain SHA-256 is in the log line or the ledger
+            for digest in (h.svc.vault.field_hash("zbm", name, record[name])[1],
+                           hashlib.sha256(record[name].encode()).hexdigest()):
+                assert digest not in blob, name
+    canon = json.dumps(doc, sort_keys=True, separators=(",", ":"))
+    assert line["data"]["result_hmac"] == h.svc.vault.field_hash("zbm", "citation_result", canon)[1]
+    assert line["data"]["result_hmac"] != hashlib.sha256(canon.encode()).hexdigest()
     assert {r["host"] for r in logged} == {"site.test", "competitor.test", None}
     assert sum(1 for r in logged if r["evidence"]["fields"].get("cited_url", {}).get("flag")) == 4
 
     # the owner's view: legitimate fields in full, flagged fields masked with an alert
     got = h.ok(h.get(f"/tenants/zbm/citation-runs/{cid}"))
-    assert got["result_sha256"] == run["result_sha256"]
+    assert got["result_hmac"] == run["result_hmac"] == line["data"]["result_hmac"] and got["result_sha256"] is None
     by = rows_by(got)
     legit = by[LEGIT_URL]
     assert legit["url"] == LEGIT_URL and legit["class"] == "STRENGTH_URL"
@@ -274,10 +285,15 @@ def test_the_cross_tenant_read_is_the_same_404_as_a_missing_run(tmp_path):
     assert other.status_code == missing.status_code == 404 and other.json() == missing.json()
     assert h.get(f"/tenants/acme/citation-runs/{cid}/mnc-priority").status_code == 404
     assert h.get(f"/tenants/zbm/citation-runs/{cid}", caller="hub", tenant="acme").status_code == 404
-    # and the vault itself answers another tenant "not found" for every record of the run
-    for row in h.svc.citation_runs[cid]["result"]["facts"]["rows"]:
+    # and the vault itself answers another tenant "not found" for the run's document (sink job C: one blob holds
+    # every row's evidence) and for each of its lines
+    ref = h.svc.citation_runs[cid]["result_ref"]
+    assert citation_document(h, cid)["evidence"]
+    with pytest.raises(vault.VaultNotFound):
+        h.svc.vault.get_blob("acme", ref)
+    for vid in list(h.svc.vault._index):
         with pytest.raises(vault.VaultNotFound):
-            h.svc.vault.get("acme", vault.parse_ref(row["evidence"]["vault_id"]))
+            h.svc.vault.get("acme", vid)
 
 
 def test_a_restart_with_the_key_reads_the_same_view(tmp_path):
@@ -297,9 +313,13 @@ def test_a_restart_without_the_key_shows_no_evidence_and_never_fails(tmp_path):
     a = citation_run(h)
     h2 = h.restart(SEO_VAULT_KEY_FILE=None)
     b = h2.ok(h2.get(f"/tenants/zbm/citation-runs/{a['citation_run_id']}"))
-    evs = [r["evidence"] for r in b["result"]["facts"]["rows"]]
-    assert evs and all(e["available"] is False and e["reason"] == "VAULT_UNAVAILABLE" for e in evs)
-    assert all(r["url"] is None for r in b["result"]["facts"]["rows"])
+    # sink job C: the whole result is in the vault, so without the key NOTHING of it is shown (it was: the logged
+    # rows with every evidence marked unavailable); the machine facts are still served, and the read never fails
+    assert b["status"] == "completed" and b["result"] is None and b["vault_unavailable"] is True
+    assert b["facts"]["outcome"] == "OK" and b["facts"]["rows"] == len(a["result"]["facts"]["rows"])
+    r = h2.get(f"/tenants/zbm/citation-runs/{a['citation_run_id']}/mnc-priority")
+    assert r.status_code == 503 and r.json()["detail"] == "VAULT_UNAVAILABLE"
+    assert MARK not in json.dumps(b) and LEGIT_URL not in json.dumps(b)
 
 
 # ------------------------------------------------------------------------------------------------ fail closed
@@ -328,21 +348,21 @@ def _boom(*a, **k):
 
 
 @pytest.mark.parametrize("where", ["vault_put_first", "vault_put_later", "vault_unavailable", "sweep",
-                                   "sweep_withheld", "commit"])
+                                   "sweep_withheld", "commit"])                 # sink job C: "put" is the blob's
 def test_any_failure_while_storing_closes_the_run_failed_with_nothing_raw_written(tmp_path, monkeypatch, caplog,
                                                                                     where):
     caplog.set_level(logging.DEBUG)
     v = synthetic()
     h = harness(tmp_path)
     start(h, v)
-    real_put = h.svc.vault.put
+    real_line = h.svc.vault._sealed_line
     calls = []
 
-    def put_later(tid, record):
+    def put_later(*a, **k):                      # the blob's chunk seals; its manifest line then fails
         calls.append(1)
-        if len(calls) > 2:
+        if len(calls) > 1:
             raise RuntimeError("forced")
-        return real_put(tid, record)
+        return real_line(*a, **k)
 
     def unavailable(tid, record):
         raise vault.VaultUnavailable("forced")
@@ -352,8 +372,9 @@ def test_any_failure_while_storing_closes_the_run_failed_with_nothing_raw_writte
         if kind == "citation_run_recorded":
             raise RuntimeError("forced")
         return real_commit(kind, *a, **k)
-    patch = {"vault_put_first": (h.svc.vault, "put", _boom), "vault_put_later": (h.svc.vault, "put", put_later),
-             "vault_unavailable": (h.svc.vault, "put", unavailable),
+    patch = {"vault_put_first": (h.svc.vault, "put_blob", _boom),
+             "vault_put_later": (h.svc.vault, "_sealed_line", put_later),
+             "vault_unavailable": (h.svc.vault, "put_blob", unavailable),
              "sweep": (callum.secret_guard, "guard_record", _boom),
              "sweep_withheld": (callum.secret_guard, "guard_record", lambda obj: sg.WITHHELD),
              "commit": (h.svc, "_commit", commit)}[where]
@@ -364,6 +385,9 @@ def test_any_failure_while_storing_closes_the_run_failed_with_nothing_raw_writte
     assert h.ledger.of_type("citation_run_recorded") == []
     if where == "vault_unavailable":
         assert run["failure"]["code"] == "VAULT_UNAVAILABLE"
+    if where == "vault_put_later":
+        assert len(calls) == 2
+    assert len(h.svc.vault) == (2 if where == "commit" else 0)       # no line of a document that was not recorded
     blob = written(h, caplog)
     assert found(blob, v) == [] and MARK not in blob, where
 
@@ -424,7 +448,39 @@ def test_mutation_no_vault_split_is_caught(tmp_path, monkeypatch):
         out = real(env, sink, put, **kw)
         return {**out, "facts": {**out["facts"], "evidence": [e["record"] for e in sink]}}
     monkeypatch.setattr(callum, "split_evidence", evidence_in_the_envelope)
-    assert _scenario(tmp_path)["log_clean"] is False
+    # sink job C: the envelope is no longer logged, so evidence left in it cannot reach a file, the ledger or a log
+    # line (before, this mutation put it into the log and ``log_clean`` failed). The property now holds without the
+    # split; the mutation that breaks it today is the next test's. The owner's view stays masked too: the strict
+    # sweep still covers the whole stored envelope.
+    assert _scenario(tmp_path) == {"log_clean": True, "owner_masked": True, "owner_full": True, "cross_404": True}
+
+
+def test_mutation_the_result_written_to_the_log_again_is_caught(tmp_path, monkeypatch):
+    # the mutation that now breaks ``log_clean``: the completion record carries the stored envelope again. With the
+    # sink guard's refusal removed as well, the evidence-free envelope's legitimate text is in the log line.
+    import sink_guard
+    from service import SeoService
+    monkeypatch.setattr(sink_guard, "OBSERVER", None)
+    real = SeoService._commit
+    box = {}
+
+    def inline(self, kind, data, actor, evidence=None):
+        if kind == "citation_run_recorded":
+            data = {**data, "result": box["doc"]}
+        return real(self, kind, data, actor, evidence=evidence)
+    real_seal = SeoService._vaulted_seal
+
+    def seal(self, tid, field, obj):
+        box["doc"] = obj
+        return real_seal(self, tid, field, obj)
+    monkeypatch.setattr(SeoService, "_commit", inline)
+    monkeypatch.setattr(SeoService, "_vaulted_seal", seal)
+    h = harness(tmp_path / "guarded")
+    start(h, synthetic())
+    run = citation_run(h)
+    assert run["status"] == "interrupted" and MARK not in written(h)         # the guard refuses: nothing written
+    monkeypatch.setattr(sink_guard, "enforce", lambda kind, data: None)
+    assert _scenario(tmp_path / "unguarded")["log_clean"] is False
 
 
 def test_mutation_no_display_mask_is_caught(tmp_path, monkeypatch):
@@ -515,10 +571,20 @@ def test_log_field_hashes_are_keyed_and_bound_to_tenant_and_field():
         vault.MemoryCitationVault(None).field_hash("zbm", "hint", guess)
 
 
-def test_a_run_without_a_keyed_hasher_fails_instead_of_logging_plain_hashes():
-    with pytest.raises(ValueError):
-        callum.split_evidence({"facts": {"rows": [{"evidence_ref": 0}]}},
-                              [{"record": {"excerpt": MARK}, "flags": {"excerpt": None}}], lambda rec: "0" * 32)
+def test_the_split_writes_no_hash_of_a_field_and_fails_when_the_evidence_is_not_kept():
+    # sink job C (was: "a run without a keyed hasher fails instead of logging plain hashes"): the split envelope
+    # carries NO per-field hash at all, keyed or plain; the one hash of a run is the keyed HMAC of its whole document
+    sink = [{"record": {"cited_url": None, "excerpt": MARK}, "flags": {"excerpt": None}}]
+    out = callum.split_evidence({"facts": {"rows": [{"evidence_ref": 0}]}}, sink, lambda rec: "e0")
+    assert out["facts"]["rows"][0]["evidence"] == {"evidence_id": "e0", "basis": None,
+                                                    "fields": {"excerpt": {"flag": None}}}
+    text = json.dumps(out)
+    assert hashlib.sha256(MARK.encode()).hexdigest() not in text and "sha256" not in text and "hmac" not in text
+    for bad in (lambda rec: None, lambda rec: "", lambda rec: 7):
+        with pytest.raises(ValueError):                                 # evidence that was not kept: the run fails
+            callum.split_evidence({"facts": {"rows": [{"evidence_ref": 0}]}}, sink, bad)
+    with pytest.raises(ValueError):                                     # a row naming evidence that does not exist
+        callum.split_evidence({"facts": {"rows": [{"evidence_ref": 3}]}}, sink, lambda rec: "e0")
 
 
 def test_the_in_memory_vault_without_a_key_stores_nothing():

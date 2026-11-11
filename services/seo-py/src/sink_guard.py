@@ -24,13 +24,17 @@ The closed set of classes (``CLASSES``):
   boolean      ``true`` / ``false``;             actor     the service's closed actor set
   hostname     a syntactic host name that the strict host check of agents.secret_guard passes (as callum.checked_host)
   code         an enum / reason code: 1..64 characters of ``[A-Za-z0-9_.:-]`` holding a letter
+  model_id     an answer-engine model id (sink job C): EXACTLY one of ``MODEL_IDS``, the closed set of ids the engine
+               adapters declare (their allowlists; a configured model is always one of them). Nothing is matched by
+               shape: any other model string is written by the service as the code ``UNKNOWN_MODEL`` with a keyed HMAC
 
 No class admits whitespace or ``@``; no value is longer than ``MAX_LEN``. A value that is not an id, a hash or a
 timestamp must also pass ``secret_guard.check`` (no key prefix, no long random token, no run of 9+ digits).
 
 ``violations`` reports normalised paths and closed reason names only: never a value, never a dynamic key.
 ``LEGACY_PROSE_PATHS`` lists the (sink, path) pairs that held non-machine values when the guard was introduced; they
-pass for now and each is a debt that sink jobs B-D remove. Everything is linear in the input: no regular expression is
+pass for now and each is a debt that sink jobs B-D remove (job B: audits and drift; job C: citation runs and engine
+runs). Everything is linear in the input: no regular expression is
 used, only ``str`` methods.
 """
 
@@ -52,7 +56,7 @@ ACTORS = frozenset(KNOWN_CALLERS) | frozenset(("seo", "andre"))
 # them as it would in prose); a closed list of constants, never data
 SERVICE_WORDS = frozenset(("SECRET_REDACTED", "NOT_FETCHED_SECRET", "secret_guard", "crawler_token"))
 CLASSES = ("empty", "service_id", "scoped_id", "invoice_id", "request_id", "request_key", "hash", "timestamp", "date", "number",
-           "version", "boolean", "actor", "hostname", "code")
+           "version", "boolean", "actor", "hostname", "code", "model_id")
 REASONS = ("type", "key_type", "long", "space", "at", "charset", "shape", "secret", "host", "depth", "kind")
 LEDGER = "ledger:"                       # the sink name of a ledger event: ``ledger:<event_type>``
 # a hex value of digits only is not a hash anywhere (it reads as a long number), except under these keys, where the
@@ -66,7 +70,8 @@ _LOWER = "abcdefghijklmnopqrstuvwxyz"
 _UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 _CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 _CODE_CHARS = _LOWER + _UPPER + _DIGITS + "_.:-"
-_STRUCTURE_CHARS = "|/"                  # only inside a request key / a ``name/N`` version
+_STRUCTURE_CHARS = "|/"                  # only inside a request key / a ``name/N`` version (a declared model
+#                                          id is matched whole, before any character rule)
 _ALLOWED = _CODE_CHARS + _STRUCTURE_CHARS    # every character a machine value may hold: no whitespace, no "@"
 _HOST_CHARS = _LOWER + _DIGITS + "-."
 _SNAKE = _LOWER + _DIGITS + "_"
@@ -74,6 +79,24 @@ _CACHE_MAX = 65536
 _CACHE: dict = {}                        # accepted, reusable values (codes, hosts, versions) -> class
 _CACHED = frozenset(("code", "hostname", "version", "actor", "boolean", "timestamp", "date", "number"))
 _KEYS: dict = {}                         # dict key -> (path segment, reason or None)
+
+
+def _declared_model_ids() -> frozenset:
+    """Every model id an engine adapter declares in its closed allowlist (config.py only ever configures one of
+    them; an adapter refuses any other). Constants of this code base, never data."""
+    import anthropic_engine
+    import google_engine
+    import openai_engine
+    import perplexity
+    ids: set = set()
+    for names in (perplexity.MODELS, perplexity.SONAR_MODELS, openai_engine.MODELS, anthropic_engine.MODELS,
+                  google_engine.MODELS):
+        ids.update(names)
+    return frozenset(ids)
+
+
+MODEL_IDS: frozenset = _declared_model_ids()             # the ``model_id`` class: exact membership, nothing else
+UNKNOWN_MODEL = "UNKNOWN_MODEL"                          # what the service writes for any other model string
 
 OBSERVER: Optional[Callable] = None      # tests: called with (sink, violations, refused paths) per enforced record
 
@@ -242,6 +265,8 @@ def _judge(s: str) -> tuple:
         return "empty", None
     if n > MAX_LEN:
         return None, "long"
+    if s in MODEL_IDS:
+        return "model_id", None                             # a declared model id, compared exactly
     if s.strip(_ALLOWED):
         if len(s.split()) != 1 or s != s.strip() or not s.isprintable():
             return None, "space"
@@ -374,51 +399,13 @@ def enforce(kind: str, data) -> None:
 # jobs B-D move the field into the vault (or make it a machine value) and delete its entry. tests/test_sink_guard.py
 # fails when an entry is no longer needed, and a path that is not listed refuses its commit.
 LEGACY_COUNTS: dict = {
-    "citation_run_interrupted": 2,
-    "citation_run_recorded": 21,
-    "engine_calls_reserved": 2,
-    "engine_run_settled": 2,
     "entity_created": 9,
-    "ledger:citation_run_interrupted": 1,
-    "ledger:engine_calls_reserved": 1,
-    "ledger:engine_run_settled": 1,
     "log_chunk": 1,
     "log_ingest_created": 2,
     "log_ingest_finished": 7,
     "prompt_set_version": 4,
 }
 LEGACY_ROWS: tuple = (
-    # citation_run_interrupted (2)
-    ("citation_run_interrupted", "/evidence[]/payload/where"),
-    ("citation_run_interrupted", "/failure/where"),
-    # citation_run_recorded (21)
-    ("citation_run_recorded", "/result/facts/evidence[]/cited_url"),
-    ("citation_run_recorded", "/result/facts/evidence[]/excerpt"),
-    ("citation_run_recorded", "/result/facts/evidence[]/hint"),
-    ("citation_run_recorded", "/result/facts/evidence[]/title"),
-    ("citation_run_recorded", "/result/facts/metrics/by_engine/anthropic/provenance/note"),
-    ("citation_run_recorded", "/result/facts/metrics/by_engine/google/provenance/note"),
-    ("citation_run_recorded", "/result/facts/metrics/by_engine/openai/provenance/note"),
-    ("citation_run_recorded", "/result/facts/metrics/by_engine_prompt[]/provenance/model_versions[]"),
-    ("citation_run_recorded", "/result/facts/metrics/totals/provenance/note"),
-    ("citation_run_recorded", "/result/facts/mnc_priority/excluded"),
-    ("citation_run_recorded", "/result/facts/mnc_priority/items[]/engines[]/model_versions[]"),
-    ("citation_run_recorded", "/result/facts/mnc_priority/items[]/for_adaeze/gap"),
-    ("citation_run_recorded", "/result/facts/mnc_priority/items[]/for_roman/question"),
-    ("citation_run_recorded", "/result/facts/mnc_priority/items[]/prompt/text"),
-    ("citation_run_recorded", "/result/facts/mnc_priority/order_rule"),
-    ("citation_run_recorded", "/result/facts/rows[]/chain/hop_hosts[]"),
-    ("citation_run_recorded", "/result/facts/rows[]/model_version"),
-    ("citation_run_recorded", "/result/facts/rows[]/reason_detail"),
-    ("citation_run_recorded", "/result/limitations[]"),
-    ("citation_run_recorded", "/result/methodology"),
-    ("citation_run_recorded", "/result/reason"),
-    # engine_calls_reserved (2)
-    ("engine_calls_reserved", "/evidence[]/payload/model"),
-    ("engine_calls_reserved", "/model"),
-    # engine_run_settled (2)
-    ("engine_run_settled", "/evidence[]/payload/model"),
-    ("engine_run_settled", "/model"),
     # entity_created (9)
     ("entity_created", "/fields/locality/provenance"),
     ("entity_created", "/fields/locality/value"),
@@ -429,12 +416,6 @@ LEGACY_ROWS: tuple = (
     ("entity_created", "/fields/street_address/value"),
     ("entity_created", "/fields/telephone/provenance"),
     ("entity_created", "/fields/telephone/value"),
-    # ledger:citation_run_interrupted (1)
-    ("ledger:citation_run_interrupted", "/where"),
-    # ledger:engine_calls_reserved (1)
-    ("ledger:engine_calls_reserved", "/model"),
-    # ledger:engine_run_settled (1)
-    ("ledger:engine_run_settled", "/model"),
     # log_chunk (1)
     ("log_chunk", "/delta/families/*/templates/{key}"),
     # log_ingest_created (2)

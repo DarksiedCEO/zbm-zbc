@@ -12,6 +12,7 @@ import re
 import string
 import time
 
+import helpers
 import pytest
 import test_review_601e328a as r6
 import test_vault_wiring as vw
@@ -439,8 +440,10 @@ def test_a_real_citation_run_writes_none_of_the_new_shapes_and_the_owner_view_ma
     run = vw.citation_run(h)
     assert run["status"] == "completed" and run["result"]["outcome"] == "OK"
     cid = run["citation_run_id"]
-    logged = h.svc.citation_runs[cid]["result"]["facts"]["rows"]
-    assert any((r.get("chain") or {}).get("hop_hosts") for r in logged)            # the hop chain was logged
+    # sink job C: the split envelope is in the tenant's vault (no host is logged any more); the hop-host rule is read
+    # on the stored document
+    logged = helpers.citation_document(h, cid)["result"]["facts"]["rows"]
+    assert any((r.get("chain") or {}).get("hop_hosts") for r in logged)            # the hop chain was kept
     assert all(h is None or " at " not in h for r in logged for h in (r.get("chain") or {}).get("hop_hosts") or [])
     blob = vw.written(h, caplog)
     assert vw.found(blob, _service_blob_values(v)) == []
@@ -459,8 +462,12 @@ def test_the_real_run_mutation_on_the_hop_host_rule_is_caught(tmp_path, caplog, 
     h.ports.engines["openai"] = _Port(_service_answers(v))
     h.ports.fetcher = _RedirectFetcher(v["hop"])
     h.ok(h.post("/tenants/zbm/domains", {"request_id": vw.rid(), "domains": [vw.DOMAIN]}, andre=True))
-    vw.citation_run(h)
-    assert "hop" in vw.found(vw.written(h, caplog), {"hop": v["hop"]})
+    cid = vw.citation_run(h)["citation_run_id"]
+    # sink job C: the mutated rule lets the hop host into the STORED envelope (the vaulted document, hence the
+    # owner's view); nothing of it reaches a file, the ledger or a log line any more
+    stored = json.dumps(helpers.citation_document(h, cid)["result"], ensure_ascii=False)
+    assert "hop" in vw.found(stored, {"hop": v["hop"]})
+    assert vw.found(vw.written(h, caplog), {"hop": v["hop"]}) == []
 
 
 # ------------------------------------------------------------------------------------------------ lock scope
@@ -503,8 +510,9 @@ class _ManyPort(_Port):
 
 
 def test_the_service_lock_is_not_held_while_rows_are_encrypted_or_decrypted(tmp_path, monkeypatch):
-    """Review SHOULD 1: the split and the owner view's decrypt + mask run outside the service lock; the vault records
-    of a run are ONE append (one fsync)."""
+    """Review SHOULD 1: the split and the owner view's decrypt + mask run outside the service lock; the vault lines
+    of a run are ONE append (one fsync). Sink job C: the run's evidence is one blob (``put_blob``), not a record per
+    row."""
     h = vw.harness(tmp_path)
     h.ports.engines["openai"] = _ManyPort(40)
     h.ok(h.post("/tenants/zbm/domains", {"request_id": vw.rid(), "domains": [vw.DOMAIN]}, andre=True))
@@ -514,16 +522,18 @@ def test_the_service_lock_is_not_held_while_rows_are_encrypted_or_decrypted(tmp_
     monkeypatch.setattr(vault.CitationVault, "_append", lambda self, line: (
         appends.append(1) if self is h.svc.vault else None, real_append(self, line))[1])
     held_during_put = []
-    real_put = vault.CitationVault.put
+    real_put = vault.CitationVault.put_blob
 
     def put(self, tid, record):
         if self is h.svc.vault:
             held_during_put.append(h.svc.lock._is_owned() if hasattr(h.svc.lock, "_is_owned") else None)
         return real_put(self, tid, record)
-    monkeypatch.setattr(vault.CitationVault, "put", put)
+    monkeypatch.setattr(vault.CitationVault, "put_blob", put)
     run = vw.citation_run(h)
     rows = len(run["result"]["facts"]["rows"])
-    assert run["status"] == "completed" and rows >= 120 and len(h.svc.vault) == rows
+    assert run["status"] == "completed" and rows >= 120
+    assert len(helpers.citation_document(h, run["citation_run_id"])["evidence"]) == rows
+    assert len(h.svc.vault) == 2                                     # one chunk and its manifest: one document
     assert len(appends) == 1                                         # one append for the whole run
     assert held_during_put and not any(held_during_put)              # no put under the service lock
     decrypting_locked = []

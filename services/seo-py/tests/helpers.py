@@ -106,6 +106,13 @@ def write_vault_key(path) -> str:
 VAULT_ENV_NAMES = ("SEO_VAULT_KEY", "SEO_VAULT_KEY_FILE", "SEO_VAULT_KEY_ID")
 
 
+def citation_document(h, cid: str) -> dict:
+    """Sink job C: a recorded citation run's vaulted document, read for its owning tenant:
+    ``{"v", "result": the split and swept envelope (what the log line used to carry), "evidence": {id: record}}``."""
+    r = h.svc.citation_runs[cid]
+    return h.svc.vault.get_blob(r["tenant_id"], r["result_ref"])
+
+
 def base_env(**over) -> dict:
     """The Wave 1/2 suites predate invoice verification (W3-2) and test the rest of the paid flow, so they run with
     SEO_INVOICE_VERIFICATION=trust; tests/test_invoice_verification.py drops it (``SEO_INVOICE_VERIFICATION=None``)

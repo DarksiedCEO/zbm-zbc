@@ -112,10 +112,11 @@ def run_classify(text_cases, url_cases, answer, collected, classify) -> list:
 
 
 # the service's OWN random values (ids, request ids, hashes and the log chain): removed before probes are searched, so a
-# 4-digit PIN probe cannot match inside a random hex id by chance. Only these exact shapes / keys are removed.
+# 4-digit PIN probe cannot match inside a random hex id by chance. Only these exact shapes / keys are removed. Sink
+# jobs B / C: the keyed hashes are named ``*_hmac`` (``result_hmac``, ``model_hmac``), and a blob ref is a service id.
 _SERVICE_RANDOM = re.compile(
     r"seo-[a-z]{2,8}-[0-9a-f]{40}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-    r"|(?<=\")(?:[a-z_]*sha256|[a-z_]*sha|hash|mac|prev|chain|key_id)\":\s?\"[0-9a-f]{16,128}(?=\")")
+    r"|(?<=\")(?:[a-z_]*sha256|[a-z_]*sha|[a-z_]*hmac|hash|mac|prev|chain|key_id)\":\s?\"[0-9a-f]{16,128}(?=\")")
 
 
 def _scrub(blob: str) -> str:

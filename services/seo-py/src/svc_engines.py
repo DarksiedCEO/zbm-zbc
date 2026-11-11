@@ -19,6 +19,11 @@ A reservation's requests (and their spend) count on the reservation's day. A run
 share for that day (``by_day``) when there is a settlement, otherwise the sum of that day's reservations: a process
 that dies mid-run leaves its reservations charged (fail closed). Payloads carry ids,
 counts, Decimal strings and hashes: never a prompt, an answer, a key or a URL.
+
+Sink job C: ``model`` is written only when it is one of the model ids the engine adapters declare
+(``sink_guard.MODEL_IDS``, compared exactly). Any other model string (a port that reports its own name) is written as
+the code ``UNKNOWN_MODEL`` with ``model_hmac``, the keyed HMAC of the raw string (the vault's log-field sub-key, bound
+to the tenant): never the string itself, never a plain SHA-256 of it.
 """
 
 from __future__ import annotations
@@ -26,10 +31,14 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Optional
 
+import sink_guard
+import vault as vault_mod
 from errors import Unavailable
 from ledger import derived_id
 from perplexity import EngineError
 from reasons import R
+
+MODEL_FIELD = "engine_model"                     # the keyed HMAC's field name for an undeclared model string
 
 ZERO = Decimal("0")
 # a single request whose reported cost exceeds this many times the reserve per call stops the run (COST_ABOVE_RESERVE):
@@ -81,6 +90,7 @@ class _Run:
         self.subject = subject
         self.run_id = derived_id("egr", aid, engine)
         self.meters: list[_Meter] = []
+        self.model_fields = svc._engine_model(tid, model)      # what the log and the ledger keep of ``model``
 
     def reserve(self, prompt_index: int, calls: int) -> _Meter:
         meter = self.svc._engine_reserve(self, prompt_index, calls)
@@ -130,6 +140,17 @@ class EnginesMixin:
 
     def engine_budget(self, tid: str, aid: str, ps: Optional[dict], subject: str = "audit") -> _Budget:
         return _Budget(self, tid, aid, None if ps is None else ps.get("sha256"), subject)
+
+    def _engine_model(self, tid: str, model) -> dict:
+        """The ``model`` fields of a reservation / settlement record: a declared model id as it is; any other value
+        as ``UNKNOWN_MODEL`` with its keyed HMAC (``model_hmac``; None when there is no vault key to hash under)."""
+        if model is None or (type(model) is str and model in sink_guard.MODEL_IDS):
+            return {"model": model}
+        try:
+            mac = self.vault.field_hash(tid, MODEL_FIELD, str(model))[1]
+        except vault_mod.VaultError:
+            mac = None
+        return {"model": sink_guard.UNKNOWN_MODEL, "model_hmac": mac}
 
     def _engine_limits(self, engine: str) -> dict:
         if engine == "perplexity":
@@ -194,7 +215,7 @@ class EnginesMixin:
             if t_calls + calls > lim["tenant_daily_calls"] or t_spend + spend > _d(lim["tenant_daily_spend_usd"]):
                 raise EngineError("ENGINE_BUDGET_EXHAUSTED", "TENANT_DAILY_BUDGET")
             data = {"run_id": run.run_id, "audit_id": run.aid, "tenant_id": run.tid, "engine": run.engine,
-                    "model": run.model, "prompt_index": prompt_index, "calls": calls, "spend_usd": str(spend),
+                    **run.model_fields, "prompt_index": prompt_index, "calls": calls, "spend_usd": str(spend),
                     "day": day, "prompt_set_sha256": run.ps_sha}
             if run.subject != "audit":
                 data["run_kind"] = run.subject         # "audit_id" then names the citation run (ADR 0046)
@@ -211,7 +232,7 @@ class EnginesMixin:
             if self._closed:
                 raise Unavailable(R("SERVICE_CLOSED"))
             data = {"run_id": run.run_id, "audit_id": run.aid, "tenant_id": run.tid, "engine": run.engine,
-                    "model": run.model, **{k: usage[k] for k in ("calls", "calls_cost_unknown", "spend_usd",
+                    **run.model_fields, **{k: usage[k] for k in ("calls", "calls_cost_unknown", "spend_usd",
                                                                   "reserved_calls", "reserved_usd", "answers",
                                                                   "stop_reason", "by_day")}}
             if run.subject != "audit":
@@ -223,7 +244,7 @@ class EnginesMixin:
     def _a_engine_calls_reserved(self, d, at):
         r = self.engine_runs.setdefault(d["run_id"], {"run_id": d["run_id"], "audit_id": d["audit_id"],
                                                       "tenant_id": d["tenant_id"], "engine": d["engine"],
-                                                      "model": d["model"], "day": d["day"], "reservations": {},
+                                                      "model": d.get("model"), "day": d["day"], "reservations": {},
                                                       "settled": None, "reserved_at": at})
         # each reservation keeps ITS day (the run's "day" is only the day of its first reservation)
         r["reservations"][str(d["prompt_index"])] = {"calls": d["calls"], "spend_usd": d["spend_usd"], "day": d["day"]}

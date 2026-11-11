@@ -33,14 +33,14 @@ The Mentioned-Not-Cited priority list (``CONTRACT_MNC``) is Callum's OUTPUT CONT
 and Adaeze (content gap); neither consumer is built (ADR 0046).
 
 Provider text is DATA: scanned in memory for brand terms; only a bounded excerpt (``EXCERPT_MAX`` characters, marked
-untrusted) is kept for the dashboard drill-down. ADR 0051 (job 2, Option B): when the service passes a ``sink`` the
-client's full evidence for each row (cited URL, excerpt, title, hint) is handed to it for the per-tenant encrypted
-vault, and ``split_evidence`` turns the envelope into the form that is logged: host-only URLs, keyed per-field hashes
-(HMAC-SHA256 under the vault's log-field sub-key, job 3) and the strict filter's verdict flags, never a path or a
-text. ``client_view`` rebuilds the owner's view from the vault: a field with a HIGH-PRECISION client-view finding
-(``secret_guard.client_view_findings`` / ``client_view_url``, job 3; never the strict flag) is masked (``alert``; a
-URL only in its offending parts), every other field is shown in full. Without a sink (unit use) the rows are the
-strict lane's stored forms, as before.
+untrusted) is kept for the dashboard drill-down. ADR 0051 (Option B; sink job C): when the service passes a ``sink``
+the client's full evidence for each row (cited URL, excerpt, title, hint) is handed to it, and ``split_evidence``
+separates the envelope (host-only URLs, the strict filter's verdict flags, an ``evidence_id`` per row; never a path or
+a text) from the evidence records. The service stores BOTH as one encrypted blob in the tenant's vault; the log keeps
+the blob's ref, one keyed HMAC and counts. ``client_view`` rebuilds the owner's view from the two: a field with a
+HIGH-PRECISION client-view finding (``secret_guard.client_view_findings`` / ``client_view_url``, job 3; never the
+strict flag) is masked (``alert``; a URL only in its offending parts), every other field is shown in full. Without a
+sink (unit use) the rows are the strict lane's stored forms, as before.
 
 No agent touches service state, the ledger or the log: the service records what this module returns.
 """
@@ -914,11 +914,12 @@ def _findings(result: dict, stopped: dict) -> list:
 
 
 # ---------------------------------------------------------------------------------------------- the vault split
-# ADR 0051 (job 2, Option B). The client's full evidence for a row goes to the per-tenant encrypted vault; what is
-# logged (data/seo_log.jsonl, the ledger, events) keeps only the vault reference, keyed HMAC-SHA256 field hashes (job
-# 3), host-only URLs (the host itself checked by the strict filter), counts / codes and the strict filter's verdict
-# flags. The owner's view is rebuilt from the vault: a field with a client-view finding (job 3) is masked with
-# ``alert``, every other field is shown in full.
+# ADR 0051 (Option B; sink job C). The client's full evidence for a row is kept apart from the envelope; the envelope
+# keeps an ``evidence_id`` per row, host-only URLs (the host itself checked by the strict filter), counts / codes and
+# the strict filter's verdict flags. Both parts go into ONE encrypted blob in the tenant's vault (svc_citations.py);
+# nothing of either is logged. The owner's view is rebuilt from the two: a field with a client-view finding (job 3)
+# is masked with ``alert``, every other field is shown in full. A result recorded before sink job C names per-row
+# vault records (``vault_id``) instead; ``client_view`` reads both.
 
 EVIDENCE_FIELDS = ("cited_url", "final_url", "canonical_url", "excerpt", "title", "hint")
 URL_FIELDS = frozenset(("cited_url", "final_url", "canonical_url"))
@@ -1020,19 +1021,29 @@ def _chain_part(d) -> dict | None:
     return {**h, "query_dropped": bool(d.get("query_dropped"))}
 
 
+EVIDENCE_ID = "evidence_id"                     # sink job C: a row's evidence, by its key in the run's vaulted document
+
+
+def _evidence_key(d) -> str | None:
+    """The evidence a row / an MNC entry names: its key in the run's vaulted document (``evidence_id``, sink job C)
+    or, in a result recorded before it, a per-row vault reference (``vault_id``)."""
+    if not isinstance(d, dict):
+        return None
+    return d.get(EVIDENCE_ID) or d.get("vault_id") or None
+
+
 def _log_fields(entry: dict) -> dict:
-    """Each field of a row's evidence as logged: its keyed hash (``hmac_sha256``, computed by ``split_evidence`` under
-    the vault's log-field sub-key; ADR 0051 job 3) and the strict filter's verdict flag. Never a plain hash: an entry
-    without its keyed hashes raises (the run then fails closed)."""
-    rec, flags, macs = entry["record"], entry["flags"], entry["hmacs"]
-    return {f: {"hmac_sha256": macs[f], "flag": flags[f]} for f in EVIDENCE_FIELDS if isinstance(rec.get(f), str)}
+    """Each field of a row's evidence in the split envelope: the strict filter's verdict flag. No hash of any kind
+    (sink job C: the whole result is one vaulted document with ONE keyed HMAC; the per-field stubs are retired)."""
+    rec, flags = entry["record"], entry["flags"]
+    return {f: {"flag": flags[f]} for f in EVIDENCE_FIELDS if isinstance(rec.get(f), str)}
 
 
 _ROW_TEXT_KEYS = ("url", "chain", "evidence", "engine_hint_unverified", "evidence_ref")
 
 
-def log_row(row: dict, vault_ref: str | None, entry: dict | None) -> dict:
-    """The logged form of a row: no URL path, no text; the vault reference, hashes, host-only URLs, verdict flags."""
+def log_row(row: dict, evidence_id: str | None, entry: dict | None) -> dict:
+    """The split form of a row: no URL path, no text; the evidence's key, host-only URLs, verdict flags."""
     out = {k: v for k, v in row.items() if k not in _ROW_TEXT_KEYS}
     ch = row.get("chain")
     if isinstance(ch, dict):
@@ -1040,17 +1051,16 @@ def log_row(row: dict, vault_ref: str | None, entry: dict | None) -> dict:
                         "final": _chain_part(ch.get("final")), "canonical": _chain_part(ch.get("canonical")),
                         "redirects": ch.get("redirects"),
                         "hop_hosts": [checked_host(h)["host"] for h in (ch.get("hop_hosts") or [])][:20]}
-    if entry is None or vault_ref is None:
+    if entry is None or evidence_id is None:
         out.update(host=None, host_withheld=None, evidence=None)
         return out
     out.update(url_host(entry["record"]["cited_url"]))
     ev = row.get("evidence") if isinstance(row.get("evidence"), dict) else {}
-    out["evidence"] = {"vault_id": vault_ref, "basis": ev.get("basis"), "hash_key_id": entry["hash_key_id"],
-                       "fields": _log_fields(entry)}
+    out["evidence"] = {EVIDENCE_ID: evidence_id, "basis": ev.get("basis"), "fields": _log_fields(entry)}
     return out
 
 
-def _log_mnc(mp, refs: dict, sink: dict):
+def _log_mnc(mp, refs: dict, sink: list):
     if not isinstance(mp, dict) or not isinstance(mp.get("items"), list):
         return mp
     items = []
@@ -1059,13 +1069,13 @@ def _log_mnc(mp, refs: dict, sink: dict):
         for x in it.get("cited_instead") or []:
             r = x.get("evidence_ref")
             inst.append({**{k: v for k, v in x.items() if k not in ("url", "host", "evidence_ref")},
-                         **checked_host(x.get("host")), "vault_id": refs.get(r)})
+                         **checked_host(x.get("host")), EVIDENCE_ID: refs.get(r)})
         evs = []
         for e in it.get("evidence") or []:
             r = e.get("evidence_ref")
-            entry = sink.get(r) if isinstance(r, int) and r in refs else None
+            entry = sink[r] if isinstance(r, int) and r in refs else None
             evs.append({"engine": e.get("engine"), "sample": e.get("sample"), "observed_at": e.get("observed_at"),
-                        "basis": e.get("basis"), "vault_id": refs.get(r),
+                        "basis": e.get("basis"), EVIDENCE_ID: refs.get(r),
                         "excerpt": _log_fields(entry).get("excerpt") if entry else None})
         hosts = sorted({x["host"] for x in inst if x["host"]})
         items.append({**it, "cited_instead": inst, "evidence": evs,
@@ -1073,30 +1083,15 @@ def _log_mnc(mp, refs: dict, sink: dict):
     return {**mp, "items": items}
 
 
-def _hashed(entry: dict, field_hash: Callable) -> dict:
-    """``entry`` with the keyed hash of each of its fields (``field_hash(field, value) -> (key id, hex)``)."""
-    rec = entry["record"]
-    macs, kids = {}, set()
-    for f in EVIDENCE_FIELDS:
-        if isinstance(rec.get(f), str):
-            kid, macs[f] = field_hash(f, rec[f])
-            kids.add(kid)
-    if len(kids) > 1:
-        raise ValueError("the log-field key changed during a run")
-    return {**entry, "hmacs": macs, "hash_key_id": next(iter(kids), None)}
-
-
-def split_evidence(env, sink: list, put: Callable, field_hash: Callable | None = None):
-    """The envelope as it is logged: every row's full evidence ``put`` into the vault (``put(record) -> vault id``),
-    the row reduced to ``log_row``; the MNC list likewise. Each logged field hash is ``field_hash(field, value) ->
-    (key id, HMAC-SHA256 hex)`` (the vault's keyed log-field hash, ADR 0051 job 3); without one, a run with evidence
-    fails. Raises on anything inconsistent (the run then fails)."""
-    from vault import ref as vault_ref
+def split_evidence(env, sink: list, put: Callable):
+    """The envelope apart from its evidence (sink job C): every row's full evidence handed to ``put(record) ->
+    evidence id`` (the service keeps it in the run's vaulted document, beside this envelope), the row reduced to
+    ``log_row``; the MNC list likewise. Neither part is written to the log: the service stores both as ONE encrypted
+    blob and logs its ref, one keyed HMAC and counts. Raises on anything inconsistent (the run then fails)."""
     facts = env.get("facts") if isinstance(env, dict) else None
     if not isinstance(facts, dict) or not isinstance(facts.get("rows"), list):
         return env                                   # no rows (NOT_CONNECTED, KILLED): nothing to keep
     refs: dict = {}
-    hashed: dict = {}
     rows = []
     for row in facts["rows"]:
         i = row.get("evidence_ref")
@@ -1105,13 +1100,12 @@ def split_evidence(env, sink: list, put: Callable, field_hash: Callable | None =
             continue
         if not isinstance(i, int) or not 0 <= i < len(sink) or i in refs:
             raise ValueError("a row names evidence that is not in the sink")
-        if field_hash is None:
-            raise ValueError("no keyed hash for the logged evidence fields")
-        refs[i] = vault_ref(put(sink[i]["record"]))
-        hashed[i] = _hashed(sink[i], field_hash)
-        rows.append(log_row(row, refs[i], hashed[i]))
+        refs[i] = put(sink[i]["record"])
+        if not isinstance(refs[i], str) or not refs[i]:
+            raise ValueError("the evidence was not kept")
+        rows.append(log_row(row, refs[i], sink[i]))
     return {**env, "facts": {**facts, "rows": rows,
-                             "mnc_priority": _log_mnc(facts.get("mnc_priority"), refs, hashed)}}
+                             "mnc_priority": _log_mnc(facts.get("mnc_priority"), refs, sink)}}
 
 
 def _display(name: str, value, logged_flag=None, recorded=None) -> dict | None:
@@ -1155,24 +1149,26 @@ def _shown(d) -> str | None:
 
 
 def client_row(row: dict, got: Callable) -> dict:
-    """The owner's view of a logged row. ``got(vault_ref) -> (record, None) | (None, reason code)``."""
+    """The owner's view of a split row. ``got(evidence key) -> (record, None) | (None, reason code)``."""
     out = dict(row)
     ev = row.get("evidence")
-    if not isinstance(ev, dict) or not ev.get("vault_id"):
+    ref = _evidence_key(ev)
+    if ref is None:
         out["url"] = None
         return out
-    record, why = got(ev["vault_id"])
+    name = EVIDENCE_ID if ev.get(EVIDENCE_ID) else "vault_id"
+    record, why = got(ref)
     if record is None:
         out["url"] = None
         out["engine_hint_unverified"] = None
-        out["evidence"] = {"vault_id": ev["vault_id"], "basis": ev.get("basis"), "available": False, "reason": why}
+        out["evidence"] = {name: ref, "basis": ev.get("basis"), "available": False, "reason": why}
         return out
     fields = ev.get("fields") or {}
     shown = {f: _display(f, record.get(f), (fields.get(f) or {}).get("flag"),
                          record.get("excerpt_view") if f == "excerpt" else None) for f in EVIDENCE_FIELDS}
     out["url"] = _shown(shown["cited_url"])
     out["engine_hint_unverified"] = _shown(shown["hint"])
-    out["evidence"] = {"vault_id": ev["vault_id"], "basis": ev.get("basis"), "available": True, **shown}
+    out["evidence"] = {name: ref, "basis": ev.get("basis"), "available": True, **shown}
     return out
 
 
@@ -1183,7 +1179,8 @@ def _client_mnc(mp, got: Callable):
     for it in mp["items"]:
         inst = []
         for x in it.get("cited_instead") or []:
-            rec, _why = got(x["vault_id"]) if x.get("vault_id") else (None, None)
+            ref = _evidence_key(x)
+            rec, _why = got(ref) if ref else (None, None)
             u = None
             if rec is not None:
                 name = "final_url" if rec.get("final_url") else "cited_url"
@@ -1191,7 +1188,8 @@ def _client_mnc(mp, got: Callable):
             inst.append({**x, "url": _shown(u), "url_evidence": u})
         evs = []
         for e in it.get("evidence") or []:
-            rec, why = got(e["vault_id"]) if e.get("vault_id") else (None, None)
+            ref = _evidence_key(e)
+            rec, why = got(ref) if ref else (None, None)
             flag = (e.get("excerpt") or {}).get("flag")
             evs.append({**e, "excerpt": _display("excerpt", rec.get("excerpt"), flag, rec.get("excerpt_view"))
                         if rec is not None else None,
@@ -1201,7 +1199,7 @@ def _client_mnc(mp, got: Callable):
 
 
 def client_view(env, got: Callable):
-    """The owner's view of a logged envelope (rows and the MNC list rebuilt from the vault)."""
+    """The owner's view of a split envelope (rows and the MNC list rebuilt from their evidence: ``got``)."""
     facts = env.get("facts") if isinstance(env, dict) else None
     if not isinstance(facts, dict) or not isinstance(facts.get("rows"), list):
         return env

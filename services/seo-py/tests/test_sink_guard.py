@@ -75,6 +75,7 @@ def accepted_values() -> dict:
         "code": ["COMPLETED", "RUN_FAILED", "audit_requested", "client", "PROCESS_LOST", "svc_audits:run:12",
                  "engine.v2_rules", "k-test", "acme-corp", "pass", "GSC_AUTH_REFUSED", "Googlebot"]
         + sorted(sg.SERVICE_WORDS),
+        "model_id": sorted(sg.MODEL_IDS),                    # sink job C: the adapters' declared model ids, exactly
     }
 
 

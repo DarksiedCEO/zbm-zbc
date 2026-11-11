@@ -264,12 +264,81 @@ service, adds a dependency and a network hop the department does not otherwise n
     e-mail emoji read as "@"; decoded base64 runs are trimmed up to 6 bytes at each end. The client view reads number
     words as SSNs / phones and labelled unformatted phones (the strict lane's phone words within 16 characters).
 
+## Sink jobs A-C: the log and the ledger take machine values only
+
+32. **Sink guard (job A, `src/sink_guard.py`).** Every `SeoService._commit` record and every ledger payload passes
+    `sink_guard.enforce` before anything is written; a string (key or value, any depth) that is not a machine value
+    refuses the write (`SINK_REFUSED`, nothing written). Closed classes: `empty`, `service_id` (`seo-<prefix>-<40 hex>`,
+    vault and blob refs included), `scoped_id`, `invoice_id`, `request_id`, `request_key`, `hash` (16 / 32 / 40 / 64
+    lower-case hex with a letter), `timestamp`, `date`, `number`, `version`, `boolean`, `actor`, `hostname` (strict
+    host check), `code` (1-64 of `[A-Za-z0-9_.:-]` with a letter, strict check) and, from job C, `model_id`. No class
+    admits whitespace or `@`; `/` only inside a request key, a `name/N` version or a declared model id. Violations
+    report normalised paths and reason names, never a value. `LEGACY_PROSE_PATHS` lists the (sink, path) pairs still
+    holding prose; a test fails when an entry is unused or a new path appears. 141 entries at job A, 53 after job B,
+    23 after job C (left for job D: `entity_created` 9, `log_chunk` 1, `log_ingest_created` 2, `log_ingest_finished`
+    7, `prompt_set_version` 4).
+33. **Blob API (job A, `vault.py`).** `put_blob(tenant, obj)` stores a JSON object or array of any size as chunk
+    lines (192 KiB each, at most 4096) plus a manifest line in the same vault file, each AES-256-GCM under the tenant
+    tag with associated data binding tenant, blob id, chunk index, chunk count and key id; one append, one fsync, all
+    or nothing; inside `collecting(batch)` the lines join the batch for a later `write_batch`. It returns a ref
+    (`seo-blb-` + 32 hex + 8 hex check). `get_blob(tenant, ref)` answers only the storing tenant; every failure is
+    the same `VaultNotFound`; no key is `VaultUnavailable`. `field_hash_matches` (job B) checks a keyed log-field
+    HMAC under the current or the retiring key in constant time.
+34. **Vaulted documents (job B, `svc_vaulted.py`).** A client-owned document is normalised, HMAC-ed (the log-field
+    sub-key of decision 15, bound to tenant and field name, over its canonical JSON) and encrypted OUTSIDE the service
+    lock; under the lock: the kill-switch re-check, one vault append, the commit. A commit that fails after the
+    append leaves an orphan (counted, never served). Readers load the blob for the owning tenant outside the lock and
+    check the HMAC; a lost, changed, foreign or unreadable blob is `vault_unavailable: true` in the view and
+    `VAULT_UNAVAILABLE` (503) for every dependant. No key: refused up front, nothing written.
+35. **What each migrated kind keeps in the log.**
+    - `audit_completed` (job B): `audit_id`, `report_ref`, `report_hmac`, `facts` (report version, outcome,
+      findings count, start / finish times, per agent: agent, task, outcome, findings count). Ledger
+      `audit_report_recorded`: `report_hmac`, outcome, findings. Field `audit_report`.
+    - `drift_recorded` (job B): `schedule_id`, `older`, `newer`, `drift_ref`, `drift_hmac`, `facts` (counts).
+      Field `drift_report`. Search Console section evidence: keyed hash, field `gsc_section`.
+    - `audit_interrupted` / `citation_run_interrupted` (jobs B / C, log and ledger): `failure.where` is
+      `svc_audits.where_code` (`module:function:line` without angle brackets, else `module:line`, else `unknown`);
+      `error_type` is a code or `Exception`.
+    - `citation_run_recorded` (job C): `citation_run_id`, `result_ref`, `result_hmac`, `facts` (`outcome`, `rows`,
+      `findings`, `usable_answers`, `mentioned_not_cited`, `strength_answers`: one code and counts). Ledger: the
+      same hash, outcome and three counts. Field `citation_result`. No host, URL, model name, note or prompt.
+    - `engine_calls_reserved` / `engine_run_settled` (job C, log and ledger): unchanged except `model`: a declared
+      model id as it is, any other string as `UNKNOWN_MODEL` with `model_hmac` (keyed, field `engine_model`, bound to
+      the tenant; null without a vault key).
+36. **Citation results are one blob; the per-row vault records and per-field stubs are retired (job C; supersedes
+    the storage side of decisions 10 and 15 for new runs).** The blob is `{"v": 1, "result": the split and swept
+    envelope, "evidence": {evidence id: record}}`: `callum.split_evidence` now only separates the envelope (each row
+    keeps `evidence_id`, the basis and the strict verdict flags; hosts only) from the evidence records, and
+    `guard_record` still sweeps the envelope. Chosen over "per-row records plus an envelope blob" because it has one
+    vault object per run instead of rows + 1, one keyed HMAC instead of up to six per row, one read per owner GET
+    instead of one per row, and nothing per-row in the log or under the lock. Consequences: a damaged blob makes the
+    whole result unavailable (it was per row); the owner's row shows `evidence.evidence_id` where it showed
+    `evidence.vault_id`. The owner's view (decisions 11 and 14) is otherwise unchanged; the MNC export of a result
+    that cannot be read answers 503 `VAULT_UNAVAILABLE` instead of rows marked unavailable.
+37. **`model_id` (job C).** Accepted only when the value is EXACTLY one of `sink_guard.MODEL_IDS`: the union of the
+    adapters' declared allowlists (`perplexity.MODELS` / `SONAR_MODELS`, `openai_engine.MODELS`,
+    `anthropic_engine.MODELS`, `google_engine.MODELS`); `config.py` can only configure one of them. Nothing is
+    admitted by shape; `@` and a free `/` stay outside the `code` class.
+38. **Renamed hash fields (plain SHA-256 of client content -> keyed HMAC).** `report_sha256` -> `report_hmac`
+    (`audit_completed`, ledger `audit_report_recorded`, the audit view), `drift_sha256` -> `drift_hmac`,
+    `result_sha256` -> `result_hmac` (`citation_run_recorded` log and ledger, the citation run view), the per-row
+    `evidence.fields.*.hmac_sha256` and `hash_key_id` are gone. The old names stay in memory and in the views as
+    `null` for new records and carry the recorded value for lines written before the change. Decision 15's list of
+    plain content hashes is now `prompt_set_sha256` (computed over HMAC stubs), `domain_sha256` (a registered
+    domain, itself logged as a host name) and the log chain.
+39. **Replay.** Lines written before each job still replay: an `audit_completed` with `report`, a `drift_recorded`
+    with detail, a `citation_run_recorded` with `result` / `result_sha256` (its rows are served from their per-row
+    vault records), interruption records with a free-form `where`, engine records with a raw `model`. The sink guard
+    is applied at write time only.
+40. **A `[withheld]` marker is never logged.** Where a logged fact would have carried the sweep's marker, the code
+    `WITHHELD` is written (`svc_citations.run_facts`); the marker itself is refused by the guard.
+
 ## Threat model
 
 | Threat | What stops it | What does not |
 |---|---|---|
 | Disk read (backup, volume snapshot, a stolen copy of the data dir) | AES-256-GCM; the key is not on disk; tenant tags are keyed, so tenant names cannot be confirmed by hashing guesses | Record count, sizes and write times are visible |
-| Log read | The vault writes no log line; the logged row keeps the vault reference, keyed HMAC-SHA256 field hashes (tenant- and field-bound), host-only URLs and verdict flags | Equality of one field's value across rows of the same tenant under the same key is visible (same HMAC) |
+| Log read | The vault writes no log line; a citation run's line keeps a blob ref, ONE keyed HMAC-SHA256 of the whole result (tenant- and field-bound), an outcome code and counts (decision 36) | Equality of two whole results of the same tenant under the same key is visible (same HMAC); record counts and sizes |
 | Owner's view (tenant-authenticated) | High-precision client-view masking (decision 14) | Unlabelled random tokens and bare short values are shown to the owner (residual, decision 14) |
 | Cross-tenant read | Keyed tenant tag checked before decryption; tenant id in the associated data | A caller that passes the wrong tenant id on a client's behalf (the API's tenant authentication is the boundary) |
 | Tamper (ciphertext, nonce, tag, key id, record moved to another tenant or id) | GCM tag over ciphertext and associated data; every failure is `VaultNotFound` | Deletion, truncation or rollback of whole lines by someone with write access to the data dir (a missing record is not found, not detected) |

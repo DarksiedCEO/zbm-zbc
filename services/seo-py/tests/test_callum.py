@@ -17,7 +17,7 @@ import pytest
 import test_answer_engines as te
 import test_perplexity as base
 import url_corpus
-from helpers import Harness, rid
+from helpers import Harness, citation_document, rid
 
 import answer_adapter as aa
 import config as config_mod
@@ -571,8 +571,10 @@ def test_guard_record_sweeps_the_stored_citation_run_before_commit(tmp_path, mon
     # ADR 0050 M4: even if a field bypassed per-field redaction, guard_record on the whole result before _commit
     # keeps any credential out of the stored run. Simulate a bypass by injecting a key into the excerpt after
     # callum.excerpt has run; the stored result must still carry no key (the wiring line is what makes this pass).
-    # ADR 0051 job 2: the excerpt text is no longer in the logged envelope at all (it is in the vault), so the bypass
-    # is now simulated at the last step that builds a LOGGED row (callum.log_row); the sweep must still withhold it.
+    # ADR 0051 job 2: the excerpt text is no longer in the split envelope at all (it is kept apart), so the bypass
+    # is now simulated at the last step that builds a split row (callum.log_row); the sweep must still withhold it.
+    # Sink job C: the swept envelope is stored in the tenant's vault (the log line carries none of it); the stored
+    # document is what is read here.
     h, _ = service(tmp_path, scripts={"openai": [base.ok(te.fixture("openai"))]})
     secret = "AKIA" + "IOSFODNN7" + "EXAMPLE"
     real_log_row = callum.log_row
@@ -584,9 +586,11 @@ def test_guard_record_sweeps_the_stored_citation_run_before_commit(tmp_path, mon
     v = h.ok(run(h, prompt_set(h, engines=("openai",))), 201)
     assert v["status"] == "completed"
     stored = json.dumps(h.ok(h.get(f"/tenants/zbm/citation-runs/{v['citation_run_id']}")))
-    logged = json.dumps(h.svc.citation_runs[v["citation_run_id"]]["result"])
+    logged = json.dumps(citation_document(h, v["citation_run_id"])["result"])
     assert secret not in stored and secret[:12] not in stored and secret not in logged
     assert "[withheld]" in logged
+    line = json.dumps([r for r in h.svc.log.iter_records() if r["kind"] == "citation_run_recorded"])
+    assert secret not in line and "[withheld]" not in line
 
 
 def test_a_full_run_across_three_engines_is_recorded_first_and_classified(tmp_path):
@@ -614,7 +618,8 @@ def test_a_full_run_across_three_engines_is_recorded_first_and_classified(tmp_pa
     subj = {e["subject_id"] for e in h.ledger.of_type("engine_calls_reserved")}
     assert subj == {f"citation_run:{v['citation_run_id']}"}
     rec = h.ledger.of_type("citation_run_recorded")[0]["_payload"]
-    assert rec["result_sha256"] == v["result_sha256"] and rec["mentioned_not_cited"] == 3
+    assert rec["result_hmac"] == v["result_hmac"] and len(rec["result_hmac"]) == 64     # sink job C: keyed
+    assert "result_sha256" not in rec and rec["mentioned_not_cited"] == 3
     usage = h.svc.engine_usage("openai", h.svc.today())
     assert usage[0] == 3                                   # three requests, each at the reserve (cost unknown)
     assert str(usage[1]) == "0.300000"
@@ -637,7 +642,7 @@ def test_no_key_and_no_answer_text_reach_the_ledger_the_log_or_the_data_director
     assert "TAILMARKER" not in blob                                        # whole answers are never stored
     led = json.dumps([e["_payload"] for e in h.ledger.events])
     assert "Z Best Media" not in led and "site.test/services" not in led   # the ledger: ids, counts, hashes only
-    assert v["result_sha256"]
+    assert v["result_hmac"] and v["result_sha256"] is None                 # sink job C: the keyed hash only
 
 
 def test_the_per_run_call_cap_and_spend_cap_bind(tmp_path):
@@ -754,7 +759,7 @@ def test_idempotency_replay_after_restart_and_the_interrupted_job(tmp_path):
     h.refused(h.post("/tenants/zbm/citation-runs", {**body, "engines": ["openai"]}), 409, "REQUEST_ID_REUSED")
     h2 = h.restart()
     again = h2.ok(h2.get(f"/tenants/zbm/citation-runs/{a['citation_run_id']}"))
-    assert again["result_sha256"] == a["result_sha256"] and again["result"] == a["result"]
+    assert again["result_hmac"] == a["result_hmac"] and a["result_hmac"] and again["result"] == a["result"]
     # a run whose process died is closed by the interrupted-audits job
     with h2.svc.lock:
         h2.svc._commit("citation_run_requested", {"citation_run_id": "seo-cit-" + "d" * 40, "tenant_id": "zbm",
