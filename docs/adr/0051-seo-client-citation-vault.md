@@ -689,6 +689,10 @@ this round is differential, against release 2b26d980 (the last one before the ho
       per length: none at 6..8; 35, 38, 58 at 9..11; 57, 70, 73, 76, 65, 63, 58, 33, 41 at 12..20 (536 of
       18,000, 2.98%); 43, 22, 21 at 21..23; 24..31 are refused as tokens. Over 6..31: 753 of 52,000 (1.448%;
       98b76cde: 339, 0.652%). The cost at 12..20 is more than twice the average the table above reports.
+      Corrected by review cd0a6c7d (re-measured on that review's fix): the 52,000 of that percentage include
+      the 16,000 labels of 24..31 characters, every one of which is refused as a token whatever its digits
+      (16,000 of 16,000), so they cannot be refused for digits. Over the 36,000 labels of 6..23 characters,
+      the ones the digit rule decides, the same 753 are 2.092% (98b76cde: 339, 0.942%).
 65. **Client view: the verb in any case (MUST 2).** `_CV_AFTER` matched ` is `, ` was `, ` are `, ` would be `,
     ` will be `, ` remains ` in lower case only: `the password IS <value>` was shown to the owner. All six are
     matched in any case mix. The other alternations of section 5 were checked for the same gap: `_CV_SCRIPT`
@@ -704,6 +708,8 @@ this round is differential, against release 2b26d980 (the last one before the ho
     marks present and absent, NFC and NFD, before a colon, an equals sign and every case mix of every verb): 0
     misses in the client view and in the strict lane. The Greek label in its natural nominative form is matched
     now; what remains is listed in decision 71 (another inflected form of the Russian and Greek labels).
+    Corrected by review cd0a6c7d (decision 72): "marks absent" no longer holds for the Japanese and the Hindi
+    label, whose marks spell the word; demanding it made ordinary words read as those labels.
     False masking for a label and a value on neutral prose (636 units of the
     utility corpus): 0 before and after, as written, in Title Case and in UPPER CASE. On 20 hand-written
     sentences that put a credential word before the verb (`The token was revoked`): 5 masked before and after
@@ -801,6 +807,16 @@ fixed, not the three forms.
       folded by `lookalikes`, the sharp s reads `ss` by case folding; the ae / oe ligatures are not folded
       (no entry and no natural spelling of one holds a ligature or a sharp s; the test asserts it, and the
       client view's table leaves the sharp s as written, so an entry holding one would stop the import).
+      **Corrected by review cd0a6c7d (decision 72). Two statements of this bullet were wrong.** (1) "Every
+      combining mark dropped" was true of the ENTRIES and not of the text: the inspection views drop the
+      non-spacing marks only, and compose the kana. For the script list the form was therefore stronger
+      than what a text is read through, and ordinary Japanese and Hindi words read as labels. It is no longer
+      what the script list uses: decision 72. (For the Latin lists it stands: their keys are ASCII letters
+      and the Latin lanes read letters only.) (2) "No natural spelling of an entry holds a sharp s" was
+      false: the German entry is written with one in the pre-1996 spelling (lower case, Title Case, and with
+      the capital sharp S), the client view left the letter as written and showed the label and its value.
+      The import-time check only ran each entry as listed and in upper case, which never produces the
+      letter, so it could not see it. Both are fixed in decision 72.
     - The matching tables are DERIVED from the lists through that function at import (`_label_keys` ->
       `_JOINED_KEYS`, `_PIECE_KEYS`, `_SCRIPT_KEYS`, `_CV_SCRIPT_KEYS`, and from them `_JOINED_RX`,
       `_PIECES_IN`, `_SCRIPT_RX`, `_CV_LABEL`, `_CV_SCRIPT`). An entry no text could match after it stops
@@ -834,6 +850,10 @@ fixed, not the three forms.
     separators (`: `, `:`, `=`, ` = `, and every case mix of ` is `, ` was `, ` are `, ` would be `,
     ` will be `, ` remains `) with a value generated at run time: 136,912 cells, each one masked in the client
     view AND flagged as a label by the strict lane.
+    Corrected by review cd0a6c7d: the "marks absent" spelling is no longer made for the Japanese and the
+    Hindi entry (decision 72: without its voicing marks or its vowel signs the word is another word). The
+    same test now holds 396 spellings and 136,224 cells, 0 missed in either lane; the sharp-s spellings,
+    which it never held, are in the test of decision 72.
 
     | The same matrix | Client view: cells shown (entry spellings, entries) | Strict lane: cells not flagged as a label (entry spellings, entries) |
     |---|---|---|
@@ -863,6 +883,11 @@ fixed, not the three forms.
     **What the normal form widens (on purpose):** in both lanes the Japanese label without its voicing
     marks and an Arabic or Persian label with a tatweel; in the strict lane a lookalike letter that carried
     a mark (a Greek letter with a tonos standing for a Latin one), which the client view already read.
+    Corrected by review cd0a6c7d: this list was incomplete and its first item was a mistake. Dropping the
+    voicing marks did not only read the Japanese label without them: it read every word that differs from
+    it by voicing marks alone, an ordinary loanword among them; and dropping the Devanagari vowel signs
+    read the Hindi label's consonants with ANY vowel signs, across word boundaries. Decision 72 withdraws
+    both and states what is widened now.
     Differential test against ffd28ca8, 120,000 generated texts (labels in every script of the lists with
     case, NFD, lookalike, mark and separator mutations, values in several scripts, neutral words around
     them): the strict lane flags 14,846 texts it let through and none fewer (92 more change their reason to
@@ -887,7 +912,9 @@ fixed, not the three forms.
     with Babel) and 0 of 200,000 random joins of three of them; no script key in any of the Arabic, Persian,
     Hebrew, Greek, Russian, Korean and Chinese ones (2,205..2,472 strings each). The generated corpora have
     small vocabularies (about 45 words a language) and no larger real-text corpus was available offline: a
-    rare ordinary word that holds a stripped key is not excluded by these figures. The client view asks for a
+    rare ordinary word that holds a stripped key is not excluded by these figures.
+    Corrected by review cd0a6c7d: with real frequency lists such words are found at once (decision 72: one
+    Japanese word, 182 Hindi word pairs, 60 Thai word pairs). The figures above said nothing about them. The client view asks for a
     separator and a value after the label, as before; the strict lane withholds on the label alone, as for
     every other entry.
     Cost, client view, microseconds of CPU per unit, the best of three interleaved runs of each release on
@@ -895,6 +922,314 @@ fixed, not the three forms.
     corpus 138.2 -> 138.8, Polish 103.8 -> 103.5, Hindi 51.1 -> 50.8, Thai 25.4 -> 25.1, Japanese 22.8 ->
     23.8 (+4.4%, the largest), Russian 102.4 -> 100.7, Greek 115.2 -> 113.5.
     `tests/test_secret_guard_perf.py` passes.
+
+## Review cd0a6c7d: the key of a label is its entry read by the text's own view
+
+A scoped review of cd0a6c7d (decision 71) found that the fix had made the script labels' keys LOOSER than the
+text they are looked for in (MUST A), and that the German password label written with the sharp s was shown
+in the client view (MUST B, older than cd0a6c7d). The owner's two standing requirements: fix the cause, not
+the cases; and do not over-tighten (ordinary text, real sites and real URLs are not flagged, masked,
+withheld or refused).
+
+72. **A key is made by the function that reads the text, never by a stronger one (MUST A).** Decision 71 put
+    every entry and every text through one normal form, but that form did more than the inspection views
+    do to a text: it dropped EVERY combining mark (the views drop the non-spacing ones) and decomposed the
+    kana (the views compose them). Measured at cd0a6c7d against ffd28ca8:
+    - Japanese: the ordinary katakana loanword for "buzzword" differs from the password label by voicing
+      marks only and read as the label, as did 425 more two-word joins of the frequency list than at ffd28ca8;
+    - Hindi: the label's consonants matched with any vowel signs and across a word boundary: 182 two-word
+      joins of ordinary words (the word for "near" before the loanword "ward" is the commonest);
+    - a text holding one was flagged by the strict lane, a title holding one was masked for its owner, a URL
+      holding one was not fetched (`url_has_secret`), a log path template lost the segment, a Unicode-form
+      host holding one was refused in the URL, check and `checked_host` lanes.
+    The demand behind it ("every entry is matched with its marks absent", decision 71) was wrong for scripts
+    whose marks distinguish words and is **withdrawn**.
+
+    **What the code does now** (`secret_guard.py`, section 2a and section 5):
+    - The key of a script entry is the entry passed through the functions a text passes through
+      (`_label_keys`): its inspection view (`normalise`: NFKC, the non-spacing marks and the invisible
+      characters removed) and then the letters-only script view (`_script_letters`). The client view's
+      key is the letters of its own script view of the entry (`_cv_script_view`). The import fails unless
+      the two are equal, unless reading a key again gives the key, and unless both lanes read the entry as
+      listed, in UPPER CASE and in Title Case as that key (`_cv_script_keys`, `_check_label_lists`, run at
+      import).
+    - The script view of one character is `_script_fold`: case folded (the final sigma is a sigma), an
+      ACCENT dropped from a precomposed letter, the tatweel dropped. An accent is a mark of canonical
+      combining class 200 or more (`ACCENT_CLASS_MIN`: above, below, attached, the iota subscript). The
+      fixed-position classes below it are part of the letter and are kept: the kana voicing marks (class
+      8), the nukta (7). Nothing is decomposed that the inspection view composed. Over every letter of the
+      first two planes the test checks that the fold keeps the base letter and removes accent-class marks
+      only; it changes Greek, Cyrillic and Arabic letters among the label scripts and no kana, Devanagari,
+      Thai, Hangul, Han or Hebrew letter.
+    - An entry whose inspection view holds a SPACING mark (the Hindi one: its long-a vowel sign) cannot be
+      read by its letters, since the letters-only view would read it without part of its spelling. It is a
+      **word label**: its key is the inspection view of the entry and it is looked for in the inspection
+      view of the text itself, as one unbroken written word (`_SCRIPT_WORD_RX`, `_CV_SCRIPT_WORD`). A
+      space, a hyphen, an underscore or any other character between two of its characters is in the view,
+      so two ordinary words side by side are never the label; a vowel sign more, less or other than the
+      entry's is another word. Only a tatweel, which spells nothing in any script label, may stand inside.
+      An entry that could not be such a word (two written words, a digit, a letter the fold would change)
+      stops the import.
+    - The Latin lists are read as before (`_label_norm`: lookalikes, lower case, marks dropped: their keys
+      are ASCII letters).
+
+    **What stays closed, and why** (each asserted one by one in the test; none relies on a step applied
+    to the entry only):
+
+    | Closed at cd0a6c7d | Still read as the label because |
+    |---|---|
+    | Arabic and Persian label with a tatweel | `_script_fold` drops the tatweel from the text |
+    | Arabic label with vowel points, Hebrew label with points | `normalise` drops non-spacing marks from the text |
+    | Thai label as listed, NFC or NFD | `normalise` drops its vowel and tone marks (non-spacing) from the text; so does the key |
+    | Hindi label, NFC or NFD, with a joiner or non-joiner in its conjunct | `normalise` drops the virama (non-spacing) and the joiners; the long-a sign stays in both |
+    | Greek label with the tonos and the final sigma, in capitals with or without the tonos | `_script_fold`: accent class, case folding |
+    | Japanese label in NFD or in half-width katakana | `normalise` (NFKC) composes it; the key is the composed entry |
+    | Polish label in capitals with the stroked L, Turkish dotted capital | the Latin views (decision 71), unchanged |
+
+    **The Greek stem.** The Greek entry is a stem ending in the first letters of its second word. Once the
+    tonos is folded (decision 71), the stem as it was read "code" followed by any word beginning with the
+    same four letters ("attack", "offends", "insulting": 13 ordinary pairs in the frequency list) as the
+    label. It is two letters longer now and ends inside the stem of "access"; every form of the label
+    (nominative, the second word in either genitive, capitals, unaccented) is still read.
+
+    **The sharp s (MUST B).** The client view's Latin table reads U+00DF as `ss` and U+1E9E as `SS`
+    (`_CV_SHARP_S`), as the strict lane's form always did. The import-time check now runs every Latin
+    entry through its natural spellings (`_natural_spellings`: as listed, UPPER, Title, and for an entry
+    holding `ss` the three sharp-s spellings) in BOTH lanes, not only as listed and in upper case; these
+    two code points are the only ones whose strict-lane form is several ASCII letters and which the client
+    view left unfolded (scan of the first three planes).
+
+    **M1, the label matrix** (every entry x natural spellings x 344 separators, a run-time value; 96
+    entries, 498 spellings now that the sharp-s spellings of the 16 entries holding `ss` are in it,
+    171,312 cells):
+
+    | | Client view: cells shown (entry spellings, entries) | Strict lane: cells not flagged as a label |
+    |---|---|---|
+    | ffd28ca8 | 39,904 (116, 24) | 7,912 (23, 7) |
+    | cd0a6c7d | 31,648 (92, 16): every sharp-s spelling of every entry holding `ss` | 0 |
+    | this release | 688 (2, 2) | 688 (2, 2) |
+
+    The 688 are the two withdrawn spellings in both lanes: the Japanese entry with its voicing marks
+    absent and the Hindi entry with its vowel signs absent (344 separators each). The three forms of the
+    review of ffd28ca8 (Polish capitals with the stroked L, Hindi, Thai) and the sharp-s spellings: 0.
+
+    **M2, collisions with real word lists.** Every word of a frequency list (wordfreq 3.1.1 for Japanese,
+    Hindi, Arabic, Persian, Russian, Greek, Polish, German; pythainlp 5.4.0 for Thai) and every two-word
+    join that can hold a label key (found by key substring across the boundary under a skeleton looser
+    than any release's matching, not by sampling), through the strict lane and, before `: ` and ordinary
+    text, the client view. Counted as the review counted them: flagged or masked, and the text does not
+    hold a listed entry (so the label words themselves are out); "in script" means both words are written
+    in the language's own script. Rates are the sum of the two unigram frequencies' products.
+
+    | Script (words; candidate joins) | Counted | ffd28ca8 | cd0a6c7d | this release |
+    |---|---|---|---|---|
+    | Japanese (214,960; 38,779) | words, strict / client view | 0 / 0 | 1 / 1 (the loanword) | 0 / 0 |
+    | | joins in script, strict (rate) / client view | 3,487 (2.7e-10) / 0 | 3,912 (2.4e-9) / 357 | 0 / 0 |
+    | Hindi (26,653; 187) | words | 0 / 0 | 0 / 0 | 0 / 0 |
+    | | joins | 0 / 0 | 182 (6.4e-8) / 131 | 0 / 0 |
+    | Thai (88,569; 180) | words | 0 / 0 | 0 / 0 | 0 / 0 |
+    | | joins | 0 / 0 | 60 (2.0e-10) / 28 | 60 (2.0e-10) / 28 |
+    | Arabic (620,701; 78,285) | words; joins | 0 / 0; 0 / 0 | the same | the same |
+    | Persian (31,389; 10) | words; joins | 0 / 0; 0 / 0 | the same | the same |
+    | Russian (713,447; 287,999) | words | 3 / 3 | 3 / 3 | 3 / 3 |
+    | | joins | 0 / 0 | 0 / 0 | 0 / 0 |
+    | Greek (46,916; 81) | words | 2 / 22 | 2 / 22 | 2 / 22 |
+    | | joins | 0 / 0 | 22 (1.3e-9) / 1 | 9 (3.7e-10) / 1 |
+    | Polish (453,320; 8,696,289) | words flagged, strict / client view (label words included) | 30 / 30 | 30 / 30 | 30 / 30 |
+    | | joins flagged (space join; label words included) | 1,318,780 / 16,017 | 1,318,780 / 16,017 | 1,318,780 / 16,017 |
+    | German (634,502; 12,964,625) | words flagged (label words included) | 226 / 49 | 226 / 49 | 226 / 49 |
+    | | joins flagged (space join; label words included) | 2,464,717 / 5,200 | 2,464,717 / 5,200 | 2,464,717 / 5,200 |
+
+    Notes on the table. The Japanese joins at ffd28ca8 are voiced neighbours of the unvoiced "token" entry,
+    which that release also looked for in a mark-stripping view; they are gone with the voicing marks kept.
+    The Russian and Greek words are older than this round and the same at all three releases: three
+    Russian abbreviations and two Greek ones whose letters are lookalikes of a short Latin label, and 20
+    Greek words ending in rho, omega after an accented letter, masked by the client view before a
+    separator (below). The nine Greek joins now are three spellings of the label itself with one word
+    unaccented and the six of the residual below. For Polish and German the joins are not classified (the
+    Latin lane is not changed): the flagged sets are identical, index for index, at ffd28ca8 and at this
+    release (and for German at cd0a6c7d; the Polish run of cd0a6c7d was made with an earlier filter of
+    the harness and agrees in every count). The German list holds no word written with a sharp s (the package spells it `ss`), so the
+    sharp s is measured on a hand list instead: of 96 ordinary German words written with it, 95 are read
+    as before in both lanes and in a URL; the 96th is the pre-1996 spelling of the listed short label
+    ("Pass"), flagged by the strict lane as before and now masked before a separator too. A two-ASCII-word
+    pair in a non-Latin list (English words in it) is skipped; four splits of the candidate search were
+    capped (Japanese 2, Arabic 1, Russian 1), and 15 / 23 for Polish / German (the most frequent words
+    kept on the larger side).
+
+    Japanese 0, Hindi 0. Two named residuals remain, each below 1e-9 per adjacent pair and each asserted in
+    the test:
+    - **Thai, 60 joins (2.0e-10).** The inspection views drop the Thai vowel and tone marks (they are
+      non-spacing), from the text and therefore from the key; Thai is written without spaces. Sixty joins
+      of two words of the list ("code" before "loincloth", for one) read as the label
+      through that view; no single word does. Taking the marks back into the inspection view would change
+      what every other rule reads; not done here. (120 more joins are the label's own two words.)
+    - **Greek, 6 joins (1.9e-10).** "Code" before a derivative of the label's second word ("accessible",
+      "accessibility") holds the stem and is flagged by the strict lane; the client view masks none.
+    Found by the same search and NOT changed, because they are older than this round and identical at
+    ffd28ca8 (reported to the owner):
+    - joins that hold a listed entry character for character across a word boundary: Japanese 3,927 (the
+      two-character Chinese entry "mouth, order" inside "population" before an era name, among others; and
+      two ordinary Japanese words, "gag order" in two spellings, hold it whole), Arabic 6,482 (5,423 of
+      them the entry "secret word" before a word that begins with the letters of its second word), Persian
+      10, Russian 194,420 (the five-letter stem across a space);
+    - a Latin joined label spelled across a space by two ordinary words (Polish 1,318,780 candidate joins
+      flagged by the strict lane, the same number at all three releases; in German, three common words
+      ending in "-sen" before a form of "haben" spell the Portuguese entry: 21 of the 48,400 ordered pairs
+      of the 220 commonest words);
+    - a Greek word ending in rho, omega after an accented letter ("I know", "around", "I bring") is masked
+      by the client view before a separator: the lookalike fold reads the two letters as a short Latin
+      label and takes a piece boundary after the accented letter (20 words of the list, 1 of the 220
+      commonest);
+    - a non-Latin word of about eight letters or more, PERCENT-ENCODED in a URL path, is read as a random
+      token by check (d) and the URL is not fetched: of 21,000 generated URLs per script, 7,851 (Japanese)
+      to 16,908 (Thai) in the encoded form against 0 to 17 as written, the same at ffd28ca8.
+
+    **M3, over-tightening differential.** 211,782 generated hosts (105,900 in Unicode form and 105,882 in
+    punycode, from up to 2,400 common words of each of 29 languages, single, hyphenated, as sub-domains, glued)
+    in the sink, registration, competitor, URL, check and `checked_host` lanes: 0 accepted at ffd28ca8 and
+    refused now, 0 the other way (the six lanes are identical host by host). URL paths and queries built
+    from ordinary words, 21,000 per script for nine scripts, as written and percent-encoded: 0 newly
+    `url_has_secret`, 0 no longer. Neutral sentences from the same lists (1,200 per script, 3,400 English,
+    each as written, in Title Case and in UPPER CASE): strict flags and client-view masks identical to
+    ffd28ca8 in every cell. Against cd0a6c7d: the same three comparisons are identical too (this corpus is
+    random and holds none of the collision words; the next one is made of them).
+    Hosts built from the M2 collision words (25,068: every cd0a6c7d collision join of Japanese, Hindi,
+    Thai and Greek, glued, hyphenated and as two labels, in both forms): 2,069 were accepted at ffd28ca8
+    and refused at cd0a6c7d; 208 are accepted at ffd28ca8 and refused now, all in Unicode form in the URL,
+    check and `checked_host` lanes: the Thai residual joins (180: 60 joins in three shapes), the Greek
+    joins that still read as the label (27: nine joins in three shapes, three of the nine being the label
+    itself with one word unaccented), and one Hindi pair glued into one word with no separator ("response"
+    before "word": the non-spacing nasal dot of the first is dropped by the inspection view and the rest
+    is the label; with a space or a hyphen between them it is not read). None outside the named residuals
+    and the label itself. (A Unicode-form host that holds a script label was
+    always refused in those three lanes; ffd28ca8 took these only because it did not recognise the Thai,
+    Hindi and accented Greek labels at all.)
+
+    **M4, end to end through the real service** (`tests/test_review_cd0a6c7d.py`; the same two runs made
+    against the source of each release):
+
+    | | ffd28ca8 | cd0a6c7d | this release |
+    |---|---|---|---|
+    | (a) 27 forms (the three of the review of ffd28ca8, four sharp-s spellings, 20 other entries in upper case), 81 planted values: values shown to the owner | 21 | 12 | 0 |
+    | (a) evidence fields masked with an alert, of 81 | 60 | 69 | 81 |
+    | (a) values readable in anything the service wrote | 0 | 0 | 0 |
+    | (b) URL resolution on, four own-site URLs cited (the Japanese loanword in one path, the Hindi phrase as a slug in another): fetched | 4 | 2 | 4 |
+    | (b) rows classified | 12 as a resolved own URL | 6 so, 6 inconclusive (cited URL not fetched) | 12 as a resolved own URL |
+    | (b) title, hint and excerpt fields masked, of 24 | 0 | 9 | 0 |
+
+    **M5, differential fuzz.** 130,000 generated texts (35 labels in every script of the lists under 18
+    mutations: case, NFD, lookalikes, accents stripped, all marks stripped, inserted characters, voicing
+    variants, vowel-sign variants, a space or a hyphen inside the label, the sharp s; values in several
+    scripts; neutral words around them, the collision words among them).
+
+    | | ffd28ca8 -> this release | cd0a6c7d -> this release |
+    |---|---|---|
+    | strict lane: texts flagged | 90,540 -> 101,259 | 105,548 -> 101,259 |
+    | newly flagged | 10,893 | 0 |
+    | no longer flagged | 174 | 4,289 |
+    | flagged for another reason | 41 (40 to a label, 1 from it) | 30 (from a label to a token or a number) |
+    | client view: masked for a label and a value | 53,089 -> 60,910 | 60,818 -> 60,910 |
+    | newly masked | 7,821 | 1,558 |
+    | no longer masked | 0 | 1,466 |
+    | any other client-view finding changed | 0 | 0 |
+
+    Every class, by a classifier that re-reads each changed text (no text is left unclassified):
+    - newly flagged against ffd28ca8 (what decision 71 closed, kept): the Greek label with its tonos, final
+      sigma or capitals 3,144; the Thai label 3,064; the Hindi label 2,420; a Latin label holding a
+      lookalike letter that carried a mark 1,764; a tatweel inside a label of any list 491; an accented
+      letter inside a script label 9; a text holding two of these 1. Newly masked: the same classes and,
+      in the client view only, the capital stroked L, the sharp s, and a spacing mark typed inside a
+      script label (the client view now drops it there, as the strict lane's letters view always did);
+    - no longer flagged against ffd28ca8, 174: the unvoiced Japanese entry ("token") with voicing marks
+      ADDED to its letters. ffd28ca8 read those through a mark-stripping view it also searched; the text
+      views do not strip them, so it is another word (one more such text is now a token finding);
+    - no longer flagged against cd0a6c7d, 4,289, exactly the withdrawn over-matches: the Japanese password
+      label with other voicing marks or none 3,257; the Japanese token entry with voicing marks added 154;
+      the Hindi label's consonants across a word boundary (a space, a hyphen, an underscore, a letter of
+      another script between them) 429; the Hindi label with vowel signs added, removed or changed 360;
+      texts holding two of these 89. The 30 reason changes and the 1,466 no longer masked are the same
+      classes (and 11 texts where a vowel sign follows the Hindi label: a longer word, flagged, not masked);
+    - newly masked against cd0a6c7d, 1,558: every one holds a sharp s and every one is masked by cd0a6c7d
+      itself once the letter is spelled `ss` (checked text by text).
+
+    **M6, cost.** `tests/test_secret_guard_perf.py` passes. Both lanes, CPU microseconds per unit on 1,000
+    real-word sentences per script, ffd28ca8 against this release. The two modules are loaded in one process
+    and timed alternately, the best of three runs of 21 alternations each (separate processes differ by 20%
+    on this box, which is why the previous round's Greek figure was inconclusive):
+
+    | Script | Client view | Strict lane |
+    |---|---|---|
+    | Japanese | 29.4 -> 30.1 (+2.4%) | 60.9 -> 58.8 (-3.3%) |
+    | Hindi | 60.8 -> 57.9 (-4.7%) | 125.1 -> 121.7 (-2.7%) |
+    | Thai | 34.4 -> 35.0 (+1.7%) | 56.5 -> 51.0 (-9.6%) |
+    | Arabic | 109.0 -> 113.3 (+4.0%) | 178.4 -> 173.7 (-2.6%) |
+    | Persian | 103.8 -> 104.5 (+0.7%) | 214.5 -> 204.4 (-4.7%) |
+    | Russian | 138.7 -> 135.2 (-2.5%) | 237.6 -> 243.2 (+2.3%) |
+    | Greek | 138.9 -> 140.4 (+1.1%) | 254.7 -> 254.5 (-0.1%) |
+    | Polish | 164.7 -> 166.3 (+1.0%) | 259.4 -> 251.3 (-3.1%) |
+    | German | 178.0 -> 176.9 (-0.6%) | 270.9 -> 245.0 (-9.6%) |
+    | English | 83.8 -> 83.3 (-0.6%) | 126.4 -> 122.6 (-3.0%) |
+
+    The largest rise is 4.0% (Arabic, client view). The same measurement, made before the last change of
+    this round, showed a cost that cd0a6c7d had added: `_label_norm` ran the whole lookalike fold a second
+    time on every text that had lost an accent, and the strict lane cost 25.5% more than at ffd28ca8 on
+    Greek text (Arabic 13.7%, Persian 6.6%, Hindi 6.2%). The second pass is now a one-character table
+    (`_refold`): the text it reads is already folded, NFKC and without marks, and there the fold works one
+    character at a time. Same result: 0 differences over 4,448,128 code-point contexts and over 669,158
+    texts in three forms; the 130,000 fuzz verdicts are byte-identical before and after it.
+    Cold start, 36 fresh processes of each release, interleaved: importing the service's modules and
+    constructing the service takes a median 745.4 ms at ffd28ca8 and 746.7 ms now (1.002x; lower quartile
+    1.012x). The changed module's own body, imported after its dependencies (15 fresh processes each): best
+    35.0 ms at ffd28ca8, 36.2 ms at cd0a6c7d, 38.4 ms now (the import-time check reads every entry in
+    every natural spelling in both lanes).
+
+    **The two lanes (SHOULD S2), pinned.** The strict lane reads a letter through case folding and the
+    `lookalikes` table; the client view reads it through its own cased table. The test puts every code
+    point whose strict-lane Latin form is ASCII letters (2,711) in place of those letters in a listed
+    label, before a separator and a run-time value, and records where the strict lane flags a label and
+    the client view shows the text: 117 code points at cd0a6c7d, 115 now (the sharp s and the capital
+    sharp S are gone). The 115 are homoglyphs, documented here and NOT closed in this round; a code point
+    outside these classes fails the test:
+
+    | Class | Code points | What each lane reads |
+    |---|---|---|
+    | a capital whose own lookalike is another letter | 50 (Greek 28, mathematical Greek 20, Warang Citi 2) | the strict lane folds the case first and reads the small letter's lookalike (Greek capital eta: `n`); the client view reads the capital's (`H`) |
+    | a capital lookalike of both `I` and `l` | 12 (mathematical 5, Coptic 2, Greek, Cyrillic, Cherokee, Deseret, Warang Citi 1 each) | strict `l`, client view `I` |
+    | the Greek eta with an iota subscript | 21 | strict two letters (`ni`), client view one |
+    | a capital read as two other letters | 1 (Cyrillic) | strict `io`, client view `LO` |
+    | a small letter read only by case folding | 31 (Cherokee 24, Cyrillic 7) | the strict lane folds it to a letter the table knows; the client view's table does not |
+
+    **Residuals (declared, each asserted in the test).**
+    - The Japanese label without its voicing marks and the Hindi label without its vowel signs (or with
+      others) are other words: not matched in either lane. Withdrawn requirement, above.
+    - The Hindi label's two halves written apart (a space, a hyphen, an underscore between them) are two
+      ordinary words ("near", "word"): not matched. (The brief for this round asked for "one
+      whitespace-delimited word"; a hyphen is excluded too, because a URL slug joins words with hyphens.)
+    - The Hindi label inside a longer written word (a plural, a compound) is flagged by the strict lane;
+      the client view masks it only when the label ends before the separator, as for every label.
+    - A Devanagari mark that is NON-spacing (a vowel sign such as the short u, the nasal dot) is dropped
+      by the inspection views from every text, so the label with such a mark added still reads as the
+      label. No word of the frequency list does; one of the 182 pairs does when its two words are glued
+      with nothing between them (a host name), not with a space or a hyphen.
+    - The Thai and the Greek joins of M2, and the homoglyph classes above.
+    - Unchanged from decision 71: an inflected form of the Russian and Greek stems in the client view,
+      the Greek label with its FIRST word inflected in both lanes, the bare word `key`.
+
+    **Tests.** `tests/test_review_cd0a6c7d.py`: the key-from-view property for every entry of every list
+    in both lanes; the fold over every letter; each closure of cd0a6c7d with the function that makes it;
+    the loanword, the Hindi joins (all 182, and every first word beside every second) and vowel-sign
+    variants; a permanent collision check on 220 common words of each of nine scripts (embedded as
+    escapes; the tests import no corpus package): alone, in a sentence, as every ordered pair, before
+    five separators in the client view, in a URL path, query and Unicode-form host; the sharp-s
+    spellings; the import-time check, arm by arm, and a copy of the module that does not import with an
+    entry the lanes read differently; the lane divergence by class; a lookalike carrying a mark,
+    `label_only` on non-ASCII segments, the mid-character guard of `_cv_script_ends`; the two end-to-end
+    runs; and each residual above. With the keys of cd0a6c7d put back the loanword and all 182 Hindi
+    joins are flagged again and two of the four cited URLs are not fetched. In
+    `tests/test_review_ffd28ca8.py` the assertions that encoded the withdrawn requirement or the old
+    internals were changed (the "marks absent" spelling of the two entries; the key derivation; the sharp
+    s; the Hindi examples of the cursor tests, now Thai); nothing else.
 
 ## Threat model
 

@@ -496,20 +496,29 @@ def _entities(t: str) -> str:
 decodings = views                        # v1 name used by callers; same function
 
 # ------------------------------------------------------------------------------------------------ 2a. label words
-# The CLOSED multilingual credential-label list (ADR 0050 v2 section 2a). Three ways to match, all on ONE normal form
-# (``_label_norm``, review ffd28ca8 MUST 1): every list entry and the text it is matched against go through that same
-# function (the strict lane here; the script labels of the client view in section 5, whose cased view of the Latin
-# labels is checked against it for every entry at import, ``_cv_latin_keys``), and the matching tables
-# (``_JOINED_KEYS``, ``_PIECE_KEYS``, ``_SCRIPT_KEYS``) are DERIVED from the lists through it at import
-# (``_label_keys``: an entry that could not be matched after it stops the import). Before, an entry was compared as
-# written with a text that had been folded: an entry holding a combining mark the views remove (the Hindi and Thai
-# labels), or a text holding a letter one lane folded differently (the upper-case stroked L in the client view), never
-# matched.
+# The CLOSED multilingual credential-label list (ADR 0050 v2 section 2a). The rule of reviews ffd28ca8 and cd0a6c7d:
+# THE KEY OF AN ENTRY IS THE ENTRY READ BY THE SAME FUNCTION THAT READS THE TEXT, never a stronger one. The matching
+# tables (``_JOINED_KEYS``, ``_PIECE_KEYS``, ``_SCRIPT_KEYS``) are made at import by passing each entry through the
+# view its lane applies to a text (``_label_keys``); an entry no text could match stops the import.
+#   Latin lists   the text is read through ``_label_norm`` (lookalikes folded, lower case, accents dropped), so is
+#                 the entry; the client view's own cased view of the Latin labels is checked against it at import for
+#                 every natural spelling of every entry (``_cv_latin_keys``).
+#   script list   the text is read through the inspection view (``normalise``: NFKC, the non-spacing marks removed)
+#                 and then ``_script_letters`` (its letters, case folded, an ACCENT dropped, the tatweel dropped), so
+#                 is the entry. Nothing else is dropped: the kana voicing marks stay on their letter (review
+#                 cd0a6c7d MUST A: with them dropped an ordinary Japanese loanword read as the label), and an entry
+#                 spelled with a SPACING vowel sign (the Hindi one) is not read by its letters at all: it is a WORD
+#                 label, looked for in the inspection view itself as one unbroken written word (its vowel signs
+#                 kept, no word boundary crossed).
+# Before review ffd28ca8 an entry was compared as written with a text that had been folded (the Hindi and Thai labels
+# never matched; the client view read the upper-case stroked L as an I); between ffd28ca8 and cd0a6c7d the entries
+# were folded MORE than the text views fold (every mark dropped, the kana decomposed).
 #   _JOINED  long labels found anywhere in the text with every non-letter removed, so "pass word", "pass_word",
 #            "p.a.s.s.w.o.r.d", "api key", "DB_PASSWORD", "userPassword", "mot de passe" all read as the label;
 #   _PIECES  short labels that must be a whole piece (pieces split at non-letters, camelCase and letter/digit
 #            boundaries): "pass" in "DB_PASS", "auth" in "authToken", "pin", "sid", "token", "secret", "cookie";
-#   _SCRIPT  labels in scripts without word spacing, matched as substrings of the letters-only view.
+#   _SCRIPT  labels in other scripts: matched as substrings of the letters-only view (scripts without word spacing,
+#            and the multi-word and stem labels of the spaced ones), or as a word label (above).
 _JOINED = (
     "password", "passwd", "passcode", "passphrase", "apikey", "accesskey", "accesstoken", "authtoken",
     "secretkey", "privatekey", "clientsecret", "sessionid", "accesscode", "securitycode", "sessiontoken", "seedphrase",
@@ -535,16 +544,24 @@ _SCRIPT = (
     "\u0643\u0644\u0645\u0629\u0627\u0644\u0645\u0631\u0648\u0631", "\u0643\u0644\u0645\u0629\u0627\u0644\u0633\u0631",
     "\u0631\u0645\u0632\u0639\u0628\u0648\u0631",
     "\u092a\u093e\u0938\u0935\u0930\u094d\u0921", "\u0e23\u0e2b\u0e31\u0e2a\u0e1c\u0e48\u0e32\u0e19",
-    "\u05e1\u05d9\u05e1\u05de\u05d4", "\u03ba\u03c9\u03b4\u03b9\u03ba\u03bf\u03c3\u03c0\u03c1\u03bf\u03c3\u03b2",
+    # the Greek stem ends inside the SECOND word's own stem ("access", ``prosbas-``): two letters shorter (as it was
+    # until review cd0a6c7d) it also read "code" followed by any word in ``prosb-`` ("attack", "offend") as the label
+    "\u05e1\u05d9\u05e1\u05de\u05d4", "\u03ba\u03c9\u03b4\u03b9\u03ba\u03bf\u03c3\u03c0\u03c1\u03bf\u03c3\u03b2\u03b1\u03c3",
 )
 
 
 _TATWEEL = "\u0640"                       # the Arabic elongation stroke: a letter by category, it spells nothing
+# Canonical combining classes from this value up are ACCENTS (above, below, attached, the iota subscript: the Greek
+# tonos and dialytika, the Cyrillic breve, the Arabic hamza above). The classes below it are fixed-position marks
+# that are part of the letter (the nukta 7, the KANA VOICING MARKS 8, the virama 9, the Thai and Arabic vowel marks):
+# a letter is never read without those.
+ACCENT_CLASS_MIN = 200
 
 
 class _LabelMarkTable(dict):
-    """``str.translate`` table: every combining mark (general category Mn, Mc, Me) and the Arabic tatweel removed
-    (filled on first use, bounded)."""
+    """``str.translate`` table of the LATIN normal form: every combining mark (general category Mn, Mc, Me) and the
+    Arabic tatweel removed (filled on first use, bounded). The Latin keys are ASCII letters and the Latin lanes read
+    the letters of the form only, so a mark never stands between two letters of a Latin label."""
 
     def __missing__(self, o: int) -> str | None:
         c = chr(o)
@@ -557,44 +574,124 @@ class _LabelMarkTable(dict):
 _LABEL_MARKS = _LabelMarkTable()
 
 
+class _RefoldTable(dict):
+    """``str.translate`` table: the lookalike fold (``fold.fold_cased``) of ONE character, for the second pass of
+    the Latin normal form. That pass reads a text that is already folded, NFKC and without marks, on which the
+    fold works one character at a time, so one C-speed pass gives what a second ``fold_cased`` of the whole text
+    gave at cd0a6c7d (measured there: the strict lane on Greek text cost a quarter more than at ffd28ca8, the whole
+    fold being run twice on every text with an accent). Filled on first use, bounded; made for one fold object."""
+
+    def __init__(self, fold):
+        super().__init__()
+        self.fold = fold
+
+    def __missing__(self, o: int) -> str:
+        r = self.fold.fold_cased(chr(o))
+        if len(self) < _CMAP_MAX:
+            self[o] = r
+        return r
+
+
+_REFOLD: list = [None]
+
+
+def _refold(g: str) -> str:
+    """The lookalike fold of ``g`` (a text already folded once, its marks dropped), one character at a time."""
+    t = _REFOLD[0]
+    if t is None or t.fold is not _FOLD:
+        t = _REFOLD[0] = _RefoldTable(_FOLD)               # (a test may put another fold in place)
+    return g.translate(t)
+
+
+def _script_fold(c: str) -> str:
+    """ONE character of an inspection view as the script labels read it (lower case): case folded (the final sigma
+    is a sigma), an ACCENT dropped from a precomposed letter (``ACCENT_CLASS_MIN``: the Greek tonos, which capitals
+    are written without), every other precomposed letter left whole (a kana letter keeps its voicing mark, a
+    Devanagari letter its nukta, a Hangul syllable its jamo), the tatweel and a combining mark standing alone read
+    as nothing (a mark is not a letter; the inspection views have already removed the non-spacing ones, and an
+    entry SPELLED with a spacing one is a word label, read on the view itself)."""
+    if c == _TATWEEL or unicodedata.category(c)[0] == "M":
+        return ""
+    f = c.casefold()
+    if f.isascii():
+        return f
+    d = "".join(x for x in unicodedata.normalize("NFD", f) if unicodedata.combining(x) < ACCENT_CLASS_MIN)
+    return unicodedata.normalize("NFC", d)
+
+
+class _ScriptFoldTable(dict):
+    """``str.translate`` table of ``_script_fold`` (filled on first use, bounded)."""
+
+    def __missing__(self, o: int) -> str:
+        r = _script_fold(chr(o))
+        if len(self) < _CMAP_MAX:
+            self[o] = r
+        return r
+
+
+_SCRIPT_FOLD = _ScriptFoldTable()
+
+
 def _label_norm(s: str, latin: bool = True) -> str:
-    """THE normal form of a credential label AND of the text it is looked for in (review ffd28ca8 MUST 1; lower
-    case). Invisible characters out and NFKC, case folded (``I`` with a dot above, the final sigma and the sharp s
-    included), NFKD with EVERY combining mark dropped (accents, the Greek tonos, Arabic and Hebrew points, the
-    Devanagari virama and vowel signs, Thai vowel and tone marks, the kana voicing marks) and the Arabic tatweel
-    dropped with them, NFC again (a Hangul syllable stays whole). Two alphabets, each applied to BOTH sides of its
-    lists:
-      ``latin=True``   (``_JOINED``, ``_PIECES``) lookalike letters read as the ASCII letters they resemble
-                       (``lookalikes``), before and after the marks are dropped. The letters NFKD does not decompose
-                       are folded there: the stroked l, o, d (``LATIN ... LETTER X WITH STROKE``) and the dotless i;
-                       the sharp s reads ``ss`` by case folding. The ae / oe ligatures are left alone: no entry, and
-                       no natural spelling of one, holds them (``tests/test_review_ffd28ca8.py`` asserts each).
-      ``latin=False``  (``_SCRIPT``) the script is kept: no lookalike folding (a Cyrillic or Greek label is not read
-                       as Latin letters)."""
-    if s.isascii():
-        return s.lower()
+    """The normal form a credential label AND the text it is looked for in are both read in (lower case).
+      ``latin=True``   (``_JOINED``, ``_PIECES``) invisible characters out and NFKC, case folded (``I`` with a dot
+                       above, the final sigma and the sharp s included), lookalike letters read as the ASCII letters
+                       they resemble (``lookalikes``), NFKD with the combining marks dropped, NFC, and the lookalikes
+                       once more (a lookalike that carried a mark: a Greek letter with a tonos). The letters NFKD
+                       does not decompose are folded by ``lookalikes``: the stroked l, o, d and the dotless i; the
+                       sharp s reads ``ss`` by case folding. The ae / oe ligatures are left alone: no entry, and no
+                       natural spelling of one, holds them (``tests/test_review_ffd28ca8.py`` asserts each).
+      ``latin=False``  (``_SCRIPT``) the inspection view of ``s`` (``normalise``), each character through
+                       ``_script_fold``. The script is kept: no lookalike folding (a Cyrillic or Greek label is not
+                       read as Latin letters), and no mark is dropped that the inspection views keep ON A LETTER."""
     if latin:
+        if s.isascii():
+            return s.lower()
         f = _FOLD.fold_cased(s)
-    else:
-        f = unicodedata.normalize("NFKC", lookalikes.strip_invisible(s)).casefold()
-    if not f.isascii():
-        g = unicodedata.normalize("NFC", unicodedata.normalize("NFKD", f).translate(_LABEL_MARKS))
-        if latin and g != f and not g.isascii():
-            g = _FOLD.fold_cased(g)                        # a lookalike that carried a mark (a Greek tonos)
-        f = g
-    return f
+        if not f.isascii():
+            g = unicodedata.normalize("NFC", unicodedata.normalize("NFKD", f).translate(_LABEL_MARKS))
+            if g != f and not g.isascii():
+                g = globals()["_refold"](g)                # a lookalike that carried a mark (a Greek tonos)
+            f = g
+        return f
+    v = normalise(s)
+    return v.lower() if v.isascii() else v.translate(_SCRIPT_FOLD)
+
+
+def _word_label(v: str) -> bool:
+    """The inspection view ``v`` of a script entry is spelled with a spacing combining mark (a Devanagari vowel
+    sign): the letters-only view would read the entry without part of its spelling, so it is a word label."""
+    return any(unicodedata.category(c) == "Mc" for c in v)
 
 
 def _label_keys(name: str, entries, latin: bool, piece: bool = False) -> tuple:
-    """The matching keys of one label list: every entry through ``_label_norm``, letters only, in list order. An
-    entry no text could match after the same normalisation stops the import (so a new entry cannot be added in an
-    unmatchable form): a Latin-list key must be ASCII letters, a script-list key must hold a non-ASCII letter, a
-    piece label must be one run of letters, every key has two letters or more."""
+    """The matching keys of one label list, in list order: every entry read by the function that reads the text.
+      Latin list    the letters of ``_label_norm(entry)``;
+      script list   the letters of the entry's inspection view (``_script_letters(normalise(entry))``), or, for an
+                    entry spelled with a spacing mark (``_word_label``), that inspection view itself.
+    An entry no text could match stops the import (so a new entry cannot be added in an unmatchable form): a
+    Latin-list key must be ASCII letters, a script-list key must hold a non-ASCII letter, a piece label must be one
+    run of letters, every key has two letters or more, reading a key again must give the key (the view is a fixed
+    point), and a word label must be ONE written word that the script fold leaves as it is (letters and spacing
+    marks only, no case, no accent: it is looked for as written)."""
     out: list = []
     for i, e in enumerate(entries):
-        norm = _label_norm(e, latin)
-        k = "".join(c for c in norm if c.isalpha())
-        ok = len(k) >= 2 and (k.isascii() if latin else not k.isascii()) and (not piece or k == norm)
+        if latin:
+            norm = _label_norm(e)
+            k = "".join(c for c in norm if c.isalpha())
+            ok = len(k) >= 2 and k.isascii() and (not piece or k == norm) and _label_norm(k) == k
+        else:
+            v = normalise(e)
+            if _word_label(v):
+                k = v
+                letters = [c for c in k if c.isalpha()]
+                ok = (len(letters) >= 2 and not k.isascii() and normalise(k) == k
+                      and all(c.isalpha() or unicodedata.category(c) == "Mc" for c in k)
+                      and all(_script_fold(c) == c for c in letters))
+            else:
+                k = _script_letters(v)
+                ok = (len(k) >= 2 and not k.isascii() and _script_letters(normalise(k)) == k
+                      and k == "".join(c for c in _label_norm(e, False) if c.isalpha()))
         if not ok:
             raise ValueError(f"credential label list {name}: entry {i} cannot be matched after normalisation")
         if k not in out:
@@ -602,12 +699,46 @@ def _label_keys(name: str, entries, latin: bool, piece: bool = False) -> tuple:
     return tuple(out)
 
 
+class _ScriptLettersTable(dict):
+    """``str.translate`` table: each character of an inspection view becomes the letters of its script fold
+    (``_script_fold``; nothing for a non-letter), so one C-speed pass gives the letters-only script view of a text
+    (``tests/test_review_ffd28ca8.py`` asserts it is the letters of ``_label_norm(v, latin=False)``). Filled on first
+    use, bounded."""
+
+    def __missing__(self, o: int) -> str:
+        r = "".join(x for x in _script_fold(chr(o)) if x.isalpha())
+        if len(self) < _CMAP_MAX:
+            self[o] = r
+        return r
+
+
+_SCRIPT_LETTERS = _ScriptLettersTable()
+
+
+def _script_letters(v: str) -> str:
+    """The letters-only script view of the inspection view ``v``: what the letter keys of ``_SCRIPT`` are looked
+    for in, and what makes them (``_label_keys``)."""
+    return v.translate(_SCRIPT_LETTERS)
+
+
+def _alternation(keys, between: str = "") -> re.Pattern | None:
+    """The keys as one pattern (longest first), ``between`` allowed between two characters of a key; None when
+    there is no key."""
+    ks = sorted(keys, key=len, reverse=True)
+    return re.compile("|".join(between.join(re.escape(c) for c in k) for k in ks)) if ks else None
+
+
 _JOINED_KEYS = _label_keys("_JOINED", _JOINED, True)
 _PIECE_KEYS = frozenset(_label_keys("_PIECES", sorted(_PIECES), True, piece=True))
 _SCRIPT_KEYS = _label_keys("_SCRIPT", _SCRIPT, False)
 _JOINED_RX = re.compile("|".join(sorted(_JOINED_KEYS, key=len, reverse=True)))
-# the script labels as ONE pattern over the letters of the script normal form (longest first)
-_SCRIPT_RX = re.compile("|".join(re.escape(k) for k in sorted(_SCRIPT_KEYS, key=len, reverse=True)))
+# the letter keys of the script list as ONE pattern over the letters-only script view (longest first), and the word
+# labels (a key holding a spacing mark is not ``isalpha``) as one pattern over the inspection view itself: the
+# characters of the key in a row (a tatweel, which spells nothing and which the letters view drops, may stand
+# between two of them, as in every other script label; nothing else may)
+_WORD_GAP = _TATWEEL + "*"
+_SCRIPT_RX = _alternation(k for k in _SCRIPT_KEYS if k.isalpha())
+_SCRIPT_WORD_RX = _alternation((k for k in _SCRIPT_KEYS if not k.isalpha()), _WORD_GAP)
 _PIECE_RX = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[^\W\d_A-Za-z]+")
 _SIG_RX = re.compile(r"(?i)(?<![a-z])sig\s*[=:]")
 _LETTER_RUN = re.compile(r"[^\W\d_]+")
@@ -624,33 +755,18 @@ def _letters_view(v: str) -> str:
     return _alpha(_label_norm(v))
 
 
-class _ScriptLettersTable(dict):
-    """``str.translate`` table: each character becomes the letters of its script label normal form
-    (``_label_norm(c, latin=False)``; nothing for a non-letter). The script form is made character by character
-    (case folding, NFKD, the marks dropped), so on an inspection view (NFKC, Hangul composed) one C-speed pass gives
-    the letters of ``_label_norm(v, latin=False)`` (``tests/test_review_ffd28ca8.py`` asserts it). Filled on first
-    use, bounded."""
-
-    def __missing__(self, o: int) -> str:
-        r = "".join(x for x in _label_norm(chr(o), False) if x.isalpha())
-        if len(self) < _CMAP_MAX:
-            self[o] = r
-        return r
-
-
-_SCRIPT_LETTERS = _ScriptLettersTable()
-
-
-def _script_letters(v: str) -> str:
-    """The letters of the script label normal form of the view ``v``: what the ``_SCRIPT`` keys are looked for
-    in."""
-    return v.translate(_SCRIPT_LETTERS)
-
-
 def _script_hit(v: str) -> bool:
-    """A ``_SCRIPT`` label anywhere in the letters of ``v`` (both sides in the script normal form). Every key holds
-    a non-ASCII letter, so an ASCII text holds none."""
-    return not v.isascii() and globals()["_SCRIPT_RX"].search(_script_letters(v)) is not None
+    """A ``_SCRIPT`` label in the inspection view ``v``: a letter key anywhere in its letters-only script view, or a
+    word label written out in ``v`` itself (an unbroken run: a space, a hyphen or any other separator between two
+    words is in ``v``, so two ordinary words side by side are never read as the label). Every key holds a non-ASCII
+    letter, so an ASCII text holds none."""
+    if v.isascii():
+        return False
+    g = globals()
+    if g["_SCRIPT_RX"].search(_script_letters(v)) is not None:
+        return True
+    words = g["_SCRIPT_WORD_RX"]
+    return words is not None and words.search(v) is not None
 
 
 class _AlphaTable(dict):
@@ -2561,19 +2677,23 @@ _CV_LABEL = _cv_label_rx()
 # review c13529af S5: the letters of a non-Latin label may be joined by a space or "_" (``<label_word>value``, XML tag
 # form)
 # (review 98b76cde MUST 2: in any case; three of the labels are in a cased script, Cyrillic and Greek)
-# Review ffd28ca8 MUST 1: built from the KEYS (each entry through ``_label_norm(..., latin=False)``) and matched on
-# the view in that same normal form (``_cv_script_view``); what follows the label is read on the view as written
-# (``_cv_script_ends``). Two of the ``_SCRIPT`` entries are STEMS (the strict lane finds them inside the inflected
+# Reviews ffd28ca8 / cd0a6c7d: built from the KEYS (each entry read by the view the text is read by, ``_label_keys``).
+# A letter key is matched on the script view of the text (``_cv_script_view``: ``_script_fold`` one character at a
+# time, case kept) and what follows the label is read on the view as written (``_cv_script_ends``); a word label
+# (the Hindi entry, spelled with a spacing vowel sign) is matched on the view as written, with no joiner: one
+# unbroken written word. Two of the ``_SCRIPT`` entries are STEMS (the strict lane finds them inside the inflected
 # word); the client view needs the label to end before the separator, so the full nominative form of each is listed
-# here (the Russian one always was; the Greek one is new). Any other inflected form of the two is not matched in the
-# client view (ADR 0051 decision 71, residual).
+# here (the Russian one always was; the Greek one since cd0a6c7d). Any other inflected form of the two is not
+# matched in the client view (ADR 0051 decision 71, residual).
 _CV_SCRIPT_FULL = (
     "\u043f\u0430\u0440\u043e\u043b\u044c",
     "\u03ba\u03c9\u03b4\u03b9\u03ba\u03cc\u03c2 \u03c0\u03c1\u03cc\u03c3\u03b2\u03b1\u03c3\u03b7\u03c2",
 )
 _CV_SCRIPT_KEYS = tuple(dict.fromkeys(_SCRIPT_KEYS + _label_keys("_CV_SCRIPT_FULL", _CV_SCRIPT_FULL, False)))
 _CV_SCRIPT = re.compile("|".join("[ _]?".join(re.escape(c) for c in k)
-                                 for k in sorted(_CV_SCRIPT_KEYS, key=len, reverse=True)), re.IGNORECASE)
+                                 for k in sorted((k for k in _CV_SCRIPT_KEYS if k.isalpha()), key=len, reverse=True)),
+                        re.IGNORECASE)
+_CV_SCRIPT_WORD = _alternation((k for k in _CV_SCRIPT_KEYS if not k.isalpha()), _WORD_GAP)
 # what follows a label: closing quotes / brackets / emphasis, then a separator, then opening quotes / brackets, then a
 # value of 4+ characters (stopped by a space, a quote, a bracket, ``|`` ``,`` ``;`` ``&``). Review 98b76cde MUST 2: the
 # words are matched in ANY case (`` Is ``, `` IS ``, `` Was ``, `` WOULD BE ``): a label and its value were shown
@@ -2592,42 +2712,51 @@ def _cv_valueish(val: str) -> bool:
     return not val.isalpha() or any(c.isupper() for c in val[1:])
 
 
+# The sharp s: NFKD does not decompose it and ``lookalikes`` reads it by case folding (``ss``), which the client
+# view's cased table does not do. Review cd0a6c7d MUST B: the German password label written with it was shown.
+_CV_SHARP_S = {"\u00df": "ss", "\u1e9e": "SS"}
+
+
 class _CvLatinTable(dict):
     """``str.translate`` table: the client view's text view for the LATIN labels, one character at a time, case kept
     (its rules read case: a camelCase boundary before a label, a capital inside a value after `` was ``). Each
     character is read as the client view always read it: NFKD, the combining marks dropped, a lookalike letter as
     the ASCII letter it resembles in the character's own case (``_fold_confusables``).
-    Review ffd28ca8 MUST 1, the one correction: ``_fold_confusables`` reads EVERY upper-case letter whose fold is
-    ``l`` as a capital I. That is right for a lookalike from another script (the Greek iota, the Cyrillic
-    palochka); a LATIN letter L with a stroke or a bar is an L, as ``_label_norm`` and the strict lane read it.
-    Before, the Polish label in upper case read ``H A S I O`` here and was shown.
-    The label keys and this view agree by construction: ``_cv_latin_keys`` runs every Latin entry through this view
-    at import, in both cases, and stops the import when the result is not the entry's key. Filled on first use,
-    bounded."""
+    Two corrections, each a letter the strict lane's normal form (``_label_norm``) always read:
+      review ffd28ca8 MUST 1  ``_fold_confusables`` reads EVERY upper-case letter whose fold is ``l`` as a capital
+                              I. That is right for a lookalike from another script (the Greek iota, the Cyrillic
+                              palochka); a LATIN letter L with a stroke or a bar is an L. Before, the Polish label
+                              in upper case read ``H A S I O`` here and was shown;
+      review cd0a6c7d MUST B  the sharp s reads ``ss`` and the capital sharp S ``SS`` (``_CV_SHARP_S``).
+    The label keys and this view agree by construction: ``_cv_latin_keys`` runs every natural spelling of every
+    Latin entry through this view at import and stops the import when the result is not the entry's key. Filled on
+    first use, bounded."""
 
     def __missing__(self, o: int) -> str:
         c = chr(o)
         r = c
         if not c.isascii():
-            r = _fold_confusables("".join(x for x in unicodedata.normalize("NFKD", c) if not unicodedata.combining(x)))
-            if r == "I" and c.lower() != c and unicodedata.name(c, "").startswith("LATIN") and _label_norm(c) == "l":
-                r = "L"
+            r = _CV_SHARP_S.get(c)
+            if r is None:
+                r = _fold_confusables("".join(x for x in unicodedata.normalize("NFKD", c) if not unicodedata.combining(x)))
+                if r == "I" and c.lower() != c and unicodedata.name(c, "").startswith("LATIN") and _label_norm(c) == "l":
+                    r = "L"
         if len(self) < _CMAP_MAX:
             self[o] = r
         return r
 
 
 class _CvScriptTable(dict):
-    """``str.translate`` table: the client view's text view for the SCRIPT labels: each non-ASCII character becomes
-    its script normal form (``_label_norm(c, latin=False)``, the function the script keys are made with), written in
-    the character's own case (so ``_CV_AFTER`` and ``_cv_valueish`` read the capitals of the value). Filled on first
-    use, bounded."""
+    """``str.translate`` table: the client view's text view for the letter keys of the SCRIPT labels: each
+    non-ASCII character becomes its script fold (``_script_fold``, the function the strict lane's letters view and
+    the keys are made with), written in the character's own case (so ``_CV_AFTER`` and ``_cv_valueish`` read the
+    capitals of the value). Filled on first use, bounded."""
 
     def __missing__(self, o: int) -> str:
         c = chr(o)
         r = c
         if not c.isascii():
-            k = _label_norm(c, False)
+            k = _script_fold(c)
             if k != c:
                 r = k.upper() if c.lower() != c else k
         if len(self) < _CMAP_MAX:
@@ -2641,40 +2770,82 @@ _CV_SCRIPT_VIEW = _CvScriptTable()
 
 def _cv_label_view(v: str) -> str:
     """``v`` as the client view reads it for a Latin label, case kept: ``contrase\u00f1a`` reads as ``contrasena``,
-    the stroked L as ``L`` / ``l``, a lookalike letter as the ASCII letter it resembles."""
+    the stroked L as ``L`` / ``l``, the sharp s as ``ss``, a lookalike letter as the ASCII letter it resembles."""
     return v.translate(_CV_LATIN_VIEW)
 
 
 def _cv_script_view(v: str) -> str:
-    """``v`` in the script label normal form, case kept (marks dropped, the final sigma read as a sigma)."""
+    """The inspection view ``v`` through the script fold, case kept (an accent dropped, the final sigma read as a
+    sigma, the tatweel and a spacing mark read as nothing; a kana letter keeps its voicing mark)."""
     return v.translate(_CV_SCRIPT_VIEW)
 
 
+def _natural_spellings(e: str) -> tuple:
+    """The spellings an entry is checked in at import: as listed, UPPER, Title, and, for an entry holding ``ss``,
+    written with the sharp s in both cases (``pa\u00dfwort``, ``Pa\u00dfwort``, ``PA\u1e9eWORT``)."""
+    forms = [e, e.upper(), e.title()]
+    if "ss" in e.lower():
+        sharp = e.lower().replace("ss", "\u00df")
+        forms += [sharp, sharp.title(), e.upper().replace("SS", "\u1e9e")]
+    return tuple(dict.fromkeys(forms))
+
+
 def _cv_latin_keys(name: str, entries) -> tuple:
-    """The keys of one Latin list AS THE CLIENT VIEW READS ITS ENTRIES: each entry through ``_cv_label_view``, as
-    listed and in upper case, letters only, lower case. It must be the entry's key (``_label_norm``, the strict
-    lane's form): an entry the two lanes would read differently stops the import."""
+    """The keys of one Latin list AS THE CLIENT VIEW READS ITS ENTRIES: each entry, in every natural spelling
+    (``_natural_spellings``), through the inspection view and ``_cv_label_view``, letters only, lower case. It must
+    be the entry's key (``_label_norm``, the strict lane's form), and the strict lane must read the spelling as that
+    key too: an entry the two lanes would read differently in any of them stops the import."""
     out: list = []
     for i, e in enumerate(entries):
         k = "".join(c for c in _label_norm(e) if c.isalpha())
-        for form in (e, e.upper()):
-            if "".join(c for c in _cv_label_view(form) if c.isalpha()).lower() != k:
+        for form in _natural_spellings(e):
+            v = normalise(form)
+            if "".join(c for c in _cv_label_view(v) if c.isalpha()).lower() != k or _letters_view(v) != k:
                 raise ValueError(f"credential label list {name}: entry {i} is read differently by the client view")
         if k not in out:
             out.append(k)
     return tuple(out)
 
 
-if _cv_latin_keys("_JOINED", _JOINED) != _JOINED_KEYS or frozenset(_cv_latin_keys("_PIECES", sorted(_PIECES))) != _PIECE_KEYS:
-    raise ValueError("credential label lists: the client view and the strict lane disagree on a key")
+def _cv_script_keys(name: str, entries) -> tuple:
+    """The keys of one script list AS THE CLIENT VIEW READS ITS ENTRIES (as listed, UPPER, Title): a letter key
+    must be the letters of the client view's script view of the entry AND of the strict lane's letters view; a word
+    label must be found, written out, in the entry's inspection view by both lanes' word patterns. An entry the
+    two lanes would read differently stops the import."""
+    keys = _label_keys(name, entries, False)
+    for i, e in enumerate(entries):
+        k = _label_keys(name, (e,), False)[0]
+        for form in (e, e.upper(), e.title()):
+            v = normalise(form)
+            if k.isalpha():
+                cv = "".join(c for c in _cv_script_view(v) if c.isalpha())
+                ok = cv.casefold() == k and _script_letters(v) == k and _CV_SCRIPT.fullmatch(cv) is not None
+            else:
+                ok = v == k and _CV_SCRIPT_WORD.fullmatch(v) is not None and _SCRIPT_WORD_RX.fullmatch(v) is not None
+            if not ok:
+                raise ValueError(f"credential label list {name}: entry {i} is read differently by the client view")
+    return keys
+
+
+def _check_label_lists() -> None:
+    """Run at import: every entry of every list, in its natural spellings, is read as its key by both lanes."""
+    if _cv_latin_keys("_JOINED", _JOINED) != _JOINED_KEYS or \
+            frozenset(_cv_latin_keys("_PIECES", sorted(_PIECES))) != _PIECE_KEYS:
+        raise ValueError("credential label lists: the client view and the strict lane disagree on a key")
+    if _cv_script_keys("_SCRIPT", _SCRIPT) != _SCRIPT_KEYS or \
+            tuple(dict.fromkeys(_SCRIPT_KEYS + _cv_script_keys("_CV_SCRIPT_FULL", _CV_SCRIPT_FULL))) != _CV_SCRIPT_KEYS:
+        raise ValueError("credential label lists: the client view and the strict lane disagree on a key")
+
+
+_check_label_lists()
 
 
 def _cv_script_ends(v: str, sv: str, matches) -> list:
     """Where each match of ``_CV_SCRIPT`` on the script view ``sv`` ends IN ``v`` (the view as written): what follows
     a label (its separator and value) is read on ``v``, exactly as it was before the label was looked for on the
     normal form. The script view is made one character at a time, so one cursor walks ``v`` once (linear); the
-    characters the view drops right after a label (a mark) are skipped. A match that ends inside the fold of one
-    character is left out."""
+    characters the view drops right after a label (a tatweel, a spacing mark) are skipped. A match that ends inside
+    the fold of one character is left out."""
     if sv == v:
         return [m.end() for m in matches]
     table = _CV_SCRIPT_VIEW
@@ -2717,7 +2888,11 @@ def _cv_label(v: str) -> bool:
                 return True
     if not v.isascii():
         sv = _cv_script_view(v)
-        for end in _cv_script_ends(v, sv, _CV_SCRIPT.finditer(sv)):
+        ends = _cv_script_ends(v, sv, _CV_SCRIPT.finditer(sv))
+        words = globals()["_CV_SCRIPT_WORD"]
+        if words is not None:
+            ends += [m.end() for m in words.finditer(v)]   # a word label: written out in the view itself
+        for end in ends:
             a = _CV_AFTER.match(v, end)
             if a is not None and (a.group("w") is None or _cv_valueish(a.group("val"))):
                 return True

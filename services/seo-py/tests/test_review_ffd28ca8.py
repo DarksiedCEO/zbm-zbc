@@ -11,6 +11,13 @@ are derived from the lists through it at import, and this file proves the proper
 credential-label list of both lanes, in every spelling: as listed, lower, UPPER, Title, with its natural diacritics
 or marks present and absent, NFC and NFD, before a colon, an equals sign and each verb in every case mix.
 
+Corrected by the review of cd0a6c7d (``tests/test_review_cd0a6c7d.py``, ADR 0051 decision 72): "marks absent" was
+demanded of every script, which made the Japanese and Hindi keys looser than the text views (an ordinary Japanese
+loanword and ordinary Hindi word pairs read as the label). The demand is withdrawn for the scripts whose marks
+distinguish words: the Japanese label without its voicing marks and the Hindi label without its vowel signs are
+other words and are no longer spellings of the entry (``MARKS_SPELL_THE_WORD``). The key of a script entry is now the
+entry read by the function that reads the text, and the assertions on the internals below say so.
+
 Every credential-shaped value is generated at run time; no assertion message prints a label or a value (list names,
 indexes and counts only). Non-ASCII text is written as escapes.
 """
@@ -75,6 +82,10 @@ NATURAL = {
 # the upper-case spelling a Turkish keyboard gives (the dotted capital I), beside ``str.upper``
 TURKISH_UPPER = {"\u015fifre": "\u015e\u0130FRE"}
 POLISH, HINDI, THAI = "haslo", "\u092a\u093e\u0938\u0935\u0930\u094d\u0921", "\u0e23\u0e2b\u0e31\u0e2a\u0e1c\u0e48\u0e32\u0e19"
+JAPANESE = "\u30d1\u30b9\u30ef\u30fc\u30c9"
+# review cd0a6c7d MUST A: in these two entries the marks spell the word (the kana voicing marks, the Devanagari vowel
+# signs): the entry with them absent is another word, not a spelling of the label (ADR 0051 decision 72)
+MARKS_SPELL_THE_WORD = (JAPANESE, HINDI)
 
 
 def strip_marks(s: str) -> str:
@@ -88,7 +99,7 @@ def spellings(entry: str) -> dict:
         forms = {"as_written": b, "lower": b.lower(), "upper": b.upper(), "title": b.title(), "capitalised": b.capitalize()}
         if b in TURKISH_UPPER:
             forms["upper_dotted"] = TURKISH_UPPER[b]
-        if not b.isascii() and strip_marks(b) != unicodedata.normalize("NFD", b):
+        if not b.isascii() and strip_marks(b) != unicodedata.normalize("NFD", b) and b not in MARKS_SPELL_THE_WORD:
             forms["marks_absent"] = unicodedata.normalize("NFC", strip_marks(b))
             forms["marks_absent_upper"] = forms["marks_absent"].upper()
         if any("\u0600" <= c <= "\u06ff" for c in b):
@@ -141,21 +152,38 @@ def matrix(entries: list, separators: list, seed: int) -> dict:
 
 def test_the_matching_tables_are_the_lists_through_the_one_normalisation():
     def keys(entries, latin):
-        return tuple(dict.fromkeys("".join(c for c in sg._label_norm(e, latin) if c.isalpha()) for e in entries))
+        if latin:
+            return tuple(dict.fromkeys("".join(c for c in sg._label_norm(e) if c.isalpha()) for e in entries))
+        # review cd0a6c7d: a script key is the entry read by the functions that read a text: its inspection view
+        # (``normalise``) and the letters-only script view of it; an entry spelled with a spacing mark (the Hindi
+        # one) is a word label, its key is the inspection view itself
+        views = [sg.normalise(e) for e in entries]
+        return tuple(dict.fromkeys(v if sg._word_label(v) else sg._script_letters(v) for v in views))
     assert sg._JOINED_KEYS == keys(sg._JOINED, True)
     assert sg._PIECE_KEYS == frozenset(keys(sg._PIECES, True))
     assert sg._SCRIPT_KEYS == keys(sg._SCRIPT, False)
     assert sg._CV_SCRIPT_KEYS == keys(sg._SCRIPT + sg._CV_SCRIPT_FULL, False)
     assert len(sg._JOINED_KEYS) == len(set(sg._JOINED)) and len(sg._SCRIPT_KEYS) == len(set(sg._SCRIPT))
+    letter_keys = [k for k in sg._CV_SCRIPT_KEYS if k.isalpha()]
+    word_keys = [k for k in sg._CV_SCRIPT_KEYS if not k.isalpha()]
+    assert word_keys == [sg.normalise(HINDI)] and len(letter_keys) == len(sg._CV_SCRIPT_KEYS) - 1
+    # the letters of every letter key are the letters of the script normal form of its entry (the two agree)
+    assert [k for k in sg._SCRIPT_KEYS if k.isalpha()] == [
+        "".join(c for c in sg._label_norm(e, False) if c.isalpha()) for e in sg._SCRIPT if e != HINDI]
     # the patterns of both lanes hold every key, and nothing else
     assert sorted(sg._JOINED_RX.pattern.split("|")) == sorted(sg._JOINED_KEYS)
     assert sorted(sg._PIECES_IN.pattern.split("|")) == sorted(sg._PIECE_KEYS)
-    assert sorted(sg._SCRIPT_RX.pattern.split("|")) == sorted(re.escape(k) for k in sg._SCRIPT_KEYS)
-    assert len(sg._CV_SCRIPT.pattern.split("|")) == len(sg._CV_SCRIPT_KEYS)
+    assert sorted(sg._SCRIPT_RX.pattern.split("|")) == sorted(re.escape(k) for k in sg._SCRIPT_KEYS if k.isalpha())
+    # (a word label: its characters in a row; only a tatweel, which spells nothing, may stand between two of them)
+    assert sg._SCRIPT_WORD_RX.pattern.split("|") == sg._CV_SCRIPT_WORD.pattern.split("|") == [
+        "\u0640*".join(re.escape(c) for c in k) for k in word_keys]
+    assert len(sg._CV_SCRIPT.pattern.split("|")) + len(word_keys) == len(sg._CV_SCRIPT_KEYS)
     for k in sorted(set(sg._JOINED_KEYS) | sg._PIECE_KEYS):
         assert sg._CV_LABEL.fullmatch(k) and sg._CV_LABEL.fullmatch(k.upper()), len(k)
-    for k in sg._CV_SCRIPT_KEYS:
+    for k in letter_keys:
         assert sg._CV_SCRIPT.fullmatch(k) and sg._CV_SCRIPT.fullmatch(k.upper()), len(k)
+    for k in word_keys:
+        assert sg._CV_SCRIPT_WORD.fullmatch(k) and sg._SCRIPT_WORD_RX.fullmatch(k), len(k)
     # the normal form is a fixed point, and a key of one alphabet is never a key of the other
     every = [(e, True) for e in sg._JOINED + tuple(sg._PIECES)] + [(e, False) for e in sg._SCRIPT + sg._CV_SCRIPT_FULL]
     assert all(sg._label_norm(sg._label_norm(e, latin), latin) == sg._label_norm(e, latin) for e, latin in every)
@@ -198,25 +226,30 @@ def test_the_text_views_of_both_lanes_are_made_by_the_same_function():
 
 
 def test_the_letters_nfkd_does_not_decompose():
-    """The stroked / dotless letters that occur in a label language are folded in both lanes; the sharp s only by
-    the normal form, the two ligatures by neither, and no entry or natural spelling needs those."""
+    """The stroked / dotless letters that occur in a label language are folded in both lanes, and so is the sharp
+    s (review cd0a6c7d MUST B: the client view left it as written and showed the German label spelled with it); the
+    two ligatures by neither, and no entry or natural spelling needs those."""
     folded = {"\u0141": "l", "\u0142": "l", "\u00d8": "o", "\u00f8": "o", "\u0110": "d", "\u0111": "d", "\u0131": "i", "\u0130": "i"}
     for c, want in folded.items():
         assert unicodedata.normalize("NFKD", c) == c or c == "\u0130"
         assert sg._label_norm(c) == want, hex(ord(c))
         assert sg._cv_label_view(c) == (want.upper() if c.lower() != c else want), hex(ord(c))
-    assert sg._label_norm("\u00df") == sg._label_norm("\u1e9e") == "ss" and not sg._cv_label_view("\u00df").isascii()
+    assert sg._label_norm("\u00df") == sg._label_norm("\u1e9e") == "ss"
+    assert sg._cv_label_view("\u00df") == "ss" and sg._cv_label_view("\u1e9e") == "SS"
     for c in "\u00e6\u00c6\u0153\u0152":
         assert not sg._label_norm(c).isascii() and not sg._cv_label_view(c).isascii()
     texts = [e for _l, _i, e in label_lists()] + [n for ns in NATURAL.values() for n in ns]
-    assert not any(c in t.lower() for t in texts for c in "\u00e6\u0153\u00df\u00f8\u0111")
+    assert not any(c in t.lower() for t in texts for c in "\u00e6\u0153\u00f8\u0111")
     # the reported letter: the client view read the capital stroked L as a capital I. A lookalike of a capital I
     # from another script (the Greek iota, the Cyrillic palochka) still reads I
     assert sg._cv_label_view("HAS\u0141O") == "HASLO" and sg._cv_label_view("P\u0399N P\u04c0N") == "PIN PIN"
-    # an entry the two lanes would read differently cannot be listed
+    # an entry the two lanes would read differently cannot be listed (the Greek capital eta: the strict lane reads
+    # it through its lower-case form, an "n"; the client view reads the capital, an "H"). One with the sharp s can
+    # be, now that both lanes read it ``ss``
     with pytest.raises(ValueError) as e:
-        sg._cv_latin_keys("_TEST", ("stra\u00dfe",))
+        sg._cv_latin_keys("_TEST", ("toke\u0397",))
     assert "entry 0" in str(e.value)
+    assert sg._cv_latin_keys("_TEST", ("stra\u00dfe",)) == ("strasse",)
 
 
 def test_what_the_client_view_read_before_it_still_reads():
@@ -229,10 +262,14 @@ def test_what_the_client_view_read_before_it_still_reads():
     glued = rs(r, LOWER, 4) + "\u0926\u0941\u0915\u093e\u0928"                              # a value with a spacing mark in it
     assert "label_value" in sg.client_view_findings(f"{korean} was {glued}")
     assert sg._cv_script_ends("ab", "ab", list(re.finditer("b", "ab"))) == [2]
-    text = f"{HINDI}: {value(r)}"
+    text = f"{THAI}: {value(r)}"
     sv = sg._cv_script_view(text)
     (end,) = sg._cv_script_ends(text, sv, list(sg._CV_SCRIPT.finditer(sv)))
-    assert sv != text and text[:end] == HINDI and text[end] == ":"
+    assert sv != text and text[:end] == THAI and text[end] == ":"
+    # the Hindi entry is a word label (review cd0a6c7d): found written out in the inspection view itself
+    view = sg.normalise(f"{HINDI}: {value(r)}")
+    (m,) = list(sg._CV_SCRIPT_WORD.finditer(view))
+    assert m.start() == 0 and view[m.end()] == ":" and list(sg._CV_SCRIPT.finditer(sg._cv_script_view(view))) == []
 
 
 @pytest.mark.parametrize("name,entries,latin,piece", [
@@ -297,6 +334,8 @@ def old_tables(monkeypatch) -> None:
                                                      re.IGNORECASE))
     monkeypatch.setattr(sg, "_script_letters", lambda v: "".join(c for c in v.lower() if c.isalpha()))
     monkeypatch.setattr(sg, "_SCRIPT_RX", re.compile("|".join(re.escape(s) for s in raw)))
+    monkeypatch.setattr(sg, "_SCRIPT_WORD_RX", None)           # (the word label of review cd0a6c7d did not exist)
+    monkeypatch.setattr(sg, "_CV_SCRIPT_WORD", None)
 
 
 def test_mutation_with_the_old_tables_the_matrix_finds_the_reported_entries(monkeypatch):
@@ -575,19 +614,24 @@ def test_ordinary_text_of_the_label_languages_is_not_masked(name):
 
 
 def test_a_changed_entry_does_not_match_ordinary_words_of_its_language():
-    """The entries whose key differs from the entry as listed (marks dropped): the key alone, looked for as the
-    strict lane looks for it, in ordinary text of the same language; and every script key in every corpus."""
+    """The entries whose key differs from the entry as listed (the marks the inspection views drop): the key alone,
+    looked for as the strict lane looks for it, in ordinary text of the same language; and every script key in
+    every corpus. (Review cd0a6c7d: the Japanese key is the entry as listed again; the Japanese corpus is still
+    read, with its key.)"""
     changed = [(i, e) for i, e in enumerate(sg._SCRIPT) if sg._SCRIPT_KEYS[i] != e.replace(" ", "")]
-    assert sorted(len(e) for _i, e in changed) == sorted(len(x) for x in (HINDI, THAI, "\u30d1\u30b9\u30ef\u30fc\u30c9"))
+    assert sorted(len(e) for _i, e in changed) == sorted(len(x) for x in (HINDI, THAI))
+    assert sg._SCRIPT_KEYS[sg._SCRIPT.index(JAPANESE)] == JAPANESE
     rates = {}
-    for i, e in changed:
+    for i, e in changed + [(sg._SCRIPT.index(JAPANESE), JAPANESE)]:
         lang = {HINDI: "hindi", THAI: "thai"}.get(e, "japanese")
         units = language_units(lang)
         key = sg._SCRIPT_KEYS[i]
-        rates[lang] = (sum(key in sg._script_letters(f(u)) for u in units for _n, f in CASINGS), 3 * len(units))
+        # a letter key is looked for in the letters-only script view, a word label in the inspection view itself
+        view = sg._script_letters if key.isalpha() else sg.normalise
+        rates[lang] = (sum(key in view(f(u)) for u in units for _n, f in CASINGS), 3 * len(units))
     every = sum(sg._script_hit(f(u)) for lang in LANGUAGES for u in language_units(lang) for _n, f in CASINGS)
     print(f"script keys in ordinary text: changed entries {rates}; any script key in any corpus: {every}")
-    assert all(hit == 0 for hit, _n in rates.values()) and every == 0
+    assert sorted(rates) == ["hindi", "japanese", "thai"] and all(hit == 0 for hit, _n in rates.values()) and every == 0
 
 
 # ================================================================================================ cost
@@ -605,7 +649,7 @@ def test_reading_what_follows_a_script_label_is_one_pass_over_the_view(monkeypat
     monkeypatch.setattr(sg, "_CV_SCRIPT_VIEW", Counting())
     for n in (50, 400):
         asked[0] = 0
-        text = " ".join([HINDI, "\u0926\u0941\u0915\u093e\u0928"] * n)                 # n labels, none followed by a separator
+        text = " ".join([THAI, "\u0926\u0941\u0915\u093e\u0928"] * n)                  # n labels, none followed by a separator
         sv = sg._cv_script_view(text)
         ends = list(sg._cv_script_ends(text, sv, list(sg._CV_SCRIPT.finditer(sv))))
         assert len(ends) == n and all(text[e] == " " for e in ends)
