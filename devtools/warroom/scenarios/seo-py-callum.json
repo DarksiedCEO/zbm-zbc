@@ -1,0 +1,3720 @@
+{
+ "library": "seo-py-callum",
+ "version": 1,
+ "department": "Search & Answer Intelligence (department 2): the multi-engine answer adapter and Callum's citation-source runs",
+ "service": "seo-py",
+ "driver": "seo_py_callum.py",
+ "basis": "ADR 0046 (A1-A6 the adapter: strict parsing, closed error codes, default OFF, per-run caps and record-first reservations, egress allow-list, no key in any output; B1-B8 Callum: STRENGTH only for the client's own host, a lookalike never the client wherever it redirects, a failed call INCONCLUSIVE never 'not cited', UNKNOWN never 0%, citations only from structured fields and http(s), evidence bounded to 160 characters and PII-screened, one running run per tenant, another tenant's run the same 404 as a missing one, idempotent requests) and ADR 0017 (crawled / provider text is data; SSRF-safe fetcher). The war room's own oracle judges hosts (WHATWG reading, NFKC, A-label decoding, the shared lookalike fold) independently of domain_match.",
+ "variants_per_seed": 2,
+ "scenarios": [
+  {
+   "id": "hostile-citation-hosts",
+   "persona": "a poisoned answer engine citing lookalike, homoglyph, punycode, IP-literal, private, IPv6, userinfo, backslash, bidi, shortened, redirector, data:/javascript:/file: and extremely long URLs",
+   "basis": "ADR 0046 B2/B3 (structured citations only, http/https only, exact host / www twin / subdomain, IDNA, never by substring, lookalikes by the shared fold) and the suite's pinned hosts and SSRF targets",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_callum.py",
+      "test": "test_domain_matching_reuses_domain_match_subdomains_twins_and_lookalikes",
+      "parametrize": true,
+      "field": 0
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_perplexity.py",
+      "test": "test_domain_match",
+      "parametrize": true,
+      "field": 0
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_primitives.py",
+      "test": "test_ssrf_direct_and_after_redirect_is_refused",
+      "parametrize": true
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_aegis_00cc66b.py",
+      "test": "test_l1_more_non_public_ranges",
+      "parametrize": true
+     }
+    }
+   ],
+   "input_field": "cited",
+   "params": {
+    "engines": [
+     "openai,anthropic,google,perplexity",
+     "openai",
+     "anthropic",
+     "google",
+     "perplexity"
+    ]
+   },
+   "steps": [
+    {
+     "action": "citation_run",
+     "args": {
+      "cited": "$cited",
+      "engines": "$engines"
+     }
+    }
+   ],
+   "transforms": [
+    "url_hostile_scheme",
+    "url_userinfo",
+    "url_backslash",
+    "url_lookalike_host",
+    "url_punycode_host",
+    "url_suffix_trick",
+    "url_ip_literal",
+    "url_long",
+    "url_bidi",
+    "url_trailing_dot",
+    "url_port",
+    "url_ideographic_dots",
+    "url_host_case",
+    "url_fullwidth",
+    "url_percent_encode",
+    "url_tracking_query",
+    "url_fragment",
+    "url_shortener",
+    "url_redirector"
+   ],
+   "chain_max": 3,
+   "variants_per_seed": 4,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "lookalike_or_non_client_never_strength",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "strength_violations"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "failed_engine_answer_is_inconclusive_never_not_cited",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_counted"
+     }
+    },
+    {
+     "id": "no_zero_percent_for_unknown",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "spend_and_call_caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "non_web_scheme_never_classified",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "non_web_rows"
+     }
+    },
+    {
+     "id": "stored_urls_bounded_500",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "long_urls"
+     }
+    },
+    {
+     "id": "no_state_change_from_provider_content",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "state_unchanged",
+      "value": true
+     }
+    },
+    {
+     "id": "evidence_excerpt_at_most_160",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "long_excerpts"
+     }
+    },
+    {
+     "id": "evidence_excerpt_pii_screened",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "lookalike_citation_flagged_lookalike",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_unflagged"
+     }
+    },
+    {
+     "id": "no_bidi_or_control_characters_in_stored_urls",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "control_chars_in_urls"
+     }
+    }
+   ]
+  },
+  {
+   "id": "redirect-chains-resolved",
+   "persona": "an engine citing shorteners, Gemini's redirector and lookalike hosts whose redirect chains land on the client, pass a lookalike, or point inside the network (resolution ON)",
+   "basis": "ADR 0046 B4 M1 (a lookalike at ANY hop is never the client), M3 (the redirector host), the SSRF-safe fetcher (ADR 0017 decision 11); seeds: the suite's pinned cited URLs",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_callum.py",
+      "test": "test_a_lookalike_host_that_redirects_onto_the_client_is_a_lookalike_never_a_strength",
+      "parametrize": true
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_callum.py",
+      "test": "test_a_redirect_chain_through_a_lookalike_hop_onto_the_client_is_a_lookalike",
+      "parametrize": true
+     }
+    }
+   ],
+   "input_field": "cited",
+   "fixed_input": {
+    "domain": "acme.com",
+    "brand": "Acme Corp",
+    "text": "Acme Corp recovers marketplace revenue.",
+    "forward": "lookalike_hop"
+   },
+   "params": {
+    "forward": [
+     "lookalike_hop",
+     "client",
+     "private_hop",
+     "metadata_hop",
+     "hostile_dns_hop",
+     "rebind_hop",
+     "competitor"
+    ],
+    "engines": [
+     "openai",
+     "google",
+     "anthropic",
+     "perplexity"
+    ]
+   },
+   "steps": [
+    {
+     "action": "citation_run",
+     "args": {
+      "cited": "$cited",
+      "forward": "$forward",
+      "engines": "$engines",
+      "domain": "$domain",
+      "brand": "$brand",
+      "text": "$text",
+      "resolve": "on",
+      "cites": [
+       "https://competitor.test/a"
+      ]
+     }
+    }
+   ],
+   "transforms": [
+    "url_host_case",
+    "url_tracking_query",
+    "url_fragment",
+    "url_trailing_slash",
+    "url_shortener",
+    "url_redirector",
+    "url_punycode_host",
+    "url_trailing_dot"
+   ],
+   "chain_max": 2,
+   "variants_per_seed": 6,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "lookalike_or_non_client_never_strength",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "strength_violations"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "failed_engine_answer_is_inconclusive_never_not_cited",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_counted"
+     }
+    },
+    {
+     "id": "no_zero_percent_for_unknown",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "spend_and_call_caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "non_web_scheme_never_classified",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "non_web_rows"
+     }
+    },
+    {
+     "id": "stored_urls_bounded_500",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "long_urls"
+     }
+    },
+    {
+     "id": "no_state_change_from_provider_content",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "state_unchanged",
+      "value": true
+     }
+    },
+    {
+     "id": "evidence_excerpt_at_most_160",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "long_excerpts"
+     }
+    },
+    {
+     "id": "evidence_excerpt_pii_screened",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_request_reached_a_non_public_address",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "internal_requests",
+      "value": []
+     }
+    },
+    {
+     "id": "nothing_an_internal_address_answers_appears",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "secret_marker_leaked",
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "client-page-redirects-to-a-lookalike",
+   "persona": "the client's own cited URL redirects (an open redirect, a compromised page) to a lookalike host, written as raw Unicode or as an A-label (resolution ON)",
+   "basis": "ADR 0046 B4 M1 (a lookalike anywhere on the chain is never the client; a client URL that redirects off-site is classified where it lands); seeds: the suite's pinned lookalike URLs",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_callum.py",
+      "test": "test_a_lookalike_host_that_redirects_onto_the_client_is_a_lookalike_never_a_strength",
+      "parametrize": true
+     }
+    }
+   ],
+   "input_field": "cited",
+   "fixed_input": {
+    "domain": "acme.com",
+    "brand": "Acme Corp",
+    "text": "Acme Corp recovers marketplace revenue."
+   },
+   "params": {
+    "engines": [
+     "openai",
+     "anthropic",
+     "google",
+     "perplexity"
+    ],
+    "status": [
+     301,
+     302,
+     307,
+     308
+    ]
+   },
+   "steps": [
+    {
+     "action": "citation_run",
+     "args": {
+      "cited": "$cited",
+      "forward": "behind_client",
+      "engines": "$engines",
+      "domain": "$domain",
+      "brand": "$brand",
+      "text": "$text",
+      "resolve": "on",
+      "status": "$status",
+      "cites": [
+       "https://competitor.test/a"
+      ]
+     }
+    }
+   ],
+   "transforms": [
+    "url_tracking_query",
+    "url_trailing_slash",
+    "url_host_case",
+    "url_fragment"
+   ],
+   "chain_max": 1,
+   "variants_per_seed": 3,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "lookalike_or_non_client_never_strength",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "strength_violations"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "failed_engine_answer_is_inconclusive_never_not_cited",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_counted"
+     }
+    },
+    {
+     "id": "no_zero_percent_for_unknown",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "spend_and_call_caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "non_web_scheme_never_classified",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "non_web_rows"
+     }
+    },
+    {
+     "id": "stored_urls_bounded_500",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "long_urls"
+     }
+    },
+    {
+     "id": "no_state_change_from_provider_content",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "state_unchanged",
+      "value": true
+     }
+    },
+    {
+     "id": "evidence_excerpt_at_most_160",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "long_excerpts"
+     }
+    },
+    {
+     "id": "evidence_excerpt_pii_screened",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_request_reached_a_non_public_address",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "internal_requests",
+      "value": []
+     }
+    },
+    {
+     "id": "nothing_an_internal_address_answers_appears",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "secret_marker_leaked",
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "prompt-injection-never-changes-classification",
+   "persona": "a page the engine read (and so its answer) carries instructions aimed at Callum: mark citations STRENGTH, drop INCONCLUSIVE rows, count a lookalike as the client",
+   "basis": "ADR 0046 B2 / ADR 0017 (provider text is data); metamorphic oracle: the same run without the injected lines must classify identically; seed: the suite's pinned injection",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_audits.py",
+      "module": "INJECTION"
+     }
+    }
+   ],
+   "input_field": "inject",
+   "steps": [
+    {
+     "action": "citation_run",
+     "args": {
+      "inject": "$inject",
+      "control": "injection",
+      "rerun": "yes",
+      "engines": "openai,anthropic,google,perplexity",
+      "cites": [
+       "https://site.test/services",
+       "https://competitor.test/a",
+       "https://xn--ste-jhd.test/",
+       "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AAA",
+       "javascript:alert(1)"
+      ]
+     }
+    }
+   ],
+   "transforms": [
+    "injection",
+    "callum_injection",
+    "md_quote",
+    "md_table",
+    "html_wrap",
+    "rtl_wrap",
+    "cjk_wrap",
+    "zero_width",
+    "fullwidth",
+    "case_flip",
+    "long_body",
+    "homoglyph"
+   ],
+   "require": [
+    "callum_injection"
+   ],
+   "chain_max": 3,
+   "variants_per_seed": 12,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "lookalike_or_non_client_never_strength",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "strength_violations"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "failed_engine_answer_is_inconclusive_never_not_cited",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_counted"
+     }
+    },
+    {
+     "id": "no_zero_percent_for_unknown",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "spend_and_call_caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "non_web_scheme_never_classified",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "non_web_rows"
+     }
+    },
+    {
+     "id": "stored_urls_bounded_500",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "long_urls"
+     }
+    },
+    {
+     "id": "no_state_change_from_provider_content",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "state_unchanged",
+      "value": true
+     }
+    },
+    {
+     "id": "evidence_excerpt_at_most_160",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "long_excerpts"
+     }
+    },
+    {
+     "id": "evidence_excerpt_pii_screened",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "injected_instructions_never_change_classification",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "injection_changed_classification"
+     }
+    },
+    {
+     "id": "identical_inputs_identical_outputs",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "nondeterministic"
+     }
+    }
+   ]
+  },
+  {
+   "id": "brand-non-dictionary-in-markdown-and-scripts",
+   "persona": "answers naming a non-dictionary brand in markdown tables, bullets, quotes and headings, beside right-to-left and CJK lines, with odd spacing",
+   "basis": "ADR 0046 B5a (every match of a non-common term is confirmed, case-insensitive, whole word; whitespace normalised); seeds: the suite's pinned Acme texts",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_callum.py",
+      "test": "test_non_dictionary_brands_match_case_insensitively_as_at_a4af277",
+      "parametrize": true,
+      "field": 1,
+      "where": {
+       "0": "Acme"
+      }
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_callum.py",
+      "test": "test_single_word_brands_not_on_the_list_or_confirmed_by_the_domain_are_mentions",
+      "parametrize": true,
+      "field": 1,
+      "where": {
+       "0": "Acme"
+      }
+     }
+    }
+   ],
+   "input_field": "text",
+   "fixed_input": {
+    "domain": "acme.com",
+    "brand": "Acme"
+   },
+   "steps": [
+    {
+     "action": "citation_run",
+     "args": {
+      "text": "$text",
+      "domain": "$domain",
+      "brand": "$brand",
+      "engines": "openai,anthropic,perplexity",
+      "cites": [
+       "https://competitor.test/a"
+      ]
+     }
+    }
+   ],
+   "transforms": [
+    "md_bullet",
+    "md_table",
+    "md_quote",
+    "md_heading",
+    "rtl_wrap",
+    "cjk_wrap",
+    "nbsp_spacing",
+    "injection",
+    "callum_injection",
+    "signature",
+    "quoted_reply",
+    "long_body",
+    "case_flip",
+    "html_wrap",
+    "mixed_language",
+    "cjk_tight",
+    "zero_width",
+    "soft_hyphen",
+    "homoglyph",
+    "fullwidth",
+    "diacritic_toggle"
+   ],
+   "downgrade": {
+    "cjk_tight": [
+     "named_brand_is_mentioned_not_cited_high"
+    ],
+    "zero_width": [
+     "named_brand_is_mentioned_not_cited_high"
+    ],
+    "soft_hyphen": [
+     "named_brand_is_mentioned_not_cited_high"
+    ],
+    "homoglyph": [
+     "named_brand_is_mentioned_not_cited_high"
+    ],
+    "fullwidth": [
+     "named_brand_is_mentioned_not_cited_high"
+    ],
+    "diacritic_toggle": [
+     "named_brand_is_mentioned_not_cited_high"
+    ]
+   },
+   "downgrade_basis": "B5a matches whole words on the text as written: a brand glued into CJK text, or spelled with invisible characters, lookalikes, full-width letters or other accents is not promised to match (scored, reported)",
+   "chain_max": 2,
+   "variants_per_seed": 5,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "lookalike_or_non_client_never_strength",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "strength_violations"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "failed_engine_answer_is_inconclusive_never_not_cited",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_counted"
+     }
+    },
+    {
+     "id": "no_zero_percent_for_unknown",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "spend_and_call_caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "non_web_scheme_never_classified",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "non_web_rows"
+     }
+    },
+    {
+     "id": "stored_urls_bounded_500",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "long_urls"
+     }
+    },
+    {
+     "id": "no_state_change_from_provider_content",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "state_unchanged",
+      "value": true
+     }
+    },
+    {
+     "id": "evidence_excerpt_at_most_160",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "long_excerpts"
+     }
+    },
+    {
+     "id": "evidence_excerpt_pii_screened",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "named_brand_is_mentioned_not_cited_high",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "all_mnc_high",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "brand-common-word-zoom-unconfirmed",
+   "persona": "answers where the common word 'Zoom' starts a sentence, a list item, a table cell, a quote or a heading, wrapped in markdown, right-to-left and CJK lines and injections",
+   "basis": "ADR 0046 B5a rounds 3-6 (a common-word term at a sentence start is unconfirmed: LOW_CONFIDENCE, never in the headline rate or the MNC list, the rate UNKNOWN never 0%); seeds: the suite's pinned LOW texts",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_callum.py",
+      "test": "test_common_word_brands_need_a_capitalised_mid_sentence_match_or_another_confirmation",
+      "parametrize": true,
+      "field": 1,
+      "where": {
+       "0": [
+        "Zoom"
+       ],
+       "2": "LOW"
+      }
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_callum.py",
+      "test": "test_markdown_structure_and_quotes_start_a_sentence_for_common_word_brands",
+      "parametrize": true,
+      "field": 1,
+      "where": {
+       "0": [
+        "Zoom"
+       ],
+       "2": "LOW"
+      }
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_callum.py",
+      "test": "test_table_cells_and_task_boxes_start_a_sentence",
+      "parametrize": true,
+      "field": 1,
+      "where": {
+       "0": [
+        "Zoom"
+       ],
+       "2": "LOW"
+      }
+     }
+    }
+   ],
+   "input_field": "text",
+   "fixed_input": {
+    "brand": "Zoom"
+   },
+   "params": {
+    "engines": [
+     "openai",
+     "anthropic",
+     "perplexity",
+     "google"
+    ]
+   },
+   "steps": [
+    {
+     "action": "citation_run",
+     "args": {
+      "text": "$text",
+      "brand": "$brand",
+      "engines": "$engines",
+      "cites": [
+       "https://competitor.test/a"
+      ]
+     }
+    }
+   ],
+   "transforms": [
+    "md_bullet",
+    "md_quote",
+    "md_heading",
+    "md_table",
+    "rtl_wrap",
+    "cjk_wrap",
+    "nbsp_spacing",
+    "injection",
+    "callum_injection",
+    "signature",
+    "quoted_reply",
+    "long_body"
+   ],
+   "chain_max": 2,
+   "variants_per_seed": 4,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "lookalike_or_non_client_never_strength",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "strength_violations"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "failed_engine_answer_is_inconclusive_never_not_cited",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_counted"
+     }
+    },
+    {
+     "id": "no_zero_percent_for_unknown",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "spend_and_call_caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "non_web_scheme_never_classified",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "non_web_rows"
+     }
+    },
+    {
+     "id": "stored_urls_bounded_500",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "long_urls"
+     }
+    },
+    {
+     "id": "no_state_change_from_provider_content",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "state_unchanged",
+      "value": true
+     }
+    },
+    {
+     "id": "evidence_excerpt_at_most_160",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "long_excerpts"
+     }
+    },
+    {
+     "id": "evidence_excerpt_pii_screened",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "unconfirmed_common_word_never_a_headline_mention",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "no_mnc_high",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "brand-common-word-target-unconfirmed",
+   "persona": "answers where the common word 'Target' starts a sentence, a list item, a table cell, a quote or a heading, wrapped in markdown, right-to-left and CJK lines and injections",
+   "basis": "ADR 0046 B5a rounds 3-6 (a common-word term at a sentence start is unconfirmed: LOW_CONFIDENCE, never in the headline rate or the MNC list, the rate UNKNOWN never 0%); seeds: the suite's pinned LOW texts",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_callum.py",
+      "test": "test_markdown_structure_and_quotes_start_a_sentence_for_common_word_brands",
+      "parametrize": true,
+      "field": 1,
+      "where": {
+       "0": [
+        "Target"
+       ],
+       "2": "LOW"
+      }
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_callum.py",
+      "test": "test_table_cells_and_task_boxes_start_a_sentence",
+      "parametrize": true,
+      "field": 1,
+      "where": {
+       "0": [
+        "Target"
+       ],
+       "2": "LOW"
+      }
+     }
+    }
+   ],
+   "input_field": "text",
+   "fixed_input": {
+    "brand": "Target"
+   },
+   "params": {
+    "engines": [
+     "openai",
+     "anthropic",
+     "perplexity",
+     "google"
+    ]
+   },
+   "steps": [
+    {
+     "action": "citation_run",
+     "args": {
+      "text": "$text",
+      "brand": "$brand",
+      "engines": "$engines",
+      "cites": [
+       "https://competitor.test/a"
+      ]
+     }
+    }
+   ],
+   "transforms": [
+    "md_bullet",
+    "md_quote",
+    "md_heading",
+    "md_table",
+    "rtl_wrap",
+    "cjk_wrap",
+    "nbsp_spacing",
+    "injection",
+    "callum_injection",
+    "signature",
+    "quoted_reply",
+    "long_body"
+   ],
+   "chain_max": 2,
+   "variants_per_seed": 4,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "lookalike_or_non_client_never_strength",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "strength_violations"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "failed_engine_answer_is_inconclusive_never_not_cited",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_counted"
+     }
+    },
+    {
+     "id": "no_zero_percent_for_unknown",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "spend_and_call_caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "non_web_scheme_never_classified",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "non_web_rows"
+     }
+    },
+    {
+     "id": "stored_urls_bounded_500",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "long_urls"
+     }
+    },
+    {
+     "id": "no_state_change_from_provider_content",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "state_unchanged",
+      "value": true
+     }
+    },
+    {
+     "id": "evidence_excerpt_at_most_160",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "long_excerpts"
+     }
+    },
+    {
+     "id": "evidence_excerpt_pii_screened",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "unconfirmed_common_word_never_a_headline_mention",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "no_mnc_high",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "brand-common-word-confirmed-mid-sentence",
+   "persona": "answers where a common-word brand is capitalised mid-sentence (a name), wrapped in markdown and other scripts",
+   "basis": "ADR 0046 B5a (a capitalised mid-sentence match confirms); seeds: the suite's pinned HIGH texts",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_callum.py",
+      "test": "test_common_word_brands_need_a_capitalised_mid_sentence_match_or_another_confirmation",
+      "parametrize": true,
+      "field": 1,
+      "where": {
+       "0": [
+        "Zoom"
+       ],
+       "2": "HIGH"
+      }
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_callum.py",
+      "test": "test_markdown_structure_and_quotes_start_a_sentence_for_common_word_brands",
+      "parametrize": true,
+      "field": 1,
+      "where": {
+       "0": [
+        "Zoom"
+       ],
+       "2": "HIGH"
+      }
+     }
+    }
+   ],
+   "input_field": "text",
+   "fixed_input": {
+    "brand": "Zoom"
+   },
+   "steps": [
+    {
+     "action": "citation_run",
+     "args": {
+      "text": "$text",
+      "brand": "$brand",
+      "engines": "openai,google",
+      "cites": [
+       "https://competitor.test/a"
+      ]
+     }
+    }
+   ],
+   "transforms": [
+    "md_bullet",
+    "md_quote",
+    "rtl_wrap",
+    "cjk_wrap",
+    "injection",
+    "callum_injection",
+    "signature",
+    "nbsp_spacing",
+    "case_flip"
+   ],
+   "downgrade": {
+    "case_flip": [
+     "confirmed_brand_is_mentioned_not_cited_high"
+    ]
+   },
+   "downgrade_basis": "a lower-cased common word is unconfirmed by design (B5a round 4): case flips may legitimately turn the name into a word",
+   "chain_max": 2,
+   "variants_per_seed": 4,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "lookalike_or_non_client_never_strength",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "strength_violations"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "failed_engine_answer_is_inconclusive_never_not_cited",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_counted"
+     }
+    },
+    {
+     "id": "no_zero_percent_for_unknown",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "spend_and_call_caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "non_web_scheme_never_classified",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "non_web_rows"
+     }
+    },
+    {
+     "id": "stored_urls_bounded_500",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "long_urls"
+     }
+    },
+    {
+     "id": "no_state_change_from_provider_content",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "state_unchanged",
+      "value": true
+     }
+    },
+    {
+     "id": "evidence_excerpt_at_most_160",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "long_excerpts"
+     }
+    },
+    {
+     "id": "evidence_excerpt_pii_screened",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "confirmed_brand_is_mentioned_not_cited_high",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "all_mnc_high",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "engine-protocol-chaos",
+   "persona": "an engine answering malformed, truncated, huge, endless, duplicate-key, NaN, BOM-prefixed, gzip, HTML, mistyped, deeply nested or reordered JSON",
+   "basis": "ADR 0046 A3 (strict parsing: any other shape is ENGINE_PROTOCOL_ERROR, never a guessed answer; two in a row stop the engine; size caps) and B2 (a failed call is INCONCLUSIVE); the modes are the driver's (PROTOCOL_MODES), '*' modes are the same answer in another JSON form, '?' modes have no documented expectation",
+   "seeds": [
+    {
+     "literal": [
+      "not_json",
+      "truncated",
+      "duplicate_keys",
+      "nan",
+      "infinity",
+      "huge",
+      "endless",
+      "html_ctype",
+      "gzip",
+      "array_root",
+      "string_root",
+      "empty_body",
+      "?bom_prefix",
+      "trailing_garbage",
+      "text_mistyped",
+      "cites_mistyped",
+      "text_null",
+      "?deep_nest",
+      "answer_too_long",
+      "*unknown_keys_flood",
+      "control_bytes",
+      "redirect_internal",
+      "*reordered_keys",
+      "*unicode_escaped",
+      "*pretty_printed",
+      "*duplicate_citations",
+      "*reversed_citations"
+     ],
+     "basis": "the driver's protocol modes (drivers/seo_py_callum.py PROTOCOL_MODES), named, not phrases"
+    }
+   ],
+   "input_field": "mode",
+   "params": {
+    "engines": [
+     "openai",
+     "anthropic",
+     "google",
+     "perplexity"
+    ]
+   },
+   "fixed_input": {
+    "engines": "openai"
+   },
+   "steps": [
+    {
+     "action": "citation_run",
+     "args": {
+      "mode": "$mode",
+      "engines": "$engines"
+     }
+    }
+   ],
+   "variants_per_seed": 3,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "lookalike_or_non_client_never_strength",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "strength_violations"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "failed_engine_answer_is_inconclusive_never_not_cited",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_counted"
+     }
+    },
+    {
+     "id": "no_zero_percent_for_unknown",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "spend_and_call_caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "non_web_scheme_never_classified",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "non_web_rows"
+     }
+    },
+    {
+     "id": "stored_urls_bounded_500",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "long_urls"
+     }
+    },
+    {
+     "id": "no_state_change_from_provider_content",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "state_unchanged",
+      "value": true
+     }
+    },
+    {
+     "id": "evidence_excerpt_at_most_160",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "long_excerpts"
+     }
+    },
+    {
+     "id": "evidence_excerpt_pii_screened",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_request_reached_a_non_public_address",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "internal_requests",
+      "value": []
+     }
+    },
+    {
+     "id": "nothing_an_internal_address_answers_appears",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "secret_marker_leaked",
+      "value": false
+     }
+    },
+    {
+     "id": "same_answer_in_another_json_form_is_still_answered",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "preserved_answer_refused"
+     }
+    }
+   ]
+  },
+  {
+   "id": "provider-storms",
+   "persona": "a provider in a 429 / 5xx storm, timing out, dripping bytes, cutting streams half-way, or echoing the key in an auth error",
+   "basis": "ADR 0046 A1/A5 (closed error codes, Retry-After within the deadline only, the hard deadline per question, 4xx never retried, the key never echoed) and B2 (INCONCLUSIVE, never not cited)",
+   "seeds": [
+    {
+     "literal": [
+      "429",
+      "429ra500",
+      "429ra2",
+      "503",
+      "500,500,ok",
+      "502,ok",
+      "connect",
+      "timeout",
+      "timeout,timeout,ok",
+      "drip",
+      "cut",
+      "cut,ok",
+      "401echo",
+      "403",
+      "402",
+      "400",
+      "404",
+      "503,429,500,502,connect,timeout,ok",
+      "ok,429,ok,503,ok,drip",
+      "ok,cut,ok,401echo",
+      "429ra2,429ra2,429ra2,ok"
+     ],
+     "basis": "storm scripts over the driver's steps (STORM_STEPS): one step per request, the last repeats"
+    }
+   ],
+   "input_field": "script",
+   "params": {
+    "engines": [
+     "openai",
+     "anthropic",
+     "google",
+     "perplexity"
+    ]
+   },
+   "fixed_input": {
+    "engines": "openai"
+   },
+   "steps": [
+    {
+     "action": "citation_run",
+     "args": {
+      "script": "$script",
+      "engines": "$engines",
+      "samples": 3
+     }
+    }
+   ],
+   "variants_per_seed": 3,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "lookalike_or_non_client_never_strength",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "strength_violations"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "failed_engine_answer_is_inconclusive_never_not_cited",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_counted"
+     }
+    },
+    {
+     "id": "no_zero_percent_for_unknown",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "spend_and_call_caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "non_web_scheme_never_classified",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "non_web_rows"
+     }
+    },
+    {
+     "id": "stored_urls_bounded_500",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "long_urls"
+     }
+    },
+    {
+     "id": "no_state_change_from_provider_content",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "state_unchanged",
+      "value": true
+     }
+    },
+    {
+     "id": "evidence_excerpt_at_most_160",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "long_excerpts"
+     }
+    },
+    {
+     "id": "evidence_excerpt_pii_screened",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    }
+   ]
+  },
+  {
+   "id": "budget-and-call-caps-mid-run",
+   "persona": "a run that hits its per-run call or spend cap, or a daily budget, part-way through its prompts",
+   "basis": "ADR 0046 A5 (per-run caps and daily budgets bind before any request; 0 = OFF; prompts not asked are reported) and B6 (a rate with no usable answer is unknown)",
+   "seeds": [
+    {
+     "literal": [
+      "RUN_MAX_CALLS=1",
+      "RUN_MAX_CALLS=3",
+      "RUN_MAX_CALLS=4",
+      "RUN_MAX_CALLS=8",
+      "RUN_MAX_CALLS=0",
+      "RUN_MAX_SPEND_USD=0.10",
+      "RUN_MAX_SPEND_USD=0.25",
+      "RUN_MAX_SPEND_USD=0.000001",
+      "RUN_MAX_SPEND_USD=0",
+      "DAILY_CALLS=4",
+      "TENANT_DAILY_CALLS=5",
+      "DAILY_SPEND_USD=0.35",
+      "TENANT_DAILY_SPEND_USD=0.2"
+     ],
+     "basis": "cap settings named in ADR 0046 A5 (config.ENGINE_ENV), with values around one prompt's reservation"
+    }
+   ],
+   "input_field": "cap",
+   "params": {
+    "engine": [
+     "openai",
+     "anthropic",
+     "google",
+     "perplexity"
+    ],
+    "prompts": [
+     "3",
+     "1",
+     "5"
+    ]
+   },
+   "fixed_input": {
+    "engine": "openai",
+    "prompts": "3"
+   },
+   "steps": [
+    {
+     "action": "budget",
+     "args": {
+      "cap": "$cap",
+      "engine": "$engine",
+      "prompts": "$prompts"
+     }
+    }
+   ],
+   "variants_per_seed": 3,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "lookalike_or_non_client_never_strength",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "strength_violations"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "failed_engine_answer_is_inconclusive_never_not_cited",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_counted"
+     }
+    },
+    {
+     "id": "no_zero_percent_for_unknown",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "spend_and_call_caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "non_web_scheme_never_classified",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "non_web_rows"
+     }
+    },
+    {
+     "id": "stored_urls_bounded_500",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "long_urls"
+     }
+    },
+    {
+     "id": "no_state_change_from_provider_content",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "state_unchanged",
+      "value": true
+     }
+    },
+    {
+     "id": "evidence_excerpt_at_most_160",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "long_excerpts"
+     }
+    },
+    {
+     "id": "evidence_excerpt_pii_screened",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "prompts_not_asked_are_reported",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "unasked_reported",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "concurrent-runs-same-tenant",
+   "persona": "a second citation run for the same tenant requested while the first is mid-flight",
+   "basis": "ADR 0046 B8 (one running citation run per tenant; record-first) and the idempotency rule",
+   "seeds": [
+    {
+     "literal": [
+      "same_tenant_new_request",
+      "same_tenant_narrowed",
+      "same_tenant_other_prompt_set",
+      "same_request_replayed"
+     ],
+     "basis": "the driver's concurrency shapes"
+    }
+   ],
+   "input_field": "second",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "concurrent_run",
+     "args": {
+      "second": "$second"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "second_run_refused_or_same_run",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "second_refused_running",
+      "value": true
+     }
+    },
+    {
+     "id": "engines_asked_for_one_run_only",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "one_run_of_requests",
+      "value": true
+     }
+    },
+    {
+     "id": "one_result_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "citation_runs_recorded",
+      "value": 1
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "spend_and_call_caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    }
+   ]
+  },
+  {
+   "id": "cross-tenant-citation-runs",
+   "persona": "another tenant's hub or dashboard probing /citation-runs: exact ids, case and encoding variants, traversal, list, the MNC list, starting a run with someone else's prompt set or domain",
+   "basis": "ADR 0046 B8 (another tenant's run is the same 404 as a missing one; the hub reads its own tenant only and never starts a run) and ADR 0017 tenant isolation",
+   "seeds": [
+    {
+     "literal": [
+      "hub_get_run",
+      "hub_get_run_own_path",
+      "dashboard_get_under_other_tenant",
+      "hub_mnc_priority",
+      "dashboard_mnc_under_other_tenant",
+      "hub_list",
+      "id_uppercased",
+      "id_trailing_slash",
+      "id_percent_encoded",
+      "path_traversal",
+      "hub_start_run_on_other_tenant",
+      "acme_runs_with_zbm_prompt_set",
+      "acme_runs_on_zbm_domain",
+      "compliance_reads_under_other_tenant"
+     ],
+     "basis": "the driver's probes"
+    }
+   ],
+   "input_field": "probe",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "cross_tenant",
+     "args": {
+      "probe": "$probe"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "probe_refused",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "probe_refused",
+      "value": true
+     }
+    },
+    {
+     "id": "indistinguishable_from_missing",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "probe_same_as_missing",
+      "value": true
+     }
+    },
+    {
+     "id": "no_other_tenant_data_echoed",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "foreign_echoed"
+     }
+    },
+    {
+     "id": "probe_asks_no_engine",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "probe_engine_requests_added",
+      "value": 0
+     }
+    },
+    {
+     "id": "other_tenant_lists_nothing",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "acme_sees_no_run",
+      "value": true
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    }
+   ]
+  },
+  {
+   "id": "idempotent-replays",
+   "persona": "a client retrying the same citation-run request (twice, five times, or with another body under the same id)",
+   "basis": "ADR 0046 B8 / ADR 0017 (a replayed request_id answers the recorded run and asks nothing; the id reused with another body is 409 REQUEST_ID_REUSED)",
+   "seeds": [
+    {
+     "literal": [
+      "same_request_twice",
+      "same_id_other_body",
+      "same_request_five_times"
+     ],
+     "basis": "the driver's replay shapes"
+    }
+   ],
+   "input_field": "kind",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "idempotency",
+     "args": {
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "replay_answers_the_recorded_run_or_409",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "idempotent_ok",
+      "value": true
+     }
+    },
+    {
+     "id": "replay_asks_no_engine",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "replay_requests_added",
+      "value": 0
+     }
+    },
+    {
+     "id": "one_result_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "runs_recorded",
+      "value": 1
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    }
+   ]
+  },
+  {
+   "id": "disabled-and-killed-engines",
+   "persona": "a run whose engines are off, unconfigured, without budget, killed by Compliance, or narrowed away",
+   "basis": "ADR 0046 A4/A5 (default OFF, fail closed; budget 0 = OFF, nothing asked) and B8 (provider:<engine> kills that engine; narrowing to nothing is refused)",
+   "seeds": [
+    {
+     "literal": [
+      "all_disabled",
+      "one_disabled",
+      "budgets_off",
+      "run_caps_zero",
+      "provider_killed",
+      "narrowed_to_one",
+      "narrowed_to_none_of_the_set"
+     ],
+     "basis": "the driver's shapes"
+    }
+   ],
+   "input_field": "kind",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "disabled",
+     "args": {
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "off_engine_never_asked",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "off_engines_asked"
+     }
+    },
+    {
+     "id": "off_engine_reserves_nothing",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "off_reservations"
+     }
+    },
+    {
+     "id": "outcome_never_ok_for_what_was_off",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "outcome_honest",
+      "value": true
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "no_zero_percent_for_unknown",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    }
+   ]
+  },
+  {
+   "id": "enterprise-scale-within-caps",
+   "persona": "an enterprise prompt set: 50 prompts x 4 engines x 20 competitors, many citations per answer, up to 50 samples",
+   "basis": "ADR 0046 A5 (per-run caps bind), B5 (at most 2,000 rows a run, rows_truncated), the prompt-set limits (models.PromptSetCreate: 50 prompts, 20 competitors, 4 engines)",
+   "seeds": [
+    {
+     "literal": [
+      "50x4x3",
+      "50x4x3_capped",
+      "50x4x3_rows",
+      "20x4x5_spend",
+      "50x1x50"
+     ],
+     "basis": "the driver's scale shapes"
+    }
+   ],
+   "input_field": "shape",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "scale",
+     "args": {
+      "shape": "$shape"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "lookalike_or_non_client_never_strength",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "strength_violations"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "failed_engine_answer_is_inconclusive_never_not_cited",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_counted"
+     }
+    },
+    {
+     "id": "no_zero_percent_for_unknown",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "spend_and_call_caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "non_web_scheme_never_classified",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "non_web_rows"
+     }
+    },
+    {
+     "id": "stored_urls_bounded_500",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "long_urls"
+     }
+    },
+    {
+     "id": "no_state_change_from_provider_content",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "state_unchanged",
+      "value": true
+     }
+    },
+    {
+     "id": "evidence_excerpt_at_most_160",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "long_excerpts"
+     }
+    },
+    {
+     "id": "evidence_excerpt_pii_screened",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "rows_bounded_2000",
+     "severity": "MUST",
+     "check": "state_le",
+     "args": {
+      "key": "rows",
+      "limit": 2000
+     }
+    }
+   ]
+  },
+  {
+   "id": "secret-echo",
+   "persona": "a provider (or a page its search read) that returns the engine's own API key: in the answer text, a cited URL's path, query, userinfo or host, or an auth error body",
+   "basis": "ADR 0046 A4 (no error echoes a value) / ADR 0017 W4-5 (the key never leaks) and B5 (the ledger receives ids, counts and hashes only)",
+   "seeds": [
+    {
+     "literal": [
+      "answer_text",
+      "answer_text_far",
+      "cited_path",
+      "cited_query",
+      "cited_userinfo",
+      "cited_host_label",
+      "error_401_body"
+     ],
+     "basis": "the driver's echo shapes"
+    }
+   ],
+   "input_field": "kind",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "secret_echo",
+     "args": {
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "lookalike_or_non_client_never_strength",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "strength_violations"
+     }
+    }
+   ]
+  },
+  {
+   "id": "personal-data-in-answers",
+   "persona": "an answer quoting someone's email, phone, SSN, card number or IP next to the brand",
+   "basis": "ADR 0046 B5 (an excerpt that looks like personal data is withheld); seeds: the suite's pinned personal-data prompts (test_prompt_guard, kind email / number / ip)",
+   "seeds": [
+    {
+     "extract": {
+      "file": "tests/test_perplexity.py",
+      "test": "test_prompt_guard",
+      "parametrize": true,
+      "field": 0,
+      "where": {
+       "1": "email"
+      }
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_perplexity.py",
+      "test": "test_prompt_guard",
+      "parametrize": true,
+      "field": 0,
+      "where": {
+       "1": "number"
+      }
+     }
+    },
+    {
+     "extract": {
+      "file": "tests/test_perplexity.py",
+      "test": "test_prompt_guard",
+      "parametrize": true,
+      "field": 0,
+      "where": {
+       "1": "ip"
+      }
+     }
+    }
+   ],
+   "input_field": "text",
+   "seed_field": "pii",
+   "fixed_input": {
+    "prefix": "Z Best Media can help: ",
+    "suffix": " today."
+   },
+   "steps": [
+    {
+     "action": "citation_run",
+     "args": {
+      "text": "$text",
+      "pii": "$pii",
+      "prefix": "$prefix",
+      "suffix": "$suffix",
+      "engines": "openai,anthropic"
+     }
+    }
+   ],
+   "transforms": [
+    "md_table",
+    "md_quote",
+    "rtl_wrap",
+    "nbsp_spacing",
+    "fullwidth",
+    "zero_width",
+    "case_flip"
+   ],
+   "chain_max": 2,
+   "variants_per_seed": 3,
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "lookalike_or_non_client_never_strength",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "strength_violations"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "failed_engine_answer_is_inconclusive_never_not_cited",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_counted"
+     }
+    },
+    {
+     "id": "no_zero_percent_for_unknown",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "spend_and_call_caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "non_web_scheme_never_classified",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "non_web_rows"
+     }
+    },
+    {
+     "id": "stored_urls_bounded_500",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "long_urls"
+     }
+    },
+    {
+     "id": "no_state_change_from_provider_content",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "state_unchanged",
+      "value": true
+     }
+    },
+    {
+     "id": "personal_data_never_in_an_excerpt",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_seed_in_excerpts"
+     }
+    },
+    {
+     "id": "evidence_excerpt_at_most_160",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "long_excerpts"
+     }
+    }
+   ]
+  },
+  {
+   "id": "generated-hostile-answers",
+   "persona": "INVENTED by the war room: random markdown / multilingual answers with random hostile citations and injections from a grammar (grammar.callum_answer)",
+   "basis": "every MUST above, on inputs nobody listed; terminals from the suite's pinned hosts, SSRF targets, brand texts and injection",
+   "generator": {
+    "name": "callum_answer",
+    "count": 60,
+    "atoms": {
+     "hosts": [
+      {
+       "extract": {
+        "file": "tests/test_callum.py",
+        "test": "test_domain_matching_reuses_domain_match_subdomains_twins_and_lookalikes",
+        "parametrize": true,
+        "field": 0
+       }
+      }
+     ],
+     "ssrf": [
+      {
+       "extract": {
+        "file": "tests/test_primitives.py",
+        "test": "test_ssrf_direct_and_after_redirect_is_refused",
+        "parametrize": true
+       }
+      }
+     ],
+     "injection": [
+      {
+       "extract": {
+        "file": "tests/test_audits.py",
+        "module": "INJECTION"
+       }
+      }
+     ],
+     "brand_texts": [
+      {
+       "extract": {
+        "file": "tests/test_callum.py",
+        "test": "test_single_word_brands_not_on_the_list_or_confirmed_by_the_domain_are_mentions",
+        "parametrize": true,
+        "field": 1
+       }
+      }
+     ]
+    }
+   },
+   "input_field": "spec",
+   "steps": [
+    {
+     "action": "generated_answer",
+     "args": {
+      "spec": "$spec"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "lookalike_or_non_client_never_strength",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "strength_violations"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "failed_engine_answer_is_inconclusive_never_not_cited",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_counted"
+     }
+    },
+    {
+     "id": "no_zero_percent_for_unknown",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "spend_and_call_caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "non_web_scheme_never_classified",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "non_web_rows"
+     }
+    },
+    {
+     "id": "stored_urls_bounded_500",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "long_urls"
+     }
+    },
+    {
+     "id": "no_state_change_from_provider_content",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "state_unchanged",
+      "value": true
+     }
+    },
+    {
+     "id": "evidence_excerpt_at_most_160",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "long_excerpts"
+     }
+    },
+    {
+     "id": "evidence_excerpt_pii_screened",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "lookalike_citation_flagged_lookalike",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "lookalike_unflagged"
+     }
+    },
+    {
+     "id": "no_bidi_or_control_characters_in_stored_urls",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "control_chars_in_urls"
+     }
+    },
+    {
+     "id": "injected_instructions_never_change_classification",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "injection_changed_classification"
+     }
+    },
+    {
+     "id": "identical_inputs_identical_outputs",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "nondeterministic"
+     }
+    }
+   ]
+  },
+  {
+   "id": "generated-engine-bodies",
+   "persona": "INVENTED by the war room: 1-3 random structural mutations of a documented engine response (grammar.engine_body_mutation)",
+   "basis": "ADR 0046 A3 (strict parsing); a breaking mutation is never counted, no mutation adds a credit the unmutated answer lacks",
+   "generator": {
+    "name": "engine_body_mutation",
+    "count": 40,
+    "atoms": {}
+   },
+   "input_field": "spec",
+   "steps": [
+    {
+     "action": "generated_protocol",
+     "args": {
+      "spec": "$spec"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "lookalike_or_non_client_never_strength",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "strength_violations"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "failed_engine_answer_is_inconclusive_never_not_cited",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_counted"
+     }
+    },
+    {
+     "id": "no_zero_percent_for_unknown",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "spend_and_call_caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "non_web_scheme_never_classified",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "non_web_rows"
+     }
+    },
+    {
+     "id": "stored_urls_bounded_500",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "long_urls"
+     }
+    },
+    {
+     "id": "no_state_change_from_provider_content",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "state_unchanged",
+      "value": true
+     }
+    },
+    {
+     "id": "evidence_excerpt_at_most_160",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "long_excerpts"
+     }
+    },
+    {
+     "id": "evidence_excerpt_pii_screened",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "breaking_mutation_never_counted",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "breaking_answer_counted"
+     }
+    },
+    {
+     "id": "mutation_never_adds_a_credit",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "credit_added_by_mutation"
+     }
+    },
+    {
+     "id": "preserving_mutation_same_classification",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "preserving_changed_classification"
+     }
+    }
+   ]
+  },
+  {
+   "id": "generated-redirect-chains",
+   "persona": "INVENTED by the war room: random redirect chains (0-5 hops: shorteners, the redirector, lookalikes, private hosts, loops) behind a cited URL, resolution ON (grammar.redirect_chain)",
+   "basis": "ADR 0046 B4 (M1 every hop, M3, the fetcher's caps) and ADR 0017 decision 11",
+   "generator": {
+    "name": "redirect_chain",
+    "count": 40,
+    "atoms": {}
+   },
+   "input_field": "spec",
+   "steps": [
+    {
+     "action": "generated_chain",
+     "args": {
+      "spec": "$spec"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "run_recorded",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "run_completed_not_left_running",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "run_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_server_error",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "server_errors"
+     }
+    },
+    {
+     "id": "lookalike_or_non_client_never_strength",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "strength_violations"
+     }
+    },
+    {
+     "id": "no_secret_in_responses_ledger_or_log",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "secrets_leaked"
+     }
+    },
+    {
+     "id": "failed_engine_answer_is_inconclusive_never_not_cited",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "failed_counted"
+     }
+    },
+    {
+     "id": "no_zero_percent_for_unknown",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unknown_shown_as_zero"
+     }
+    },
+    {
+     "id": "requests_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "requests_over_bound"
+     }
+    },
+    {
+     "id": "fake_clock_time_structurally_bounded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "time_over_bound"
+     }
+    },
+    {
+     "id": "every_request_inside_a_recorded_reservation",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "unreserved_requests"
+     }
+    },
+    {
+     "id": "spend_and_call_caps_never_exceeded",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "cap_violations"
+     }
+    },
+    {
+     "id": "non_web_scheme_never_classified",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "non_web_rows"
+     }
+    },
+    {
+     "id": "stored_urls_bounded_500",
+     "severity": "MUST",
+     "check": "state_empty",
+     "args": {
+      "key": "long_urls"
+     }
+    },
+    {
+     "id": "no_state_change_from_provider_content",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "state_unchanged",
+      "value": true
+     }
+    },
+    {
+     "id": "evidence_excerpt_at_most_160",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "long_excerpts"
+     }
+    },
+    {
+     "id": "evidence_excerpt_pii_screened",
+     "severity": "SHOULD",
+     "check": "state_empty",
+     "args": {
+      "key": "pii_in_excerpts"
+     }
+    },
+    {
+     "id": "no_request_reached_a_non_public_address",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "internal_requests",
+      "value": []
+     }
+    },
+    {
+     "id": "nothing_an_internal_address_answers_appears",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "secret_marker_leaked",
+      "value": false
+     }
+    }
+   ]
+  }
+ ]
+}

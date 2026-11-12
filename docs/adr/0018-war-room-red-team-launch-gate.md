@@ -1,7 +1,7 @@
 # ADR 0018 — The war room: a red-team launch gate for public-facing departments
 
 Status: accepted for build, approved by Andre on Oct 7 2026; built on branch `warroom-redteam-gate`. In force for the
-seven departments it has scenario libraries for (below; seo-py added Oct 10 2026, ADR 0017 W3-3; ooh-py added Oct 16 2026, ADR 0019). Owner: department 41, Adversarial Testing & Red Team.
+seven departments it has scenario libraries for (below; seo-py added Oct 10 2026, ADR 0017 W3-3; ooh-py added Oct 16 2026, ADR 0019; a second seo-py library, seo-py-callum, for the multi-engine answer adapter and Callum's citation runs added Nov 8 2026, ADR 0046, with the generative layer). Owner: department 41, Adversarial Testing & Red Team.
 
 ## Context
 
@@ -80,6 +80,7 @@ Base cases (no chaos) must all PASS: a base FAIL means the library's expectation
 | clipper-network-py (32) | a money or earnings word in a display name is refused (homoglyph, leet, spacing, invisible characters, full-width, accents) | ordinary names pass |
 | onboarding-py (1) | one person's re-spelled legal name aggregates to one 1099 total (or the variant is refused at the schema); a replayed payment is idempotent and recorded once; the id reused with another amount or creator is 409 and records nothing | a spelled-out name |
 | seo-py (2) | the audit answers (never a server error) whatever a hostile site serves; no request ever reaches a non-public address (private, loopback, link-local, CGNAT, mapped, NAT64, rebinding, numeric spellings; redirects, canonical links, robots / sitemap / llms.txt) and nothing an internal address would answer appears anywhere; odd ports, other schemes and credentials refused; compression bombs and odd codings contained within the byte budget; a trickled body stopped by the deadline; DOCTYPE / ENTITY XML quarantined; crawled or logged instructions change no state; uploaded logs keep nothing identifying (the suite's own PII needles, read through the shared lookalike fold) and quarantine broken lines; the hub never reaches another tenant (404 identical to a missing object, nothing echoed); personal-data keys refused 422 with nothing recorded; kill switches refuse with their own code, stop crawling before any request, interrupt a run mid-way, and only Andre releases them; a paid run is refused, unrecorded and uncrawled unless Finance (31) confirms the invoice | none: every invariant is MUST (the log-identifier downgrade was removed with the W3-3 templating fix) |
+| seo-py-callum (2, ADR 0046) | a lookalike, a non-client host (read as a browser reads it: WHATWG, NFKC, A-labels, the shared fold) or a citation whose redirect chain passes a lookalike is never STRENGTH_URL; a failed / unparsable / stormed engine answer is never counted and never "not cited" (INCONCLUSIVE only); no key or token appears in any response, the ledger or the log; another tenant's run is the same 404 as a missing one and nothing of it is echoed; per-run and daily call / spend caps are never exceeded (requests reaching the provider and reservations on the ledger); no rate with no evidence shows a value (UNKNOWN, never 0%); requests and fake-clock seconds stay within prompts x samples x attempts (structural, no wall clock); every request is inside a recorded reservation; prompt-injected instructions never change a classification (metamorphic: the same run without them); a non-web scheme is never classified; stored URLs stay within 500 characters; one running run per tenant; a replayed request asks nothing; an engine that is off, budget-less or killed is never asked; nothing a cited URL's internal address answers appears (resolution on) | evidence excerpts at most 160 characters and PII-screened; identical inputs give identical results (ids masked); a lookalike citation is flagged LOOKALIKE_URL; no bidi / control characters in stored URLs; a brand written into CJK text, with invisible characters, lookalikes or full-width letters is still read (downgraded: outside B5a) |
 | ooh-py (15) | vendor text carrying instructions (to verify funds, zero the markup, buy) changes nothing and the unfunded purchase is refused FUNDS_NOT_VERIFIED; an authorized amount off the quote or a substituted vendor (lookalikes, leet, invisible characters, full-width) is refused and no authorization exists; only Andre authorizes (agent, console without his token, Compliance, scheduler: 403); a second submission of an open order is DUPLICATE_ORDER_BLOCKED and the vendor commitment is counted once; a bank transfer reference respelt (case, separators, method words, punctuation) never funds a second campaign; one face in two quotes is never priced or bought twice; one face respelt is never registered twice; a vendor answer never moves a disputed campaign; a 0.00 funds record is refused (AEGIS round 1, ADR 0019); a zero-padded or spelled-out transfer number never funds a second campaign; a face on another client's open order for an overlapping flight is refused without naming that client; a respelt vendor id (separators, corporate forms, leetspeak) is never registered (AEGIS round 2) | — |
 
 ### Chaos catalogue
@@ -93,6 +94,19 @@ services' own opt-out words in those languages as seeds); prompt-injection lines
 caps; legal-name punctuation and whitespace; email sub-addressing and provider variants; post-URL variants; parameter
 variation (platform, time gap, replay count, creator). Character-level transforms leave HTML tags and entities alone.
 The full table is in `devtools/warroom/README.md`.
+
+### Generative layer (Nov 8 2026)
+
+The libraries list the cases someone thought of; `devtools/warroom/grammar.py` invents the ones nobody did. A
+generated scenario names a grammar (cited URLs, markdown / multilingual answers with injections kept apart,
+redirect chains, structural mutations of a documented engine response), a count, and its ATOMS: corpora extracted by
+AST from the service's pinned tests and source, exactly as seeds are. Case i is a pure function of (global seed,
+scenario, i), so every seed invents other cases and a case id rebuilds its input. The grammar only builds inputs; the
+driver's independent oracle and the invariants judge. Memory only grows: a failing generated case is appended to the
+replay library on the run that found it (`known_failure: null`, gate-blocking until triaged); on CI, where the
+checkout must stay clean, the entries are written to the report directory (`replay-additions.json`) and the gate
+fails on them. One service may now have several libraries; cases and replay libraries are filed under the library's
+name (`seo-py-callum/R0001`).
 
 ### Runtime and determinism
 
@@ -120,6 +134,7 @@ other seeds are exploration, and what they find is promoted into the replay libr
 - **Live channels**: no real email, SMS, chat, platform OAuth, payment rail or ledger is exercised; the services'
   own live runs (`live-runs` job) cover the real ledger over HTTP, not chaos.
 - **Multi-message conversations, concurrency and load**: each case is one short, sequential exchange on a fresh
-  harness.
+  harness (seo-py-callum's concurrency cases start a second run from inside the first one's in-flight engine request,
+  in process; no real parallel load).
 - **Certification-time attacks** that need the 14-day job schedule (for example the same video behind a short link,
   certified once) are left to verification-py's own suite.
