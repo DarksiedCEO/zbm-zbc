@@ -923,8 +923,9 @@ def test_non_latin_labels_joined_by_underscore_and_confusable_is_are_masked(monk
              f"token \u03b9s {v}", f"password wa\u0455 {v.capitalize()}"]
     assert all("label_value" in sg.client_view_findings(t) for t in texts)
     assert all(sg.check(t) is not None for t in texts)
-    monkeypatch.setattr(sg, "_CV_SCRIPT", re.compile("|".join(" ?".join(re.escape(c) for c in s.replace(" ", ""))
-                                                              for s in sg._SCRIPT)))   # mutation: no "_" joiner
+    # mutation: no "_" joiner (review cbdf5e78: the one script pattern of both lanes, ``_SCRIPT_SEQ``)
+    monkeypatch.setattr(sg, "_SCRIPT_SEQ", re.compile("|".join(" ?".join(re.escape(c) for c in s.replace(" ", ""))
+                                                               for s in sg._SCRIPT)))
     assert sum(1 for t in texts[:3] if "label_value" not in sg.client_view_findings(t)) > 0
 
 

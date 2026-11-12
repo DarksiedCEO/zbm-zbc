@@ -14,6 +14,12 @@ spelling. This file proves it for every entry, pins what stays closed and why, a
 missing: ordinary words of nine languages (embedded below, from real frequency lists) must not read as a label,
 alone, in a sentence, side by side, before a separator, or in a URL.
 
+Corrected by the review of cbdf5e78 (``tests/test_review_cbdf5e78.py``, ADR 0051 decision 73): the word label
+and the letters-only matching of the script keys are replaced by ONE boundary rule both lanes read (a label is a
+sequence of whole words), the Hindi and Thai entries are read on the marked views (their non-spacing marks kept),
+and the residuals this file pinned for them (the Thai joins, the glued Hindi pair, the Greek derivatives) are
+closed; the assertions below say which.
+
 Every credential-shaped value is generated at run time; no assertion message prints a label or a value (list
 names, indexes, code points and counts only). Non-ASCII text is written as escapes.
 """
@@ -677,22 +683,24 @@ def script_entries() -> list:
 
 
 def test_the_key_of_every_entry_is_the_entry_read_by_the_view_that_reads_a_text():
-    """key == view(entry) and view(view(x)) == view(x), for every entry of every list, in both lanes."""
-    words = 0
+    """key == view(entry) and view(view(x)) == view(x), for every entry of every list, in both lanes. (Review
+    cbdf5e78: a script key is the letters-only view of the entry, the prefilter of both lanes; the words both lanes
+    match are each word of the entry through the word view of its inspection view, of its MARKED view for the two
+    entries spelled with a non-spacing mark.)"""
+    marked = 0
     for name, i, e in script_entries():
         (k,) = sg._label_keys(name, (e,), False)
         v = sg.normalise(e)                                    # what a text holding the entry reads as
-        if sg._word_label(v):
-            words += 1
-            assert k == v and sg.normalise(k) == k, (name, i)
-            assert sg._SCRIPT_WORD_RX.fullmatch(v) and sg._CV_SCRIPT_WORD.fullmatch(v), (name, i)
-            continue
-        assert k == sg._script_letters(v), (name, i)                              # the strict lane's view
-        assert k == letters(sg._cv_script_view(v)).casefold(), (name, i)          # the client view's view
-        assert sg._script_letters(k) == k and sg._cv_script_view(k) == k, (name, i)
+        assert k == sg._script_letters(v) == letters(sg._script_word_view(v)), (name, i)
+        assert sg._script_letters(k) == k and sg._script_word_view(k) == k, (name, i)
         assert sg._script_letters(sg._script_letters(v)) == sg._script_letters(v), (name, i)
-        assert sg._cv_script_view(sg._cv_script_view(v)) == sg._cv_script_view(v), (name, i)
-    assert words == 1 and sg._word_label(sg.normalise(HINDI))
+        assert sg._script_word_view(sg._script_word_view(v)) == sg._script_word_view(v), (name, i)
+        (spell,) = sg._script_words(name, (e,))
+        clean = sg._clean_marked if spell[0] else sg.normalise
+        marked += spell[0]
+        assert spell[2] == tuple(sg._script_word_view(clean(w)) for w in e.split(" ")), (name, i)
+        assert all(sg._script_word_view(clean(w)) == w for w in spell[2]), (name, i)
+    assert marked == 2 and sg._marked_entry(HINDI) and sg._marked_entry(THAI)
     for name, entries in (("_JOINED", sg._JOINED), ("_PIECES", sorted(sg._PIECES))):
         for i, e in enumerate(entries):
             (k,) = sg._label_keys(name, (e,), True)
@@ -747,14 +755,14 @@ def test_the_script_fold_removes_an_accent_and_nothing_else_from_a_letter():
         for o in range(first, last + 1, step):
             c = chr(o)
             if c.isalpha() and sg.normalise(c) == c:
-                assert sg._script_fold(c) == c and sg._script_letters(c) == c and sg._cv_script_view(c) == c, hex(o)
+                assert sg._script_fold(c) == c and sg._script_letters(c) == c and sg._script_word_view(c) == c, hex(o)
     assert sg.ACCENT_CLASS_MIN == 200 and unicodedata.combining("\u3099") == unicodedata.combining("\u309a") == 8
     assert sg._script_fold("\u03cc") == "\u03bf" and sg._script_fold("\u03c2") == sg._script_fold("\u03a3") == "\u03c3"
     assert sg._script_fold(TATWEEL) == "" and sg._script_fold("\u093e") == "" and sg._script_fold("\u0130") == "i"
-    # the client view's script view is the same fold, written in the character's own case
+    # the word view both lanes read (review cbdf5e78) is the same fold, one character at a time
     capitals = chr(0x39a) + chr(0x38c) + chr(0x3a3) + " " + chr(0x416) + chr(0x419)
-    assert sg._cv_script_view(capitals) == chr(0x39a) + chr(0x39f) + chr(0x3a3) + " " + chr(0x416) + chr(0x418)
-    assert sg._cv_script_view(capitals.lower()) == sg._label_norm(capitals, False) == sg._cv_script_view(capitals).casefold()
+    assert sg._script_word_view(capitals) == chr(0x3ba) + chr(0x3bf) + chr(0x3c3) + " " + chr(0x436) + chr(0x438)
+    assert sg._script_word_view(capitals.lower()) == sg._label_norm(capitals, False) == sg._script_word_view(capitals)
     # the spacing mark is not a letter of the letters-only view; the entry spelled with one is not read there
     assert not any(unicodedata.category(c) == "Mc" for k in sg._SCRIPT_KEYS if k.isalpha() for c in k)
     assert sg._SCRIPT_RX.search(sg._script_letters(sg.normalise(HINDI))) is None
@@ -771,7 +779,8 @@ CLOSED = (
     ("greek_capitals_tonos", "\u039a\u03a9\u0394\u0399\u039a\u038c\u03a3 \u03a0\u03a1\u038c\u03a3\u0392\u0391\u03a3\u0397\u03a3", "script_fold"),
     ("russian_capitals", "\u041f\u0410\u0420\u041e\u041b\u042c", "script_fold"),
     ("thai_as_listed", THAI, "normalise"),
-    ("thai_marks_absent", "\u0e23\u0e2b\u0e2a\u0e1c\u0e32\u0e19", "normalise"),
+    # (review cbdf5e78 MUST 2: the Thai label without its marks is another word, as the Japanese and Hindi ones are:
+    # ``test_review_cbdf5e78.py`` asserts it is NOT read; it was listed here as closed)
     ("hindi_nfc", HINDI, "normalise"),
     ("hindi_nfd", unicodedata.normalize("NFD", HINDI), "normalise"),
     ("hindi_joiner_in_the_conjunct", HINDI[:6] + "\u200d" + HINDI[6:], "normalise"),
@@ -791,17 +800,22 @@ def test_what_cd0a6c7d_closed_stays_closed_because_the_text_view_does_the_same(n
     reads the spelling as the key (no step is applied to the entry that is not applied to the text)."""
     r = random.Random(f"{SEED}:{name}")
     v = sg.normalise(spelling)
+    marked = sg._MARKED_RX.search(sg._script_letters(v)) is not None   # (the Hindi and Thai entries: review cbdf5e78)
     if how == "normalise":
-        # the inspection view alone removes the difference: nothing is left for the fold to do
+        # the inspection view alone removes the difference: nothing is left for the fold to do (for a marked entry:
+        # its marked view, which keeps only the marks the entry is spelled with)
         assert not any(unicodedata.category(c) in ("Mn", "Me", "Cf") for c in v)
-        assert sg._script_hit(v) and (sg._SCRIPT_WORD_RX.search(v) or sg._SCRIPT_RX.search(letters(v)))
+        if marked:
+            assert sg._marked_hit(spelling) and sg._clean_marked(spelling).replace(TATWEEL, "") in (HINDI, THAI)
+        else:
+            assert sg._script_hit(v) and sg._SCRIPT_SEQ.search(sg._script_word_view(v))
     elif how == "word_gap":
-        # the tatweel spells nothing in the word label either (the letters view drops it; the word pattern skips it)
-        assert sg._WORD_GAP == TATWEEL + "*" and sg._SCRIPT_WORD_RX.search(v) and sg._CV_SCRIPT_WORD.search(v)
-        assert sg.normalise(HINDI) not in v and sg._SCRIPT_WORD_RX.search(v.replace(TATWEEL, "x")) is None
+        # the tatweel spells nothing (the word view drops it), in the marked label too
+        assert marked and sg._script_word_view(TATWEEL) == "" and sg._marked_hit(spelling)
+        assert sg.normalise(HINDI) not in v and not sg._marked_hit(spelling.replace(TATWEEL, "x"))
     elif how == "script_fold":
         assert sg._SCRIPT_RX.search(letters(v)) is None        # not the view alone: the fold does it
-        assert sg._SCRIPT_RX.search(sg._script_letters(v)) and sg._CV_SCRIPT.search(sg._cv_script_view(v))
+        assert sg._SCRIPT_RX.search(sg._script_letters(v)) and sg._SCRIPT_SEQ.search(sg._script_word_view(v))
     else:
         assert sg._JOINED_RX.search(sg._letters_view(v)) or sg._letters_view(v) in sg._PIECE_KEYS
         assert sg._CV_LABEL.search(sg._cv_label_view(v))
@@ -867,12 +881,15 @@ def test_ordinary_hindi_words_side_by_side_do_not_read_as_the_label():
         bad = [i for i, (a, b) in enumerate(joins) if sg.check(f"{a}{sep}{b}") is not None
                or sg.client_view_findings(f"{a}{sep}{b}: {value(r)}")]
         assert bad == [], (sep, len(bad))
-    # declared residual (ADR 0051 decision 72): the inspection views drop a NON-spacing Devanagari mark from every
-    # text. One of the 182 pairs ("response" before "word") reads as the label when its two words are GLUED with
-    # nothing between them: the nasal dot of the first is dropped and the rest is the label's letters and signs
+    # the residual declared here at cbdf5e78, closed by its review (MUST 2 / S-1, ADR 0051 decision 73): one of the
+    # 182 pairs ("response" before "word") read as the label when GLUED, the inspection views dropping the nasal dot
+    # of the first word. The label is read on the marked view now, the dot kept: another word
     glued = [i for i, (a, b) in enumerate(joins) if flagged(a + b)]
-    assert len(glued) == 1 and chr(0x902) in joins[glued[0]][0] and joins[glued[0]][1] == HINDI_HALVES[1]
-    assert sg.normalise(HINDI) in sg.normalise("".join(joins[glued[0]])) and not flagged(" ".join(joins[glued[0]]))
+    assert glued == []
+    (pair,) = [(a, b) for a, b in joins if chr(0x902) in a and b == HINDI_HALVES[1]
+               and sg.normalise(HINDI) in sg.normalise(a + b)]
+    assert sg._clean_marked(pair[0] + pair[1]) != sg.normalise(pair[0] + pair[1])
+    assert not masked(pair[0] + pair[1] + ": " + value(r)) and not flagged(" ".join(pair))
     # every first word beside every second word, not only the pairs found
     every = [(a, b) for a in HINDI_FIRST for b in HINDI_SECOND]
     assert len(every) == 43 * 23 and [1 for a, b in every if flagged(f"{a} {b}") or flagged(f"{a}-{b}")] == []
@@ -900,11 +917,11 @@ def test_the_hindi_label_is_read_as_one_written_word():
         for sep in SEPARATORS:
             t = f"{label}{sep}{value(r)}"
             assert masked(t) and flagged(t), sep
-    # inside a longer written word the strict lane finds it (a compound, an inflected form); the client view needs
-    # the label to end before the separator, as for every other label (decision 71, residual)
+    # review cbdf5e78 (the boundary rule, ADR 0051 decision 73): a written word is the label only whole, or with a
+    # declared ending (the oblique plural here), in BOTH lanes; a word glued before or after it makes another word
     longer = [HINDI + "\u094b\u0902", "\u0928\u092f\u093e" + HINDI, HINDI + "\u092a\u094d\u0930\u092c\u0902\u0927\u0915"]
-    assert [flagged(f"{w}: {value(r)}") for w in longer] == [True] * 3
-    assert [masked(f"{w}: {value(r)}") for w in longer] == [False, True, False]
+    assert [flagged(f"{w}: {value(r)}") for w in longer] == [True, False, False]
+    assert [masked(f"{w}: {value(r)}") for w in longer] == [True, False, False]
     # declared residual: the label's own two halves written apart are two ordinary words ("near", "word")
     a, b = HINDI_HALVES
     assert a + b == HINDI
@@ -926,11 +943,16 @@ def loose_keys(monkeypatch) -> None:
             c = chr(o)
             k = c if c.isascii() else loose(c)
             return k.upper() if c.lower() != c else k
+    # (review cbdf5e78: in the names of this release: every key anywhere in the loose letters, no marked views, the
+    # client view's "[ _]?" pattern on the loose view)
+    rx = re.compile("|".join(re.escape(loose(e)) for e in sg._SCRIPT))
     monkeypatch.setattr(sg, "_script_letters", loose)
-    monkeypatch.setattr(sg, "_SCRIPT_RX", re.compile("|".join(re.escape(loose(e)) for e in sg._SCRIPT)))
-    monkeypatch.setattr(sg, "_CV_SCRIPT_VIEW", LooseView())
-    monkeypatch.setattr(sg, "_CV_SCRIPT", re.compile("|".join("[ _]?".join(re.escape(c) for c in loose(e))
-                                                              for e in sg._SCRIPT + sg._CV_SCRIPT_FULL), re.IGNORECASE))
+    monkeypatch.setattr(sg, "_SCRIPT_RX", rx)
+    monkeypatch.setattr(sg, "_SCRIPT_UNSPACED_RX", rx)
+    monkeypatch.setattr(sg, "_MARKED_RX", None)
+    monkeypatch.setattr(sg, "_SCRIPT_WORD", LooseView())
+    monkeypatch.setattr(sg, "_SCRIPT_SEQ", re.compile("|".join("[ _]?".join(re.escape(c) for c in loose(e))
+                                                               for e in sg._SCRIPT + sg._CV_SCRIPT_FULL), re.IGNORECASE))
 
 
 def test_mutation_with_the_keys_of_cd0a6c7d_the_ordinary_words_read_as_labels_again(monkeypatch):
@@ -946,16 +968,18 @@ def test_mutation_with_the_keys_of_cd0a6c7d_the_ordinary_words_read_as_labels_ag
     assert flagged(" ".join(HINDI_PHRASE)) and sg.url_has_secret("https://site.test/" + "-".join(HINDI_PHRASE) + "/")
 
 
-def test_residual_the_thai_joins_are_read_as_the_label():
-    """Declared, pinned (ADR 0051 decision 72): the inspection views drop the Thai vowel and tone marks (they are
-    non-spacing), from the text and so from the entry; Thai is written without spaces. Sixty joins of two words of
-    the frequency list read as the label through that view; none of the words does alone. Estimated rate, from
-    the unigram frequencies: 2.0e-10 per adjacent pair. Not changed here: it would take the marks back into the
-    inspection view, which every other rule reads."""
+def test_the_thai_joins_no_longer_read_as_the_label():
+    """Declared at cd0a6c7d and cbdf5e78 (ADR 0051 decision 72) and closed by the review of cbdf5e78 (MUST 2,
+    decision 73): the inspection views drop the Thai vowel and tone marks; sixty joins of two words of the
+    frequency list read as the label through that view. The Thai entry is read on the marked views now (the marks
+    kept, in the entry and in the text): none of the sixty, glued, spaced or before a separator, is the label."""
+    r = random.Random(SEED + 15)
     pairs = [j.split("+") for j in THAI_JOINS]
     assert len(pairs) == 60 and THAI_JOINS_RATE < 1e-9
     assert [w for p in pairs for w in p if sg.check(w) is not None] == []
-    assert sum(flagged(a + b) for a, b in pairs) == 60
+    # (what made them read as the label: its letters, the marks dropped, in a row)
+    assert all(sg._script_letters(sg.normalise(THAI)) in sg._script_letters(sg.normalise(a + b)) for a, b in pairs)
+    assert sum(flagged(a + b) or flagged(f"{a} {b}") or masked(f"{a}{b}: {value(r)}") for a, b in pairs) == 0
     assert sg._script_letters(sg.normalise(THAI)) == sg._SCRIPT_KEYS[sg._SCRIPT.index(THAI)]
 
 
@@ -977,7 +1001,8 @@ GREEK_DERIVATIVES = (
 def test_the_greek_stem_ends_inside_the_labels_second_word():
     """The Greek entry is a stem (the client view lists the nominative form). Two letters shorter, as it was, it
     read "code" followed by any word in ``prosb-`` as the label once the tonos was folded: 13 such ordinary pairs
-    in the frequency list. It now ends inside the stem of "access"; every form of the label is still read."""
+    in the frequency list. It now ends inside the stem of "access"; every form of the label is still read. Review
+    cbdf5e78 (decision 73): the stem is followed by one of its declared endings only, and both lanes read it so."""
     r = random.Random(SEED + 13)
     assert len(GREEK_OTHER_WORDS) == 13 and len(GREEK_DERIVATIVES) == 6
     for w in GREEK_OTHER_WORDS:
@@ -988,10 +1013,11 @@ def test_the_greek_stem_ends_inside_the_labels_second_word():
                    "\u03ba\u03c9\u03b4\u03b9\u03ba\u03cc\u03c2 \u03c0\u03c1\u03bf\u03c3\u03b2\u03ac\u03c3\u03b5\u03c9\u03c2", "\u039a\u03a9\u0394\u0399\u039a\u039f\u03a3 \u03a0\u03a1\u039f\u03a3\u0392\u0391\u03a3\u0397\u03a3",
                    "\u03ba\u03c9\u03b4\u03b9\u03ba\u03bf\u03c2 \u03c0\u03c1\u03bf\u03c3\u03b2\u03b1\u03c3\u03b7\u03c2", "\u03ba\u03c9\u03b4\u03b9\u03ba\u03cc\u03c2_\u03c0\u03c1\u03cc\u03c3\u03b2\u03b1\u03c3\u03b7\u03c2"]
     assert [flagged(f"{f}: {value(r)}") for f in label_forms] == [True] * len(label_forms)
-    assert [masked(f"{f}: {value(r)}") for f in label_forms] == [True, False, False, True, True, True]
-    # declared residual (ADR 0051 decision 72): "code" before a derivative of "access" reads as the label in the
-    # strict lane (6 pairs in the frequency list, estimated 1.9e-10 per adjacent pair); none is masked
-    assert [flagged(f"{GREEK_CODE} {w}") for w in GREEK_DERIVATIVES] == [True] * 6
+    assert [masked(f"{f}: {value(r)}") for f in label_forms] == [True] * 6
+    # the residual declared here (ADR 0051 decision 72), closed by the review of cbdf5e78: "code" before a
+    # derivative of "access" ("accessible") read as the label in the strict lane; a derivative is not a declared
+    # ending of the stem
+    assert [flagged(f"{GREEK_CODE} {w}") for w in GREEK_DERIVATIVES] == [False] * 6
     assert [masked(f"{GREEK_CODE} {w}: {value(r)}") for w in GREEK_DERIVATIVES] == [False] * 6
     assert [sg.check(w) for w in GREEK_DERIVATIVES + GREEK_OTHER_WORDS] == [None] * 19
 
@@ -1054,8 +1080,10 @@ def test_the_client_view_does_not_mask_an_ordinary_word_before_a_separator(name)
         assert tuple(got) == known, (sep, len(got))
     # and before a value-like value: masked for nothing (a label needs to BE a label)
     assert tuple(w for w in ws if sg.client_view_findings(f"{w}: {value(r)}")) == known
-    # none of it comes from the script labels (the lane this round changed)
-    assert [w for w in ws if sg._CV_SCRIPT.search(sg._cv_script_view(w)) or sg._CV_SCRIPT_WORD.search(w)] == []
+    # none of it comes from the script labels (the lane this round changed; review cbdf5e78: the one pattern of both
+    # lanes, on the word view of the inspection view and of the marked view)
+    assert [w for w in ws if sg._SCRIPT_SEQ.search(sg._script_word_view(sg.normalise(w)))
+            or sg._MARKED_SEQ.search(sg._script_word_view(sg._clean_marked(w)))] == []
 
 
 @pytest.mark.parametrize("name", SCRIPTS)
@@ -1151,12 +1179,28 @@ def test_mutation_each_arm_of_the_import_check_is_needed(monkeypatch):
     with pytest.raises(ValueError):
         sg._cv_latin_keys("_TEST", (lower_only,))
     monkeypatch.undo()
-    # a script entry: with the client view's script view an identity, the capitals are no longer read as the key
-    monkeypatch.setattr(sg, "_CV_SCRIPT_VIEW", {})
+    # a script entry: with the word view an identity, the capitals are no longer read as the key (review cbdf5e78:
+    # the word view both lanes read)
+    monkeypatch.setattr(sg, "_SCRIPT_WORD", {})
     with pytest.raises(ValueError):
         sg._cv_script_keys("_TEST", sg._CV_SCRIPT_FULL)
     with pytest.raises(ValueError):
         sg._check_label_lists()
+    # ... and it is the UPPER / Title spellings that are refused: read as listed only, the (lower-case, unaccented)
+    # Russian form passes
+    russian = sg._CV_SCRIPT_FULL[:1]
+    monkeypatch.setattr(sg, "_natural_spellings", lambda e: (e,))
+    assert sg._cv_script_keys("_TEST", russian) == sg._label_keys("_TEST", russian, False)
+    for arm in (str.upper, str.title):
+        monkeypatch.setattr(sg, "_natural_spellings", lambda e, arm=arm: (e, arm(e)))
+        with pytest.raises(ValueError):
+            sg._cv_script_keys("_TEST", russian)
+    monkeypatch.undo()
+    # the letters-match arm of ``_label_keys``: a script normal form that is not the letters-only view is refused
+    assert sg._label_keys("_TEST", ("\u043f\u0430\u0440\u043e\u043b\u044c",), False) == ("\u043f\u0430\u0440\u043e\u043b\u044c",)
+    monkeypatch.setattr(sg, "_SCRIPT_FOLD", {0x430: "x"})
+    with pytest.raises(ValueError):
+        sg._label_keys("_TEST", ("\u043f\u0430\u0440\u043e\u043b\u044c",), False)
     monkeypatch.undo()
     # a list that changed after its keys were made: a Latin one, then the script one
     monkeypatch.setattr(sg, "_JOINED", sg._JOINED + ("losungswort",))
@@ -1174,22 +1218,28 @@ def test_mutation_each_arm_of_the_import_check_is_needed(monkeypatch):
     with pytest.raises(ValueError):
         sg._cv_latin_keys("_TEST", ("secret",))
     monkeypatch.undo()
-    # and so is each lane's own pattern for the word label
-    assert sg._cv_script_keys("_TEST", (HINDI,)) == (sg.normalise(HINDI),)
-    monkeypatch.setattr(sg, "_CV_SCRIPT_WORD", re.compile("x"))
-    with pytest.raises(ValueError):
-        sg._cv_script_keys("_TEST", (HINDI,))
-    monkeypatch.undo()
-    monkeypatch.setattr(sg, "_SCRIPT_WORD_RX", re.compile("x"))
-    with pytest.raises(ValueError):
-        sg._cv_script_keys("_TEST", (HINDI,))
-    monkeypatch.undo()
+    # and so is the one pattern both lanes read, and the strict lane's own reading (review cbdf5e78), for a marked
+    # entry and for another
+    assert sg._cv_script_keys("_TEST", (HINDI,)) == (sg._script_letters(sg.normalise(HINDI)),)
+    for name, patch in (("_MARKED_SEQ", re.compile("x")), ("_marked_hit", lambda t: False)):
+        monkeypatch.setattr(sg, name, patch)
+        with pytest.raises(ValueError):
+            sg._cv_script_keys("_TEST", (HINDI,))
+        monkeypatch.undo()
+    russian = sg._CV_SCRIPT_FULL[:1]
+    for name, patch in (("_SCRIPT_SEQ", re.compile("x")), ("_script_hit", lambda v: False)):
+        monkeypatch.setattr(sg, name, patch)
+        with pytest.raises(ValueError):
+            sg._cv_script_keys("_TEST", russian)
+        monkeypatch.undo()
     assert sg._check_label_lists() is None
 
 
 @pytest.mark.parametrize("name,entries,latin", [
-    ("a script entry of two written words with a spacing mark", (HINDI + " " + HINDI,), False),
-    ("a script word label holding a capital the fold would change", (HINDI + "X",), False),
+    # (review cbdf5e78: every script entry is read by the word view, so an entry of two Hindi words, or with a
+    # capital, can be matched; a word that mixes two scripts, or holds a digit, cannot)
+    ("a script word of two scripts", (HINDI + "x",), False),
+    ("a script word of two scripts in capitals", (HINDI + "X",), False),
     ("a script word label holding a digit", (HINDI + "2",), False),
     ("a script entry of spacing marks only", ("\u093e\u093f",), False),
     ("a script entry of one letter", ("\u5bc6",), False),
@@ -1198,6 +1248,8 @@ def test_mutation_each_arm_of_the_import_check_is_needed(monkeypatch):
 def test_an_entry_no_text_could_match_is_refused(name, entries, latin):
     with pytest.raises(ValueError) as e:
         sg._label_keys("_TEST", entries, latin)
+        if not latin:
+            sg._script_words("_TEST", entries)                 # the words the boundary rule matches
     assert "entry 0" in str(e.value) and entries[0] not in str(e.value)
 
 
@@ -1249,7 +1301,9 @@ def lane_divergence() -> dict:
         c = chr(o)
         if unicodedata.category(c)[0] in "CMZ":
             continue
-        k = sg._label_norm(c)
+        # (review cbdf5e78: the second lookalike pass reads a letter of another script inside a Latin word only, as
+        # it stands in the label below; alone, a letter is read in its own script)
+        k = sg._label_norm("a" + c)[1:]
         if not (k and k.isascii() and k.isalpha()):
             continue
         word = next((w for w in keys if k in w), None)
@@ -1362,22 +1416,23 @@ def test_label_only_reads_a_non_ascii_segment_through_the_normal_form():
 
 
 def test_a_script_label_match_never_ends_inside_one_character():
-    """(c) ``_cv_script_ends``: the script view is made one character at a time and one character can become two
+    """(c) ``_cv_script_ends``: the word view is made one character at a time and one character can become two
     letters (the sharp s); a match of the script pattern that ends between those two is not a label end."""
     v = "x\u00dfy"
-    sv = sg._cv_script_view(v)
+    sv = sg._script_word_view(v)
     assert sv == "xssy"
     inside, whole = re.compile("xs"), re.compile("xss")
     assert sg._cv_script_ends(v, sv, list(inside.finditer(sv))) == []
     assert sg._cv_script_ends(v, sv, list(whole.finditer(sv))) == [2]
-    # a dropped character after a label (a tatweel, a spacing mark) is skipped; a letter is not
+    # a dropped character after a label (a tatweel) is skipped; a letter is not, nor a mark (review cbdf5e78: the
+    # word view keeps a mark, which spells the word)
     v = "ab" + TATWEEL + "\u093e" + "c"
-    sv = sg._cv_script_view(v)
-    assert sv == "abc" and sg._cv_script_ends(v, sv, list(re.finditer("ab", sv))) == [4]
+    sv = sg._script_word_view(v)
+    assert sv == "ab\u093ec" and sg._cv_script_ends(v, sv, list(re.finditer("ab", sv))) == [3]
     assert sg._cv_script_ends(v, sv, list(re.finditer("a", sv))) == [1]
     # several matches, one cursor
     v = "\u00df\u00df x\u00df"
-    sv = sg._cv_script_view(v)
+    sv = sg._script_word_view(v)
     assert sg._cv_script_ends(v, sv, list(re.finditer("s", sv))) == [1, 2, 5]
 
 

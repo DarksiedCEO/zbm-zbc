@@ -329,7 +329,7 @@ def _shifted(prev: list, s: str) -> bool:
     return len(s) > 2 * DECODE_EDGE and any(0 <= len(p) - len(s) <= 16 and p.endswith(s[DECODE_EDGE:]) for p in prev)
 
 
-def _decoded_runs(t: str) -> list:
+def _decoded_runs(t: str, clean=_clean) -> list:
     """Base64- and hex-looking runs of ``t`` decoded (when they decode to readable text), for inspection only.
     Bounded: at most ``DECODE_RUNS_MAX`` runs of at most ``DECODE_RUN_MAX`` characters each; a base64 run is decoded
     from each of its ``_b64_starts`` (a constant number per run). Each run gives its main readings and ONE edge view
@@ -342,10 +342,10 @@ def _decoded_runs(t: str) -> list:
 
     def emit(mains: list, edges: list) -> None:
         for s in mains:
-            out.append(_clean(s))
+            out.append(clean(s))
         kept: list = []
         for e in edges:
-            c = _clean(e)
+            c = clean(e)
             if len(c) < DECODE_EDGE_MIN:
                 continue                                   # c0c09bd1: a few junk characters carry no value
             if c not in kept and len(kept) < DECODE_EDGES_MAX and budget[0] >= len(c):
@@ -392,12 +392,13 @@ def views(text: str) -> list:
     return [v for v, _ in _tagged_views(text)]
 
 
-def _tagged_views(text: str) -> list:
+def _tagged_views(text: str, clean=_clean, fold: bool = True) -> list:
     """(view, folded) pairs. Every inspection view of ``text`` (step 1): the normalised form, the markup-stripped
     form, each percent / HTML-entity / escape decoding round (re-normalised), the decoded base64 / hex runs of each,
-    and (``folded`` True) the ASCII-folded form of each non-ASCII view. Distinct, in order; bounded in number and
-    size."""
-    base = _clean(text or "")
+    and (``folded`` True, unless ``fold`` is False) the ASCII-folded form of each non-ASCII view. Distinct, in order;
+    bounded in number and size. ``clean``: the normalisation (``_clean_marked`` gives the MARKED views the script
+    labels spelled with a non-spacing mark are read on, section 2a)."""
+    base = clean(text or "")
     out = [base]
     seen = {base}
 
@@ -409,7 +410,7 @@ def _tagged_views(text: str) -> list:
     add(_strip_markup(base))
     cur = base
     for _ in range(PERCENT_ROUNDS):
-        nxt = _clean(_unescape(_entities(_percent(cur))))     # escapes read before markup strips the backslash
+        nxt = clean(_unescape(_entities(_percent(cur))))      # escapes read before markup strips the backslash
         if nxt == cur:
             break
         add(nxt)
@@ -417,17 +418,19 @@ def _tagged_views(text: str) -> list:
         add(_strip_markup(nxt))
         cur = nxt
     for v in out.copy():
-        for d in _decoded_runs(v):
+        for d in (_decoded_runs(v) if clean is _clean else _decoded_runs(v, clean)):
             add(d)
             cur = d
             for _ in range(PERCENT_ROUNDS):               # review 601e328a MUST 5: every round, as for the text
-                nxt = _clean(_entities(_percent(cur)))
+                nxt = clean(_entities(_percent(cur)))
                 if nxt == cur:
                     break
                 cur = nxt
             add(_strip_md(cur))
             add(_strip_markup(cur))
     tagged = [(v, False) for v in out]
+    if not fold:
+        return tagged
     for v in out.copy():
         if not v.isascii():
             f = _ascii_fold(v)                             # r2 part 2: rules (b)-(f) also read the ASCII-folded form
@@ -503,13 +506,26 @@ decodings = views                        # v1 name used by callers; same functio
 #   Latin lists   the text is read through ``_label_norm`` (lookalikes folded, lower case, accents dropped), so is
 #                 the entry; the client view's own cased view of the Latin labels is checked against it at import for
 #                 every natural spelling of every entry (``_cv_latin_keys``).
-#   script list   the text is read through the inspection view (``normalise``: NFKC, the non-spacing marks removed)
-#                 and then ``_script_letters`` (its letters, case folded, an ACCENT dropped, the tatweel dropped), so
-#                 is the entry. Nothing else is dropped: the kana voicing marks stay on their letter (review
-#                 cd0a6c7d MUST A: with them dropped an ordinary Japanese loanword read as the label), and an entry
-#                 spelled with a SPACING vowel sign (the Hindi one) is not read by its letters at all: it is a WORD
-#                 label, looked for in the inspection view itself as one unbroken written word (its vowel signs
-#                 kept, no word boundary crossed).
+#   script list   the text is read through the WORD VIEW (``_script_word_view``: the inspection view, each letter
+#                 case folded with an ACCENT dropped, the tatweel dropped, every other character kept), so is each
+#                 word of the entry. The kana voicing marks stay on their letter (review cd0a6c7d MUST A). An entry
+#                 whose inspection view would drop a NON-SPACING mark it is spelled with (the Hindi virama, the Thai
+#                 vowel and tone marks) is a MARKED entry: it is read, entry and text alike, on the marked views
+#                 (``_marked_views``: the same views with the non-spacing marks of those scripts kept), never on a
+#                 view without them (review cbdf5e78 MUST 2: with the Thai marks dropped, "quilt" + "code" read as
+#                 the label; with the Hindi nasal dot dropped, "response" + "word" glued did).
+#                 Review cbdf5e78 MUST 1, the BOUNDARY RULE (ADR 0051 decision 73): in a script that writes words
+#                 apart (all but Han, kana, Thai, Lao, Khmer, Myanmar) a label is a SEQUENCE OF WHOLE WORDS: it
+#                 starts at a word start and ends at a word end (a boundary is the text's start / end or any
+#                 character that is not a letter or mark of the word's own script: a space, a separator, a digit,
+#                 another script), each word of the label is one whole word of the text, and two words of a label
+#                 stand apart by one space, "_" or "-" (or by nothing, for the labels declared ``glued``), never by
+#                 another word. A declared STEM is followed in its own word by one of its declared endings only; a
+#                 declared PROCLITIC letter may be written onto the first word. One pattern (``_SCRIPT_SEQ``) holds
+#                 this rule and both lanes use it. Before, the letters-only view (spaces dropped) let a key be
+#                 assembled from the letters of several words ("code" + "to" + "base-" read as the Greek label).
+#                 The letters-only view is kept as a necessary PREFILTER only (every match of the rule leaves the
+#                 key's letters in a row there).
 # Before review ffd28ca8 an entry was compared as written with a text that had been folded (the Hindi and Thai labels
 # never matched; the client view read the upper-case stroked L as an I); between ffd28ca8 and cd0a6c7d the entries
 # were folded MORE than the text views fold (every mark dropped, the kana decomposed).
@@ -517,8 +533,9 @@ decodings = views                        # v1 name used by callers; same functio
 #            "p.a.s.s.w.o.r.d", "api key", "DB_PASSWORD", "userPassword", "mot de passe" all read as the label;
 #   _PIECES  short labels that must be a whole piece (pieces split at non-letters, camelCase and letter/digit
 #            boundaries): "pass" in "DB_PASS", "auth" in "authToken", "pin", "sid", "token", "secret", "cookie";
-#   _SCRIPT  labels in other scripts: matched as substrings of the letters-only view (scripts without word spacing,
-#            and the multi-word and stem labels of the spaced ones), or as a word label (above).
+#   _SCRIPT  labels in other scripts, written as their language writes them, words apart (``_SCRIPT_FORMS``: stems,
+#            proclitics, glued words). Han, kana and Thai labels (scripts without word spacing) are matched as
+#            substrings of the letters-only view; every other one by the boundary rule (above).
 _JOINED = (
     "password", "passwd", "passcode", "passphrase", "apikey", "accesskey", "accesstoken", "authtoken",
     "secretkey", "privatekey", "clientsecret", "sessionid", "accesscode", "securitycode", "sessiontoken", "seedphrase",
@@ -541,13 +558,58 @@ _SCRIPT = (
     "\u5bc6\u7801", "\u5bc6\u78bc", "\u53e3\u4ee4", "\u5bc6\u94a5", "\u79d8\u94a5", "\u91d1\u9470", "\u4ee4\u724c",
     "\u30d1\u30b9\u30ef\u30fc\u30c9", "\u6697\u8a3c\u756a\u53f7", "\u30c8\u30fc\u30af\u30f3",
     "\ube44\ubc00\ubc88\ud638", "\ube44\ubc88", "\uc554\ud638", "\ud1a0\ud070",
-    "\u0643\u0644\u0645\u0629\u0627\u0644\u0645\u0631\u0648\u0631", "\u0643\u0644\u0645\u0629\u0627\u0644\u0633\u0631",
-    "\u0631\u0645\u0632\u0639\u0628\u0648\u0631",
+    "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631", "\u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631",
+    "\u0631\u0645\u0632 \u0639\u0628\u0648\u0631",
     "\u092a\u093e\u0938\u0935\u0930\u094d\u0921", "\u0e23\u0e2b\u0e31\u0e2a\u0e1c\u0e48\u0e32\u0e19",
-    # the Greek stem ends inside the SECOND word's own stem ("access", ``prosbas-``): two letters shorter (as it was
-    # until review cd0a6c7d) it also read "code" followed by any word in ``prosb-`` ("attack", "offend") as the label
-    "\u05e1\u05d9\u05e1\u05de\u05d4", "\u03ba\u03c9\u03b4\u03b9\u03ba\u03bf\u03c3\u03c0\u03c1\u03bf\u03c3\u03b2\u03b1\u03c3",
+    # Greek "code" + the stem of "access" (its endings: ``_SCRIPT_FORMS``)
+    "\u05e1\u05d9\u05e1\u05de\u05d4", "\u03ba\u03c9\u03b4\u03b9\u03ba\u03bf\u03c2 \u03c0\u03c1\u03bf\u03c3\u03b2\u03b1\u03c3",
 )
+# How the words of a script label may be written (review cbdf5e78, ADR 0051 decision 73), by entry:
+#   endings   the LAST word is a stem, followed in its own word by one of these endings ("" = none) and nothing
+#             else (``None``, any letters of its script, is allowed by the builder but used by no entry). Read by
+#             the word view, as the entry is. Without a declared list the Greek stem read "code accessible" ("code"
+#             + a derivative of "access") as the label; Korean writes its particles onto the noun (a closed list).
+#   prefix    (letters, n): up to n of these letters may be written onto the FIRST word (the Hebrew and Arabic
+#             proclitics: "the", "and", "in", "to", "with"...)
+#   glued     the words may also be written with nothing between them (the Persian non-joiner, which the inspection
+#             view removes; a change of script). Arabic writes its two words apart: glued, "with the word" + "family" +
+#             "secret" read as the label once the madda was folded (review cbdf5e78 S-2)
+# Any other label word is one whole word.
+_RU_ENDINGS = ("", "\u044c", "\u044f", "\u044e", "\u0435\u043c", "\u0435", "\u0438", "\u0435\u0439", "\u044f\u043c",
+               "\u044f\u043c\u0438", "\u044f\u0445", "\u0456", "\u0456\u0432")             # the noun's cases (ru, uk)
+# the Korean particles written onto a noun (a closed list: an open one read "encryption" as "cipher" + more)
+_KO_PARTICLES = ("", "\uc774", "\uac00", "\uc740", "\ub294", "\uc744", "\ub97c", "\uc758", "\uc5d0", "\uc5d0\uc11c", "\ub85c",
+                 "\uc73c\ub85c", "\uc640", "\uacfc", "\ub3c4", "\ub9cc", "\uae4c\uc9c0", "\ubd80\ud130", "\uc774\ub098", "\ub098",
+                 "\ub791", "\uc774\ub791", "\ud558\uace0", "\uc5d0\uac8c", "\uc785\ub2c8\ub2e4", "\uc774\ub2e4", "\uc608\uc694",
+                 "\uc774\uc5d0\uc694", "\ub4e4", "\ub4e4\uc744", "\ub4e4\uc774", "\ub4e4\uc740", "\ub4e4\uc758")
+_SCRIPT_FORMS = {
+    _SCRIPT[0]: {"endings": _RU_ENDINGS},
+    _SCRIPT[1]: {"glued": True},
+    "\ube44\ubc00\ubc88\ud638": {"endings": _KO_PARTICLES}, "\ube44\ubc88": {"endings": _KO_PARTICLES},
+    "\uc554\ud638": {"endings": _KO_PARTICLES}, "\ud1a0\ud070": {"endings": _KO_PARTICLES},
+    "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631": {"prefix": ("\u0648\u0641\u0628\u0644\u0643", 2)},
+    "\u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631": {"prefix": ("\u0648\u0641\u0628\u0644\u0643", 2)},
+    "\u0631\u0645\u0632 \u0639\u0628\u0648\u0631": {"glued": True},
+    "\u05e1\u05d9\u05e1\u05de\u05d4": {"prefix": ("\u05d5\u05d4\u05d1\u05dc\u05de\u05e9\u05db", 3)},
+    _SCRIPT[19]: {"endings": ("", "\u094b\u0902", "\u094d\u0938")},           # Hindi: oblique plural, "-s"
+    _SCRIPT[-1]: {"endings": ("", "\u03b7", "\u03b7\u03c2", "\u03b5\u03c9\u03c2", "\u03b5\u03b9\u03c2", "\u03b5\u03c9\u03bd")},
+}
+# The scripts a label word may be in, by the first word of its letters' Unicode names, and their blocks: a word of a
+# label ends where the letters and marks of its script end (``_word_class``).
+_WORD_SCRIPTS = {
+    "LATIN": ((0x41, 0x5a), (0x61, 0x7a), (0xc0, 0x24f), (0x1e00, 0x1eff)),
+    "CYRILLIC": ((0x400, 0x52f), (0x1c80, 0x1c8f), (0x2de0, 0x2dff), (0xa640, 0xa69f)),
+    "GREEK": ((0x370, 0x3ff), (0x1f00, 0x1fff)),
+    "ARABIC": ((0x600, 0x6ff), (0x750, 0x77f), (0x870, 0x8ff), (0xfb50, 0xfdff), (0xfe70, 0xfeff)),
+    "HEBREW": ((0x590, 0x5ff), (0xfb1d, 0xfb4f)),
+    "DEVANAGARI": ((0x900, 0x97f), (0xa8e0, 0xa8ff)),
+    "HANGUL": ((0x1100, 0x11ff), (0x3130, 0x318f), (0xa960, 0xa97f), (0xac00, 0xd7af), (0xd7b0, 0xd7ff)),
+}
+# scripts written without spaces between words: a label in one is a substring of the letters-only view
+_UNSPACED_SCRIPTS = frozenset(("CJK", "HIRAGANA", "KATAKANA", "THAI", "LAO", "KHMER", "MYANMAR"))
+# the blocks whose NON-SPACING marks the marked views keep (Devanagari, Thai, Lao, Myanmar, Khmer): in them a mark
+# spells the word
+_MARKED_BLOCKS = ((0x900, 0x97f), (0xa8e0, 0xa8ff), (0xe00, 0xe7f), (0xe80, 0xeff), (0x1000, 0x109f), (0x1780, 0x17ff))
 
 
 _TATWEEL = "\u0640"                       # the Arabic elongation stroke: a letter by category, it spells nothing
@@ -641,6 +703,11 @@ def _label_norm(s: str, latin: bool = True) -> str:
                        does not decompose are folded by ``lookalikes``: the stroked l, o, d and the dotless i; the
                        sharp s reads ``ss`` by case folding. The ae / oe ligatures are left alone: no entry, and no
                        natural spelling of one, holds them (``tests/test_review_ffd28ca8.py`` asserts each).
+                       The second lookalike pass reads only a word that MIXES scripts (``p\u03acssword``): in a
+                       word written wholly in ONE script other than Latin a marked letter is a letter of that word
+                       (review cbdf5e78 measurement: with every accented Greek letter read as Latin, ordinary Greek
+                       words side by side spelled a Latin label across them, as "na rik egine" spelled "apikey";
+                       ffd28ca8 read them as Greek), ``_one_script_spans``.
       ``latin=False``  (``_SCRIPT``) the inspection view of ``s`` (``normalise``), each character through
                        ``_script_fold``. The script is kept: no lookalike folding (a Cyrillic or Greek label is not
                        read as Latin letters), and no mark is dropped that the inspection views keep ON A LETTER."""
@@ -651,29 +718,208 @@ def _label_norm(s: str, latin: bool = True) -> str:
         if not f.isascii():
             g = unicodedata.normalize("NFC", unicodedata.normalize("NFKD", f).translate(_LABEL_MARKS))
             if g != f and not g.isascii():
-                g = globals()["_refold"](g)                # a lookalike that carried a mark (a Greek tonos)
+                # a lookalike that carried a mark (a Greek tonos): the second pass, but not on a word of one script
+                one = globals().get("_ONE_SCRIPT_TEXT")
+                if one is None or one.fullmatch(s) is None or _ONE_SCRIPT_ACROSS.search(s) is not None:
+                    spans = _one_script_spans(s)
+                    if not spans:
+                        g = globals()["_refold"](g)
+                    elif _mixed_outside(s, spans):
+                        if globals()["_refold"](g) != g:
+                            g = _refold_mixed(s, spans)
+                # (else every word of one script: the first pass is the form, and the second is not run)
             f = g
         return f
     v = normalise(s)
     return v.lower() if v.isascii() else v.translate(_SCRIPT_FOLD)
 
 
-def _word_label(v: str) -> bool:
-    """The inspection view ``v`` of a script entry is spelled with a spacing combining mark (a Devanagari vowel
-    sign): the letters-only view would read the entry without part of its spelling, so it is a word label."""
-    return any(unicodedata.category(c) == "Mc" for c in v)
+class _ScriptTagTable(dict):
+    """``str.translate`` table: each character as ONE tag character: a letter as the first letter of its script's
+    name ("L" Latin, "G" Greek, "C" Cyrillic... a tag per script name, made on first use), a mark as "m", anything
+    else as a space (filled on first use, bounded)."""
+    names: dict = {}
+
+    def __missing__(self, o: int) -> str:
+        c = chr(o)
+        if c.isalpha():
+            n = _first_name(c)
+            r = self.names.get(n)
+            if r is None:
+                r = "L" if n == "LATIN" else chr(0x4e00 + len(self.names))
+                self.names[n] = r
+        else:
+            r = "m" if unicodedata.category(c)[0] == "M" else " "
+        if len(self) < _CMAP_MAX:
+            self[o] = r
+        return r
+
+
+_SCRIPT_TAG = _ScriptTagTable()
+
+
+_TAG_RUN = re.compile(r"([^ Lm])(?:\1|m)*")
+# the runs ``_one_script_spans`` keeps, in one pass (review cbdf5e78 M6: the loop cost a Greek text 7%): a run of
+# two letters or more of one script (with their marks), or a run of one letter that is a whole word
+_ONE_SCRIPT_RUN = re.compile(r"([^ Lm])m*\1(?:\1|m)*|(?:(?<= )|^)[^ Lm]m*(?= |$)")
+
+
+def _one_script_spans(s: str) -> list:
+    """The (start, end) of every run of letters of ONE script other than Latin (its marks included) in ``s`` that is
+    a whole word or two letters or more: the second lookalike pass leaves those letters alone. What it reads is a
+    lone letter of another script standing in a word with letters of other scripts (``p\u03acssword``)."""
+    return [m.span() for m in _ONE_SCRIPT_RUN.finditer(s.translate(_SCRIPT_TAG))]
+
+
+def _one_script_spans_loop(s: str) -> list:
+    """``_one_script_spans`` written as a loop over every run (``_TAG_RUN``): the definition the pattern
+    ``_ONE_SCRIPT_RUN`` is tested against (``tests/test_review_cbdf5e78.py``)."""
+    tags = s.translate(_SCRIPT_TAG)
+    out: list = []
+    n = len(tags)
+    for m in _TAG_RUN.finditer(tags):
+        a, b = m.span()
+        if len(m.group(0).replace("m", "")) >= 2 or ((a == 0 or tags[a - 1] == " ") and (b == n or tags[b] == " ")):
+            out.append((a, b))
+    return out
+
+
+# the ASCII characters Unicode calls case-ignorable: the lower-casing rule of the final sigma looks across them
+_CASE_IGNORABLE_ASCII = frozenset("'.:^`")
+# punctuation of other scripts that no fold step changes and composes with nothing, neither a letter nor
+# case-ignorable (the no-break space reads as a space): outside the one-script words it changes nothing either
+# (the danda, the Arabic comma, question mark and full stop, the Hebrew maqaf, guillemets, curly double quotes, the
+# en and em dash, the ideographic comma and full stop)
+_PLAIN_PUNCT = ("\u00a0\u00ab\u00bb\u0589\u05be\u05c3\u060c\u061b\u061f\u06d4\u0964\u0965\u2013\u2014\u201c\u201d"
+                "\u3001\u3002")
+_PLAIN_OUT = {ord(c): None for c in _PLAIN_PUNCT}
+
+
+def _edge_cased(s: str, i: int, step: int, stop: int) -> bool:
+    """Whether, from ``s[i]`` towards ``stop`` (``step`` 1 or -1), the first character that is not case-ignorable
+    is a letter or lies past ``stop`` (in the next one-script word): the context of the final-sigma rule reaches
+    across that edge of a word."""
+    while i != stop:
+        c = s[i]
+        if c not in _CASE_IGNORABLE_ASCII:
+            return c.isalpha()
+        i += step
+    return stop not in (-1, len(s))
+
+
+def _mixed_outside(s: str, spans: list) -> bool:
+    """Whether ``_refold_mixed`` must run: a part of ``s`` outside the one-script ``spans`` holds a character that is
+    not ASCII nor plain punctuation (``_PLAIN_PUNCT``; a lone letter of another script, a mark on a Latin letter:
+    only there can the second lookalike pass change anything), or a one-script word touches a letter (``user`` + a Greek word), alone or across
+    case-ignorable characters (where folding the parts one by one and folding the whole differ: the final sigma).
+    Otherwise ``_refold_mixed`` gives the first pass of the whole text, part for part (the fold reads one character
+    at a time, a part ends where a run of letters and their marks ends, and no casing context crosses a part), so
+    it is not run: the cost of an ordinary text of another script stays that of ffd28ca8 (review cbdf5e78 M6)."""
+    at = 0
+    n = len(s)
+    for k, (a, b) in enumerate(spans):
+        if not s[at:a].translate(_PLAIN_OUT).isascii() or (a > 0 and _edge_cased(s, a - 1, -1, at - 1)):
+            return True
+        nxt = spans[k + 1][0] if k + 1 < len(spans) else n
+        if b < n and _edge_cased(s, b, 1, nxt):
+            return True
+        at = b
+    return not s[at:].translate(_PLAIN_OUT).isascii()
+
+
+def _refold_mixed(s: str, spans: list) -> str:
+    """The Latin normal form of ``s`` with the second lookalike pass on every part but the one-script words
+    (``spans``): each part through the same steps, the parts in order."""
+    out: list = []
+    at = 0
+    for a, b in spans + [(len(s), len(s))]:
+        for part, again in ((s[at:a], True), (s[a:b], False)):
+            if not part:
+                continue
+            f = _FOLD.fold_cased(part)
+            if not f.isascii():
+                g = unicodedata.normalize("NFC", unicodedata.normalize("NFKD", f).translate(_LABEL_MARKS))
+                f = globals()["_refold"](g) if (again and g != f and not g.isascii()) else g
+            out.append(f)
+        at = b
+    return "".join(out)
+
+
+def _word_fold(c: str) -> str:
+    """ONE character of a view as the WORD VIEW reads it (lower case): a letter through ``_script_fold``, an ASCII
+    character in lower case, the tatweel as nothing, a combining mark kept as it is (a view holds a spacing mark,
+    and a marked view the non-spacing marks of ``_MARKED_BLOCKS``: they spell the word), anything else as it is."""
+    if c == _TATWEEL:
+        return ""
+    if unicodedata.category(c)[0] == "M":
+        return c
+    return c.lower() if c.isascii() else _script_fold(c)
+
+
+class _ScriptWordTable(dict):
+    """``str.translate`` table of ``_word_fold`` (filled on first use, bounded): one C-speed pass gives the word view
+    of a text, and ``_cv_script_ends`` maps a position in it back to the view as written."""
+
+    def __missing__(self, o: int) -> str:
+        r = _word_fold(chr(o))
+        if len(self) < _CMAP_MAX:
+            self[o] = r
+        return r
+
+
+_SCRIPT_WORD = _ScriptWordTable()
+
+
+def _script_word_view(v: str) -> str:
+    """The word view of the view ``v``: what the script labels are matched on by the boundary rule (both lanes)."""
+    return v.translate(_SCRIPT_WORD)
+
+
+def _in_blocks(o: int, blocks) -> bool:
+    return any(a <= o <= b for a, b in blocks)
+
+
+class _MarkedTable(dict):
+    """``str.translate`` table of the MARKED normalisation: the per-character map of ``_clean`` (``_map_char``), but a
+    non-spacing mark of ``_MARKED_BLOCKS`` is kept (filled on first use, bounded). Any other mark, a variation
+    selector or a joiner is removed as in every view."""
+
+    def __missing__(self, o: int) -> str:
+        c = chr(o)
+        r = c if (unicodedata.category(c) == "Mn" and _in_blocks(o, _MARKED_BLOCKS)) else _map_char(c)
+        if len(self) < _CMAP_MAX:
+            self[o] = r
+        return r
+
+
+_MARKED = _MarkedTable()
+
+
+def _clean_marked(text: str) -> str:
+    """``_clean`` keeping the non-spacing marks of ``_MARKED_BLOCKS``: NFKC, the per-character map, NFKC again, runs
+    of spaces collapsed. Dropping those marks from it gives ``_clean`` of the same text."""
+    t = _nfkc(text)
+    if not t.isascii() or _CONTROL.search(t):
+        t = _nfkc(t.translate(_MARKED))
+    return _collapse(t)
+
+
+def _marked_views(text: str) -> list:
+    """The MARKED inspection views of ``text``: every view of ``_tagged_views`` (markup stripped, each decoding
+    round, the decoded runs) made with ``_clean_marked``. Read for the marked script labels only."""
+    return [v for v, _f in _tagged_views(text, _clean_marked, False)]
 
 
 def _label_keys(name: str, entries, latin: bool, piece: bool = False) -> tuple:
     """The matching keys of one label list, in list order: every entry read by the function that reads the text.
       Latin list    the letters of ``_label_norm(entry)``;
-      script list   the letters of the entry's inspection view (``_script_letters(normalise(entry))``), or, for an
-                    entry spelled with a spacing mark (``_word_label``), that inspection view itself.
+      script list   the letters of the entry's inspection view (``_script_letters(normalise(entry))``): the
+                    PREFILTER key (every match of the boundary rule leaves it in a row in the letters-only view).
+                    The words the rule matches are ``_script_words``.
     An entry no text could match stops the import (so a new entry cannot be added in an unmatchable form): a
-    Latin-list key must be ASCII letters, a script-list key must hold a non-ASCII letter, a piece label must be one
-    run of letters, every key has two letters or more, reading a key again must give the key (the view is a fixed
-    point), and a word label must be ONE written word that the script fold leaves as it is (letters and spacing
-    marks only, no case, no accent: it is looked for as written)."""
+    Latin-list key must be ASCII letters, a script-list key must hold a non-ASCII letter and be the letters of the
+    script normal form, a piece label must be one run of letters, every key has two letters or more, and reading a
+    key again must give the key (the view is a fixed point)."""
     out: list = []
     for i, e in enumerate(entries):
         if latin:
@@ -681,21 +927,93 @@ def _label_keys(name: str, entries, latin: bool, piece: bool = False) -> tuple:
             k = "".join(c for c in norm if c.isalpha())
             ok = len(k) >= 2 and k.isascii() and (not piece or k == norm) and _label_norm(k) == k
         else:
-            v = normalise(e)
-            if _word_label(v):
-                k = v
-                letters = [c for c in k if c.isalpha()]
-                ok = (len(letters) >= 2 and not k.isascii() and normalise(k) == k
-                      and all(c.isalpha() or unicodedata.category(c) == "Mc" for c in k)
-                      and all(_script_fold(c) == c for c in letters))
-            else:
-                k = _script_letters(v)
-                ok = (len(k) >= 2 and not k.isascii() and _script_letters(normalise(k)) == k
-                      and k == "".join(c for c in _label_norm(e, False) if c.isalpha()))
+            k = _script_letters(normalise(e))
+            ok = (len(k) >= 2 and not k.isascii() and _script_letters(normalise(k)) == k
+                  and k == "".join(c for c in _label_norm(e, False) if c.isalpha()))
         if not ok:
             raise ValueError(f"credential label list {name}: entry {i} cannot be matched after normalisation")
         if k not in out:
             out.append(k)
+    return tuple(out)
+
+
+def _first_name(c: str) -> str:
+    """The script of a letter by its Unicode name ("CYRILLIC", "CJK", "KATAKANA" for the prolonged sound mark too)."""
+    return unicodedata.name(c, "").split(" ")[0].split("-")[0]
+
+
+def _one_script_text_rx() -> tuple:
+    """(whole, across): a text of ASCII characters, plain punctuation (``_PLAIN_PUNCT``) and the letters of ONE other
+    script (Greek, Cyrillic, Hebrew, Arabic, Devanagari; each letter followed by marks of its script or by
+    combining diacritics, or not) is matched WHOLE by ``whole``; ``across`` finds a word of such a script that
+    touches a letter, directly or across case-ignorable characters only (``'.:^`` and the grave): an ASCII letter
+    on either side, or another word of the script after it. A text matched whole with nothing found across: every
+    word of the script is a one-script word (``_one_script_spans``), nothing outside them is other than ASCII or
+    plain punctuation, and no casing context crosses them (``_mixed_outside``), so ``_label_norm`` answers it in
+    one C pass (review cbdf5e78 M6: the cost of ordinary text of another script). Any other text takes the spans;
+    the answer is the same (``tests/test_review_cbdf5e78.py``)."""
+    gap = "".join(re.escape(chr(o)) for o in range(128)) + "".join(re.escape(c) for c in _PLAIN_PUNCT)
+    ign = "".join(re.escape(c) for c in sorted(_CASE_IGNORABLE_ASCII))
+    alts, every = [], []
+    for name, ranges in (("GREEK", ((0x370, 0x400), (0x1F00, 0x2000))),
+                         ("CYRILLIC", ((0x400, 0x530), (0x1C80, 0x1C90), (0xA640, 0xA6A0))),
+                         ("HEBREW", ((0x590, 0x600),)), ("ARABIC", ((0x600, 0x700), (0x750, 0x780))),
+                         ("DEVANAGARI", ((0x900, 0x980),))):
+        cps = [o for a, b in ranges for o in range(a, b)]
+        letters = lookalikes.char_class([o for o in cps if chr(o).isalpha() and _first_name(chr(o)) == name])
+        marks = lookalikes.char_class([o for o in cps if unicodedata.category(chr(o))[0] == "M"]) + "\\u0300-\\u036f"
+        alts.append(f"(?:[{gap}]|[{letters}][{letters}{marks}]*+)*+")             # (possessive: linear)
+        every.append((letters, marks))
+    letter = "".join(x for x, _m in every)
+    mark = "".join(m for _x, m in every)
+    word_end = f"[{letter}][{mark}]*+"
+    return re.compile("|".join(alts)), re.compile(f"{word_end}(?:[{ign}]++[{letter}]|[{ign}]*+[A-Za-z])"
+                                                  f"|[A-Za-z][{ign}]*+[{letter}]")
+
+
+_ONE_SCRIPT_TEXT, _ONE_SCRIPT_ACROSS = _one_script_text_rx()
+
+
+def _marked_entry(e: str) -> bool:
+    """The inspection view of the entry drops a non-spacing mark it is spelled with: it is read on the marked views."""
+    return _clean_marked(e) != normalise(e)
+
+
+def _script_words(name: str, entries) -> tuple:
+    """How each script entry is matched, in list order: (marked, unspaced, words, scripts, endings, prefix, glued).
+    ``words``: each word of the entry through the (marked) normalisation and the word view; ``scripts``: the script
+    of each word (``_WORD_SCRIPTS``; an unspaced entry: its one script). Stops the import when a word is not a fixed
+    point of the view, holds a character of another script or a separator, when an entry has no non-ASCII word, or
+    when its declared forms do not fit it."""
+    out: list = []
+    for i, e in enumerate(entries):
+        form = _SCRIPT_FORMS.get(e, {})
+        marked = _marked_entry(e)
+        clean = _clean_marked if marked else normalise
+        words = tuple(_script_word_view(clean(w)) for w in e.split(" "))
+        scripts = []
+        ok = len(words) >= 1 and all(words) and any(not w.isascii() for w in words)
+        for w in words:
+            names = {_first_name(c) for c in w if c.isalpha()}
+            sc = names.pop() if len(names) == 1 else ""
+            ok = ok and sc != "" and _script_word_view(clean(w)) == w and all(
+                c.isalpha() or unicodedata.category(c)[0] == "M" for c in w)
+            ok = ok and (sc in _WORD_SCRIPTS or sc in _UNSPACED_SCRIPTS) and all(
+                _first_name(c) == sc or unicodedata.category(c)[0] == "M" for c in w if c.isalpha())
+            scripts.append(sc)
+        unspaced = bool(scripts) and scripts[0] in _UNSPACED_SCRIPTS
+        endings = form.get("endings", ("",))
+        if endings is not None:
+            endings = tuple(_script_word_view(clean(x)) for x in endings)
+        prefix = form.get("prefix")
+        if prefix is not None:
+            prefix = (_script_word_view(clean(prefix[0])), prefix[1])
+        ok = ok and (not unspaced or (len(words) == 1 and not form))
+        ok = ok and (endings is None or all(c.isalpha() or unicodedata.category(c)[0] == "M"
+                                            for x in endings for c in x))
+        if not ok:
+            raise ValueError(f"credential label list {name}: entry {i} cannot be matched after normalisation")
+        out.append((marked, unspaced, words, tuple(scripts), endings, prefix, bool(form.get("glued"))))
     return tuple(out)
 
 
@@ -732,13 +1050,160 @@ _JOINED_KEYS = _label_keys("_JOINED", _JOINED, True)
 _PIECE_KEYS = frozenset(_label_keys("_PIECES", sorted(_PIECES), True, piece=True))
 _SCRIPT_KEYS = _label_keys("_SCRIPT", _SCRIPT, False)
 _JOINED_RX = re.compile("|".join(sorted(_JOINED_KEYS, key=len, reverse=True)))
-# the letter keys of the script list as ONE pattern over the letters-only script view (longest first), and the word
-# labels (a key holding a spacing mark is not ``isalpha``) as one pattern over the inspection view itself: the
-# characters of the key in a row (a tatweel, which spells nothing and which the letters view drops, may stand
-# between two of them, as in every other script label; nothing else may)
-_WORD_GAP = _TATWEEL + "*"
-_SCRIPT_RX = _alternation(k for k in _SCRIPT_KEYS if k.isalpha())
-_SCRIPT_WORD_RX = _alternation((k for k in _SCRIPT_KEYS if not k.isalpha()), _WORD_GAP)
+_WORD_CLASS: dict = {}
+
+
+def _word_class(script: str) -> str:
+    """The pattern class of the letters and marks of ``script`` (``_WORD_SCRIPTS``, made once): what a word of a
+    label may not touch on either side. A space, a separator, a digit or a letter of another script ends it."""
+    r = _WORD_CLASS.get(script)
+    if r is None:
+        parts: list = []
+        for a, b in _WORD_SCRIPTS[script]:
+            run = None
+            for o in range(a, b + 2):
+                inside = o <= b and unicodedata.category(chr(o))[0] in "LM"
+                if inside and run is None:
+                    run = o
+                elif not inside and run is not None:
+                    parts.append(f"\\u{run:04x}" + ("" if run == o - 1 else f"-\\u{o - 1:04x}"))
+                    run = None
+        r = _WORD_CLASS[script] = "[" + "".join(parts) + "]"
+    return r
+
+
+# a label spelled ONE UNIT AT A TIME, the same separator between every two units (review cbdf5e78 S-3): once, or
+# twice where the view dropped a mark between them; a mark may also stay on its letter
+_SPACERS = (" ", "_", "-", ".")
+
+
+def _spelled(units: str, s: str) -> str:
+    e = re.escape(s)
+    return re.escape(units[0]) + "".join(
+        (e + ("{0,2}" if unicodedata.category(u)[0] == "M" else "{1,2}")) + re.escape(u) for u in units[1:])
+
+
+def _spelled_whole(units: str, s: str) -> str:
+    """``units`` spelled one at a time with the separator ``s``, as a whole word: no letter right before or after
+    it, nor a letter joined to it by ``s`` (``a-b`` is read; ``xa-b``, ``x-a-b``, ``a-by`` and ``a-b-y`` are not)."""
+    e = re.escape(s)
+    return f"(?<![^\\W\\d_])(?<![^\\W\\d_]{e}){_spelled(units, s)}(?![^\\W\\d_])(?!{e}[^\\W\\d_])"
+
+
+def _ending_alt(endings, last: str, s: str | None) -> str:
+    """What may follow a label's last word in its own word: an open stem, any letters of its script; a stem, one of
+    its endings; any other word, nothing. ``s``: spelled with that separator."""
+    if endings is None:
+        return f"{last}*" if s is None else f"(?:{re.escape(s)}{{1,2}}{last})*"
+    if s is None:
+        alts = [re.escape(x) for x in endings]
+    else:
+        alts = ["".join(re.escape(s) + ("{0,2}" if unicodedata.category(u)[0] == "M" else "{1,2}") + re.escape(u)
+                        for u in x) for x in endings]
+    alts = sorted(set(alts), key=len, reverse=True)
+    return "" if alts == [""] else "(?:" + "|".join(alts) + ")"
+
+
+def _seq_alternatives(spell) -> list:
+    """The pattern of one script entry over the word view: THE BOUNDARY RULE (section 2a) for a script that writes
+    words apart, and the entry spelled one unit at a time with one separator. An unspaced entry: its letters in a
+    row, a space or "_" allowed between two (as the client view always read them; the strict lane reads them on the
+    letters-only view); a MARKED unspaced one (Thai) only as written, its marks on their letters, or spelled one
+    unit at a time: in a text without word spaces nothing else tells it from the end of one word and the start of
+    the next (review cbdf5e78 MUST 2)."""
+    marked, unspaced, words, scripts, endings, prefix, glued = spell
+    if unspaced:
+        (key,) = words
+        if not marked:
+            # (and the whole entry spelled one letter at a time with "-" or ".": review of ced056c5)
+            return ["[ _]?".join(re.escape(c) for c in key)] + [_spelled_whole(key, s) for s in "-."]
+        return [re.escape(key)] + [_spelled(key, s) for s in _SPACERS]
+    first, last = _word_class(scripts[0]), _word_class(scripts[-1])
+    pre = "" if prefix is None else f"[{re.escape(prefix[0])}]{{0,{prefix[1]}}}"
+    gap = "[ _\\-]?" if glued else "[ _\\-]"
+    out = [f"(?<!{first}){pre}{gap.join(re.escape(w) for w in words)}{_ending_alt(endings, last, None)}(?!{last})"]
+    units = "".join(words)
+    out += [f"(?<!{first}){_spelled(units, s)}{_ending_alt(endings, last, s)}(?!{last})" for s in _SPACERS
+            if len(units) >= 3 or s in " _"]
+    # a two-letter label with a hyphen or a dot between its letters: only the WHOLE entry so spelled, as a word of
+    # its own (no letter of its script before or after it, nor another letter joined by the same separator), no
+    # ending (review of ced056c5: brief item 4, the spaced-letter form with one uniform separator)
+    if len(units) < 3:
+        out += [f"(?<!{first}){_spelled_whole(units, s)}(?!{last})" for s in "-."]
+    return out
+
+
+def _seq_pattern(spells) -> re.Pattern | None:
+    """One pattern of every entry of ``spells`` (the longest words first)."""
+    alts = [a for sp in sorted(spells, key=lambda x: -len("".join(x[2]))) for a in _seq_alternatives(sp)]
+    return re.compile("|".join(alts)) if alts else None
+
+
+_SCRIPT_SPELL = _script_words("_SCRIPT", _SCRIPT)
+_SPELL_KEYS = tuple(zip(_SCRIPT_SPELL, (_script_letters(normalise(e)) for e in _SCRIPT)))
+# the PREFILTERS (letters-only view; necessary): the letter keys of the entries read on the views, and of the marked
+# entries (their letters without marks: a match on a marked view leaves them in a row in the view without marks)
+_SCRIPT_RX = _alternation(k for sp, k in _SPELL_KEYS if not sp[0])
+_MARKED_RX = _alternation(k for sp, k in _SPELL_KEYS if sp[0])
+# the RULES: the strict lane and the client view both match ``_SCRIPT_SEQ`` (``_MARKED_SEQ`` on the marked views)
+# on the word view; the strict lane also finds an unspaced (Han, kana) label anywhere in the letters-only view, as
+# it always did
+_SCRIPT_SEQ = _seq_pattern(sp for sp, _k in _SPELL_KEYS if not sp[0])
+_MARKED_SEQ = _seq_pattern(sp for sp, _k in _SPELL_KEYS if sp[0])
+_SCRIPT_UNSPACED_RX = _alternation(k for sp, k in _SPELL_KEYS if sp[1] and not sp[0])
+
+
+class _LowerTable(dict):
+    """``str.translate`` table: each character in lower case when that is ONE character, else as it is (filled on
+    first use, bounded): the view as written, case aside."""
+
+    def __missing__(self, o: int) -> str:
+        c = chr(o)
+        lo = c.lower()
+        r = lo if len(lo) == 1 else c
+        if len(self) < _CMAP_MAX:
+            self[o] = r
+        return r
+
+
+_LOWER = _LowerTable()
+
+
+def _split_alternatives(entry: str, spell) -> list:
+    """A label WORD written with ONE space or "_" put inside it (the no-break space or line break of a disguised
+    label, which the views read as a space): read only letter for letter AS WRITTEN, case aside (the entry and its
+    declared proclitics as listed, nothing folded, no ending: the entries and the full forms of ``_CV_SCRIPT_FULL``
+    are the words). That is how both lanes of ffd28ca8 read every script label (its letters in a row, a space or "_"
+    between two allowed; the client view needed the label to end before its separator), so it reads nothing
+    ffd28ca8 did not. Not for an entry the word view reads otherwise than as written (the Greek one: its final
+    sigma) nor for the marked ones."""
+    marked, unspaced, words, scripts, _endings, _prefix, glued = spell
+    raw = tuple(normalise(w).lower() for w in entry.split(" "))
+    if marked or unspaced or raw != words:
+        return []
+    form = _SCRIPT_FORMS.get(entry, {})
+    endings = ("",)
+    prefix = form.get("prefix")
+    first, last = _word_class(scripts[0]), _word_class(scripts[-1])
+    pre = "" if prefix is None else f"[{re.escape(prefix[0])}]{{0,{prefix[1]}}}"
+    gap = "[ _\\-]?" if glued else "[ _\\-]"
+    tails = sorted(set(endings), key=len, reverse=True)
+    ending_rx = "" if tails == [""] else "(?:" + "|".join(re.escape(t) for t in tails) + ")"
+    out = []
+    n = len(words)
+    for i in range(n):
+        forms = [words[i] + t for t in tails] if i == n - 1 else [words[i]]
+        for f in forms:
+            for k in range(1, len(f)):
+                parts = [re.escape(x) for x in words]
+                parts[i] = re.escape(f[:k]) + "[ _]" + re.escape(f[k:])
+                body = gap.join(parts) + ("" if i == n - 1 else ending_rx)
+                out.append(f"(?<!{first}){pre}{body}(?!{last})")
+    return out
+
+
+_SCRIPT_SPLIT = re.compile("|".join(a for e, (sp, _k) in zip(_SCRIPT, _SPELL_KEYS) for a in _split_alternatives(e, sp)))
+_SPLIT_FULL: list = []                   # the full forms of section 5, added to ``_SCRIPT_SPLIT`` there
 _PIECE_RX = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[^\W\d_A-Za-z]+")
 _SIG_RX = re.compile(r"(?i)(?<![a-z])sig\s*[=:]")
 _LETTER_RUN = re.compile(r"[^\W\d_]+")
@@ -756,17 +1221,53 @@ def _letters_view(v: str) -> str:
 
 
 def _script_hit(v: str) -> bool:
-    """A ``_SCRIPT`` label in the inspection view ``v``: a letter key anywhere in its letters-only script view, or a
-    word label written out in ``v`` itself (an unbroken run: a space, a hyphen or any other separator between two
-    words is in ``v``, so two ordinary words side by side are never read as the label). Every key holds a non-ASCII
-    letter, so an ASCII text holds none."""
+    """A ``_SCRIPT`` label (not a marked one: ``_marked_label``) in the inspection view ``v``. The letters-only view
+    must hold a key (prefilter); then an unspaced label anywhere in it, or the boundary rule on the word view
+    (``_SCRIPT_SEQ``, the pattern the client view reads too). Every entry holds a non-ASCII letter, so an ASCII text
+    holds none."""
     if v.isascii():
         return False
     g = globals()
-    if g["_SCRIPT_RX"].search(_script_letters(v)) is not None:
+    letters = _script_letters(v)
+    if g["_SCRIPT_RX"].search(letters) is None:
+        return False
+    unspaced = g["_SCRIPT_UNSPACED_RX"]
+    if unspaced is not None and unspaced.search(letters) is not None:
         return True
-    words = g["_SCRIPT_WORD_RX"]
-    return words is not None and words.search(v) is not None
+    if g["_SCRIPT_SEQ"].search(_script_word_view(v)) is not None:
+        return True
+    return g["_SCRIPT_SPLIT"].search(v.translate(_LOWER)) is not None
+
+
+# a character of the marked blocks: only such a character, in an inspection view, is a letter of a marked entry on
+# the letters-only view (no other character folds to one; ``tests/test_review_cbdf5e78.py`` checks every code
+# point), so a view without one is no candidate, decided in one C pass (review cbdf5e78 M6)
+_MARKED_BLOCK_RX = re.compile("[" + "".join(f"\\u{a:04x}-\\u{b:04x}" for a, b in _MARKED_BLOCKS) + "]")
+
+
+def _marked_candidate(v: str) -> bool:
+    """The view ``v`` (marks dropped) holds the letters of a marked entry in a row: the marked views must be read."""
+    rx = globals()["_MARKED_RX"]
+    return (rx is not None and not v.isascii() and _MARKED_BLOCK_RX.search(v) is not None
+            and rx.search(_script_letters(v)) is not None)
+
+
+def _marked_hit(text: str) -> bool:
+    """A marked ``_SCRIPT`` label (spelled with a non-spacing mark: the Hindi and Thai entries) on a marked view of
+    ``text``, its marks as written (``_MARKED_SEQ`` on the word view, the pattern the client view reads too)."""
+    seq = globals()["_MARKED_SEQ"]
+    return seq is not None and any(not mv.isascii() and seq.search(_script_word_view(mv)) is not None
+                                   for mv in _marked_views(text))
+
+
+def _marked_label(text: str, v: str, memo: list) -> bool:
+    """The strict lane's marked step for one view ``v`` of ``text``: the marked views are read (once per text, the
+    answer kept in ``memo``) only when a view holds a marked entry's letters."""
+    if memo[0] is None:
+        if not globals()["_marked_candidate"](v):
+            return False
+        memo[0] = globals()["_marked_hit"](text)
+    return memo[0]
 
 
 class _AlphaTable(dict):
@@ -847,7 +1348,14 @@ def _spaced_label(v: str) -> bool:
     if "_" not in v and "-" not in v:
         return False
     chars = "".join(t if _single(t) else " " for t in v.split(" "))
-    return any(_fold_piece(x) in _PIECE_KEYS for x in _LETTER_RUN.findall(chars) if len(x) >= 3)
+    return any(_fold_words(x) in _PIECE_KEYS for x in _LETTER_RUN.findall(chars) if len(x) >= 3)
+
+
+def _fold_words(*words) -> str:
+    """Words of a text read one after the other, each through ``_fold_piece`` ON ITS OWN (review cbdf5e78: a split
+    or letter-spaced label is read from words that are words of the text; folded as one string, a lone letter of
+    another script among them was read through the second lookalike pass as if it stood inside a Latin word)."""
+    return "".join(_fold_piece(w) for w in (words[0] if len(words) == 1 else words))
 
 
 # every short / piece label is ASCII: when every LETTER of a view is ASCII (its pieces fold to lower case), a piece, a
@@ -888,13 +1396,13 @@ def _label_hit(v: str) -> bool:
             # a short label split by one space / NBSP / separator (``to ken``, ``P IN``): two adjacent short words
             nxt = words[i + 1]
             if len(w) + len(nxt) <= 16 and (min(len(w), len(nxt)) <= 3 or len(w) + len(nxt) >= 8):
-                g = _fold_piece(w + nxt)
+                g = _fold_words(w, nxt)
                 if g in _PIECE_KEYS and (g not in _NO_PAIR_JOIN or _pair_has_separator(v, w, nxt, runs[i].start(),
                                                                                     runs[i + 1].end())):
                     return True
     # a label spelled one letter at a time (``t o k e n``)
     singles = "".join(w if len(w) == 1 else " " for w in words)
-    if any(_fold_piece(x) in _PIECE_KEYS for x in singles.split() if len(x) >= 3):
+    if any(_fold_words(x) in _PIECE_KEYS for x in singles.split() if len(x) >= 3):
         return True
     if globals()["_spaced_label"](v):
         return True
@@ -1846,7 +2354,10 @@ def _mask_clean_urls(m: str) -> tuple:
 
 def _abc(text: str) -> str | None:
     """Checks (a)-(c) only, on every view (a text glued from parts, where (d) / (e) would read words as one)."""
+    marked: list = [None]
     for v, folded in _tagged_views(text):
+        if not folded and _marked_label(text, v, marked):
+            return "a_label"                               # (a) for the labels read on the marked views
         for name, fn in (_CHECK_FUNCS[1:] if folded else _CHECK_FUNCS):
             if globals()[fn](v):
                 return name
@@ -1857,9 +2368,12 @@ def _check(text: str, waive=frozenset(), urls: bool = True) -> str | None:
     if len(text) > MAX_INPUT:
         return "cap"
     personal = None
+    marked: list = [None]
     for v, folded in _tagged_views(text):
         if not v:
             continue
+        if not folded and _marked_label(text, v, marked):
+            return "a_label"                               # (a) for the labels read on the marked views (2a)
         # a folded view skips (a): the label rule folds confusables itself (``_letters_view`` / ``_fold_piece``)
         for name, fn in (_CHECK_FUNCS[1:] if folded else _CHECK_FUNCS):
             if globals()[fn](v):
@@ -2674,26 +3188,17 @@ def _cv_label_rx() -> re.Pattern:
 
 
 _CV_LABEL = _cv_label_rx()
-# review c13529af S5: the letters of a non-Latin label may be joined by a space or "_" (``<label_word>value``, XML tag
-# form)
-# (review 98b76cde MUST 2: in any case; three of the labels are in a cased script, Cyrillic and Greek)
-# Reviews ffd28ca8 / cd0a6c7d: built from the KEYS (each entry read by the view the text is read by, ``_label_keys``).
-# A letter key is matched on the script view of the text (``_cv_script_view``: ``_script_fold`` one character at a
-# time, case kept) and what follows the label is read on the view as written (``_cv_script_ends``); a word label
-# (the Hindi entry, spelled with a spacing vowel sign) is matched on the view as written, with no joiner: one
-# unbroken written word. Two of the ``_SCRIPT`` entries are STEMS (the strict lane finds them inside the inflected
-# word); the client view needs the label to end before the separator, so the full nominative form of each is listed
-# here (the Russian one always was; the Greek one since cd0a6c7d). Any other inflected form of the two is not
-# matched in the client view (ADR 0051 decision 71, residual).
+# Reviews ffd28ca8 / cd0a6c7d / cbdf5e78: a script label is matched by THE SAME pattern as in the strict lane
+# (``_SCRIPT_SEQ`` on the word view, ``_MARKED_SEQ`` on the marked views: the boundary rule of section 2a; an unspaced
+# label's letters may be joined by a space or "_", review c13529af S5; any case, review 98b76cde MUST 2), and what
+# follows the label (its separator and value) is read on the view as written (``_cv_script_ends``). A stem's match
+# reaches the end of the word that carries it (one of its declared endings), so the nominative forms below, and the
+# other declared case forms, are read before their separator (before review cbdf5e78 only these two were: ADR 0051
+# decision 71). The two full forms are kept as a check: each must be matched, whole, by both lanes at import.
 _CV_SCRIPT_FULL = (
     "\u043f\u0430\u0440\u043e\u043b\u044c",
     "\u03ba\u03c9\u03b4\u03b9\u03ba\u03cc\u03c2 \u03c0\u03c1\u03cc\u03c3\u03b2\u03b1\u03c3\u03b7\u03c2",
 )
-_CV_SCRIPT_KEYS = tuple(dict.fromkeys(_SCRIPT_KEYS + _label_keys("_CV_SCRIPT_FULL", _CV_SCRIPT_FULL, False)))
-_CV_SCRIPT = re.compile("|".join("[ _]?".join(re.escape(c) for c in k)
-                                 for k in sorted((k for k in _CV_SCRIPT_KEYS if k.isalpha()), key=len, reverse=True)),
-                        re.IGNORECASE)
-_CV_SCRIPT_WORD = _alternation((k for k in _CV_SCRIPT_KEYS if not k.isalpha()), _WORD_GAP)
 # what follows a label: closing quotes / brackets / emphasis, then a separator, then opening quotes / brackets, then a
 # value of 4+ characters (stopped by a space, a quote, a bracket, ``|`` ``,`` ``;`` ``&``). Review 98b76cde MUST 2: the
 # words are matched in ANY case (`` Is ``, `` IS ``, `` Was ``, `` WOULD BE ``): a label and its value were shown
@@ -2746,38 +3251,13 @@ class _CvLatinTable(dict):
         return r
 
 
-class _CvScriptTable(dict):
-    """``str.translate`` table: the client view's text view for the letter keys of the SCRIPT labels: each
-    non-ASCII character becomes its script fold (``_script_fold``, the function the strict lane's letters view and
-    the keys are made with), written in the character's own case (so ``_CV_AFTER`` and ``_cv_valueish`` read the
-    capitals of the value). Filled on first use, bounded."""
-
-    def __missing__(self, o: int) -> str:
-        c = chr(o)
-        r = c
-        if not c.isascii():
-            k = _script_fold(c)
-            if k != c:
-                r = k.upper() if c.lower() != c else k
-        if len(self) < _CMAP_MAX:
-            self[o] = r
-        return r
-
-
 _CV_LATIN_VIEW = _CvLatinTable()
-_CV_SCRIPT_VIEW = _CvScriptTable()
 
 
 def _cv_label_view(v: str) -> str:
     """``v`` as the client view reads it for a Latin label, case kept: ``contrase\u00f1a`` reads as ``contrasena``,
     the stroked L as ``L`` / ``l``, the sharp s as ``ss``, a lookalike letter as the ASCII letter it resembles."""
     return v.translate(_CV_LATIN_VIEW)
-
-
-def _cv_script_view(v: str) -> str:
-    """The inspection view ``v`` through the script fold, case kept (an accent dropped, the final sigma read as a
-    sigma, the tatweel and a spacing mark read as nothing; a kana letter keeps its voicing mark)."""
-    return v.translate(_CV_SCRIPT_VIEW)
 
 
 def _natural_spellings(e: str) -> tuple:
@@ -2807,21 +3287,27 @@ def _cv_latin_keys(name: str, entries) -> tuple:
     return tuple(out)
 
 
+_SPLIT_FULL[:] = [a for e, sp in zip(_CV_SCRIPT_FULL, _script_words("_CV_SCRIPT_FULL", _CV_SCRIPT_FULL))
+                  for a in _split_alternatives(e, sp)]
+_SCRIPT_SPLIT = re.compile(_SCRIPT_SPLIT.pattern + "".join("|" + a for a in _SPLIT_FULL))
+
+
 def _cv_script_keys(name: str, entries) -> tuple:
-    """The keys of one script list AS THE CLIENT VIEW READS ITS ENTRIES (as listed, UPPER, Title): a letter key
-    must be the letters of the client view's script view of the entry AND of the strict lane's letters view; a word
-    label must be found, written out, in the entry's inspection view by both lanes' word patterns. An entry the
-    two lanes would read differently stops the import."""
+    """The prefilter keys of one script list, each entry checked AS BOTH LANES READ IT (as listed, UPPER, Title): the
+    word view of its inspection view (its marked view, for a marked entry) is matched WHOLE by the one pattern both
+    lanes read (``_SCRIPT_SEQ`` / ``_MARKED_SEQ``), the strict lane flags it, and its letters are its prefilter key.
+    An entry the lanes would read differently, or that the rule would not take whole, stops the import."""
     keys = _label_keys(name, entries, False)
+    g = globals()
     for i, e in enumerate(entries):
-        k = _label_keys(name, (e,), False)[0]
-        for form in (e, e.upper(), e.title()):
-            v = normalise(form)
-            if k.isalpha():
-                cv = "".join(c for c in _cv_script_view(v) if c.isalpha())
-                ok = cv.casefold() == k and _script_letters(v) == k and _CV_SCRIPT.fullmatch(cv) is not None
-            else:
-                ok = v == k and _CV_SCRIPT_WORD.fullmatch(v) is not None and _SCRIPT_WORD_RX.fullmatch(v) is not None
+        k = _script_letters(normalise(e))
+        marked = _marked_entry(e)
+        rx = g["_MARKED_SEQ"] if marked else g["_SCRIPT_SEQ"]
+        for form in g["_natural_spellings"](e):
+            v = _clean_marked(form) if marked else normalise(form)
+            ok = (rx is not None and _script_letters(normalise(form)) == k
+                  and rx.fullmatch(_script_word_view(v)) is not None
+                  and (g["_marked_hit"](form) if marked else g["_script_hit"](v)))
             if not ok:
                 raise ValueError(f"credential label list {name}: entry {i} is read differently by the client view")
     return keys
@@ -2832,23 +3318,23 @@ def _check_label_lists() -> None:
     if _cv_latin_keys("_JOINED", _JOINED) != _JOINED_KEYS or \
             frozenset(_cv_latin_keys("_PIECES", sorted(_PIECES))) != _PIECE_KEYS:
         raise ValueError("credential label lists: the client view and the strict lane disagree on a key")
-    if _cv_script_keys("_SCRIPT", _SCRIPT) != _SCRIPT_KEYS or \
-            tuple(dict.fromkeys(_SCRIPT_KEYS + _cv_script_keys("_CV_SCRIPT_FULL", _CV_SCRIPT_FULL))) != _CV_SCRIPT_KEYS:
+    if _cv_script_keys("_SCRIPT", _SCRIPT) != _SCRIPT_KEYS:
         raise ValueError("credential label lists: the client view and the strict lane disagree on a key")
+    _cv_script_keys("_CV_SCRIPT_FULL", _CV_SCRIPT_FULL)
 
 
 _check_label_lists()
 
 
-def _cv_script_ends(v: str, sv: str, matches) -> list:
-    """Where each match of ``_CV_SCRIPT`` on the script view ``sv`` ends IN ``v`` (the view as written): what follows
-    a label (its separator and value) is read on ``v``, exactly as it was before the label was looked for on the
-    normal form. The script view is made one character at a time, so one cursor walks ``v`` once (linear); the
-    characters the view drops right after a label (a tatweel, a spacing mark) are skipped. A match that ends inside
+def _cv_script_ends(v: str, sv: str, matches, table=None) -> list:
+    """Where each match on the word view ``sv`` of ``v`` (made one character at a time by ``table``, the word view's
+    by default) ends IN ``v`` (the view as written): what follows a label (its separator and value) is read on
+    ``v``, exactly as it was before the label was looked for on the word view. One cursor walks ``v`` once
+    (linear); the characters the view drops right after a label (a tatweel) are skipped. A match that ends inside
     the fold of one character is left out."""
     if sv == v:
         return [m.end() for m in matches]
-    table = _CV_SCRIPT_VIEW
+    table = _SCRIPT_WORD if table is None else table
     out: list = []
     j = acc = 0
     n = len(v)
@@ -2863,6 +3349,23 @@ def _cv_script_ends(v: str, sv: str, matches) -> list:
             j += 1
         out.append(j)
     return out
+
+
+def _cv_script_value(v: str, rx, table=None) -> bool:
+    """A script label that ``rx`` matches on the word view of ``v`` (or on ``v`` through ``table``), followed IN
+    ``v`` by a separator and a value."""
+    wv = _script_word_view(v) if table is None else v.translate(table)
+    for end in _cv_script_ends(v, wv, rx.finditer(wv), table):
+        a = _CV_AFTER.match(v, end)
+        if a is not None and (a.group("w") is None or _cv_valueish(a.group("val"))):
+            return True
+    return False
+
+
+def _cv_marked(text: str) -> bool:
+    """The client view's marked step: a marked script label and its value on a marked view of ``text``."""
+    rx = globals()["_MARKED_SEQ"]
+    return rx is not None and any(not mv.isascii() and _cv_script_value(mv, rx) for mv in _marked_views(text))
 
 
 # ``Bearer <token>`` with only a space (review adacb2ca SHOULD 3): a token of 12+ token characters holding a digit or a
@@ -2886,16 +3389,12 @@ def _cv_label(v: str) -> bool:
             a = _CV_AFTER.match(w, m.end())
             if a is not None and (a.group("w") is None or _cv_valueish(a.group("val"))):
                 return True
-    if not v.isascii():
-        sv = _cv_script_view(v)
-        ends = _cv_script_ends(v, sv, _CV_SCRIPT.finditer(sv))
-        words = globals()["_CV_SCRIPT_WORD"]
-        if words is not None:
-            ends += [m.end() for m in words.finditer(v)]   # a word label: written out in the view itself
-        for end in ends:
-            a = _CV_AFTER.match(v, end)
-            if a is not None and (a.group("w") is None or _cv_valueish(a.group("val"))):
-                return True
+    g = globals()
+    if v.isascii() or getattr(_CV_MEMO, "folded", False):
+        return False                                       # (a script label is not read on an ASCII-folded view)
+    if g["_SCRIPT_RX"].search(_script_letters(v)) is not None:
+        # the strict lane's patterns (section 2a), then a value
+        return _cv_script_value(v, g["_SCRIPT_SEQ"]) or _cv_script_value(v, g["_SCRIPT_SPLIT"], _LOWER)
     return False
 
 
@@ -3460,22 +3959,32 @@ def _cv_findings(text: str) -> set:
     read again, the strong-prefix scans are remembered for the call (an identical string is scanned once), and a field
     found ``cap`` (fail closed: masked whatever else is in it) is not read further."""
     found: set = set()
+    marked = False
     _CV_MEMO.prefix = {}
     try:
-        for v, _folded in _tagged_views(text):
+        for v, folded in _tagged_views(text):
             if not v:
                 continue
+            # review cbdf5e78: a script label is read on a view as written, never on its ASCII-folded form (the
+            # strict lane's label rule skips that form too): a letter folded to a Latin lookalike there would stand
+            # as a change of script next to the label's letters
+            _CV_MEMO.folded = folded
             for name, fn in _CV_CHECKS:
                 if name not in found and globals()[fn](v):
                     found.add(name)
             if "label_value" not in found and globals()["_cv_label_nospace"](v):
                 found.add("label_value")                   # review 601e328a MUST 5: the strict no-space view
+            if "label_value" not in found and not folded and not marked and _marked_candidate(v):
+                marked = True                              # the marked views are read once (section 2a)
+                if globals()["_cv_marked"](text):
+                    found.add("label_value")
             if not {"card", "ssn", "phone"} <= found:
                 found |= globals()["_cv_numbers"](v)
             if "cap" in found:
                 break
     finally:
         _CV_MEMO.prefix = None
+        _CV_MEMO.folded = False
     return found
 
 
