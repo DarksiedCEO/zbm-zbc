@@ -81,9 +81,13 @@ NATURAL = {
     "connectionstring": ["connection string"], "sharedaccesssignature": ["shared access signature"],
     "\u043f\u0430\u0440\u043e\u043b": ["\u043f\u0430\u0440\u043e\u043b\u044c"],
     # (review cbdf5e78: the multi-word entries are listed with their words apart; the glued spelling the list held
-    # until then is a natural spelling of the Persian one only, written with the non-joiner, ``_SCRIPT_FORMS``)
-    "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631": ["\u0643\u064e\u0644\u0650\u0645\u064e\u0629 \u0627\u0644\u0645\u064f\u0631\u064f\u0648\u0631"],
-    "\u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631": ["\u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0651\u0631"],
+    # until then is a natural spelling of the Persian one only, written with the non-joiner, ``_SCRIPT_FORMS``.
+    # Review 0334eeae MUST A: the glued Arabic spellings, as listed at cbdf5e78, are natural spellings again, read
+    # as written; and the vowelled one glued too)
+    "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631": ["\u0643\u0644\u0645\u0629\u0627\u0644\u0645\u0631\u0648\u0631", "\u0643\u064e\u0644\u0650\u0645\u064e\u0629 \u0627\u0644\u0645\u064f\u0631\u064f\u0648\u0631",
+                                                   "\u0643\u064e\u0644\u0650\u0645\u064e\u0629\u0627\u0644\u0645\u064f\u0631\u064f\u0648\u0631"],
+    "\u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631": ["\u0643\u0644\u0645\u0629\u0627\u0644\u0633\u0631", "\u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0651\u0631",
+                                       "\u0643\u0644\u0645\u0629\u0627\u0644\u0633\u0651\u0631"],
     "\u0631\u0645\u0632 \u0639\u0628\u0648\u0631": ["\u0631\u0645\u0632\u0639\u0628\u0648\u0631"],
     "\u05e1\u05d9\u05e1\u05de\u05d4": ["\u05e1\u05b4\u05d9\u05e1\u05b0\u05de\u05b8\u05d4"],
 }

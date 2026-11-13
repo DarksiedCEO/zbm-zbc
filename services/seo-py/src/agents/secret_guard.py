@@ -526,6 +526,11 @@ decodings = views                        # v1 name used by callers; same functio
 #                 assembled from the letters of several words ("code" + "to" + "base-" read as the Greek label).
 #                 The letters-only view is kept as a necessary PREFILTER only (every match of the rule leaves the
 #                 key's letters in a row there).
+#                 Review 0334eeae MUST A (ADR 0051 decision 74): a multi-word label may also be written GLUED (its
+#                 words with nothing between them, a tatweel or an invisible joiner at most): read only AS WRITTEN
+#                 (``_SCRIPT_GLUED`` on ``_WRITTEN``: lower case, the tatweel dropped, no mark, accent, hamza or
+#                 madda folded), with the same boundaries, proclitics and endings. On the word view the hamza and
+#                 madda are folded away and ordinary Arabic phrases read as the label (review cbdf5e78 S-2).
 # Before review ffd28ca8 an entry was compared as written with a text that had been folded (the Hindi and Thai labels
 # never matched; the client view read the upper-case stroked L as an I); between ffd28ca8 and cd0a6c7d the entries
 # were folded MORE than the text views fold (every mark dropped, the kana decomposed).
@@ -571,6 +576,10 @@ _SCRIPT = (
 #             + a derivative of "access") as the label; Korean writes its particles onto the noun (a closed list).
 #   prefix    (letters, n): up to n of these letters may be written onto the FIRST word (the Hebrew and Arabic
 #             proclitics: "the", "and", "in", "to", "with"...)
+#   apart     (one-word compound entries) the entry's own words, which may also be written apart by one space, "_"
+#             or "-" (the boundary rule: whole words; the last one takes the entry's endings)
+#   written   (multi-word entries) more spellings of the entry AS WRITTEN (the Greek label with its accents, and the
+#             stem ffd28ca8 listed): read glued as written (``_glued_alternatives``) and spelled one letter at a time
 #   glued     the words may also be written with nothing between them (the Persian non-joiner, which the inspection
 #             view removes; a change of script). Arabic writes its two words apart: glued, "with the word" + "family" +
 #             "secret" read as the label once the madda was folded (review cbdf5e78 S-2)
@@ -585,14 +594,24 @@ _KO_PARTICLES = ("", "\uc774", "\uac00", "\uc740", "\ub294", "\uc744", "\ub97c",
 _SCRIPT_FORMS = {
     _SCRIPT[0]: {"endings": _RU_ENDINGS},
     _SCRIPT[1]: {"glued": True},
-    "\ube44\ubc00\ubc88\ud638": {"endings": _KO_PARTICLES}, "\ube44\ubc88": {"endings": _KO_PARTICLES},
+    # (the compound "secret" + "number": its two words also written apart, as ffd28ca8 read them)
+    "\ube44\ubc00\ubc88\ud638": {"endings": _KO_PARTICLES, "apart": "\ube44\ubc00 \ubc88\ud638"},
+    "\ube44\ubc88": {"endings": _KO_PARTICLES},
     "\uc554\ud638": {"endings": _KO_PARTICLES}, "\ud1a0\ud070": {"endings": _KO_PARTICLES},
     "\u0643\u0644\u0645\u0629 \u0627\u0644\u0645\u0631\u0648\u0631": {"prefix": ("\u0648\u0641\u0628\u0644\u0643", 2)},
     "\u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631": {"prefix": ("\u0648\u0641\u0628\u0644\u0643", 2)},
     "\u0631\u0645\u0632 \u0639\u0628\u0648\u0631": {"glued": True},
     "\u05e1\u05d9\u05e1\u05de\u05d4": {"prefix": ("\u05d5\u05d4\u05d1\u05dc\u05de\u05e9\u05db", 3)},
     _SCRIPT[19]: {"endings": ("", "\u094b\u0902", "\u094d\u0938")},           # Hindi: oblique plural, "-s"
-    _SCRIPT[-1]: {"endings": ("", "\u03b7", "\u03b7\u03c2", "\u03b5\u03c9\u03c2", "\u03b5\u03b9\u03c2", "\u03b5\u03c9\u03bd")},
+    _SCRIPT[-1]: {"endings": ("", "\u03b7", "\u03b7\u03c2", "\u03b5\u03c9\u03c2", "\u03b5\u03b9\u03c2", "\u03b5\u03c9\u03bd"),
+                  # (the same forms with the accents Greek writes them with: read glued as written)
+                  "written": ("\u03ba\u03c9\u03b4\u03b9\u03ba\u03cc\u03c2 \u03c0\u03c1\u03cc\u03c3\u03b2\u03b1\u03c3\u03b7",
+                              "\u03ba\u03c9\u03b4\u03b9\u03ba\u03cc\u03c2 \u03c0\u03c1\u03cc\u03c3\u03b2\u03b1\u03c3\u03b7\u03c2",
+                              "\u03ba\u03c9\u03b4\u03b9\u03ba\u03cc\u03c2 \u03c0\u03c1\u03bf\u03c3\u03b2\u03ac\u03c3\u03b5\u03c9\u03c2",
+                              "\u03ba\u03c9\u03b4\u03b9\u03ba\u03cc\u03c2 \u03c0\u03c1\u03bf\u03c3\u03b2\u03ac\u03c3\u03b5\u03b9\u03c2",
+                              "\u03ba\u03c9\u03b4\u03b9\u03ba\u03cc\u03c2 \u03c0\u03c1\u03bf\u03c3\u03b2\u03ac\u03c3\u03b5\u03c9\u03bd",
+                              # the stem ffd28ca8 listed, as it read it: glued, or spelled one letter at a time
+                              "\u03ba\u03c9\u03b4\u03b9\u03ba\u03bf\u03c2 \u03c0\u03c1\u03bf\u03c3\u03b2")},
 }
 # The scripts a label word may be in, by the first word of its letters' Unicode names, and their blocks: a word of a
 # label ends where the letters and marks of its script end (``_word_class``).
@@ -725,7 +744,7 @@ def _label_norm(s: str, latin: bool = True) -> str:
                     if not spans:
                         g = globals()["_refold"](g)
                     elif _mixed_outside(s, spans):
-                        if globals()["_refold"](g) != g:
+                        if globals()["_refold"](g) != g or _SIGMA_RX.search(s) is not None:
                             g = _refold_mixed(s, spans)
                 # (else every word of one script: the first pass is the form, and the second is not run)
             f = g
@@ -758,7 +777,6 @@ class _ScriptTagTable(dict):
 _SCRIPT_TAG = _ScriptTagTable()
 
 
-_TAG_RUN = re.compile(r"([^ Lm])(?:\1|m)*")
 # the runs ``_one_script_spans`` keeps, in one pass (review cbdf5e78 M6: the loop cost a Greek text 7%): a run of
 # two letters or more of one script (with their marks), or a run of one letter that is a whole word
 _ONE_SCRIPT_RUN = re.compile(r"([^ Lm])m*\1(?:\1|m)*|(?:(?<= )|^)[^ Lm]m*(?= |$)")
@@ -771,19 +789,12 @@ def _one_script_spans(s: str) -> list:
     return [m.span() for m in _ONE_SCRIPT_RUN.finditer(s.translate(_SCRIPT_TAG))]
 
 
-def _one_script_spans_loop(s: str) -> list:
-    """``_one_script_spans`` written as a loop over every run (``_TAG_RUN``): the definition the pattern
-    ``_ONE_SCRIPT_RUN`` is tested against (``tests/test_review_cbdf5e78.py``)."""
-    tags = s.translate(_SCRIPT_TAG)
-    out: list = []
-    n = len(tags)
-    for m in _TAG_RUN.finditer(tags):
-        a, b = m.span()
-        if len(m.group(0).replace("m", "")) >= 2 or ((a == 0 or tags[a - 1] == " ") and (b == n or tags[b] == " ")):
-            out.append((a, b))
-    return out
-
-
+# the characters whose NFKC (and the fold's early letters) give the capital sigma: the only character whose lower
+# case depends on its context (the final sigma), so the only one for which folding a text part by part and folding
+# it whole can differ. Without one, and with nothing for the second pass to change, ``_refold_mixed`` gives the
+# first pass of the whole text, so that is kept (review 0334eeae NIT 1: the shortcut without this test was not
+# output-identical; ``tests/test_review_0334eeae.py`` checks the list against every code point)
+_SIGMA_RX = re.compile("[\u03a3\u03f9\U0001d6ba\U0001d6f4\U0001d72e\U0001d768\U0001d7a2]")
 # the ASCII characters Unicode calls case-ignorable: the lower-casing rule of the final sigma looks across them
 _CASE_IGNORABLE_ASCII = frozenset("'.:^`")
 # punctuation of other scripts that no fold step changes and composes with nothing, neither a letter nor
@@ -1149,6 +1160,41 @@ _MARKED_RX = _alternation(k for sp, k in _SPELL_KEYS if sp[0])
 # on the word view; the strict lane also finds an unspaced (Han, kana) label anywhere in the letters-only view, as
 # it always did
 _SCRIPT_SEQ = _seq_pattern(sp for sp, _k in _SPELL_KEYS if not sp[0])
+
+
+def _declared_alternatives(entry: str, spell) -> list:
+    """The boundary rule (over the word view) for the declared spellings of an entry (``_SCRIPT_FORMS``): a
+    compound's own words written apart (``apart``: one space, "_" or "-" between them, the endings on the last),
+    and a ``written`` spelling whose letters are not the entry's with one of its endings, spelled one letter at a
+    time with one separator (as ``_seq_alternatives`` spells the entry)."""
+    marked, unspaced, words, scripts, endings, prefix, glued = spell
+    if marked or unspaced:
+        return []
+    form = _SCRIPT_FORMS.get(entry, {})
+    first, last = _word_class(scripts[0]), _word_class(scripts[-1])
+
+    def view(x: str) -> str:
+        return _script_word_view(normalise(x))
+
+    out = []
+    if form.get("apart"):
+        parts = tuple(view(w) for w in form["apart"].split(" "))
+        out.append(f"(?<!{first}){'[ _\\-]'.join(re.escape(w) for w in parts)}{_ending_alt(endings, last, None)}(?!{last})")
+    have = {"".join(words) + x for x in (endings or ("",))}
+    for x in form.get("written", ()):
+        units = view(x.replace(" ", ""))
+        if units not in have:
+            out += [f"(?<!{first}){_spelled(units, s)}(?!{last})" for s in _SPACERS]
+    return out
+
+
+_DECLARED = [a for e, (sp, _k) in zip(_SCRIPT, _SPELL_KEYS) for a in _declared_alternatives(e, sp)]
+# the prefilter keys of the declared ``written`` spellings whose letters do not hold their entry's key (the stem
+# ffd28ca8 listed): a view whose letters hold neither kind of key holds no script label
+_WRITTEN_RX = _alternation(dict.fromkeys(
+    _script_letters(normalise(x)) for e, (sp, k) in zip(_SCRIPT, _SPELL_KEYS) if not sp[0]
+    for x in _SCRIPT_FORMS.get(e, {}).get("written", ()) if k not in _script_letters(normalise(x))))
+_SCRIPT_SEQ = re.compile(_SCRIPT_SEQ.pattern + "".join("|" + a for a in _DECLARED)) if _DECLARED else _SCRIPT_SEQ
 _MARKED_SEQ = _seq_pattern(sp for sp, _k in _SPELL_KEYS if sp[0])
 _SCRIPT_UNSPACED_RX = _alternation(k for sp, k in _SPELL_KEYS if sp[1] and not sp[0])
 
@@ -1204,6 +1250,70 @@ def _split_alternatives(entry: str, spell) -> list:
 
 _SCRIPT_SPLIT = re.compile("|".join(a for e, (sp, _k) in zip(_SCRIPT, _SPELL_KEYS) for a in _split_alternatives(e, sp)))
 _SPLIT_FULL: list = []                   # the full forms of section 5, added to ``_SCRIPT_SPLIT`` there
+
+
+class _WrittenTable(dict):
+    """``str.translate`` table of the view AS WRITTEN (review 0334eeae MUST A): each character in lower case when that
+    is ONE character, else as it is, and the tatweel (which spells nothing) as nothing; every mark, accent, hamza and
+    madda the inspection view keeps stays on its letter (the joiners, the soft hyphen and every other invisible
+    character are already gone from an inspection view). Filled on first use, bounded."""
+
+    def __missing__(self, o: int) -> str:
+        c = chr(o)
+        lo = c.lower()
+        r = "" if c == _TATWEEL else (lo if len(lo) == 1 else c)
+        if len(self) < _CMAP_MAX:
+            self[o] = r
+        return r
+
+
+_WRITTEN = _WrittenTable()
+# the Greek final sigma: a word that ends a label word with it is written with the medial sigma when the next word
+# is glued to it, and lower-casing a capital sigma gives the medial one, so there either may stand in its place
+# (never the other way round: a medial sigma of the entry is a medial sigma)
+_FINAL_SIGMA = "\u03c2"
+
+
+def _written(w: str) -> str:
+    """The pattern of the word ``w`` (as written, through ``_WRITTEN``) letter for letter."""
+    return "".join("[\u03c2\u03c3]" if c == _FINAL_SIGMA else re.escape(c) for c in w)
+
+
+def _glued_alternatives(entry: str, spell) -> list:
+    """A multi-word label written GLUED (its words with nothing between them; review 0334eeae MUST A), read only AS
+    WRITTEN: the words of the entry (and the entry's declared ``written`` spellings: the Greek label with its
+    accents) through ``_WRITTEN`` (lower case, the tatweel dropped; no mark, accent, hamza or madda folded or
+    dropped), the declared proclitics on the first word and the declared endings on the last as listed, and the
+    same word boundaries as the spaced form (the boundary rule of this section: a word start before it, a word end
+    after it). The word view folds the hamza and madda away, so a glued alternative made on it read ordinary Arabic
+    phrases as the label (review cbdf5e78 S-2); on the view as written they are other words. Not for an entry
+    declared ``glued`` (its words are already read with nothing between them: the Persian label, the Russian "API
+    key"), a one-word entry, an unspaced one or a marked one."""
+    marked, unspaced, words, scripts, endings, prefix, glued = spell
+    if marked or unspaced or glued or len(words) < 2:
+        return []
+    form = _SCRIPT_FORMS.get(entry, {})
+    first, last = _word_class(scripts[0]), _word_class(scripts[-1])
+
+    def written(x: str) -> str:
+        return normalise(x).translate(_WRITTEN)
+
+    pre = ""
+    if form.get("prefix") is not None:
+        letters, n = form["prefix"]
+        pre = f"[{re.escape(written(letters))}]{{0,{n}}}"
+    tails = ("",) if form.get("endings") is None else tuple(written(x) for x in form["endings"])
+    spellings = [(tuple(written(w) for w in entry.split(" ")), tails)]
+    spellings += [(tuple(written(w) for w in x.split(" ")), ("",)) for x in form.get("written", ())]
+    out = []
+    for ws, ts in spellings:
+        ends = sorted(set(_written(t) for t in ts), key=len, reverse=True)
+        tail = "" if ends == [""] else "(?:" + "|".join(ends) + ")"
+        out.append(f"(?<!{first}){pre}{''.join(_written(w) for w in ws)}{tail}(?!{last})")
+    return out
+
+
+_SCRIPT_GLUED = re.compile("|".join(a for e, (sp, _k) in zip(_SCRIPT, _SPELL_KEYS) for a in _glued_alternatives(e, sp)))
 _PIECE_RX = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[^\W\d_A-Za-z]+")
 _SIG_RX = re.compile(r"(?i)(?<![a-z])sig\s*[=:]")
 _LETTER_RUN = re.compile(r"[^\W\d_]+")
@@ -1229,12 +1339,14 @@ def _script_hit(v: str) -> bool:
         return False
     g = globals()
     letters = _script_letters(v)
-    if g["_SCRIPT_RX"].search(letters) is None:
+    if g["_SCRIPT_RX"].search(letters) is None and (_WRITTEN_RX is None or _WRITTEN_RX.search(letters) is None):
         return False
     unspaced = g["_SCRIPT_UNSPACED_RX"]
     if unspaced is not None and unspaced.search(letters) is not None:
         return True
     if g["_SCRIPT_SEQ"].search(_script_word_view(v)) is not None:
+        return True
+    if g["_SCRIPT_GLUED"].search(v.translate(_WRITTEN)) is not None:
         return True
     return g["_SCRIPT_SPLIT"].search(v.translate(_LOWER)) is not None
 
@@ -3321,6 +3433,23 @@ def _check_label_lists() -> None:
     if _cv_script_keys("_SCRIPT", _SCRIPT) != _SCRIPT_KEYS:
         raise ValueError("credential label lists: the client view and the strict lane disagree on a key")
     _cv_script_keys("_CV_SCRIPT_FULL", _CV_SCRIPT_FULL)
+    _check_glued("_SCRIPT", _SCRIPT)
+
+
+def _check_glued(name: str, entries) -> None:
+    """Run at import (review 0334eeae MUST A): every entry that has glued alternatives, written glued (as listed,
+    UPPER, Title, and each declared ``written`` spelling), is taken WHOLE by ``_SCRIPT_GLUED`` on its view as written
+    and flagged by the strict lane; otherwise the import stops."""
+    g = globals()
+    for i, (e, spell) in enumerate(zip(entries, _script_words(name, entries))):
+        if not _glued_alternatives(e, spell):
+            continue
+        forms = [f.replace(" ", "") for f in g["_natural_spellings"](e)]
+        forms += [x.replace(" ", "") for x in _SCRIPT_FORMS.get(e, {}).get("written", ())]
+        for form in forms:
+            v = normalise(form)
+            if g["_SCRIPT_GLUED"].fullmatch(v.translate(_WRITTEN)) is None or not g["_script_hit"](v):
+                raise ValueError(f"credential label list {name}: entry {i} is not read glued as written")
 
 
 _check_label_lists()
@@ -3392,9 +3521,11 @@ def _cv_label(v: str) -> bool:
     g = globals()
     if v.isascii() or getattr(_CV_MEMO, "folded", False):
         return False                                       # (a script label is not read on an ASCII-folded view)
-    if g["_SCRIPT_RX"].search(_script_letters(v)) is not None:
+    letters = _script_letters(v)
+    if g["_SCRIPT_RX"].search(letters) is not None or (_WRITTEN_RX is not None and _WRITTEN_RX.search(letters)):
         # the strict lane's patterns (section 2a), then a value
-        return _cv_script_value(v, g["_SCRIPT_SEQ"]) or _cv_script_value(v, g["_SCRIPT_SPLIT"], _LOWER)
+        return (_cv_script_value(v, g["_SCRIPT_SEQ"]) or _cv_script_value(v, g["_SCRIPT_GLUED"], _WRITTEN)
+                or _cv_script_value(v, g["_SCRIPT_SPLIT"], _LOWER))
     return False
 
 

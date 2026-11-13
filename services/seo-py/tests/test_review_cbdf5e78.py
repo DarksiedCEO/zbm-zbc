@@ -415,12 +415,14 @@ def test_the_greek_label_is_read_in_its_forms_and_nothing_glued_to_it():
             assert flagged(t) and masked(t), (len(f), sep)
         assert flagged(f"note: {f}") and not masked(f"{f} {rs(r, LOWER, 6)}")
     # a value glued after a separator or a change of script is still read; a word glued to the label is not the
-    # label (Greek writes the two words apart: a glued form is not declared)
+    # label. Review 0334eeae MUST A: the label's own two words glued are read again, AS WRITTEN (accents on the
+    # letters the entry's written spellings carry them on); "code" + "to" + "basis" glued is not the label
     assert flagged(f"{GREEK_LABEL}:{value(r)}") and masked(f"{GREEK_LABEL}:{value(r)}")
     assert flagged(f"{GREEK_LABEL}{rs(r, LOWER, 3)}{r.randint(10, 99)}")
     glued = [GREEK_LABEL.replace(" ", ""), GREEK_CODE + "\u03c0\u03c1\u03bf\u03c2\u03b2\u03ac\u03c3\u03b7",
              GREEK_LABEL + "\u03c4\u03b1", "\u03c4\u03bf" + GREEK_LABEL.replace(" ", "")]
-    assert [flagged(f"{g}: {value(r)}") or masked(f"{g}: {value(r)}") for g in glued] == [False] * 4
+    assert [flagged(f"{g}: {value(r)}") for g in glued] == [True, False, False, False]
+    assert [masked(f"{g}: {value(r)}") for g in glued] == [True, False, False, False]
 
 
 # ================================================================================================ MUST 2: Thai
@@ -533,14 +535,17 @@ def test_the_arabic_and_hebrew_labels_are_read_with_their_proclitics():
     hebrew = "\u05e1\u05d9\u05e1\u05de\u05d4"
     forms = [word, secret, word.replace(" ", "-"), word.replace(" ", "_"), "\u0628" + word, "\u0648\u0628" + word,
              "\u0644" + secret, hebrew, "\u05d4" + hebrew, "\u05d5\u05d4" + hebrew, "\u05d5\u05e9\u05d4" + hebrew,
-             "\u0631\u0645\u0632 \u0639\u0628\u0648\u0631", "\u0631\u0645\u0632\u200c\u0639\u0628\u0648\u0631"]
+             "\u0631\u0645\u0632 \u0639\u0628\u0648\u0631", "\u0631\u0645\u0632\u200c\u0639\u0628\u0648\u0631",
+             # review 0334eeae MUST A: the Arabic words glued, as written (with a proclitic too)
+             word.replace(" ", ""), secret.replace(" ", ""), "\u0628" + word.replace(" ", ""),
+             "\u0648\u0644" + secret.replace(" ", "")]
     for f in forms:
         for sep in SEPARATORS:
             t = f"{f}{sep}{value(r)}"
             assert flagged(t) and masked(t), (len(f), sep)
-    # not a declared proclitic, or a word between: not the label
-    # (nor glued: Arabic writes the two words apart, and glued they met "with the word" + "family" + "secret")
-    for f in ("\u0627" + word, word.replace(" ", " \u0648 "), word.replace(" ", ""), "\u05d0" + hebrew,
+    # not a declared proclitic, or a word between: not the label (glued, the hamza / madda forms of "with the
+    # word" + "family" + "secret" stay other words: ``test_arabic_phrases_are_not_masked``)
+    for f in ("\u0627" + word, word.replace(" ", " \u0648 "), "\u0627" + word.replace(" ", ""), "\u05d0" + hebrew,
               hebrew + "\u05d5\u05ea"):
         assert not flagged(f"{f}: {value(r)}") and not masked(f"{f}: {value(r)}")
 
@@ -704,13 +709,39 @@ def test_mutation_with_the_second_pass_everywhere_the_greek_triples_read_as_lati
     assert sum(flagged(t.replace("+", " ")) for t in GREEK_ACCENT_TRIPLES) == 40
 
 
+_TAG_RUN = re.compile(r"([^ Lm])(?:\1|m)*")
+
+
+def _one_script_spans_loop(s: str) -> list:
+    """``sg._one_script_spans`` written as a loop over every run of one tag (``_TAG_RUN``): the definition the
+    pattern ``sg._ONE_SCRIPT_RUN`` is tested against (kept here: review 0334eeae NIT 2, test-only code is not in
+    the production module)."""
+    tags = s.translate(sg._SCRIPT_TAG)
+    out: list = []
+    n = len(tags)
+    for m in _TAG_RUN.finditer(tags):
+        a, b = m.span()
+        if len(m.group(0).replace("m", "")) >= 2 or ((a == 0 or tags[a - 1] == " ") and (b == n or tags[b] == " ")):
+            out.append((a, b))
+    return out
+
+
 def _latin_form_by_the_spans(monkeypatch, s: str) -> str:
-    """``_label_norm`` with its two shortcuts off (M6): every text through the one-script spans, every text with
-    spans and a second-pass change through ``_refold_mixed`` (what the measurements of this round read)."""
-    with monkeypatch.context() as m:
-        m.setattr(sg, "_ONE_SCRIPT_TEXT", None)
-        m.setattr(sg, "_mixed_outside", lambda s, spans: True)
-        return sg._label_norm(s)
+    """The Latin normal form by its DEFINITION, without the shortcuts of M6 (what the measurements of round 5
+    read): the first pass of the whole text; when it dropped a mark and the text is not ASCII, the second pass on
+    the whole text when it has no one-script word, else part by part around the one-script words
+    (``_refold_mixed``) -- with no other test in between (review 0334eeae NIT 1: the shortcut that kept the
+    first pass whenever the second pass of the whole text changed nothing was not output-identical to this)."""
+    if s.isascii():
+        return s.lower()
+    f = sg._FOLD.fold_cased(s)
+    if f.isascii():
+        return f
+    g = unicodedata.normalize("NFC", unicodedata.normalize("NFKD", f).translate(sg._LABEL_MARKS))
+    if g != f and not g.isascii():
+        spans = _one_script_spans_loop(s)
+        g = sg._refold(g) if not spans else sg._refold_mixed(s, spans)
+    return g
 
 
 def test_no_character_outside_the_marked_blocks_is_a_letter_of_a_marked_entry():
@@ -744,12 +775,17 @@ def test_the_latin_form_shortcuts_give_the_same_answer(monkeypatch):
     # case-ignorable characters only, and a lone accented letter in a Latin word beside a Greek word)
     texts += ["  \u03cc s:\u03a3", "a.\u03a3 \u03cc", " \u03ac.'\u03a3 \u03ac", "\u03cc \u0391'\u03a3 ",
               "\u03c1 \u03cca", "\u03a3w\u03cc:\u03b1"]
+    # (review 0334eeae NIT 1: texts the shortcut "keep the first pass when the second pass of the whole text changes
+    # nothing" read otherwise than the part-by-part fold; 659 of 300,000 random texts of this pool did)
+    nit1 = ["\u060c\u03a9\u064eS\xab\xe9\u039a\u2019\u03a3", "\u039a\u0419\u2019\u03a3\u05bc",
+            "\u0964\u094d,\u0390'\u0441\u03c3^\u03a3"]
+    texts += nit1
     fast = sum(1 for t in texts if sg._ONE_SCRIPT_TEXT.fullmatch(t) and not sg._ONE_SCRIPT_ACROSS.search(t)
                and t != t.encode("ascii", "ignore").decode())
     assert fast > 1500                                                   # (the one-pass answer is exercised)
     bad = [i for i, t in enumerate(texts) if sg._label_norm(t) != _latin_form_by_the_spans(monkeypatch, t)]
     assert bad == []
-    assert [i for i, t in enumerate(texts) if sg._one_script_spans(t) != sg._one_script_spans_loop(t)] == []
+    assert [i for i, t in enumerate(texts) if sg._one_script_spans(t) != _one_script_spans_loop(t)] == []
     # the final sigma: folded as one string or part by part, a capital sigma touching a Latin letter differs; the
     # shortcut is not taken there
     t = "\u03a3\u0391\u03a3x"

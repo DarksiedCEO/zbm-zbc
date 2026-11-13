@@ -1524,7 +1524,12 @@ two- and three-word joins (spaced, hyphenated, glued) of 18 languages, but the r
       by side is not flagged by the strict lane (the client view masks it with its value); below.
     - (g) ACCEPTED by the owner (review of ced056c5): the 165 glued lone-lookalike joins of M2 (Greek 141,
       Persian 20, Arabic 3, Japanese 1; stage 1 and 2 of M2, classed by re-reading each with the second pass
-      off: flagged only through it). A lone letter of another script with a mark glued between Latin letters is
+      off: flagged only through it). **Reworded by review 0334eeae (SHOULD 3; decision 74 has the counts at
+      20,000 and 30,000 words):** the mechanism is a LONE letter of another script (one letter, not a run of two
+      or more of one script, nor a whole word) carrying a mark, standing in a glued join next to Latin letters,
+      which the second lookalike pass reads as the Latin letter it resembles; it stands between two Latin
+      letters, at the edge of the join (the text's start or end, Latin letters on its other side), or beside a
+      word of another script (a run that pass leaves alone, such as a two-letter Cyrillic word). That is
       exactly the homoglyph-evasion shape (a Latin label with one accented Greek lookalike, asserted flagged by
       `tests/test_review_cd0a6c7d.py`) and cannot be told from it; not flagging it would be a security
       regression. A sample of each language is pinned as flagged.
@@ -1537,9 +1542,12 @@ two- and three-word joins (spaced, hyphenated, glued) of 18 languages, but the r
       lanes read them as ffd28ca8 did. A sample of each language is pinned.
     No longer read, against ffd28ca8 (fewer flags, not more; listed so the owner can weigh them): a script label
     inside a longer written word or across words (the Korean compound with a noun before it, the Russian
-    "password-protected", a Hebrew or Arabic word with a prefix that is not a declared proclitic), the
-    unaccented Greek label written glued, the Korean label written as two words, the Arabic labels written
-    glued. Against cbdf5e78 only (ffd28ca8 did not flag them either): a Latin label with TWO accented lookalikes of
+    "password-protected", a Hebrew or Arabic word with a prefix that is not a declared proclitic).
+    **Corrected by review 0334eeae (decision 74):** this list also named the unaccented Greek label written
+    glued, the Korean label written as two words and the Arabic labels written glued; at 0334eeae they were
+    not read, which the review rejected (MUST A). They are read again (decision 74: the Arabic and Greek labels
+    glued, as written; the Korean compound's two words with a space, "_" or "-" between them): M1 of decision 74
+    finds no label form ffd28ca8 or cbdf5e78 read that this release does not. Against cbdf5e78 only (ffd28ca8 did not flag them either): a Latin label with TWO accented lookalikes of
     one script side by side ("t" + omicron with tonos + kappa + "en") is not flagged by the strict lane; the
     client view masks it with its value, as at both releases. Two letters of one other script in a row are read
     as a word of that script: read as lookalikes instead (the mutation of this round), 36 ordinary glued joins
@@ -1561,6 +1569,250 @@ two- and three-word joins (spaced, hyphenated, glued) of 18 languages, but the r
     read, and only as a whole word; two citation runs end to end. In `tests/test_review_ffd28ca8.py`, `tests/test_review_cd0a6c7d.py` and
     `tests/test_review_c13529af.py` the assertions on the removed internals were moved to the new ones, and
     the residuals this round closes are asserted closed; each change is listed in the round's report.
+
+## Review 0334eeae: a glued script label is read as written
+
+A scoped review of 0334eeae (decision 73) found the boundary rule sound but one class of label forms lost. MUST A:
+the Arabic "password" and "secret word" labels written with their two words glued (also with a tatweel inside,
+and with an invisible joiner between letters) were no longer flagged or masked, and the unaccented Greek label
+written glued neither; ffd28ca8 and cbdf5e78 read them, and the glued Arabic natural spellings had been removed
+from `tests/test_review_ffd28ca8.py` (a weakened assertion). The cause: the multi-word entries were not declared
+glued, so the separator between their words was mandatory; declaring them glued on the word view would have read
+the ordinary Arabic phrases of review cbdf5e78 S-2 again (the word view folds the hamza and the madda away).
+SHOULD 1 seven behavioural mutants survived the review tests; SHOULD 2 the collision tests were snapshots only;
+SHOULD 3 the wording of residual (g); NIT 1 a Latin-form shortcut not output-identical; NIT 2 test-only code in
+the production module. THE BAR for this round is two-sided: against ffd28ca8 nothing ordinary newly flagged,
+masked, withheld or refused (and against 0334eeae nothing ordinary at all); and every label form ffd28ca8 or
+cbdf5e78 read still read.
+
+74. **A multi-word script label written glued is read AS WRITTEN, by one pattern both lanes read.**
+
+    **What the code does now** (`secret_guard.py`, section 2a):
+    - **The glued rule.** `_glued_alternatives` makes, for every multi-word script entry that is not declared
+      `glued` (the two Arabic labels and the Greek label), the entry with its words written together, matched on
+      the view AS WRITTEN (`_WRITTEN`: each character in lower case when that is one character, the tatweel as
+      nothing; no mark, accent, hamza or madda folded or dropped; the joiners, the soft hyphen, the word joiner
+      and every other invisible character are already gone from every inspection view), with the entry's
+      declared proclitics on the first word and declared endings on the last, as listed, and the boundaries of
+      the spaced form (a word start before it, a word end after it: the boundary rule of decision 73). The Greek
+      final sigma of an entry word may be written as the medial sigma (a glued word is so written, and a capital
+      sigma lowers to it), never the other way round (`_written`). The entry's declared `written` spellings
+      (`_SCRIPT_FORMS`) are read the same way: the Greek label with the accents Greek writes it with (five case
+      forms), and the stem ffd28ca8 listed. `_SCRIPT_GLUED` is searched by the strict lane (`_script_hit`) and
+      by the client view, with the separator and the value read after it on the view as written (`_cv_label`,
+      `_cv_script_value` with `_WRITTEN`). The word view is not used for it: no fold is needed to read what
+      ffd28ca8 and cbdf5e78 read (M1 below), so none is made.
+    - **Two declared spellings ffd28ca8 read that the boundary rule did not** (found by M1): the Korean compound
+      "secret" + "number" written as its two words apart with a hyphen (`apart`: one space, "_" or "-" between the
+      words, whole words, the particles on the last), and the stem ffd28ca8 listed for the Greek label (its own
+      prefilter key, `_WRITTEN_RX`, as the stem does not hold the entry's key). `_declared_alternatives` adds
+      both to `_SCRIPT_SEQ`.
+    - **The import check** (`_check_glued`) stops the import unless every entry that has glued alternatives, as
+      listed, UPPER and Title, and each declared written spelling, is taken whole by `_SCRIPT_GLUED` on its view
+      as written and flagged by the strict lane.
+    - **NIT 1.** The shortcut in `_label_norm` that kept the whole text's first pass when a second pass changed
+      nothing was not output-identical to the part-by-part fold (`h/nit1.py`: 659 of 300,000 random texts of the
+      test's five-script pool gave another internal form at 0334eeae; the same verdicts). Folding a text part by
+      part and whole can differ only through a character whose lower case depends on its context, the capital
+      sigma (the final-sigma rule; every other step reads one character at a time, and no composition crosses a
+      part edge: a part ends where a run of letters and their marks ends): the shortcut is now taken only when
+      the text holds no character that gives the capital sigma (`_SIGMA_RX`, checked against every code point in
+      `tests/test_review_0334eeae.py`). Now 0 of 600,000 random texts differ from the definition, which
+      `tests/test_review_cbdf5e78.py` writes out with no shortcut. (Removing the shortcut altogether was measured
+      first: the part-by-part fold then ran on 701 of 1,000 Japanese sentences, strict lane +24.9% against
+      ffd28ca8; see M6.) **NIT 2.** `_TAG_RUN` and `_one_script_spans_loop` moved to that test.
+
+    **M1, the label matrix, BAR 2** (`h/m1x_gen.py`, `h/m1x_eval.py`, `h/m1x_diff.py`: ONE fixed cell set for every
+    release, so the cells compare one by one): the union of the four releases' lists (101 entries: each
+    release's own `_JOINED`, `_PIECES`, `_SCRIPT`, `_CV_SCRIPT_FULL`, so the glued entries ffd28ca8 and cbdf5e78
+    listed and the stem ffd28ca8 listed for the Greek label are entries too) x natural spellings in 37 classes x
+    NFC and NFD (as written, lower, upper, title, capitalised, Turkish dotted capital, marks absent and its upper
+    case, elongated, four sharp-s forms, each of five invisible joiners inside a word (zero-width joiner and
+    non-joiner, zero-width space, soft hyphen, word joiner), words joined by "_", "-" or a no-break space, GLUED,
+    glued upper, glued title, glued with the medial sigma, glued with a tatweel at the join or inside, glued
+    with each of the five joiners at the join, glued with the marks absent and its upper case, spelled letter
+    by letter with " ", "_", "-", ".") x 16 separators x bare / inside a sentence: 2,513 spellings, 80,416
+    cells, a run-time value in each. Read = flagged by the strict lane / masked by the client view.
+
+    | | strict lane: cells read | client view: cells read |
+    |---|---|---|
+    | ffd28ca8 | 68,316 | 58,496 |
+    | cbdf5e78 | 79,806 | 68,376 |
+    | 0334eeae | 71,998 | 71,136 |
+    | this release | 80,318 | 79,456 |
+    | read at ffd28ca8 or cbdf5e78, not at 0334eeae | 8,320 | 6,656 |
+    | read at ffd28ca8 or cbdf5e78, not at this release (BAR 2) | **0** | **0** |
+    | this release against 0334eeae: newly read / no longer read | 8,320 / 0 | 8,320 / 0 |
+
+    The 8,320 strict cells 0334eeae lost, by class: glued 672, glued upper 288, glued title 320, glued with the
+    medial sigma 320, glued with a tatweel at the join 768 / inside 704, glued with a joiner at the join 768 each
+    of the five, glued with the marks absent 128 and upper 128, a joiner inside a word 128 each of the five, as
+    written 128, upper 64, title 64, elongated 64, the Korean words with a hyphen 64, spelled 32 each of the four
+    separators: the two Arabic labels and the Greek label glued (and the glued entries the older lists held), the
+    stem ffd28ca8 listed, the Korean compound with a hyphen. This release reads every one of them, and nothing
+    else against 0334eeae: its 8,320 newly read client-view cells are the same cells; 1,664 of them ffd28ca8 and
+    cbdf5e78 read in the strict lane only (the glued Greek forms, the Korean compound with a hyphen, the stem
+    spelled with "-" or "."), so the client view now masks the label forms the strict lane flags. Still not read
+    at this release: strict 98 cells (the piece "pw" spelled letter by letter: residual (d), the same at all four
+    releases); client view 960 cells (a Latin label with an ARABIC TATWEEL put inside or between its words: not
+    read by the client view of any of the four releases, a class of no natural spelling, recorded only).
+
+    **M2, the collision search, 30,000 words** (`h/m2_words30.py`, `h/m2_cand.py`, `h/m2_eval.py`, `h/m2_diff6.py`,
+    `h/m2_s2list6.py`, `h/m2_s2table.py`): wordfreq 3.1.1, the 30,000 most frequent words of 17 languages (Hindi
+    26,604 and Korean 29,978: all wordfreq holds); Thai the TNC top 20,000 by count with the full pythainlp 5.4.0
+    dictionary (61,495 words), 65,087 words. Candidates as in decision 73 (every two-word join whose skeleton
+    holds a key across the boundary, every three-word join across both, four skeletons and the keys of the four
+    releases, no cap), each word alone and each candidate in FOUR forms (spaced, hyphenated, glued, dotted):
+    174,790,165 texts, 26,011,061 read and 148,779,104 skipped by the Latin filter of decision 73 for the seven
+    Latin-script languages (recomputed on these lists; it skips a text only when it holds no letter of another
+    script and no character the releases' Latin rules read differently). By the review's amendment the PRIMARY
+    proof is the differential against 0334eeae (measured independently in everything but MUST A) over all 18
+    languages; the languages of MUST A (Arabic, Greek, Persian, Hebrew) are also measured from scratch against
+    ffd28ca8 and cbdf5e78 (and Japanese, Hindi, Thai, Russian, Korean, Chinese against ffd28ca8).
+
+    Stage 1 against 0334eeae (texts read by the label rule of each lane; new / no longer = texts this release
+    reads that 0334eeae did not / the other way):
+
+    | Language (words; pairs; triples) | texts read | 0334eeae strict / client view | this release | new | no longer |
+    |---|---|---|---|---|---|
+    | Japanese (30,000; 246; 37,645) | 181,564 | 137,903 / 6,398 | 137,903 / 6,398 | 0 / 0 | 0 / 0 |
+    | Hindi (26,604; 292; 2,063,598) | 8,282,164 | 146,089 / 2,435 | 146,089 / 2,435 | 0 / 0 | 0 / 0 |
+    | Thai (65,087; 144; 146,564) | 651,919 | 48,497 / 2,257 | 48,497 / 2,257 | 0 / 0 | 0 / 0 |
+    | Arabic (30,000; 190; 11,071) | 75,044 | 7,244 / 281 | 7,276 / 313 | 32 / 32 | 0 / 0 |
+    | Persian (30,000; 121; 17,834) | 101,820 | 41,744 / 1,064 | 41,744 / 1,064 | 0 / 0 | 0 / 0 |
+    | Russian (30,000; 361; 271,134) | 1,115,980 | 977,859 / 1,364 | 977,859 / 1,364 | 0 / 0 | 0 / 0 |
+    | Ukrainian (30,000; 379; 2,127,907) | 8,543,144 | 8,341,247 / 1,804 | 8,341,247 / 1,804 | 0 / 0 | 0 / 0 |
+    | Greek (30,000; 275; 786,925) | 3,178,800 | 1,890,127 / 7,258 | 1,890,150 / 7,270 | 23 / 12 | 0 / 0 |
+    | Hebrew (30,000; 1,090; 483,111) | 1,966,804 | 1,499 / 400 | 1,499 / 400 | 0 / 0 | 0 / 0 |
+    | Korean (29,978; 5,617; 351,089) | 1,456,802 | 99,986 / 2,519 | 99,987 / 2,520 | 1 / 1 | 0 / 0 |
+    | Chinese (30,000; 542; 28,336) | 145,512 | 102,682 / 6,700 | 102,682 / 6,700 | 0 / 0 | 0 / 0 |
+    | Polish (30,000; 3,209; 1,531,577) (filtered) | 30,000 | 5 / 5 | 5 / 5 | 0 / 0 | 0 / 0 |
+    | German (30,000; 151,560; 15,397,542) (filtered) | 30,076 | 33 / 44 | 33 / 44 | 0 / 0 | 0 / 0 |
+    | Turkish (30,000; 28,891; 8,127,142) (filtered) | 47,600 | 17,586 / 75 | 17,586 / 75 | 0 / 0 | 0 / 0 |
+    | French (30,000; 16,349; 3,405,113) (filtered) | 30,000 | 10 / 13 | 10 / 13 | 0 / 0 | 0 / 0 |
+    | Spanish (30,000; 9,428; 4,472,890) (filtered) | 46,740 | 16,424 / 341 | 16,424 / 341 | 0 / 0 | 0 / 0 |
+    | Portuguese (30,000; 15,100; 3,199,534) (filtered) | 87,628 | 56,617 / 452 | 56,617 / 452 | 0 / 0 | 0 / 0 |
+    | Italian (30,000; 5,715; 856,103) (filtered) | 39,464 | 9,412 / 36 | 9,412 / 36 | 0 / 0 | 0 / 0 |
+
+    Every one of the 56 strict and 45 client-view texts is the label itself as written: the two Arabic labels'
+    words glued (with a declared proclitic, or with a list "word" that is only a joiner or a split of the label
+    between them: "word" + "the" + "passing" glued is the label's letters in a row), the Greek label's words
+    glued in its written spellings (and the label glued with a declared ending, an elision or a full stop after
+    it), and the Korean compound "secret" + "number" with a hyphen. Stage 2 (the real lanes on the 68,158 texts
+    of the lists: every new text against any reference and 2,000 of the others per language): against 0334eeae,
+    newly flagged 56, newly masked 45, a URL holding the text newly withheld 46 (raw path; 1 percent-encoded),
+    a host built from it newly refused 56, exactly those texts; nothing the other way. Against ffd28ca8 and
+    cbdf5e78, the four languages of MUST A:
+
+    | Language | ffd28ca8 strict / client view | cbdf5e78 | this release | new against ffd28ca8, strict / client view (by class) | new against cbdf5e78 |
+    |---|---|---|---|---|---|
+    | Arabic | 35,766 / 445 | 44,610 / 529 | 7,276 / 313 | 54 / 12 (cv:label_words 11, cv:lone_lookalike 1, s:lone_lookalike 54) | 0 / 12 (cv:label_words 11, cv:lone_lookalike 1) |
+    | Greek | 1,884,880 / 7,250 | 3,134,802 / 7,279 | 1,890,150 / 7,270 | 5270 / 20 (cv:label_words 20, s:label_words 4659, s:lone_lookalike 611) | 0 / 12 (cv:label_words 12) |
+    | Persian | 46,361 / 1,323 | 66,503 / 1,323 | 41,744 / 1,064 | 31 / 3 (cv:label_words 1, cv:lone_lookalike 2, s:lone_lookalike 31) | 0 / 3 (cv:label_words 1, cv:lone_lookalike 2) |
+    | Hebrew | 1,936,609 / 1,412 | 1,936,609 / 1,412 | 1,499 / 400 | 0 / 0 () | 0 / 0 () |
+
+    (stage 1; the classes by this release's rules: the label's own words; (g) the lone lookalike; nothing else.
+    The client-view "lone lookalike" of Arabic 1 and Persian 2 is a stage-1 artifact, the hyphenated "Hormuz" +
+    "crossing" read on an ASCII-folded view that the client view does not read: in stage 2 it is not masked.)
+    Against ffd28ca8 also: Japanese 2 / 60 (strict: (g); client view: 56 label words, 4 residual (h)), Hindi
+    9 / 9 (the label's halves glued), Thai 48,497 / 2,257 (residual (a): the label as written inside a glued
+    join), Russian 0 / 21 and Korean 2 / 105 (cases and particles, 6 residual (h); strict 2 (g)), Chinese 0 / 60
+    (50 label words, 10 residual (h)); "other" 0 in every language. Stage 2 against ffd28ca8: a host newly
+    refused only for these texts (the label, residual (a), (g)); against cbdf5e78: newly flagged 0, newly
+    masked 24 (label words), newly refused 0.
+
+    **Residual (g) by mechanism** (SHOULD 3; `h/g_class.py`: every strict-lane text newly read against
+    ffd28ca8 only through the second lookalike pass, by where the lone letter stands): at 20,000 words 165
+    (Greek 141: 118 between Latin letters, 23 at the edge of the join; Persian 20, Arabic 3: between Latin
+    letters; Japanese 1: at the edge), the count of decision 73; at 30,000 words 700 (Greek 611: 552 between
+    Latin letters, 29 at the edge of the join, 30 beside a word of another script; Persian 31 and Arabic 54
+    between Latin letters; Japanese 2 and Korean 2 at the edge). The same texts at 0334eeae (0 differences).
+
+    **M3, over-tightening** (`h/m3_eval.py`, `h/m3_machine.py`, `h/m3c_gen.py`): 1,320,550 hosts (696,028 in
+    Unicode form, 624,522 in punycode: the 948,803 of decision 73 and 371,747 more built from this round's lists,
+    words 20,001-30,000 and 2,500 seeded candidate joins per language) in the six lanes; 378,000 URLs from
+    ordinary words, raw and percent-encoded; 14,200 neutral sentences in three casings; 120,000 machine values
+    through `check`, the client view and `sink_guard.classify`. Against 0334eeae: accepted then refused 0,
+    refused then accepted 0; URLs 0 and 0; sentences 0 rows; machine values 0. Against ffd28ca8: accepted then refused 36 lane cells, of 12 hosts: the Hindi label itself (as in decision 73) and 11 hosts built from the Greek label hyphenated with another word (a Unicode host holding a script label is refused in the URL, check and checked-host lanes), the label itself; refused then accepted 20,661; URLs 0 and 0; sentences 0; machine values 0. The real schedules
+    route: 20,000 schedules, each with a distinct invoice id and a distinct ruling id: 20,000 of 20,000 answered 201.
+
+    **M4, end to end through the real service** (`h/m4_6.py`, the source of each release with this release's test
+    helpers):
+
+    | | ffd28ca8 | 0334eeae | this release |
+    |---|---|---|---|
+    | the 27 forms of decision 72, 81 values: shown to the owner / fields masked of 81 / on disk | 21 / 60 / 0 | 0 / 81 / 0 | 0 / 81 / 0 |
+    | the 10 forms of decision 73, 30 values: shown / fields masked of 90 / on disk | 24 / 18 / 0 | 0 / 90 / 0 | 0 / 90 / 0 |
+    | the 190 glued Arabic and Greek forms of `tests/test_review_0334eeae.py`, 570 values (4 runs): shown / fields masked of 1,710 / on disk | 402 / 504 / 0 | 500 / 210 / 0 | 0 / 1,710 / 0 |
+    | URL resolution, 5 own-site URLs of decision 73: fetched | 4 | 5 | 5 |
+    | URL resolution, 80 own-site URLs holding ordinary phrases (10 Greek "code to" + bas-, 6 Thai joins, the Japanese loanword, 3 Hindi glued joins, the 60 Arabic S-2 phrases; 4 runs of 20): fetched / fields masked of 720 | 20 / 0 | 80 / 0 | 80 / 0 |
+
+    **M5, differential fuzz** (`corp/m5.json`, the 130,000 texts of decision 72): against 0334eeae, strict lane
+    newly flagged 56, client view newly masked 30, every one the Korean label with a hyphen put in it at its
+    compound point (the generator's "split with a hyphen", the label's own two words), no longer flagged 0, no
+    longer masked 0, no other finding changed. Against ffd28ca8: 90,540 -> 99,058 flagged (newly 9,531, no
+    longer 1,013), 53,089 -> 60,304 masked (newly 7,252, no longer 37); the classes of decision 73.
+
+    **M6, cost** (the code of this commit). `tests/test_secret_guard_perf.py`: 16 passed. Per script, CPU
+    microseconds per sentence (1,000 sentences of each of 10 languages, `corp/m3.json`), ffd28ca8 / this release,
+    best of 5 rounds, each round one fresh process per release, the order alternating, each process best of 5
+    passes:
+
+    | script | client view | strict lane (the five rounds) |
+    |---|---|---|
+    | ja | 27.7 / 26.6 (-4.2%) | 57.6 / 61.1 (+6.1%; +12.8, +3.8, +1.8, +10.4, +8.4) |
+    | hi | 58.0 / 58.1 (+0.1%) | 125.7 / 134.1 (+6.7%) |
+    | th | 34.6 / 34.1 (-1.4%) | 56.4 / 54.1 (-4.0%) |
+    | ar | 114.3 / 101.4 (-11.2%) | 189.5 / 165.7 (-12.6%) |
+    | fa | 110.8 / 99.8 (-9.9%) | 221.8 / 160.1 (-27.8%) |
+    | ru | 148.7 / 132.4 (-11.0%) | 248.4 / 200.0 (-19.5%) |
+    | el | 142.6 / 128.1 (-10.2%) | 266.0 / 285.2 (+7.2%) |
+    | pl | 176.5 / 171.6 (-2.8%) | 270.7 / 266.6 (-1.5%) |
+    | de | 186.5 / 184.2 (-1.2%) | 269.8 / 263.5 (-2.3%) |
+    | en | 88.3 / 86.5 (-2.0%) | 133.8 / 123.8 (-7.5%) |
+
+    The largest rise is Greek strict +7.2%. A first measurement of this round, with the NIT-1 shortcut removed
+    altogether, had Japanese strict +24.9% (rounds +17.6% to +27.5%): the part-by-part fold ran on 701 of 1,000
+    Japanese sentences; the exact sigma test (above) restores the shortcut where it is output-identical (checked:
+    the Latin form of this commit and of the code M1 to M5 measured are equal on every inspection view of the M1
+    cells, the M5 texts, the M3 sentences, every M2 word, 15,000 seeded M2 candidates per language in four forms
+    and 400,000 random texts: 2,289,729 texts, 4,577,043 views, 0 differ). Cold start (24 fresh processes per
+    release, interleaved, medians): the guard, the service and the first two calls 848.8 ms at ffd28ca8, 910.5 ms
+    now (1.07x); the guard module alone, with its bytecode written 37.0 ms and 78.3 ms (2.12x), without bytecode
+    (`-B`, caches removed) 58.3 ms and 114.9 ms (1.97x): the patterns of the boundary and glued rules and the import
+    checks. Worst-case inputs (13 shapes, four of them new: Arabic proclitics + the first word glued and repeated,
+    the Greek "code" glued and repeated, the Korean compound's first word + hyphen repeated, a tatweel run inside
+    the label; 2,000 to 32,000 characters, both lanes, `h/m6_lin.py`): every doubling 1.9x to 2.1x but one noisy
+    reading (the Greek glued shape in the client view 3.39x at 32,000; measured again: 1.96, 1.86, 1.93, 2.09):
+    linear.
+
+    **Residuals after this round** (decision 73's list, with this round's counts): (a) Thai 48,497 strict / 2,257 client-view texts at 30,000 words
+    (3,158 / 634 at 20,000); (b), (c), (d) unchanged (M1: the "pw" cells 98); (e) closed; (f) unchanged; (g) as
+    above, 700 at 30,000 words (165 at 20,000); (h) inside the client-view counts against ffd28ca8 above
+    (Japanese 60, Korean 105, Chinese 60 texts at 30,000 words, label words and (h) together; the classifier
+    names as (h) only the two-unit shapes, 4, 6 and 10; at 20,000 words decision 73 counted 82); the same
+    texts at 0334eeae. No new residual: against 0334eeae nothing is read but the label forms of MUST A.
+
+    **Tests.** `tests/test_review_0334eeae.py`: every glued form of the Arabic and Greek labels (190 forms: the
+    words glued, with proclitics, a tatweel at the join or inside, each of the five invisible joiners at the join
+    or inside, the Greek endings, final and medial sigma, UPPER, Title, the accented spellings, NFC and NFD)
+    flagged and masked after ": " and " is ", bare and in a sentence; the 60 S-2 phrases and their forms with a
+    tatweel, a joiner or NFD: 0 masked, 0 flagged; the hamza and madda read as written; the known trap (the
+    Arabic entries glued on the word view mask the S-2 phrases) as a mutation; the glued pattern off; the final
+    sigma rule; the Korean compound apart; the stem ffd28ca8 listed; the import check arm. SHOULD 1, one minimal
+    positive and negative pin per rule: label words apart by one space, "_" or "-" only; the closed Korean
+    particle list; up to three Hebrew proclitics; a two-letter label spelled with "-" or "." as a word of its own
+    (no letter joined before or after); one or two separators between spelled units; a spelled mark on its
+    letter or apart; every letter and mark of both Greek blocks continuing a Greek word, before and after the
+    label. SHOULD 2: the boundary joins DERIVED from the label entries (and their written spellings) against a
+    bundled sample of ordinary words of nine scripts (30 to 38 words each, from this round's M2 lists), spaced,
+    hyphenated, glued and dotted, none read (a join whose words glued ARE a label form is read glued and with one
+    space, as decision 73 and ffd28ca8 read it, never with "-" or "."); with the letters-only matching of
+    cbdf5e78 put back, the derived joins are read (the test is not a snapshot); NIT 1, the sigma list against every
+    code point and the shortcut without it read as another form; the snapshots of
+    `tests/test_review_cbdf5e78.py` stay. In `tests/test_review_ffd28ca8.py` the glued Arabic natural spellings
+    are restored as at cbdf5e78, with the vowelled ones glued too; in `tests/test_review_cbdf5e78.py` the two
+    assertions that pinned the glued Arabic and Greek forms as not read now pin them read.
 
 ## Threat model
 
