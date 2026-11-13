@@ -18,7 +18,9 @@ YEAR_DATE_KEEP = [
     "2024-12-25 hotel deals", "2025-01-01 hours", "2010 2020 ohio state", "2024-2025 one piece", "2025/11/08 hotel",
     "2025-01-01 holidays",
     # year pairs / ranges + products, model years, seasons
-    "2019 2020 2021 toyota camry", "2022 vs 2023 honda accord", "2024 to 2025 tax brackets", "1999 2000 y2k",
+    # round 18: "1999 2000 y2k" moved to test_query_privacy_r18.LIST_MANDATED_DROP (its digits and the "y" gap spell
+    # a valid SSN stream: closed list item 1)
+    "2019 2020 2021 toyota camry", "2022 vs 2023 honda accord", "2024 to 2025 tax brackets",
     "2020-2021 nba season", "2023/2024 premier league", "2024-25 school year calendar", "2018 2019 ford f150 parts",
     "2021 2022 2023 subaru outback", "2024 2025 phone deals", "2025 2026 one punch man", "1990 2000 movies",
     "2024 2025 world cup qualifiers", "nfl 2024 2025 schedule", "2023 2024 ohio state football",

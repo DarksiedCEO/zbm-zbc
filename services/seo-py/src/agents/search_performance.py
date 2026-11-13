@@ -49,7 +49,11 @@ import lookalikes
 from agents import logs as logs_mod
 
 AGENT, TASK = "osei", "search_performance"
-VERSION = "2026-11-08.16"                     # query classes, templating and the aggregation rules below
+VERSION = "2026-11-08.18"                     # query classes, templating and the aggregation rules below
+# 2026-11-08.18 (review round 18): the CLOSED threat list of ADR 0047 - the digit stream (any gap of up to three
+#    non-digit characters, letters included; UATP cards), spelled digits across such gaps, vanity toll-free numbers
+#    with any separator, e-mails spelled / bracketed / rot13 / reversed / base64 / base32 / hex / URL-encoded, whole
+#    or chunked, in surrounding text; addresses in surrounding text; software names as version keywords (generic)
 # 2026-11-08.1 (Priya review round 1, M3): street addresses, unit / apartment numbers, PO boxes, ZIP+4 and a ZIP next
 #    to a US state are pii_suspect (looks_like_address)
 # 2026-11-08.2 (review round 2): the address rule needs address structure (it over-dropped service queries)
@@ -162,10 +166,17 @@ def longest_digit_run(text: str) -> int:
     count. A phone number holding one such group (``555 010 2024``) is still caught. Calendar dates that stand alone
     (``2024-10-24``, ``11/08/2025``; ``isolated_dates_removed``) are taken out first and break a run; a run of two
     groups, a year and a number of at most five digits (``90210 2024``), counts the number only. GENERIC rule:
-    since round 15 a real SSN regrouped 5 + 4 (``12345 2019``) is the SSN detector's, which no exemption reaches."""
+    since round 15 a real SSN regrouped 5 + 4 (``12345 2019``) is the SSN detector's, which no exemption reaches.
+    Round 18: a number of one or two digits glued to a letter at either END of a run of two or more groups is part of
+    that word (a model name or a unit: ``ddr5 6400 64gb`` counts 4); a lone group always counts. The detectors are not affected."""
     best = 0
-    for m in _DIGIT_RUN.finditer(isolated_dates_removed(text)):
+    s = isolated_dates_removed(text)
+    for m in _DIGIT_RUN.finditer(s):
         groups = re.findall(r"\d+", m.group())
+        if len(groups) > 1 and len(groups[-1]) <= 2 and s[m.end():m.end() + 1].isalpha():
+            groups = groups[:-1]
+        if len(groups) > 1 and len(groups[0]) <= 2 and s[max(m.start() - 1, 0):m.start()].isalpha():
+            groups = groups[1:]
         years = [g for g in groups if _YEAR.fullmatch(g)]
         n = sum(len(g) for g in groups if len(years) < 2 or not _YEAR.fullmatch(g))
         if len(groups) == 2 and len(years) == 1 and max(len(g) for g in groups if not _YEAR.fullmatch(g)) <= 5:
@@ -242,6 +253,10 @@ _ADDRESS = (
                + r"?(?:\s*,?\s*" + _STATE + r")?(?:\s*,?\s*" + _ZIP + r")?\s*$"),
     re.compile(_STREET_HEAD + r"(?:" + _ORDINARY_SUFFIX + r")(?:\s+" + _DIRECTION + r")?" + _UNIT + r"?"
                r"(?:\s*,?\s*[a-z]+){0,3}(?:\s*,?\s*" + _STATE + r")?(?:\s*,?\s*" + _ZIP + r"(?!\d)(?:\s.*)?)?\s*$"),
+    # round 18 (an address inside surrounding text): the same street, then up to three tokens of any kind to the end
+    # ("12 kings road x2", "17 elm way tonight"); the text is ``_address_core`` (punctuation, emoji, CJK set aside)
+    re.compile(_STREET_HEAD + r"(?:" + _ORDINARY_SUFFIX + r")(?:\s+" + _DIRECTION + r")?" + _UNIT + r"?"
+               r"(?:\s+[a-z0-9]+){0,3}\s*$"),
     re.compile(r"(?<!\w)p\.?\s*o\.?\s*box\s*#?\s*\d+"),                                         # po box 1234
     re.compile(r"(?<!\w)pmb\s*#?\s*\d+"),                                                       # pmb 123
     re.compile(r"(?<!\w)(?:rr|hc|rural route)\s*#?\s*\d+\s*,?\s*box\s*#?\s*\d+"),               # rr 2 box 15
@@ -260,6 +275,21 @@ _ADDRESS = (
     re.compile(r"(?:^|[\s,])" + _STATE + r"\.?\s*,?\s*\d{5}(?!\d)(?!\s*(?:" + _UNIT_WORDS + r")(?!\w))"),  # boise id 83702
 )
 MAX_QUERY_CHARS = 512        # longer text is not classified (it is pii_suspect): bounds the regex work per query
+
+
+_ADDR_TOKEN_EDGE = re.compile(r"^[^a-z0-9#]+|[^a-z0-9]+$")
+
+
+def _address_core(folded: str) -> str:
+    """Round 18: the text with every token that holds no ASCII letter or digit (emoji, CJK, punctuation) left out and
+    punctuation trimmed from the ends of the others, so surrounding text of another script or symbols never stops the
+    address rule ("17 elm way \u3067\u3059", "\u300c 62 oak lane, \U0001f600")."""
+    out = []
+    for tok in folded.split():
+        tok = _ADDR_TOKEN_EDGE.sub("", tok)
+        if any(c.isascii() and c.isalnum() for c in tok):
+            out.append(tok)
+    return " ".join(out)
 
 
 def looks_like_address(folded: str) -> bool:
@@ -712,7 +742,8 @@ def card_like(folded: str) -> bool:
 # issuer prefixes (IIN ranges) of the card networks: Visa 4; Mastercard 51-55, 2221-2720; Amex 34, 37; Discover 6011,
 # 644-649, 65; Diners 300-305, 36, 38, 39; JCB 3528-3589; UnionPay 62, 81; Maestro 50, 56-58, 6304, 67; Mir 2200-2204;
 # RuPay 60, 65, 81, 82, 508; Verve 506, 650; Troy 9792
-_IIN = re.compile(r"4|5[0-8]|2(?:2[2-9]|[3-6]\d|7[01])\d|2720|3[4789]|30[0-5]|35(?:2[89]|[3-8]\d)|6\d|8[12]|220[0-4]|"
+# round 18: Diners 36 was missing (the class read 3[4789]); the list's UATP prefix (1, 15 digits) is ``stream_card``'s
+_IIN = re.compile(r"4|5[0-8]|2(?:2[2-9]|[3-6]\d|7[01])\d|2720|3[46789]|30[0-5]|35(?:2[89]|[3-8]\d)|6\d|8[12]|220[0-4]|"
                   r"9792")
 
 
@@ -936,21 +967,323 @@ _VANITY = re.compile(r"(?<![\da-z])(?:1[\s.\-]{0,3})?\(?8(?:00|33|44|55|66|77|88
 
 def pii_detectors(raw: str) -> bool:
     """The structural detectors (THE RULE above): card, phone (NANP, E.164, 7-digit local, vanity toll-free) and
-    SSN, on the raw text and on its separator view (``detector_view``), including the de-separated runs."""
+    SSN, on the raw text and on its separator view (``detector_view``), including the de-separated runs. Round 18:
+    the digit stream (``digit_stream_hit``: any gap of up to three non-digit characters, letters included) and the
+    vanity toll-free rule over any separators (``_VANITY_ANY``)."""
     view, idx = detector_view(raw, with_map=True)
     for t, expl in ((raw, None), (view, (raw, idx))):
         if card_like(t) or _NANP.search(t) or _E164.search(t) or _VANITY.search(t) \
+                or digit_stream_hit(t) or _vanity_any(t) \
                 or _deseparated_hit(t, expl) \
                 or any(_valid_ssn(re.sub(r"\D", "", m.group())) for m in _SSN.finditer(t)):
             return True
     return bool(_LOCAL7.search(raw))
 
 
+# ---------------------------------------------------------------- round 18: the closed threat list (ADR 0047)
+# The owner-accepted method (decision 2026-11-08): certification is against the CLOSED list in ADR 0047, section
+# "Personal data". Each rule below is one item of that list; none has an exemption (THE RULE).
+STREAM_GAP = 3                 # the list: any gap of up to three non-digit characters between two digits
+_STREAM_DIGITS = re.compile(r"\d+")
+
+
+def stream_card(d: str) -> bool:
+    """A card number of the list: 13-19 digits, Luhn-valid, a network's issuer prefix (``card_iin``) or the UATP
+    prefix (1, 15 digits)."""
+    return 13 <= len(d) <= 19 and (card_iin(d) or (len(d) == 15 and d[0] == "1")) and _luhn(d)
+
+
+def nanp_phone(d: str) -> bool:
+    """A NANP number: 10 digits (or 11 after a 1) whose area code and exchange both start with 2-9."""
+    if len(d) == 11 and d[0] == "1":
+        d = d[1:]
+    return len(d) == 10 and d[0] in "23456789" and d[3] in "23456789"
+
+
+def digit_stream_hit(text: str) -> bool:
+    """THE DIGIT STREAM (round 18, the list's first item). Digit groups whose gaps are at most ``STREAM_GAP`` non-digit
+    characters of ANY kind (separators, ASCII letters, letters NFKC made ASCII, other scripts' letters) form one
+    stream ("4111a1111b1111c1111", "555x010yz0199"); every window of whole consecutive groups of a stream is read as
+    one number and is a card (``stream_card``), an SSN (``_valid_ssn``), a NANP phone (``nanp_phone``) or, after a
+    '+', an E.164 phone of 8-15 digits. ``text`` is the detection form (decoded, NFKC, marks removed, other-script
+    digits made ASCII, lookalike-folded), so fullwidth and other-script digits are already digits here. No date,
+    year, version or keyword exemption exists for this rule. Linear: each window stops at 19 digits."""
+    gs = [(m.start(), m.end(), m.group()) for m in _STREAM_DIGITS.finditer(text)]
+    for a, (start, _end, first) in enumerate(gs):
+        lo = max(gs[a - 1][1] if a else 0, start - STREAM_GAP)
+        plus = "+" in text[lo:start]
+        d = ""
+        for b in range(a, len(gs)):
+            if b > a and gs[b][0] - gs[b - 1][1] > STREAM_GAP:
+                break
+            d += gs[b][2]
+            n = len(d)
+            if n > 19:
+                break
+            if (n == 9 and _valid_ssn(d)) or (n in (10, 11) and nanp_phone(d)) or stream_card(d) \
+                    or (plus and 8 <= n <= 15):
+                return True
+    return False
+
+
+_NUMBER_WORD_RE = re.compile(r"\b(?:" + "|".join(_NUMBER_WORDS) + r")\b")
+
+
+def spelled_stream(folded: str) -> str:
+    """Round 18 (spelled digits with any gap of the list): the text split at every separator (P*, S*, Z*, C*
+    character but '+'), each word that is a number word made its digit, and the words joined with NO separator, so
+    the gaps the stream counts are the letters between digits ("cinco, a, W, cero" -> "5aW0"). Only when the text
+    holds two or more whole number words; else ""."""
+    if len(_NUMBER_WORD_RE.findall(folded)) < 2:
+        return ""
+    out, cur = [], []
+    for c in folded + " ":
+        if c != "+" and unicodedata.category(c)[0] in "PSZC":
+            if cur:
+                w = "".join(cur)
+                out.append(_NUMBER_WORDS.get(w, w))
+                cur = []
+            continue
+        cur.append(c)
+    return "".join(out)
+
+
+# vanity toll-free numbers (round 18): 1 (optional), an 8xx toll-free code, then seven keypad characters with at least
+# one letter; up to three non-alphanumeric characters (any separator of the list) before the code, after it and
+# between any two of the seven
+_VANITY_ANY = re.compile(r"(?<![a-z0-9])(?:1[^a-z0-9]{0,3})?8(?:00|33|44|55|66|77|88)[^a-z0-9]{0,3}"
+                         r"([a-z0-9](?:[^a-z0-9]{0,3}[a-z0-9]){6})(?![a-z0-9])")
+
+
+def _vanity_any(t: str) -> bool:
+    return any(any(c.isalpha() for c in m.group(1)) for m in _VANITY_ANY.finditer(t))
+
+
+# ---- e-mail views (round 18): spelled / bracketed, rot13, reversed, encoded, whole or chunked
+# The detector reads a "marker string": every space and bracket becomes one '|', so a spelled keyword ("at", "dot",
+# Spanish "arroba", "punto", in brackets or not) counts only between markers (never inside a word: "what", "dotted"),
+# and a chunk space inside a keyword or a label ("a t", "exa mple") is tolerated.
+_MARK_CHARS = frozenset("[](){}<>")
+_KW_AT = re.compile(r"(?<=\|)(?:a\|?t|a\|?r\|?r\|?o\|?b\|?a)(?=\|)")
+_KW_DOT = re.compile(r"(?<=\|)(?:d\|?o\|?t|p\|?u\|?n\|?t\|?o)(?=\|)")
+# the at-keyword in every view (as written, rot13, reversed, both): the cheap gate before any view is built
+_KW_AT_ANY = re.compile(r"@|(?<=\|)(?:a\|?t|t\|?a|n\|?g|g\|?n|a\|?r\|?r\|?o\|?b\|?a|a\|?b\|?o\|?r\|?r\|?a|"
+                        r"n\|?e\|?e\|?b\|?o\|?n|n\|?o\|?b\|?e\|?e\|?n)(?=\|)")
+_EM_TLD_WORDS = ("com", "net", "org", "edu", "gov", "mil", "int", "info", "biz", "name", "pro", "mobi", "io", "ai",
+                 "app", "dev", "xyz", "online", "site", "shop", "store", "tech", "blog", "cloud", "email", "mail",
+                 "live", "news", "club", "top", "art", "design", "agency", "media", "world", "life", "space",
+                 "website", "group", "company", "business", "network", "systems", "today", "tips", "zone", "global",
+                 "local", "travel", "jobs", "asia", "museum", "digital", "solutions", "services")
+
+
+def _tld_alternation() -> str:
+    # a TLD of the list, or any two letters (country codes), each letter optionally followed by a chunk marker
+    words = sorted(_EM_TLD_WORDS, key=len, reverse=True)
+    return "(?:" + "|".join(r"\|?".join(w) for w in words) + r"|[a-z]\|?[a-z])"
+
+
+_LABEL = r"(?:[a-z0-9\-]\|?){1,63}"
+_MAILBOX = re.compile(r"[a-z0-9_+\-]\|?@\|?" + _LABEL + r"(?:\.\|?" + _LABEL + r"){0,4}?\.\|?" + _tld_alternation()
+                      + r"(?=\||$)")
+_ROT13 = str.maketrans("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                       "nopqrstuvwxyzabcdefghijklmNOPQRSTUVWXYZABCDEFGHIJKLM")
+_EMAIL_CORE = re.compile(r"[a-z0-9_.+\-]@[a-z0-9\-]")
+# a whole mailbox at the start of a decoded prefix (the plain-word base32 check: the bytes after it are context's)
+_MAILBOX_AT_START = re.compile(r"[a-z0-9._%+\-]{1,64}@[a-z0-9\-]{1,63}(?:\.[a-z0-9\-]{1,63}){0,4}\.[a-z]{2,24}")
+_ASCII_MARKS = re.compile(r"[\s\[\](){}<>!\"#$&'*,/:;=?\\^`|~]+")
+
+
+def _is_marker(c: str) -> bool:
+    # a space, a bracket, or any other punctuation / symbol character except those an address is made of
+    return c.isspace() or c in _MARK_CHARS or (c not in ".-_+@%" and unicodedata.category(c)[0] in "PSZ")
+
+
+def _marker_string(t: str) -> str:
+    """Every run of spaces, brackets and other punctuation / symbols (not . - _ + @ %) made one '|', with a '|' at
+    both ends."""
+    if t.isascii():
+        return "|" + _ASCII_MARKS.sub("|", t).strip("|") + "|"
+    out, prev = ["|"], True
+    for c in t:
+        if _is_marker(c):
+            if not prev:
+                out.append("|")
+            prev = True
+        else:
+            out.append(c)
+            prev = False
+    if not prev:
+        out.append("|")
+    return "".join(out)
+
+
+def _despelled(m: str) -> str:
+    """The marker string with spelled keywords made '@' and '.' (markers kept)."""
+    return _KW_DOT.sub(".", _KW_AT.sub("@", m))
+
+
+def rot13(t: str) -> str:
+    return t.translate(_ROT13)
+
+
+def _mailbox_any(d: str) -> bool:
+    # the despelled view as written, rot13'd and reversed ("spelled, then rot13 / reversed")
+    return bool(_MAILBOX.search(d) or _MAILBOX.search(rot13(d)) or _MAILBOX.search(d[::-1]))
+
+
+def email_views_hit(folded: str) -> bool:
+    """A spelled or bracketed e-mail, plain, rot13 or reversed (whole text or each word), whole or chunked, in any
+    surrounding text (round 18). On the marker string of the text (``_marker_string``) and its views (rot13; reversed
+    whole; each written word reversed in place), spelled keywords are read as '@' / '.' (``_despelled``), and the result, its rot13
+    or its reverse must show a mailbox shape (``_MAILBOX``): a name, '@', a domain, '.', then a TLD of the list or
+    any two letters ending at a marker. Gate: no at-keyword in any view and no '@' means no e-mail here."""
+    m = _marker_string(folded)
+    if not _KW_AT_ANY.search(m):
+        return False
+    words = _marker_string(" ".join(w[::-1] for w in folded.split()))       # each written word reversed in place
+    for base in (m, rot13(m), words, rot13(words)):
+        for v in (base, base[::-1]):
+            if ("@" in v or _KW_AT.search(v)) and _mailbox_any(_despelled(v)):
+                return True
+    return False
+
+
+# the characters of base64 (standard and URL-safe), base32, hex and percent encoding
+_ENC_TOKEN = re.compile(r"[A-Za-z0-9+/=_\-%]+")
+_ENC_EDGE = re.compile(r"^[^A-Za-z0-9+/=_\-%]+|[^A-Za-z0-9+/=_\-%]+$")
+_PLAIN_TOKEN = re.compile(r"[a-z]+")
+_B64_BODY = re.compile(r"[A-Za-z0-9+/_\-]+={0,2}")
+_B32_BODY = re.compile(r"(?:[A-Z2-7]+|[a-z2-7]+)=*")
+_HEX_BODY = re.compile(r"(?:[0-9a-fA-F]{2})+")
+ENC_SPAN_TOKENS = 12           # chunks joined into one candidate at most
+ENC_SPAN_CHARS = 400
+
+
+def _printable(raw: bytes) -> str | None:
+    if len(raw) < 5 or sum(32 <= b < 127 for b in raw) < 0.9 * len(raw):
+        return None
+    return raw.decode("ascii", "replace")
+
+
+def _decodings(s: str):
+    """Every decoding of one candidate the list names: percent, base64 (standard / URL-safe, padded or not), base32
+    (either case, padded or not), hex; only those whose output is printable text."""
+    if "%" in s:
+        u = unquote(s)
+        if u != s:
+            yield u
+    if len(s) >= 8 and _B64_BODY.fullmatch(s) and any(c.isupper() for c in s) and any(c.islower() for c in s):
+        body = s.rstrip("=").replace("-", "+").replace("_", "/")
+        try:
+            u = _printable(base64.b64decode(body + "=" * (-len(body) % 4), validate=True))
+        except (binascii.Error, ValueError):
+            u = None
+        if u:
+            yield u
+    if len(s) >= 8 and _B32_BODY.fullmatch(s):
+        body = s.rstrip("=").upper()
+        try:
+            u = _printable(base64.b32decode(body + "=" * (-len(body) % 8)))
+        except (binascii.Error, ValueError):
+            u = None
+        if u:
+            yield u
+    if len(s) >= 10 and _HEX_BODY.fullmatch(s):
+        u = _printable(bytes.fromhex(s))
+        if u:
+            yield u
+
+
+def _decoded_email(u: str, depth: int) -> bool:
+    low = _LOOKALIKE.fold_cased(u)
+    if "%" in low:
+        low = unquote(low)
+    if _EMAIL_CORE.search(low) or _EMAIL_CORE.search(rot13(low)) or email_views_hit(low):
+        return True
+    return depth == 0 and encoded_email(u, 1)
+
+
+def encoded_email(cased: str, depth: int = 0) -> bool:
+    """An e-mail base64 / base32 / hex / percent encoded, as written, rot13'd or reversed, whole or in chunks, in any
+    surrounding text (round 18). Candidates: every run of up to ``ENC_SPAN_TOKENS`` consecutive words made only of
+    encoding characters, joined, that holds at least one word which is not a plain lower-case word (an encoded
+    e-mail always has an upper-case letter, a digit, '%', '+', '/' or '='); each is decoded as written, rot13'd
+    and reversed (``_decodings``), and the decoded text is judged for an e-mail ('@' shape, its rot13, spelled
+    views), then decoded once more (two encodings). The one encoding that can be all lower-case letters, base32 in
+    lower case, is also tried from each word of an all-plain run to the run's end (``_plain_base32``)."""
+    toks = [_ENC_EDGE.sub("", t) for t in cased.split()]     # "wcm90b24ubWU=," -> "wcm90b24ubWU="
+    n = len(toks)
+    ok = [_ENC_TOKEN.fullmatch(t) is not None for t in toks]
+    plain = [ok[i] and _PLAIN_TOKEN.fullmatch(toks[i]) is not None for i in range(n)]
+    for i in range(n):
+        if not ok[i]:
+            continue
+        s, special = "", False
+        for j in range(i, min(n, i + ENC_SPAN_TOKENS)):
+            if not ok[j]:
+                break
+            s += toks[j]
+            special = special or not plain[j]
+            if len(s) > ENC_SPAN_CHARS:
+                break
+            if len(s) < 8 or not special:
+                continue
+            for v in (s, rot13(s), s[::-1]):
+                for u in _decodings(v):
+                    if _decoded_email(u, depth):
+                        return True
+    return _plain_base32(toks, plain)
+
+
+def _plain_base32(toks: list, plain: list) -> bool:
+    """Lower-case base32 written as plain words (the one encoding with no tell): in each run of plain words, the run
+    from each word to its end (at most ``ENC_SPAN_TOKENS`` words) as written and rot13'd, and the run from its first
+    word to each word reversed and reversed-then-rot13'd, decoded as base32 (cut to the longest valid length); a whole
+    mailbox at the start of what decodes (the bytes after the e-mail are the other words', so only a prefix needs to
+    be text)."""
+    n, i = len(toks), 0
+    while i < n:
+        if not plain[i]:
+            i += 1
+            continue
+        j = i
+        while j < n and plain[j] and j - i < ENC_SPAN_TOKENS:
+            j += 1
+        run = toks[i:j]
+        cands = []
+        for k in range(len(run)):
+            s = "".join(run[k:])
+            cands += [s, rot13(s)]
+            r = "".join(run[:k + 1])[::-1]
+            cands += [r, rot13(r)]
+        if any(_b32_mailbox(c) for c in cands):
+            return True
+        i = j
+    return False
+
+
+def _b32_mailbox(s: str) -> bool:
+    k = len(s) - (1 if len(s) % 8 in (1, 3, 6) else 0)       # the longest valid unpadded length
+    if k < 16:
+        return False
+    try:
+        raw = base64.b32decode(s[:k].upper() + "=" * (-k % 8))
+    except (binascii.Error, ValueError):
+        return False
+    return _MAILBOX_AT_START.match(raw.decode("ascii", "replace").lower()) is not None
+
+
 # rounds 14-15: a software / standard version number of realistic dotted shape (2-4 parts, each at most 5 digits)
 # after its keyword, and a standard's number ("rfc 9110"). They only ever suppress the GENERIC rules and the IP check;
 # the detectors never see them.
 _VERSION = re.compile(r"\b(version|ver|firmware|fw|build|release|kernel|bios|driver|update|patch|ios|android|rfc|"
-                      r"iso|ieee|ecma|win(?:dows)?|v)\s*\.?\s*v?(?:\d{1,5}(?:\.\d{1,5}){1,3})(?![\d.])")
+                      r"iso|ieee|ecma|win(?:dows)?|v|"
+                      # round 18: software names before their version number ("chrome 124.0.6367.91"); GENERIC rules
+                      # only, like every keyword here (the detectors never see an exemption)
+                      r"chrome|chromium|firefox|edge|safari|opera|python|node|nodejs|java|jdk|php|ruby|perl|golang|"
+                      r"rust|django|rails|react|angular|vue|macos|ubuntu|debian|fedora|centos|wordpress|excel|office|"
+                      r"minecraft|unity|blender|nvidia|docker|kubernetes|npm|pip|git)"
+                      r"\s*\.?\s*v?(?:\d{1,5}(?:\.\d{1,5}){1,3})(?![\d.])")
 _RFC_NUMBER = re.compile(r"\b(rfc|iso|ieee|ecma)\s*\d{1,5}(?!\d)")
 
 
@@ -1029,17 +1362,28 @@ def _classify_core(q: str, brands: list, _depth: int = 0) -> str:
     log templater)."""
     if len(q or "") > MAX_QUERY_CHARS:          # too long to classify cheaply: dropped as personal data, counted
         return "pii_suspect"
-    t = decode_query(q)
+    raw_form = strip_marks(q or "")              # the detection form before percent-decoding
+    t = raw_form if "%" not in (q or "") else decode_query(q)     # (no '%': decoding changes nothing)
     if len(t) > MAX_QUERY_CHARS:                # NFKC can expand a character many times (U+FDFA is 18)
         return "pii_suspect"
     folded = _LOOKALIKE.fold_cased(t)
     # THE RULE (round 15): detectors first, on the raw normalised text and its de-obfuscated views, never exempted.
     # Round 16: also on the text before percent-decoding ("202%555%0100": "%55" would decode into a letter).
-    undecoded = _LOOKALIKE.fold_cased(strip_marks(q or ""))
+    undecoded = folded if raw_form == t else _LOOKALIKE.fold_cased(raw_form)
     spelled = spelled_digits(folded)
     glyphs = homoglyph_digits(folded)
-    if pii_detectors(folded) or pii_detectors(undecoded) or (spelled and pii_detectors(spelled)) \
+    if pii_detectors(folded) or (undecoded != folded and pii_detectors(undecoded)) \
+            or (spelled and pii_detectors(spelled)) \
             or (glyphs and pii_detectors(glyphs)) or any(pii_detectors(v) for v in _defilled_views(folded)[1:]):
+        return "pii_suspect"
+    # round 18: the list's e-mail items (spelled / bracketed / rot13 / reversed / encoded, whole or chunked) and the
+    # address rule with surrounding text set aside; detectors like the above, never exempted
+    core = _address_core(folded)
+    if digit_stream_hit(t) or (raw_form != t and digit_stream_hit(raw_form)) \
+            or digit_stream_hit(spelled_stream(folded)) \
+            or email_views_hit(folded) or (undecoded != folded and email_views_hit(undecoded)) \
+            or encoded_email(t) or (raw_form != t and encoded_email(raw_form)) \
+            or (core != folded and looks_like_address(core)):
         return "pii_suspect"
     # exemptions below this line touch ONLY the generic digit-run / token rules (and the IP check)
     versioned = _RFC_NUMBER.sub(lambda m: m.group(1) + " #", _VERSION.sub(lambda m: m.group(1) + " #", folded))

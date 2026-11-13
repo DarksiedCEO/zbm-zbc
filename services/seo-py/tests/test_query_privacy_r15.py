@@ -70,10 +70,11 @@ DATE_SPLIT_DROP = [
     "2025/5/5 0100 2024", "2025.5.5 0100 2024", "2025-5-5 0100 2024", "2025 550100 2024", "2024 2025 550100",
     "2025/5/5 0199", "2 1909/9/9 99", "22230 03/12/2003 222", "2025-11-08 202 555 0100", "1 23 45 67 89 2024",
 ]
+# round 18: a date with a time right after it is a digit stream (closed list item 1, gaps of at most three characters)
+# whose windows spell a valid NANP phone or SSN; those eight moved to test_query_privacy_r18.LIST_MANDATED_DROP, with
+# "1999 2000 y2k" (an SSN stream across the "y")
 DATE_TIME_KEEP = [
-    "11/8/2025 7pm", "2025-11-08 10am", "exam 12/15/2025 9am", "dentist 11/10/2025 3:30",
-    "2025-11-08T09:30 meeting", "2025-11-08 09:30 utc", "10/31/2025 halloween 7pm", "flight 2025-12-24 6:45am",
-    "meeting 2025-11-08 14:00", "2025-11-08 10:30:00z log", "1999 2000 y2k", "90210 2024 restaurants",
+    "11/8/2025 7pm", "10/31/2025 halloween 7pm", "90210 2024 restaurants",
 ]
 
 
@@ -90,5 +91,8 @@ def test_date_and_time_queries_are_kept(q):
 def test_detectors_are_called_on_the_raw_text_before_any_exemption():
     raw = "version " + J(("4111", "1111", "1111", "1111"))
     assert sp.pii_detectors(raw)
-    assert not sp.pii_detectors("2025-11-08 10am") and not sp.pii_detectors("2001 2002 2003 2004")
+    # round 18: "2025-11-08 10am" is a NANP stream now (closed list item 1; asserted dropped in test_query_privacy_r18);
+    # a date standing alone is still not a detector hit
+    assert not sp.pii_detectors("2025-11-08") and not sp.pii_detectors("2001 2002 2003 2004")
+    assert sp.pii_detectors("2025-11-08 10am")
     assert sp.card_iin(J(("2223", "0031", "2200", "3222"))) and not sp.card_iin("2001200220032004")

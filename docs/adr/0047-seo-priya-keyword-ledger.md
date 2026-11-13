@@ -143,9 +143,29 @@ account and developer token: a founder decision, not built.
 
 ## Personal data
 
+### The closed threat list (owner decision 2026-11-08; certified from round 18)
+
+Certification of the personal-data rule is against THIS list and nothing else; anything outside it is a documented
+residual (below). Classes: **card numbers** (13-19 digits, Luhn-valid, a card network's issuer prefix, the UATP
+prefix 1 with 15 digits), **phone numbers** (NANP: 10 digits, or 11 after a 1, area code and exchange starting 2-9;
+E.164: a '+' and 8-15 digits; vanity toll-free: 800 / 833 / 844 / 855 / 866 / 877 / 888 and seven keypad characters
+with a letter, with or without the leading 1), **SSNs** (9 digits with a valid area, group and serial), **e-mail
+addresses** and **street addresses** (the address rule below). Disguises, each alone and inside surrounding text:
+
+1. any gap of up to 3 non-digit characters between two digits - ASCII letters, letters NFKC turns into ASCII
+   letters, other scripts' letters, and any separator (punctuation, symbol, space);
+2. digits in any script (every Unicode decimal-digit block) or fullwidth;
+3. zero-width and bidi characters anywhere;
+4. spelled digits (English and Spanish number words, mixed with digits, run together or separated);
+5. e-mails spelled (`at` / `dot`, `arroba` / `punto`), bracketed (`[at]`, `(at)`, `{at}`, `<at>`, `[@]`, `[.]`,
+   `(dot)` ...), base64 (standard or URL-safe, padded or not), base32 (either case, padded or not), hex,
+   URL-encoded (whole or partly), rot13 or reversed (the whole text or each word), each whole or chunked (split
+   into pieces with spaces);
+6. composed pairs: two of these transforms applied to one value (measured residual at most 1%).
+
 A query that ADR 0017's classifier calls `pii_suspect` (e-mails in any spelling, one phone-like run of 7+ digits not
 an ISO date, id- or secret-like words, and — added in review round 1, reworked in rounds 2 to 4,
-`search_performance` rules `2026-11-08.16`, so Osei's query classes use it too — address forms and over-long text):
+`search_performance` rules `2026-11-08.18`, so Osei's query classes use it too - address forms and over-long text):
 - an id- or secret-like word (round 4 narrowed this from the log templater's rule, which dropped model numbers, tire
   sizes, decimals and years — `24acc636a003`, `225/65r17`, `3.5`, `2012` — as ids): an e-mail in any spelling, a
   UUID, 16+ hex characters, a JWT-like dotted token, 20+ token characters, anything over 40 characters, a
@@ -305,6 +325,77 @@ an ISO date, id- or secret-like words, and — added in review round 1, reworked
   contexts) offline — **0 kept**. All 12 known war-room failures (R0001, R0003-R0005, R0007, R0010-R0012, R0016-R0019)
   pass on replay with this classifier.
   7+ digits in one run stay the digit-run rule's;
+- **Round 18 - the closed list, covered** (rules `2026-11-08.18`; every number below was measured on 65f8b92a and on
+  this round's code with the generator `tests/privacy_r18_corpus.py`, synthetic values made at run time).
+  **What changed:** (1) THE DIGIT STREAM (`digit_stream_hit`): digit groups whose gaps are at most 3 non-digit
+  characters of any kind form one stream, and every window of whole consecutive groups is read as one number -
+  a card (`stream_card`: Luhn, issuer prefix, UATP), an SSN, a NANP phone (`nanp_phone`, area code and exchange
+  2-9) or, after a '+', an E.164 phone; it runs on the detection form (fullwidth and other-script digits already
+  ASCII), on the text before percent-decoding, and on the spelled view across gaps (`spelled_stream`: number words
+  made digits, separators removed, so the gap is the letters between them), with no exemption of any kind, so a
+  date or a time can never hide a value; (2) vanity toll-free numbers with any separator of up to 3 characters
+  (`_vanity_any`); (3) e-mail views (`email_views_hit`): a marker string where spaces, brackets and punctuation are
+  one marker, spelled keywords read only between markers (so `what`, `dotted` are not keywords) and tolerating chunk
+  spaces inside keywords and labels, read as written, rot13'd, reversed whole and word by word, and after reading
+  the keywords also rot13'd and reversed, must show a mailbox shape (a TLD of a closed list or any two letters);
+  (4) encoded e-mails (`encoded_email`): every run of up to 12 words made of encoding characters is joined and
+  decoded (percent, base64, base32, hex; as written, rot13'd, reversed; and once more for two encodings), and
+  lower-case base32 written as plain words is decoded from each word to the run's end (`_plain_base32`);
+  (5) an address followed or preceded by other text (`_address_core` sets aside emoji, CJK and punctuation; an
+  ordinary-word suffix may be followed by up to three tokens of any kind); (6) the issuer table missed Diners 36
+  (`3[4789]` read 34, 37, 38, 39): fixed; (7) software names (`chrome`, `python`, `node`, ...) are version keywords
+  for the GENERIC rules only. **M1, the list, single disguise** (2,000 values per class, every disguise, alone and
+  in context: 244,000 queries): 65f8b92a kept **18,345**; this round keeps **0** - per class kept at 65f8b92a /
+  now: card 42 / 0, NANP phone 4,305 / 0, E.164 phone 1,452 / 0, SSN 6,976 / 0, vanity 39 / 0, e-mail 5,283 / 0,
+  address 248 / 0. Through the service path (fake Search Console rows, Priya's ledger, the POST response, the run
+  views, the audit export, every file under the data dir, every log record; the same 244,000 queries as rows): 65f8b92a let 18,345 into the returned ledger and the POST
+  response (the ledger is handed out once and never stored, so 0 reached the data dir or the logs); this round:
+  **0 in the ledger, 0 in the API responses, 0 on disk, 0 in the logs** (1,491 ordinary rows kept, none past the cap).
+  **M2, composed pairs** (40,000 cases, each class and ordered transform pair in turn, a quarter in context):
+  65f8b92a kept 4,777; this round keeps **2 (0.005%)**, pinned in `tests/test_query_privacy_r18.py` - a phone
+  spelled with the number words run together and then a mixed gap put between digits, and an SSN with a mixed gap
+  and then spelled run together (number words glued to letters and symbols with no separator are not read as
+  digits). **Lost protection: 0** - every case 65f8b92a drops in a personal-data corpus is still dropped, cell by
+  cell, over M1, M2 and the round-10 attack corpus (676 single, 40,672 composed). (In M3, ordinary queries, 84 cases
+  65f8b92a dropped are kept now: those are the over-drops fixed below.)
+  **M3, ordinary queries** (24,000; 80% text classes - plain, multilingual, questions, local intent - and 20%
+  digit-bearing classes; that mix is an assumption, so each class's own rate is given): dropped at 65f8b92a **204
+  (0.850%)**, now **162 (0.675%)** - ABOVE the round's 0.5% bar; see "Owner decision" below. New drops, **42**, both
+  made personal data by list item 1: a date followed by a time (22 of 600 date queries: `<date> 3am` spells an SSN or
+  a NANP phone across gaps of at most 3 characters) and a tire size with its load index (20 of 720 size queries:
+  `<width>/<ratio>r<rim> <load><speed>` spells a NANP phone). Over-drops fixed, **84**: version numbers after a
+  software name, 23 (generic rule), and `ddr<n> <speed> <size>gb` model numbers, 61 (generic 7-digit run: a number of
+  one or two digits glued to a word at either end of a run, `ddr5`, `64gb`, is part of that word; a lone group, and
+  any group of three or more digits, still counts; `longest_digit_run`). Still dropped: ZIP + year 65 of 480 (64:
+  the 9 digits are an SSN; 1: a ZIP starting `1866` followed by a word is a vanity toll-free number), version numbers
+  53 of 480 (46: the digits across the dots are a NANP phone or SSN of the list; 5: the round-15 de-separated rule's
+  phone shape, whose exchange may start 0 or 1; 2: the round-12 homoglyph view, `bios` read as digits), model numbers
+  2 of 960 (a 5-digit number starting `877` / `866` followed by a word is a vanity toll-free number). 0 dropped in
+  plain text, multilingual text, questions, local intent, prices, years and quantities. With a smaller share of
+  digit-bearing queries the total falls in proportion (the text classes drop 0). Nine KEEP cases of rounds 13 and
+  15 are dropped now by list item 1 and are asserted dropped (`LIST_MANDATED_DROP`): eight dates followed by a time
+  and `1999 2000 y2k`.
+  **Owner decision (open):** of the 162 M3 drops, **155 are made personal data by the closed list itself** (a
+  value's digits across gaps of at most 3 characters: date + time 22, tire size + load index 20, version numbers
+  46, ZIP + year 64, vanity toll-free 3), so 0.646% of this corpus cannot be kept without letting a list case
+  through (for example an SSN written 5 + 4, which is exactly ZIP + year). The other 7 (5 + 2 above) are older
+  rules outside the list. The 0.5% bar and zero leaks on the list cannot both hold on this corpus; which one gives
+  way, or whether the list is narrowed (for example ZIP + year, 64 cases), is the owner's call.
+  **Cost:** median per-query classification on M3, 161.1 / 162.6 us at 65f8b92a and 183.3 / 176.8 us now in two
+  interleaved runs (+13.8% / +8.7%; one shared machine with other jobs running, best of 3 per query); on the list
+  sample the median fell from 138.2 / 137.3 to 83.5 / 82.2 us;
+  identical detector calls are no longer repeated. Queries over 512 characters are not examined (as before), and the
+  work per word is capped (each candidate stops at 12 words or 400 characters, each digit window at 19 digits), so
+  no input backtracks catastrophically; the worst inputs found, at 512 characters, best of 5: 29.0 ms (base64-like
+  chunks; 1.3 ms at 64), 15.3 ms (one-character words), 6.9 ms (`a at b dot` runs), 3.5 ms (spelled words), 1.3 ms
+  (digits with letter gaps; 65f8b92a took 82-105 ms there); 64k-character text is not examined (about 10-45 ms,
+  dominated by normalising it).
+  **Residuals (outside the list, or measured):** the 2 composed cases above; 7-digit local numbers with letter
+  gaps (the list's phones are NANP / E.164 / vanity; a plain 7-digit run is still the generic rule's); gaps of 4 or
+  more characters (the older filler rules catch some); number words of languages other than English and Spanish;
+  three or more stacked transforms; encodings other than the list's (base85, uuencode, ...); lower-case base32 of
+  an e-mail shorter than 16 characters with no digit 2-7 in any chunk; a chunked, rot13'd or reversed spelled e-mail whose TLD is
+  not two letters and not on the list (`_EM_TLD_WORDS`; written plainly, the older rule reads any TLD); the address rule's own gaps (below); personal names.
 - a street address: a house number (at the start, or after a space not preceded by `top` / `best`), an optional
   direction, 1-3 street-name tokens (none a stop or quantity word such as `near`, `in`, `best`, `hour`, `bedroom`,
   `lane`, `way`), then a suffix. `old`, `new`, `good` may start a street name (`17 old mill road`, `40 good hope
