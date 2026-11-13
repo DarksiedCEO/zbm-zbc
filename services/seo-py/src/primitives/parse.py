@@ -10,6 +10,7 @@ quote them (through envelope.observed), and nothing here or downstream acts on w
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from html.parser import HTMLParser
@@ -42,6 +43,9 @@ SCHEMA_RULES = {
     "PostalAddress": ((), ("streetAddress", "addressLocality", "addressRegion", "postalCode")),
 }
 LOCAL_BUSINESS_TYPES = ("LocalBusiness", "ProfessionalService", "Store")
+# meta robots names read: the generic one and the engines' crawlers (agents/bots.py ENGINE_SEARCH_BOT and families)
+ROBOTS_META_NAMES = ("robots", "googlebot", "bingbot", "gptbot", "claudebot", "perplexitybot", "oai-searchbot",
+                     "claude-searchbot")
 ORG_TYPES = ("Organization",) + LOCAL_BUSINESS_TYPES
 
 
@@ -115,7 +119,9 @@ class _Extractor(HTMLParser):
             self._skip = max(0, self._skip - 1)
             if self._ld is not None:
                 if len(self.scripts_ld) < MAX_JSONLD_BLOCKS:
-                    self.scripts_ld.append("".join(self._ld)[:MAX_JSONLD_BYTES + 1])
+                    full = "".join(self._ld)
+                    # round 2 Osei M2: the block's whole size is kept beside the bounded prefix
+                    self.scripts_ld.append((full[:MAX_JSONLD_BYTES + 1], len(full.encode("utf-8", "surrogatepass"))))
                 self._ld = None
         elif tag in ("style", "noscript", "template"):
             self._skip = max(0, self._skip - 1)
@@ -151,7 +157,7 @@ def parse_html(html: str, base_url: str) -> dict:
     description = None
     for mt in metas:
         name = (mt.get("name") or "").lower()
-        if name in ("robots", "googlebot", "bingbot", "gptbot", "claudebot", "perplexitybot") and mt.get("content"):
+        if name in ROBOTS_META_NAMES and mt.get("content"):
             robots_meta[name] = [x.strip().lower() for x in mt["content"].split(",") if x.strip()][:20]
         elif name == "description" and description is None:
             description = mt.get("content")
@@ -175,7 +181,7 @@ def parse_html(html: str, base_url: str) -> dict:
         "canonicals_invalid": sum(1 for a in canon_abs if a is None),
         "canonicals_valid": sum(1 for a in canon_abs if a),
         "hreflang": hreflang[:200], "headings": p.headings, "links": links,
-        "jsonld_raw_count": len(p.scripts_ld), "jsonld": [validate_jsonld(b) for b in p.scripts_ld],
+        "jsonld_raw_count": len(p.scripts_ld), "jsonld": [validate_jsonld(b, n) for b, n in p.scripts_ld],
         "text_length": len(text), "text_sample": text[:20_000], "elements": p.elements,
         "scripts": p.script_count, "parse_error": error,
         "viewport": any((m.get("name") or "").lower() == "viewport" for m in metas),
@@ -232,14 +238,27 @@ def _present(v) -> bool:
     return v not in (None, "", [], {})
 
 
-def validate_jsonld(raw: str) -> dict:
-    """One ``<script type="application/ld+json">`` block -> {valid_json, nodes: [{types, issues, props}]}."""
+def _size(raw: str) -> dict:
+    """Size and SHA-256 of a block that will be quarantined (ADR 0017 decision 15; AEGIS Wave-1 M-O4): of its UTF-8
+    bytes as read (the extract keeps at most MAX_JSONLD_BYTES + 1 characters of it)."""
+    b = raw.encode("utf-8", "surrogatepass")
+    return {"bytes": len(b), "sha256": hashlib.sha256(b).hexdigest()}
+
+
+def validate_jsonld(raw: str, total_bytes: Optional[int] = None) -> dict:
+    """One ``<script type="application/ld+json">`` block -> {valid_json, nodes: [{types, issues, props}]}.
+    ``total_bytes``: the whole block's UTF-8 size when the caller kept only a prefix of it. A block over
+    MAX_JSONLD_BYTES characters is not parsed (round 2 Osei M2): ``truncated``, ``bytes`` and ``sha256`` of the
+    first MAX_JSONLD_BYTES characters read (``sha256_basis`` says so) and ``total_bytes`` of the whole block."""
     if len(raw) > MAX_JSONLD_BYTES:
-        return {"valid_json": False, "error": "BLOCK_TOO_LARGE", "nodes": []}
+        prefix = _size(raw[:MAX_JSONLD_BYTES])
+        return {"valid_json": False, "error": "BLOCK_TOO_LARGE", "nodes": [], "truncated": True, **prefix,
+                "sha256_basis": f"the first {MAX_JSONLD_BYTES} characters of the block (a truncated prefix)",
+                "total_bytes": total_bytes}
     try:
         doc = json.loads(raw.strip().removeprefix("<!--").removesuffix("-->"))
     except (ValueError, RecursionError):
-        return {"valid_json": False, "error": "JSON_INVALID", "nodes": []}
+        return {"valid_json": False, "error": "JSON_INVALID", "nodes": [], **_size(raw)}
     out = []
     for n in _nodes(doc):
         types = _types(n)

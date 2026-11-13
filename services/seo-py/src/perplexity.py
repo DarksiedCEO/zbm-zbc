@@ -123,8 +123,19 @@ class EngineError(Exception):
         # a micro-dollar Decimal string or None; the adapter charges it when it exceeds the reserve (AEGIS L4)
         self.cost = cost if cost is None or re.fullmatch(r"[0-9]{1,6}\.[0-9]{6}", cost) else None
 
+    # AEGIS Wave-1 M-O4: the size and SHA-256 of the response body an ENGINE_PROTOCOL_ERROR was raised over, when one
+    # was in hand (``body_partial``: only the bytes read before a TOO_LARGE stop). Never the body itself.
+    body_bytes: Optional[int] = None
+    body_sha256: Optional[str] = None
+    body_partial: bool = False
+
     def __repr__(self) -> str:
         return f"EngineError({self.code!r})"
+
+
+def _with_body(e: "EngineError", body: bytes, partial: bool = False) -> "EngineError":
+    e.body_bytes, e.body_sha256, e.body_partial = len(body), hashlib.sha256(body).hexdigest(), partial
+    return e
 
 
 class ApiKey:
@@ -668,7 +679,10 @@ class PerplexityEngine:
                 status, headers, raw = self._post(body, end, guard)
                 self._check(guard)                   # a switch engaged during the last read: drop the answer
                 if status == 200:
-                    ans = parse(raw, (model,))
+                    try:
+                        ans = parse(raw, (model,))
+                    except EngineError as e:
+                        raise _with_body(e, raw) from None
                     if meter is not None:
                         meter.after(cost_of(ans))
                         charged = True
@@ -767,7 +781,8 @@ class PerplexityEngine:
                             raise _Retry("ENGINE_UNAVAILABLE")          # the deadline, mid-body
                         size += len(chunk)
                         if size > MAX_RESPONSE_BYTES:
-                            raise EngineError("ENGINE_PROTOCOL_ERROR", "TOO_LARGE")
+                            raise _with_body(EngineError("ENGINE_PROTOCOL_ERROR", "TOO_LARGE"), b"".join(chunks),
+                                             partial=True)
                         chunks.append(chunk)
                     return status, kept, b"".join(chunks)
         except (EngineError, _Retry):

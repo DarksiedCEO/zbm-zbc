@@ -238,6 +238,20 @@ _R = {
                                  "200 without redirecting.", (("canonical", "url"), ("status", "num"),
                                                              ("redirected", "bool"))),
     "CANONICAL_MISSING": ("No canonical link", "Add a self-referencing rel=canonical to the page.", ()),
+    # AEGIS Wave-1 certification round 2: this service's own limits are said as such, never as a site defect
+    "CANONICAL_TARGET_UNCHECKED": ("Canonical target could not be checked", "Nothing to fix from this audit: our "
+                                   "request to the canonical URL did not complete. Re-run the audit.",
+                                   (("canonical", "url"), ("fetch_state", "token"))),
+    "PAGE_NOT_READ_ROBOTS_CHECK_INCOMPLETE": ("Page not read: our robots.txt check did not complete", "Nothing to "
+                                              "fix from this audit: robots.txt was too costly to check within our "
+                                              "bounds. Simplify very large rule sets if crawlers matter to you.", ()),
+    "ROBOTS_BLOCK_APPROXIMATE": ("robots.txt may block a crawler (approximate)", "robots.txt is longer than "
+                                 "500 KiB; crawlers stop reading there. Shorten it so every rule is read.",
+                                 (("token", "token"), ("blocked_paths", "paths"), ("rules", "texts"))),
+    "NOINDEX_FOR_BOT": ("Page asks specific crawlers not to index it", "No fix needed if this is your policy for "
+                        "the named crawlers.", ()),
+    "STRUCTURED_DATA_BLOCK_TOO_LARGE": ("Structured data block too large to read", "Split very large JSON-LD into "
+                                        "smaller blocks; this one was not validated.", (("blocks", "num"),)),
     "HTML_PARSE_ERROR": ("HTML could not be fully parsed", "Validate the page's HTML and fix structural errors.", ()),
     "BOT_DIFFERENTIAL": ("Crawlers are served different content than browsers", "Serve crawlers and visitors the "
                          "same content (check CDN, bot-protection and cloaking rules).", ()),
