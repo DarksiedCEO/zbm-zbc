@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import logging
 import re
 import socket
 import ssl
@@ -44,10 +45,19 @@ import httpx
 
 from primitives import Killed
 from primitives import robots as robots_mod
+from primitives import safe_url as safe_url_mod
+
+# AEGIS Wave-1 certification (NIT): httpx / httpcore log every request URL at INFO; a crawled URL must not reach a
+# log at any level, so their loggers stay at WARNING whatever the service's root level is.
+for _name in ("httpx", "httpcore"):
+    logging.getLogger(_name).setLevel(logging.WARNING)
 
 PRODUCT_TOKEN = "ZBM-SEO-Audit"
 VERSION = "0.1"
 ROBOTS_MAX_BYTES = 500 * 1024              # RFC 9309: crawlers must parse at least 500 KiB
+# AEGIS Wave-1 M-S1: this crawler's own robots.txt checks in one run (one robots cache) share this time budget; once
+# it is spent a path is not fetched (BLOCKED_BY_ROBOTS, detail says why), never a hang.
+ROBOTS_CHECK_BUDGET_S = 5.0
 KEPT_HEADERS = ("content-type", "content-length", "location", "x-robots-tag", "last-modified", "link",
                 "cache-control", "vary", "server-timing", "retry-after")
 # A browser-like identity used ONLY by access-diff to compare what a person's browser would be served. Labelled
@@ -110,6 +120,9 @@ class FetchResult:
     redirects: list = field(default_factory=list)        # [{"url", "status"}] in order
     detail: Optional[str] = None
     user_agent: str = "bot"                              # "bot" (ours) or "human" (access-diff only)
+    # TOO_LARGE (AEGIS Wave-1 M-O4): the decoded bytes read before the fetch was stopped (the body is not kept):
+    # {"bytes_read": n, "sha256": of those bytes, "declared": Content-Length or None}
+    partial: Optional[dict] = None
 
     @property
     def ok(self) -> bool:
@@ -125,18 +138,23 @@ class FetchResult:
             return self.body.decode("utf-8", errors="replace")
 
     def summary(self) -> dict:
-        """What a report may carry: no body."""
-        return {"url": self.url, "final_url": self.final_url, "state": self.state, "status": self.status,
-                "content_type": self.content_type, "redirects": list(self.redirects), "detail": self.detail,
+        """What a report may carry: no body, and every URL in its safe form (primitives/safe_url.py: templated path,
+        no query, fragment or userinfo; AEGIS Wave-1 M-S2). ``x_robots_tag`` is reduced to the directives and bot
+        tokens this service knows (``safe_url.safe_x_robots``)."""
+        return {"url": safe_url_mod.safe_url(self.url), "final_url": safe_url_mod.safe_url(self.final_url),
+                "state": self.state, "status": self.status, "content_type": safe_url_mod.safe_ctype(self.content_type),
+                "redirects": [{"url": safe_url_mod.safe_url(r.get("url")), "status": r.get("status")}
+                              for r in self.redirects], "detail": self.detail,
                 "bytes": len(self.body) if self.body is not None else None,
-                "x_robots_tag": self.headers.get("x-robots-tag")}
+                "x_robots_tag": safe_url_mod.safe_x_robots(self.headers.get("x-robots-tag"))}
 
 
 class _Refused(Exception):
-    def __init__(self, state: str, detail: str):
+    def __init__(self, state: str, detail: str, partial: Optional[dict] = None):
         super().__init__(detail)
         self.state = state
         self.detail = detail
+        self.partial = partial
 
 
 class _NotConnected(_Refused):
@@ -397,7 +415,7 @@ class Fetcher:
                 return self._attempt(url, target, ip, ua, deadline, accept, connect_s)
             except _NotConnected as exc:
                 last = exc
-        raise _Refused(last.state, last.detail)
+        raise _Refused(last.state, last.detail, last.partial)
 
     def _attempt(self, url: str, target: tuple, ip: str, ua: str, deadline: float, accept: str, connect_s: float
                  ) -> tuple[int, dict, Optional[bytes], str]:
@@ -424,20 +442,29 @@ class Fetcher:
                         return resp.status_code, kept, None, url
                     declared = resp.headers.get("content-length")
                     if declared and declared.isdigit() and int(declared) > self.max_bytes:
-                        raise _Refused("TOO_LARGE", f"declared body larger than {self.max_bytes} bytes")
+                        raise _Refused("TOO_LARGE", f"declared body larger than {self.max_bytes} bytes",
+                                       {"bytes_read": 0, "sha256": hashlib.sha256(b"").hexdigest(),
+                                        "declared": int(declared) if len(declared) < 19 else None})
                     codings = [c.strip().lower() for c in (resp.headers.get("content-encoding") or "").split(",")
                                if c.strip() and c.strip().lower() != "identity"]
                     if len(codings) > 1 or (codings and codings[0] not in ENCODINGS):
                         raise _Refused("UNSUPPORTED_ENCODING", "only one content coding, gzip or deflate, is accepted")
                     dec = _Decoder(codings[0] if codings else None, self.max_bytes)
                     raw = 0
-                    for chunk in resp.iter_raw():               # raw bytes: httpx decodes nothing (AEGIS H1)
-                        raw += len(chunk)
-                        if raw > self.max_bytes:
-                            raise _Refused("TOO_LARGE", f"body larger than {self.max_bytes} bytes (on the wire)")
-                        if time.monotonic() > deadline:
-                            raise _Refused("TIMEOUT", "the response did not complete within the deadline")
-                        dec.feed(chunk)
+                    try:
+                        for chunk in resp.iter_raw():           # raw bytes: httpx decodes nothing (AEGIS H1)
+                            raw += len(chunk)
+                            if raw > self.max_bytes:
+                                raise _Refused("TOO_LARGE", f"body larger than {self.max_bytes} bytes (on the wire)")
+                            if time.monotonic() > deadline:
+                                raise _Refused("TIMEOUT", "the response did not complete within the deadline")
+                            dec.feed(chunk)
+                    except _Refused as r:
+                        if r.state == "TOO_LARGE" and r.partial is None:
+                            got = dec.body()                    # what was read before the stop (bounded)
+                            r.partial = {"bytes_read": len(got), "sha256": hashlib.sha256(got).hexdigest(),
+                                         "declared": None}
+                        raise
                     return resp.status_code, kept, dec.body(), url
         except _Refused:
             raise
@@ -512,7 +539,7 @@ class Fetcher:
                 return res
             raise _Refused("TOO_MANY_REDIRECTS", f"more than {self.max_redirects} redirects")
         except _Refused as r:
-            res.state, res.detail, res.final_url = r.state, r.detail, current
+            res.state, res.detail, res.final_url, res.partial = r.state, r.detail, current, r.partial
             return res
         except Killed as k:                               # a kill switch engaged (or the service closed)
             res.state, res.detail, res.final_url = "KILLED", k.code, current
@@ -530,7 +557,19 @@ class Fetcher:
             cache[origin] = self.robots(origin, guard=guard)
         rb = cache[origin]
         path = urlunsplit(("", "", p.path or "/", p.query, ""))
-        return rb["parsed"].allowed(PRODUCT_TOKEN, path) if rb["parsed"] is not None else rb["default_allow"]
+        if rb["parsed"] is None:
+            return rb["default_allow"]
+        budget = rb.get("check_budget")
+        if budget is None:
+            budget = rb["check_budget"] = robots_mod.Budget(ROBOTS_CHECK_BUDGET_S)
+        d = rb["parsed"].decide(PRODUCT_TOKEN, path, budget)
+        if d["allowed"] is None:
+            raise _Refused("BLOCKED_BY_ROBOTS", "robots.txt could not be checked within this service's bounds "
+                                                "(time budget or path length); not fetched")
+        if d["allowed"] and not d.get("complete", True):
+            raise _Refused("BLOCKED_BY_ROBOTS", "robots.txt exceeds this service's rule bounds; an allow from an "
+                                                "incomplete rule set is not trusted (fail closed); not fetched")
+        return d["allowed"]
 
     def robots(self, origin: str, guard: Optional[Callable] = None) -> dict:
         """RFC 9309 section 2.3.1: 2xx -> parse (first ROBOTS_MAX_BYTES); 4xx -> unavailable, allow all; 5xx or
@@ -539,6 +578,7 @@ class Fetcher:
         out = {"origin": origin, "fetch": r.summary(), "parsed": None, "default_allow": False, "status_class": None}
         if r.state == "TOO_LARGE":
             out["status_class"] = "too_large"          # cannot read the whole file: treat as unreachable (fail closed)
+            out["partial"] = r.partial                   # size / SHA-256 of what was read, for the quarantine record
             return out
         if r.state != "OK":
             out["status_class"] = "unreachable"

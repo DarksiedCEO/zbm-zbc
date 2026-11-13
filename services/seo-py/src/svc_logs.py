@@ -7,8 +7,12 @@ request's SHA-256 only).
 What is retained (AEGIS 1472041 H1): counts, status mixes, PATH TEMPLATES (identifiers replaced by {email}, {uuid},
 {id}, {token}), robots-disallowed hit counts, the indices of the public sitemap sample that were crawled, and a
 HyperLogLog sketch per family for distinct client IPs. Never retained anywhere — log, ledger, report, error: raw
-lines, raw paths, IPs, IP hashes, User-Agent strings. robots.txt (public) and the sitemap sample (public paths from
-the tenant's latest audit) are fixed when the ingest is created, so exact paths are compared in memory and dropped.
+lines, raw paths, IPs, IP hashes, User-Agent strings. robots.txt and the sitemap sample (from the tenant's latest
+audit) are fixed when the ingest is created, so exact paths are compared in memory and dropped. AEGIS Wave-1 M-S3 /
+M-S4: the robots.txt TEXT is held in memory only (parsed) and only its SHA-256 is recorded; the sitemap sample is
+recorded as path TEMPLATES (shown in the report) and keyed digests (agents/logs.path_digest, matched against a log
+path's digest in memory), never as raw paths. After a restart the robots.txt of an open ingest is no longer in
+memory: its later bot requests are counted ``robots_unchecked`` and the report is PARTIAL.
 Retention: nothing identifying is kept, so expiry (SEO_LOG_RETENTION_DAYS) hides the per-ingest report and keeps
 totals; the append-only log holds no personal data that would need shredding.
 
@@ -34,10 +38,13 @@ from errors import Conflict, Forbidden, Invalid, NotFound
 from ledger import derived_id
 from primitives import Killed
 from primitives import robots as robots_mod
+from primitives.safe_url import safe_path
 from reasons import R
 
 CHUNK_MAX = 90_000
 SEARCH_TOKENS = ("Googlebot", "Bingbot")
+SERVER_ERROR_MIN_REQUESTS = 20      # SEARCH_CRAWLER_SERVER_ERRORS: at least this many requests, and
+SERVER_ERROR_SHARE = 0.05           # more than this share of them answered 5xx
 METHODOLOGY = ("The uploaded access log was parsed line by line ({fmt}); each request was attributed to a bot family "
                "by its User-Agent token (bot list {v}) and the client IP checked with the bot-verification port "
                "(reverse DNS plus forward-confirm against the operator's documented host names) where one is "
@@ -126,7 +133,7 @@ class LogsMixin:
             self._check_log_caps(tid, new_ingest=True)
             sample = self._sitemap_sample(tid, body["domain"])
         guard = self.guard(tid, run="logs")
-        robots_text, robots_status = None, "not_fetched"
+        robots_text, robots_status = None, "not_fetched"      # robots_text: memory only (M-S3)
         try:
             guard(capability="logs", agent="selene")
             if self.ports.fetcher is not None:
@@ -146,15 +153,18 @@ class LogsMixin:
                 return self.log_ingest_view(tid, prev[1])
             self._check_log_caps(tid, new_ingest=True)
             iid = derived_id("lgi", tid, actor, rk)
+            robots_sha = None if robots_text is None else sha(robots_text)
             data = {"ingest_id": iid, "tenant_id": tid, "domain": body["domain"], "scheme": body["scheme"],
                     "format": body["format"], "key_fp": hashlib.sha256(self.settings.log_hash_key).hexdigest()[:16],
-                    "robots_status": robots_status, "robots_text": robots_text, "sitemap_sample": sample}
+                    "robots_status": robots_status, "robots_sha256": robots_sha, "sitemap_sample": sample}
             self._commit("log_ingest_created", self._req(data, actor, rk, body, iid), actor,
                          evidence=("log_ingest_created", f"ingest:{iid}",
                                    {"ingest_id": iid, "tenant_id": tid, "format": body["format"],
                                     "domain_sha256": sha(body["domain"]), "robots_status": robots_status,
-                                    "robots_sha256": None if robots_text is None else sha(robots_text),
+                                    "robots_sha256": robots_sha,
                                     "sitemap_sample_sha256": None if sample is None else sha(sample)}, (actor, rk)))
+            if robots_text is not None:
+                self._log_robots[iid] = robots_mod.parse(robots_text)       # in memory only
             return self.log_ingest_view(tid, iid)
 
     def _a_log_ingest_created(self, d, at):
@@ -162,8 +172,9 @@ class LogsMixin:
             "ingest_id": d["ingest_id"], "tenant_id": d["tenant_id"], "domain": d["domain"], "scheme": d["scheme"],
             "format": d["format"], "key_fp": d["key_fp"], "status": "open", "created_at": at, "next_seq": 1,
             "bytes": 0, "last_seen": False, "totals": logs_mod.empty_delta(), "report": None, "report_sha256": None,
-            "robots_status": d.get("robots_status"), "robots_text": d.get("robots_text"),
-            "sitemap_sample": d.get("sitemap_sample")}
+            "robots_status": d.get("robots_status"), "robots_sha256": d.get("robots_sha256"),
+            # a line written before AEGIS Wave-1 M-S3 carried the text itself: it is read, never written again
+            "robots_text": d.get("robots_text"), "sitemap_sample": d.get("sitemap_sample")}
 
     def _ingest(self, tid: str, iid: str) -> dict:
         g = self.log_ingests.get(iid)
@@ -198,13 +209,14 @@ class LogsMixin:
             cache = self._log_verify_cache.setdefault(iid, {})
             budget = self._log_budget.setdefault(iid, {"left": self.settings.bot_verify_max})
             robots = self._robots_parsed(g)
-            sample = {p: i for i, p in enumerate(g["sitemap_sample"] or [])}
+            robots_expected = g.get("robots_sha256") is not None or g.get("robots_text") is not None
+            sample = _sample_index(g["sitemap_sample"], log_hash_key)
         try:
             self.guard(tid, run="logs")(capability="logs", agent="selene")
         except Killed as k:
             raise _refusal(k) from None
         delta = logs_mod.process_chunk(fmt, data, log_hash_key, self.ports.bot_verifier.verify, cache,
-                                       budget, robots, sample)
+                                       budget, robots, sample, robots_expected=robots_expected)
         del data
         with self.lock:
             self._gate()
@@ -221,10 +233,8 @@ class LogsMixin:
             return self.log_ingest_view(tid, iid)
 
     def _robots_parsed(self, g: dict):
-        if g.get("robots_text") is None:
-            return None
         rb = self._log_robots.get(g["ingest_id"])
-        if rb is None:
+        if rb is None and g.get("robots_text") is not None:      # an ingest recorded before M-S3
             rb = self._log_robots[g["ingest_id"]] = robots_mod.parse(g["robots_text"])
         return rb
 
@@ -301,12 +311,13 @@ class LogsMixin:
             return None
         for e in latest["report"]["agents"]:
             if e["agent"] == "delia":
-                return list(e["facts"].get("sitemap_paths_sample") or [])
+                return _sample_of(e["facts"], self.settings.log_hash_key)
         return None
 
     def _log_report(self, iid: str, g: dict) -> dict:
-        totals, sample, fmt = g["totals"], g["sitemap_sample"], g["format"]
-        robots_ok = g.get("robots_text") is not None
+        totals, sample, fmt = g["totals"], _sample_templates(g["sitemap_sample"]), g["format"]
+        robots_ok = g.get("robots_sha256") is not None or g.get("robots_text") is not None
+        unchecked = totals.get("robots_unchecked", 0)
         findings, fams = [], {}
         for tok, f in sorted(totals["families"].items()):
             fam = bots.by_token(tok)
@@ -328,9 +339,9 @@ class LogsMixin:
                                                                  "verified": f["verified"], "claimed": f["claimed"],
                                                                  "note": "robots.txt disallows these paths; the "
                                                                          "requests may predate it or be spoofed"}))
-            if tok in SEARCH_TOKENS and f["requests"] >= 20:
+            if tok in SEARCH_TOKENS and f["requests"] >= SERVER_ERROR_MIN_REQUESTS:
                 err = f["status"].get("5xx", 0)
-                if err / f["requests"] > 0.05:
+                if err / f["requests"] > SERVER_ERROR_SHARE:
                     findings.append(finding("SEARCH_CRAWLER_SERVER_ERRORS", "high", "measured", "ACT",
                                             capability="P1", detail={"token": tok, "requests": f["requests"],
                                                                      "5xx": err}))
@@ -348,11 +359,18 @@ class LogsMixin:
         if totals["quarantined"]:
             findings.append(finding("LOG_LINES_QUARANTINED", "low", "measured", "WATCH", capability="P5",
                                     detail={"by_reason": dict(totals["quarantined"])}))
+        if robots_ok and unchecked:
+            findings.append(finding("LOG_ROBOTS_CHECK_INCOMPLETE", "info", "measured", "INSUFFICIENT_EVIDENCE",
+                                    capability="P2", detail={"requests": unchecked,
+                                                             "note": "bot requests not checked against robots.txt "
+                                                                     "(time budget, or robots.txt no longer in "
+                                                                     "memory after a restart): the disallowed-hit "
+                                                                     "counts are a lower bound"}))
         nc = {"bot_ip_range_verification"}
         if not getattr(self.ports.bot_verifier, "connected", False):
             nc.add("bot_dns_verification")
         usable = totals["lines"] - sum(totals["quarantined"].values())
-        outcome = "OK" if usable > 0 and robots_ok and sample is not None else \
+        outcome = "OK" if usable > 0 and robots_ok and sample is not None and not unchecked else \
             ("PARTIAL" if usable > 0 else "INSUFFICIENT_EVIDENCE")
         env = envelope("selene", "log_access", outcome, findings,
                        methodology=METHODOLOGY.format(fmt=fmt, v=bots.VERSION, rules=logs_mod.TEMPLATE_RULES),
@@ -360,6 +378,7 @@ class LogsMixin:
                        facts={"lines": totals["lines"], "usable_lines": usable, "non_bot": totals["non_bot"],
                               "no_user_agent": totals["no_user_agent"], "quarantined": dict(totals["quarantined"]),
                               "families": fams, "robots_status": g.get("robots_status"),
+                              "robots_unchecked_requests": unchecked if robots_ok else None,
                               "uncrawled_important_paths": uncrawled[:50] if uncrawled is not None else None,
                               "sitemap_sample": "latest audit" if sample is not None else
                               "none: run an audit of this domain first", "bot_families_version": bots.VERSION})
@@ -390,3 +409,38 @@ class LogsMixin:
     def log_ingests_view(self, tid: str) -> list:
         with self.lock:
             return [self.log_ingest_view(tid, i) for i, g in self.log_ingests.items() if g["tenant_id"] == tid][:1000]
+
+
+def _sample_of(delia_facts: dict, key: bytes) -> Optional[dict]:
+    """The sitemap sample an ingest keeps (M-S3 / M-S4): templates to show and keyed digests to match, never raw
+    paths. A report written before AEGIS Wave-1 held raw paths: they are templated and digested here, in memory."""
+    dg = delia_facts.get("sitemap_paths_sample_digests")
+    templates = list(delia_facts.get("sitemap_paths_sample") or [])
+    fp = hashlib.sha256(key).hexdigest()[:16]
+    if isinstance(dg, dict):
+        if dg.get("key_fp") != fp or len(dg.get("digests") or []) != len(templates):
+            return None                          # another key: its digests cannot be matched
+        return {"templates": templates, "digests": list(dg["digests"]), "key_fp": fp}
+    if "sitemap_paths_sample_digests" in delia_facts:   # recorded without a key
+        return None
+    exact = [p for p in templates if isinstance(p, str)]
+    return {"templates": [safe_path(p) for p in exact], "digests": [logs_mod.path_digest(key, logs_mod._path(p) or p)
+                                                                      for p in exact], "key_fp": fp}
+
+
+def _sample_index(sample, key: bytes) -> dict:
+    """{digest: index} for process_chunk; an ingest recorded before M-S3 kept raw paths (read, digested here)."""
+    if isinstance(sample, dict):
+        return {d: i for i, d in enumerate(sample.get("digests") or [])}
+    if isinstance(sample, list):
+        return {logs_mod.path_digest(key, logs_mod._path(p) or p): i for i, p in enumerate(sample)
+                if isinstance(p, str)}
+    return {}
+
+
+def _sample_templates(sample) -> Optional[list]:
+    if isinstance(sample, dict):
+        return list(sample.get("templates") or [])
+    if isinstance(sample, list):
+        return [safe_path(p) for p in sample]
+    return None

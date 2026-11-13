@@ -6,8 +6,12 @@ prompt index). A key present in only one run, or present in both with a differen
 and every change gets exactly one class by the FIRST rule below that its evidence supports. A class is never
 assigned without the evidence listed with it; UNKNOWN is a valid answer and is used whenever no rule's evidence holds.
 
-  R1 TOOL_FAILURE       the agent's outcome, or the page's fetch state, is not OK in either run (or differs): the
-                        observation failed, so the change says nothing about the site
+  R1 TOOL_FAILURE       the agent's outcome is not OK / PARTIAL in either run, or the observation THIS finding
+                        rests on failed in either run (AEGIS Wave-1 M-O1: a PARTIAL agent is not healthy for the
+                        fact that failed): the page's fetch state; the finding is itself a fetch failure
+                        (``*_UNREADABLE``, a robots / sitemap check left incomplete); robots.txt unreachable or
+                        too large; llms.txt unreadable; for a sitemap finding, that sitemap URL unreadable, or (a
+                        finding over all sitemaps) any sitemap fetch failure: the change says nothing about the site
   R2 MEASUREMENT_ERROR  the ruler moved and the thing measured did not: the bot family list, the structured-data
                         rule table, the canonical entity record version, or (answer engines) the prompt set changed,
                         while the page / robots.txt is the same by fingerprint
@@ -31,7 +35,7 @@ from datetime import date
 from typing import Optional
 
 AGENT, TASK = "osei", "search_truth_drift"
-RULES_VERSION = "2026-10-10.2"   # .2: ruler changes are checked before real change
+RULES_VERSION = "2026-11-13.1"   # .1 of 11-13: R1 per fact (a failed fetch is never a change, M-O1)
 CLASSES = ("REAL_CHANGE", "MEASUREMENT_ERROR", "MODEL_DRIFT", "SURFACE_DRIFT", "SAMPLING_NOISE", "TOOL_FAILURE",
            "UNKNOWN")
 KEY_DETAIL = ("token", "field", "engine", "prompt_index")
@@ -90,6 +94,9 @@ def classify(agent: str, f: dict, a: dict, b: dict) -> tuple[str, dict]:
     ok = ("OK", "PARTIAL")
     if oa not in ok or ob not in ok:
         return "TOOL_FAILURE", {"rule": "R1", "outcome_before": oa, "outcome_after": ob}
+    failed = _fact_failed(agent, f, ea, eb)
+    if failed is not None:
+        return "TOOL_FAILURE", {"rule": "R1", **failed}
     url = f.get("url")
     pa, pb = _path_of(a, url), _path_of(b, url)
     if pa is not None and pb is not None:
@@ -121,7 +128,9 @@ def classify(agent: str, f: dict, a: dict, b: dict) -> tuple[str, dict]:
                   if A["fetch"].get(k) != B["fetch"].get(k)}
         fa, fb = A.get("fingerprint"), B.get("fingerprint")
         moved = _ruler(a, b, agent)
-        changed = sorted(k for k in fb if fa.get(k) != fb.get(k)) if fa is not None and fb is not None else None
+        # NIT: a field in either fingerprint counts (one present in only the older report is a change too)
+        changed = sorted(k for k in set(fa) | set(fb) if fa.get(k) != fb.get(k)) \
+            if fa is not None and fb is not None else None
         page_moved = bool(changed) or bool(served)
         if moved and page_moved:
             return "UNKNOWN", {"rule": "R3", "why": "the rules and the page both changed", "changed": moved,
@@ -152,6 +161,43 @@ def classify(agent: str, f: dict, a: dict, b: dict) -> tuple[str, dict]:
             return "REAL_CHANGE", {"rule": "R7", "observed_changed": diff}
         return "UNKNOWN", {"rule": "R8", "why": "the sitemap and llms.txt observations are the same"}
     return "UNKNOWN", {"rule": "R8", "why": "no rule applies to this finding"}
+
+
+INCOMPLETE_CODES = frozenset({"ROBOTS_CHECK_INCOMPLETE", "SITEMAP_ROBOTS_CHECK_INCOMPLETE",
+                              "LOG_ROBOTS_CHECK_INCOMPLETE"})
+
+
+def _codes_urls(env: Optional[dict], code: str) -> set:
+    return {x.get("url") for x in (env or {}).get("findings", []) if x.get("code") == code}
+
+
+def _fact_failed(agent: str, f: dict, ea: dict, eb: dict) -> Optional[dict]:
+    """The evidence that the observation this finding rests on failed in either run, or None (R1, per fact)."""
+    code = f.get("code") or ""
+    if code.endswith("_UNREADABLE") or code.endswith("_UNREACHABLE") or code in INCOMPLETE_CODES:
+        return {"why": "the finding is itself a failed or incomplete observation", "code": code}
+    fa, fb = (ea or {}).get("facts") or {}, (eb or {}).get("facts") or {}
+    url = f.get("url")
+    if agent == "selene" and url and url.endswith("/robots.txt"):
+        ca = (fa.get("robots") or {}).get("status_class")
+        cb = (fb.get("robots") or {}).get("status_class")
+        if ca in ("unreachable", "too_large") or cb in ("unreachable", "too_large"):
+            return {"robots_status_before": ca, "robots_status_after": cb}
+    if agent == "delia":
+        if code.startswith("LLMS_TXT"):
+            la, lb = (fa.get("llms_txt") or {}).get("state"), (fb.get("llms_txt") or {}).get("state")
+            if la in (None, "unreadable") or lb in (None, "unreadable"):
+                return {"llms_txt_state_before": la, "llms_txt_state_after": lb}
+            return None
+        if url:
+            ua, ub = url in _codes_urls(ea, "SITEMAP_UNREADABLE"), url in _codes_urls(eb, "SITEMAP_UNREADABLE")
+            if ua or ub:
+                return {"sitemap_unreadable_before": ua, "sitemap_unreadable_after": ub}
+            return None
+        xa, xb = fa.get("sitemap_fetch_failures") or 0, fb.get("sitemap_fetch_failures") or 0
+        if xa or xb or fa.get("robots_unchecked") or fb.get("robots_unchecked"):
+            return {"sitemap_fetch_failures_before": xa, "sitemap_fetch_failures_after": xb}
+    return None
 
 
 def _ruler(a: dict, b: dict, agent: str) -> dict:

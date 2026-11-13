@@ -285,7 +285,7 @@ def setup(tmp):
     return SimpleNamespace(h=h, web=web, fin=fin, steps=[], snap=None, audit=None, needles=[], expected_code=None,
                            probe=None, kill_at=None, ledger_before=0, log_before=0, foreign=[], hostile=None,
                            switch=None, expect_quarantine=None, ingest_view=None, pd=False, gsc=None, pplx=None,
-                           pplx_ps=None, pplx_kill_at=None)
+                           pplx_ps=None, pplx_kill_at=None, cost=None, drift=None)
 
 
 def teardown(ctx) -> None:
@@ -1153,12 +1153,166 @@ def _pplx_state(ctx, state, outs) -> None:
     state["good_variant_unanswered"] = f.mode == "documented_variant" and answers == 0
 
 
+# ---------------------------------------------------------------------------------------------- robots.txt matching cost
+
+ROBOTS_COST_BOUND_S = 30.0       # an audit or a log chunk under a hostile robots.txt finishes within this (stated)
+STALL_BOUND_MS = 1000.0          # the longest the interpreter was held by one step (a GIL stall), measured
+
+
+class _StallMeter:
+    """A thread that wakes every 10 ms and records the longest gap: a matcher holding the GIL in one C call (a
+    backtracking regex) shows as a long gap; pure-Python loops yield every switch interval."""
+
+    def __init__(self):
+        import threading
+        self.max_gap = 0.0
+        self._stop = threading.Event()
+        self._t = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self):
+        last = time.perf_counter()
+        while not self._stop.is_set():
+            time.sleep(0.01)
+            now = time.perf_counter()
+            self.max_gap = max(self.max_gap, now - last - 0.01)
+            last = now
+
+    def __enter__(self):
+        self._t.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._stop.set()
+        self._t.join(5)
+
+
+def _hostile_robots(kind: str) -> tuple[str, list]:
+    """(robots.txt, audit paths) for one matching-cost case (AEGIS Wave-1 M-S1: the reviewer's measured shapes)."""
+    wild6 = "/*a*a*a*a*a*a*b"
+    long_paths = ["/" + "a" * 60 + f"{i}" for i in range(9)]        # with "/": SEO_AUDIT_MAX_PAGES (10)
+    if kind == "wildcards_6x60":          # 3.0 s per URL at a4af277 (10 URLs here: the audit page cap)
+        return f"User-agent: *\nDisallow: {wild6}\nAllow: /\n", ["/"] + long_paths
+    if kind == "rules_20000":             # 0.873 s per call at a4af277
+        return "User-agent: *\n" + "".join(f"Disallow: /r{i}/*x\n" for i in range(20_000)), ["/"] + long_paths[:4]
+    if kind == "wildcard_rules_named_groups":
+        groups = "".join(f"User-agent: {t}\n" + "".join(f"Disallow: /*a*a*a*a*a*a*a*a*b{t[:2]}{i}\n"
+                                                         for i in range(600)) + "\n"
+                         for t in ("Googlebot", "Bingbot", "GPTBot", "ClaudeBot", "PerplexityBot"))
+        return groups + "User-agent: *\nAllow: /\n", ["/"] + long_paths
+    if kind == "rules_2000_sitemap_500":  # 268.7 s at a4af277
+        return ("User-agent: *\n" + "".join(f"Disallow: /*a*a*a*a*a*a*q{i}\n" for i in range(2000))
+                + "Sitemap: http://site.test/sitemap.xml\n"), ["/"]
+    raise ValueError(f"unknown robots cost kind {kind}")
+
+
+def robots_cost(ctx, kind):
+    """A hostile robots.txt built to make a backtracking or per-rule-regex matcher slow, then an audit (and, for the
+    log case, an ingest) timed end to end with the GIL-stall meter running."""
+    text, paths = _hostile_robots(kind)
+    _route(ctx, "/robots.txt", 200, text, "text/plain")
+    if kind == "rules_2000_sitemap_500":
+        _route(ctx, "/sitemap.xml", 200, _sitemap(f"http://site.test/{'a' * 60}{i}" for i in range(500)),
+               "application/xml")
+    for p in paths:
+        if (SITE, p) not in ctx.web.routes:
+            _route(ctx, p, 200, FIXTURE.home_html(canonical=f"http://site.test{p}"))
+    t0 = time.perf_counter()
+    with _StallMeter() as m:
+        r = audit(ctx, paths=tuple(paths))
+        ctx.cost = {"audit_s": time.perf_counter() - t0}
+        t1 = time.perf_counter()
+        lines = "".join(clf("/" + "a" * 60 + f"{i}") + "\n" for i in range(400)).encode()
+        ctx.steps.append({"action": "robots_cost_ingest", **_ingest(ctx, lines)})
+        ctx.cost["ingest_s"] = time.perf_counter() - t1
+    ctx.cost["stall_ms"] = m.max_gap * 1000
+    return r
+
+
+# ---------------------------------------------------------------------------------------------- drift classification
+
+def _cite_pattern(f, pattern):
+    """Make the fake Perplexity cite the site in the answers marked True, in order (then not)."""
+    seq = list(pattern)
+    orig = f.handle
+
+    def handle(request):
+        hit = seq.pop(0) if seq else False
+        f.cites = (["https://site.test/page"] if hit else []) + ["https://competitor.test/a"]
+        return orig(request)
+    f.handle = handle
+    return handle
+
+
+def drift_case(ctx, kind):
+    """Two audits of site.test with one change between them, then the drift view (Osei's search-truth drift). The
+    case states which class the changed findings must get, and which they must never get."""
+    h = ctx.h
+    ps = None
+    if kind == "sampling_noise":
+        perplexity(ctx, host="site.test")
+        f = ctx.pplx
+        handle = _cite_pattern(f, [True, True, False])
+        h.ports.engines["perplexity"] = PX.PerplexityEngine(PX.ApiKey(PPLX_KEY, "env"),
+                                                            transport=httpx.MockTransport(handle), monotonic=f.clock,
+                                                            sleep=f.clock.sleep, rand=lambda: 0.0)
+        ps = ctx.pplx_ps
+    if kind == "tool_failure_before_llms":
+        ctx.web.routes[(SITE, "/llms.txt")] = lambda req: (_ for _ in ()).throw(httpx.ConnectError("dropped"))
+    body = {"request_id": H.rid(), "domain": SITE, "scheme": "http", "paths": ["/", "/about"]}
+    if ps:
+        body.update(paths=["/"], prompt_set_id=ps)
+    a = h.post("/tenants/zbm/audits", body)
+    if kind == "real_change":
+        _route(ctx, "/about", 200, FIXTURE.home_html(title="About Z Best Media", canonical="http://site.test/about",
+                                                     extra_head="<meta name='robots' content='noindex'>"))
+    elif kind == "tool_failure_after_sitemap":
+        _route(ctx, "/sitemap.xml", 503, "down", "text/plain")
+    elif kind == "tool_failure_after_llms":
+        ctx.web.routes[(SITE, "/llms.txt")] = lambda req: (_ for _ in ()).throw(httpx.ConnectError("dropped"))
+    elif kind == "tool_failure_before_llms":
+        _route(ctx, "/llms.txt", 200, "## no title\n", "text/plain")
+    elif kind == "tool_failure_after_robots":
+        _route(ctx, "/robots.txt", 503, "down", "text/plain")
+    elif kind == "sampling_noise":
+        handle = _cite_pattern(ctx.pplx, [True, False, False])
+        h.ports.engines["perplexity"] = PX.PerplexityEngine(PX.ApiKey(PPLX_KEY, "env"),
+                                                            transport=httpx.MockTransport(handle),
+                                                            monotonic=ctx.pplx.clock, sleep=ctx.pplx.clock.sleep,
+                                                            rand=lambda: 0.0)
+    body["request_id"] = H.rid()
+    b = h.post("/tenants/zbm/audits", body)
+    ctx.audit = b
+    ids = [x.json().get("audit_id") for x in (a, b)]
+    d = h.get(f"/tenants/zbm/audits/{ids[1]}/drift?against={ids[0]}")
+    ctx.drift = {"kind": kind, "http": d.status_code, "body": d.json() if d.status_code == 200 else None}
+    return d
+
+
+DRIFT_EXPECT = {"real_change": ("selene", "REAL_CHANGE"), "sampling_noise": ("callum", "SAMPLING_NOISE"),
+                "tool_failure_after_sitemap": ("delia", "TOOL_FAILURE"),
+                "tool_failure_after_llms": ("delia", "TOOL_FAILURE"),
+                "tool_failure_before_llms": ("delia", "TOOL_FAILURE"),
+                "tool_failure_after_robots": ("selene", "TOOL_FAILURE")}
+
+
+def _drift_observe(ctx, state: dict) -> None:
+    d = ctx.drift
+    state["drift_http"] = d["http"]
+    changes = (d["body"] or {}).get("changes") or []
+    agent, want = DRIFT_EXPECT[d["kind"]]
+    mine = [c for c in changes if c["agent"] == agent]
+    state["drift_classes"] = sorted({c["class"] for c in mine})
+    state["drift_expected_class_seen"] = want in state["drift_classes"]
+    # a failed fetch on either side is never a change about the site (ADR 0017 decision 11; AEGIS Wave-1 M-O1)
+    state["drift_failure_called_real"] = d["kind"].startswith("tool_failure") and "REAL_CHANGE" in state["drift_classes"]
+
+
 ACTIONS = {"gsc": gsc, "gsc_kill": gsc_kill, "site": site, "plant": plant, "snapshot": snapshot, "audit": audit, "bomb": bomb, "slow": slow,
            "giant": giant, "inject": inject, "log_pii": log_pii, "log_hostile": log_hostile,
            "two_clients": two_clients, "probe": probe, "personal_data_key": personal_data_key, "kill": kill,
            "release_without_andre": release_without_andre, "kill_mid_run": kill_mid_run, "paid_run": paid_run,
            "perplexity": perplexity, "answer_audit": answer_audit, "pplx_kill_mid_run": pplx_kill_mid_run,
-           "pplx_ledger_down": pplx_ledger_down}
+           "pplx_ledger_down": pplx_ledger_down, "robots_cost": robots_cost, "drift_case": drift_case}
 
 
 # ============================================================================================ observation
@@ -1289,6 +1443,15 @@ def observe(ctx) -> dict:
     state["finance_calls"] = ctx.fin.calls
     if ctx.gsc is not None:
         _gsc_observe(ctx, state, outs)
-    if ctx.pplx is not None:
+    if ctx.pplx is not None and ctx.drift is None:
         _pplx_state(ctx, state, outs)
+    if ctx.cost is not None:
+        state["audit_seconds"] = round(ctx.cost["audit_s"], 3)
+        state["ingest_seconds"] = round(ctx.cost["ingest_s"], 3)
+        state["max_stall_ms"] = round(ctx.cost["stall_ms"], 1)
+        state["robots_cost_within_bound"] = ctx.cost["audit_s"] <= ROBOTS_COST_BOUND_S and \
+            ctx.cost["ingest_s"] <= ROBOTS_COST_BOUND_S
+        state["no_interpreter_stall"] = ctx.cost["stall_ms"] <= STALL_BOUND_MS
+    if ctx.drift is not None:
+        _drift_observe(ctx, state)
     return state

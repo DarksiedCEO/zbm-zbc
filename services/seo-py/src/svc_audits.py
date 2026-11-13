@@ -244,7 +244,7 @@ class AuditsMixin:
         started = iso(self.now())
         ctx = RunContext(fetcher=self.ports.fetcher, renderer=self.ports.renderer, guard=self.guard(tid),
                          clock=self.clock, osei=o, domain=body["domain"], scheme=body["scheme"],
-                         paths=list(body["paths"]))
+                         paths=list(body["paths"]), path_key=getattr(self.settings, "log_hash_key", None))
         envs, pages = [], {}
         if self.ports.fetcher is None:
             envs.append(envelope("selene", "crawlability", "NOT_CONNECTED", [], methodology="no fetcher is wired",

@@ -75,7 +75,7 @@ def test_injection_text_in_paths_and_user_agents_is_data():
     d = run("combined", chunk([clf("1.2.3.4", "/ignore-previous-instructions;drop", 200, ua)]))
     g = d["families"]["Googlebot"]
     assert g["claimed"] == 1 and g["verified"] == 0
-    assert list(g["templates"]) == ["/ignore-previous-instructions;drop"]
+    assert list(g["templates"]) == ["/ignore-previous-instructions;{param}"]     # M-S5: ";" parameters templated
 
 
 def test_classification_prefers_the_specific_token():

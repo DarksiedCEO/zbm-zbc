@@ -2406,12 +2406,12 @@
      "literal": [
       "evilsite.test",
       "site.test.evil.test",
-      "sіte.test",
+      "s\u0456te.test",
       "xn--ste-jhd.test",
       "site.tes",
       "site-test.example",
       "www-site.test",
-      "ѕite.test",
+      "\u0455ite.test",
       "site.test@evil.test",
       "evil.test%2esite.test",
       "s1te.test"
@@ -2977,6 +2977,211 @@
      "check": "state_equals",
      "args": {
       "key": "pplx_key_leaked",
+      "value": false
+     }
+    }
+   ]
+  },
+  {
+   "id": "robots-matching-cost",
+   "persona": "a site whose robots.txt is built to make the matcher slow (backtracking wildcards, tens of thousands of rules, many named groups, a long sitemap)",
+   "basis": "ADR 0017 decision 11 and the AEGIS Wave-1 certification M-S1: robots.txt matching is linear (no regular expression), rules are compiled once per file, bounded (MAX_PATTERN, MAX_WILDCARDS, MAX_RULES_PER_GROUP, MAX_PATH) and every step has a time budget; the reviewer measured 3.0 s per URL, 63 s per request and 268.7 s at a4af277 for these shapes",
+   "seeds": [
+    {
+     "literal": [
+      "wildcards_6x60",
+      "rules_20000",
+      "wildcard_rules_named_groups",
+      "rules_2000_sitemap_500"
+     ],
+     "basis": "the reviewer's measured shapes (M-S1)"
+    }
+   ],
+   "input_field": "kind",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "site"
+    },
+    {
+     "action": "snapshot"
+    },
+    {
+     "action": "robots_cost",
+     "args": {
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "audit_completes",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "audit_status_completed",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_request_reached_a_non_public_address",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "internal_requests",
+      "value": []
+     }
+    },
+    {
+     "id": "no_internal_content_anywhere",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "secret_leaked",
+      "value": false
+     }
+    },
+    {
+     "id": "within_the_stated_time_bound",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "robots_cost_within_bound",
+      "value": true
+     }
+    },
+    {
+     "id": "no_interpreter_stall",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "no_interpreter_stall",
+      "value": true
+     }
+    },
+    {
+     "id": "ingest_accepted",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "ingest_ok",
+      "value": true
+     }
+    },
+    {
+     "id": "crawled_content_changes_no_state",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "state_unchanged",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-classification",
+   "persona": "a site that changes, or fails to answer, between two audits (and an answer engine whose citations vary by chance)",
+   "basis": "ADR 0017 decision 11 (a failed fetch is TOOL_FAILURE, never a change) and the drift rules R1..R8 (agents/drift.py; AEGIS Wave-1 M-O1: R1 per fact, either side)",
+   "seeds": [
+    {
+     "literal": [
+      "real_change",
+      "sampling_noise",
+      "tool_failure_after_sitemap",
+      "tool_failure_after_llms",
+      "tool_failure_before_llms",
+      "tool_failure_after_robots"
+     ],
+     "basis": "one per drift class the rules must assign: a real change, sampling noise, a tool failure on the newer and on the older side"
+    }
+   ],
+   "input_field": "kind",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "site"
+    },
+    {
+     "action": "snapshot"
+    },
+    {
+     "action": "drift_case",
+     "args": {
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "audit_completes",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "audit_status_completed",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_request_reached_a_non_public_address",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "internal_requests",
+      "value": []
+     }
+    },
+    {
+     "id": "no_internal_content_anywhere",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "secret_leaked",
+      "value": false
+     }
+    },
+    {
+     "id": "drift_view_answers",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "drift_http",
+      "value": 200
+     }
+    },
+    {
+     "id": "expected_class_assigned",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "drift_expected_class_seen",
+      "value": true
+     }
+    },
+    {
+     "id": "a_failed_fetch_is_never_a_change",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "drift_failure_called_real",
       "value": false
      }
     }
