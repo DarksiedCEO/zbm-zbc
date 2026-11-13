@@ -211,18 +211,25 @@ def test_l2_export_serves_expired_sections_as_totals_only(tmp_path):
     fake = FakeGoogle()
     fake.pages += [("https://acme.test/blog/post-3", 1, 5, 2.0)]
     h = _setup(tmp_path, fake, SEO_GSC_RETENTION_DAYS="1")
-    audit(h, "acme", "acme.test")
+    aid = audit(h, "acme", "acme.test")["audit_id"]
 
     def exported():
-        ev = h.ok(h.get("/audit/export", params={"limit": 1000}))["events"]
-        return [e["data"]["report"]["search_performance"]["section"] for e in ev if e["kind"] == "audit_completed"]
-    fresh = exported()
-    assert fresh and "by_query_class" in fresh[0] and "by_page_template" in fresh[0]
+        return h.ok(h.get("/audit/export", params={"limit": 1000}))
+
+    def served():
+        return h.ok(h.get(f"/tenants/acme/audits/{aid}"))["report"]["search_performance"]["section"]
+    # sink job B: the report (with its search-performance section) is in the tenant's vault; the log, and so the
+    # export, never carries it, fresh or expired: only the ref, the keyed hash and machine facts
+    (done,) = [e["data"] for e in exported()["events"] if e["kind"] == "audit_completed"]
+    assert "report" not in done and set(done) >= {"report_ref", "report_hmac", "facts"}
+    assert "/blog/{slug}" not in json.dumps(exported()) and "by_query_class" not in json.dumps(exported())
+    fresh = served()
+    assert "by_query_class" in fresh and "by_page_template" in fresh
     h.clock.advance(days=2)
-    (old,) = exported()
+    old = served()                                          # retention binds the owner's read of the vaulted report
     assert old["expired"] is True and "by_query_class" not in old and "by_page_template" not in old
-    assert "by_date" not in old and old["totals"]["clicks"] == fresh[0]["totals"]["clicks"]
-    assert "/blog/{slug}" not in json.dumps(h.ok(h.get("/audit/export", params={"limit": 1000})))
+    assert "by_date" not in old and old["totals"]["clicks"] == fresh["totals"]["clicks"]
+    assert "/blog/{slug}" not in json.dumps(exported())
 
 
 # ====================================================================== L3: drift
@@ -273,8 +280,8 @@ def test_l3_api_and_scheduler_classify_the_same_pair_the_same_way_after_expiry(t
     a1 = audit(h, "acme", "acme.test")["audit_id"]
     h.clock.advance(days=8)
     a2 = audit(h, "acme", "acme.test")["audit_id"]
-    with h.svc.lock:                                    # what the scheduler compares (raw records, retention applied)
-        raw = [h.svc.gsc_retained(h.svc.audits[x]["report"], h.svc.audits[x]["completed_at"]) for x in (a1, a2)]
+    # what the scheduler compares (the recorded reports, read from the vault, retention applied; sink job B)
+    raw = [h.svc._audit_recorded("acme", x)["report"] for x in (a1, a2)]
     sched = drift.compare(*raw)["search_performance"]
     api = h.ok(h.get(f"/tenants/acme/audits/{a2}/drift", params={"against": a1}))["search_performance"]
     assert raw[0]["search_performance"]["section"]["expired"] is True       # the older one has expired

@@ -11,7 +11,7 @@ import pytest
 
 import compliance_client as cc
 import config as config_mod
-from helpers import Harness, PassingCompliance, base_env, derived, rid
+from helpers import Harness, PassingCompliance, base_env, derived, rid, ruling_id
 from ports import Ports
 from test_invoice_verification import CLIENT, FakeFinance, client_tenant, harness, paid_audit, schedule, tick
 
@@ -164,7 +164,7 @@ def test_an_allowed_run_records_the_activation(tmp_path, srv):
     h = harness(tmp_path, srv, f)
     client_tenant(h)
     a = h.ok(paid_audit(h, invoice_id=f.add()), 201)
-    assert a["invoice_verification"]["compliance"] == {"verdict": "ALLOW", "ruling_id": f"cmp-rul-{CLIENT}",
+    assert a["invoice_verification"]["compliance"] == {"verdict": "ALLOW", "ruling_id": ruling_id(CLIENT),
                                                        "jurisdiction": "US-CA"}
     ev = h.ledger.of_type("compliance_activation_confirmed")
     assert ev and ev[0]["subject_id"].startswith("audit:")

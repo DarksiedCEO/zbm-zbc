@@ -22,14 +22,17 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from agents import domain_match
+from agents import domain_match, secret_guard
 from config import CAPABILITY_SWITCHES, PROVIDER_SWITCHES, TENANT_ID
 from errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from primitives import Killed
 from reasons import R
+import sink_guard
+from svc_optext import url_view
 
 TENANT_KINDS = ("own", "client")
-DOMAIN = re.compile(r"(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}")
+# review 2b26d980 SHOULD 1: a punycode TLD (``xn--p1ai``) is a TLD too (an IDN domain is registered as A-labels)
+DOMAIN = re.compile(r"(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,63}|xn--[a-z0-9-]{1,58}[a-z0-9])")
 DOMAINS_MAX = 20
 OWN_TENANT = "zbm"
 
@@ -40,6 +43,36 @@ def valid_domain(d) -> bool:
     return isinstance(d, str) and bool(DOMAIN.fullmatch(d)) and not d.endswith((".local", ".internal", ".localhost",
                                                                                 ".arpa", ".invalid")) \
         and not domain_match.is_public_suffix(d)
+
+
+def identifier_refused(x, prose: bool = False) -> bool:
+    """Review c0c09bd1: an identifier (tenant id, Finance client id) holding a key, a 9+ digit run, an e-mail form
+    (review 2b26d980: also one written without its "@"), or failing the strict check (secret_guard.identifier_refusal).
+    ``prose`` (a tenant id, a Finance client id): also prose folded with hyphens / dots (secret_guard.folded_prose)."""
+    if secret_guard.identifier_refusal(x) is not None:
+        return True
+    if prose and secret_guard.folded_prose(x):
+        return True
+    # sink job D: an identifier is LOGGED, so it must be a machine value of the sink guard (a host name the host rule
+    # takes, a code of at most 64 characters holding a letter, a small number). One that is not is
+    # refused here (422 IDENTIFIER_WITHHELD) instead of being accepted and then refused at the sink (503)
+    return sink_guard.classify(x) is None
+
+
+def domain_refused(d) -> bool:
+    """Review 2b26d980 SHOULD 1: a DOMAIN field (a tenant's domain, a competitor domain) is judged as a host name by
+    the sink guard's host rule (``sink_guard.host_refusal``: a credential word in a label is a name,
+    ``1password.com``; a key-shaped or number-shaped host is refused).
+    Review 98b76cde: the registration lane keeps exactly what release 2b26d980 did with an e-mail form in a domain
+    (``first-last-at-domain.tld`` is refused; a mailbox provider's sub-domain and an ``at`` LABEL are not e-mail
+    forms), and a domain that release registered is never refused now (P1): one the rule does not take is judged
+    by that release's identifier rules (``secret_guard.identifier_refusal`` without the "@"-less forms, which are
+    for a tenant id and a Finance client id, then the sink guard)."""
+    if not sink_guard.host_shaped(d):
+        return identifier_refused(d)
+    if sink_guard.host_refusal(d) is None and not secret_guard.email_form(d):
+        return False
+    return secret_guard.identifier_refusal(d, atless=False) is not None or sink_guard.classify(d) is None
 
 
 def _site(d: str) -> str:
@@ -178,6 +211,8 @@ class TenantsMixin:
         tid, kind = body["tenant_id"], body["kind"]
         if kind not in TENANT_KINDS:
             raise Invalid(R("TENANT_KIND_INVALID"))
+        if identifier_refused(tid, prose=True):           # review c0c09bd1: an identifier, not prose
+            raise Invalid(R("IDENTIFIER_WITHHELD"))
         with self.lock:
             self._gate()
             self.check_kill(write=True)
@@ -202,6 +237,8 @@ class TenantsMixin:
             raise Invalid(R("DOMAIN_LIMIT"))
         if not all(valid_domain(d) for d in domains) or len(set(domains)) != len(domains):
             raise Invalid(R("DOMAIN_INVALID"))
+        if any(domain_refused(d) for d in domains):       # review c0c09bd1: a registrable host name, not prose
+            raise Invalid(R("IDENTIFIER_WITHHELD"))
         with self.lock:
             self._gate()
             self.check_kill(tenant=tid, write=True)
@@ -227,6 +264,8 @@ class TenantsMixin:
         """Andre binds a client tenant to its Finance (31) client id (Legal's party reference at Finance), so a paid
         run can check that the invoice is this client's (ADR 0017 W3-2). Re-binding is allowed and recorded; the
         id is never read from a page, an invoice or a caller other than Andre."""
+        if identifier_refused(body["finance_client_id"], prose=True):  # review c0c09bd1: an identifier, not prose
+            raise Invalid(R("IDENTIFIER_WITHHELD"))
         with self.lock:
             self._gate()
             self.check_kill(tenant=tid, write=True)
@@ -247,8 +286,18 @@ class TenantsMixin:
     def tenant_view(self, tid: str) -> dict:
         with self.lock:
             t = self._get(self.tenants, tid, "TENANT_NOT_FOUND")
-            return {**t, "domains": list(t["domains"]),
-                    "audits": sum(1 for a in self.audits.values() if a["tenant_id"] == tid)}
+            out = {**{k: v for k, v in t.items() if k not in ("gsc_property_host", "gsc_vault_unavailable")},
+                   "domains": list(t["domains"]),
+                   "audits": sum(1 for a in self.audits.values() if a["tenant_id"] == tid)}
+            if t.get("gsc_vault_unavailable"):            # sink job D: bound, the property text cannot be read
+                out["gsc_vault_unavailable"] = True
+            prop = t.get("gsc_property")
+            if isinstance(prop, str) and prop.startswith("http"):
+                shown, alert = url_view(prop)             # review c0c09bd1: the owner's view, client-view masked
+                out["gsc_property"] = shown
+                if alert:
+                    out["gsc_property_masked"] = True
+            return out
 
     def tenants_view(self) -> list:
         with self.lock:

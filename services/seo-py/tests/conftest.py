@@ -60,6 +60,72 @@ def _no_network(request, monkeypatch):
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "local_http: the test talks to an in-process HTTP fixture on 127.0.0.1")
+    config.addinivalue_line("markers", "sink_last: runs after every other test (it reads what the whole run wrote)")
+
+
+# Sink jobs A-D: every record the suite commits is observed by the sink guard. ``SINK_SEEN`` keeps, for the whole run,
+# the sinks whose records passed and, per test, the (sink, path) pairs the guard REFUSED. There is no legacy list any
+# more (sink job D): tests/test_sink_guard.py reads this LAST and fails when a refusal happened anywhere but in a test
+# that provokes one on purpose (``EXPECTED_SINK_REFUSALS`` there). Paths and sink names only: never a value.
+# Review 2b26d980 NIT: a test cannot silence the observer unseen. ``SINK_SEEN["silenced"]`` keeps, per test, the guard
+# entry points (``GUARD_ENTRY_POINTS``) it replaced, however it did so (assignment, ``monkeypatch.setattr``): the
+# sink_guard module is given a class whose ``__setattr__`` notes it. tests/test_sink_guard.py lists the only tests
+# that may (``EXPECTED_GUARD_PATCHES``) and fails on any other.
+SINK_SEEN = {"passed": set(), "violations": {}, "silenced": {}, "full_run": False, "test": "(outside a test)"}
+GUARD_ENTRY_POINTS = ("OBSERVER", "enforce", "refused", "violations")
+
+
+def _sink_observer(kind, found, bad):
+    if not bad:
+        SINK_SEEN["passed"].add(kind)
+    else:
+        SINK_SEEN["violations"].setdefault(SINK_SEEN["test"], set()).update((kind, p) for p in bad)
+
+
+@pytest.fixture(autouse=True)
+def _sink_current_test(request):
+    name = getattr(request.node, "originalname", None) or request.node.name
+    SINK_SEEN["test"] = f"{Path(str(request.node.fspath)).name}::{name}"
+    yield
+    SINK_SEEN["test"] = "(outside a test)"
+
+
+def _install_sink_observer():
+    import types
+
+    import sink_guard
+    sink_guard.OBSERVER = _sink_observer
+    original = {name: getattr(sink_guard, name) for name in GUARD_ENTRY_POINTS}
+
+    class WatchedGuard(types.ModuleType):
+        def __setattr__(self, name, value):
+            if name in original and value is not original[name]:
+                SINK_SEEN["silenced"].setdefault(SINK_SEEN["test"], set()).add(name)
+            super().__setattr__(name, value)
+
+        def __delattr__(self, name):
+            if name in original:
+                SINK_SEEN["silenced"].setdefault(SINK_SEEN["test"], set()).add(name)
+            super().__delattr__(name)
+
+    sink_guard.__class__ = WatchedGuard
+
+
+_install_sink_observer()
+
+
+def pytest_collection_modifyitems(session, config, items):
+    last = [i for i in items if i.get_closest_marker("sink_last")]
+    if last:
+        items[:] = [i for i in items if not i.get_closest_marker("sink_last")] + last
+    files = {Path(str(i.fspath)).name for i in items}
+    every = {p.name for p in TESTS.glob("test_*.py")}
+    opt = config.option
+    SINK_SEEN["full_run"] = bool(
+        files >= every and not getattr(opt, "keyword", "") and not getattr(opt, "markexpr", "")
+        and not getattr(opt, "lf", False) and not getattr(opt, "failedfirst", False)
+        and not getattr(opt, "maxfail", 0) and not getattr(opt, "deselect", None)
+        and not getattr(opt, "numprocesses", None) and not hasattr(config, "workerinput"))
 
 
 @pytest.fixture

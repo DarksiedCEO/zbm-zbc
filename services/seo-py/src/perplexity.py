@@ -46,20 +46,29 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import os
 import random
 import re
 import time
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal  # noqa: F401 - part of this module's names since Wave 4 (tests read perplexity.Decimal)
 from typing import Annotated, Callable, Literal, Optional
 
-import httpcore
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, StrictFloat, StrictInt, StrictStr, ValidationError
 
+# The shared plumbing (ADR 0046): the error type, the key holder, the network layer and the ask loop moved to
+# answer_adapter.py UNCHANGED in behaviour; they are re-exported here so every existing name keeps working.
+from answer_adapter import (CODES, MAX_ANSWER_CHARS, MAX_RESPONSE_BYTES, MAX_RETRY_AFTER_S, MAX_SOURCES,  # noqa: F401
+                            MAX_UNMODELLED_KEYS, PROTOCOL_ERROR_STOP_AFTER, READ_SLICE_S, STOP_CODES, SYSTEM_PROMPT,
+                            ApiKey, EngineError, HttpAnswerEngine, _GuardedDeadlineBackend, _Killed, _Retry,
+                            _retry_after, _Stream, join_text, money)
+from answer_adapter import no_duplicates as _no_duplicates
 from finance_client import _DnsGate, _Resolver, _system_resolve
 from ports import ProviderAnswer
+
+# the documentation this adapter was built from (ADR 0017 W4-1; re-read for the Agent API migration)
+DOCS = {"url": "https://docs.perplexity.ai/api-reference/agent-post", "read": "2026-10-24",
+        "version": "Agent API, POST /v1/agent (Sonar /v1/sonar as the rollback)"}
 
 ENGINE = "perplexity"
 BASE_URL = "https://api.perplexity.ai"
@@ -85,72 +94,7 @@ AGENT_EFFORT = "fast"
 MAX_OUTPUT_ITEMS = 64
 MAX_CONTENT_PARTS = 64
 MAX_ANNOTATIONS = 200
-MAX_RESPONSE_BYTES = 512 * 1024
-MAX_ANSWER_CHARS = 100_000
-MAX_SOURCES = 100
-MAX_RETRY_AFTER_S = 30
-MAX_UNMODELLED_KEYS = 20                     # drift visibility: at most this many unmodelled top-level key NAMES
-# one socket read waits at most this long (within the deadline) before the kill-switch guard is checked again, so a
-# switch engaged while the API is still composing its answer stops the request within seconds (AEGIS L1)
-READ_SLICE_S = 2.0
-
-CODES = frozenset({"ENGINE_AUTH_REFUSED", "ENGINE_RATE_LIMITED", "ENGINE_UNAVAILABLE", "ENGINE_PROTOCOL_ERROR",
-                   "ENGINE_BUDGET_EXHAUSTED", "ENGINE_KILLED", "ENGINE_NOT_CONNECTED"})
-# a run stops asking this engine after one of these (asking again cannot help, or must not happen). A run also stops
-# after PROTOCOL_ERROR_STOP_AFTER ENGINE_PROTOCOL_ERRORs with no answer in between, whatever other errors come between
-# them (agents/probes.py): a response shape we cannot
-# read will not change on the next request, and every request costs money.
-PROTOCOL_ERROR_STOP_AFTER = 2
-STOP_CODES = frozenset({"ENGINE_AUTH_REFUSED", "ENGINE_RATE_LIMITED", "ENGINE_BUDGET_EXHAUSTED", "ENGINE_KILLED",
-                        "ENGINE_NOT_CONNECTED"})
-# The one fixed instruction sent with every question: no tenant, no person, no brand, no identifier of any kind.
-SYSTEM_PROMPT = "Answer the question concisely and cite your sources."
-_KEY_RX = re.compile(r"[\x21-\x7e]{20,512}")
-_MICRO = Decimal("0.000001")
-
-
-class EngineError(Exception):
-    """An answer-engine outcome that is not an answer. ``code`` is one of CODES; nothing else is carried (no body,
-    no header, no key, no URL)."""
-
-    def __init__(self, code: str, detail: Optional[str] = None, cost: Optional[str] = None):
-        if code not in CODES:
-            raise AssertionError(f"not an engine code: {code}")
-        super().__init__(code)
-        self.code = code
-        self.detail = detail if detail is None or re.fullmatch(r"[A-Z_]{1,40}", detail) else None
-        # the cost the provider reported on a response that is not an answer (failed, incomplete, another model):
-        # a micro-dollar Decimal string or None; the adapter charges it when it exceeds the reserve (AEGIS L4)
-        self.cost = cost if cost is None or re.fullmatch(r"[0-9]{1,6}\.[0-9]{6}", cost) else None
-
-    def __repr__(self) -> str:
-        return f"EngineError({self.code!r})"
-
-
-class ApiKey:
-    """The Perplexity API key. ``repr``/``str`` never show it, it cannot be pickled or compared by value from the
-    outside, and ``reveal()`` is the one way to read it (used only to build the Authorization header)."""
-
-    __slots__ = ("_v", "source")
-
-    def __init__(self, value: str, source: str):
-        if not isinstance(value, str) or not _KEY_RX.fullmatch(value):
-            raise ValueError("an API key is 20..512 printable ASCII characters without spaces")
-        if source not in ("file", "env"):
-            raise ValueError("source")
-        self._v = value
-        self.source = source
-
-    def reveal(self) -> str:
-        return self._v
-
-    def __repr__(self) -> str:
-        return f"ApiKey(***, source={self.source})"
-
-    __str__ = __repr__
-
-    def __reduce__(self):
-        raise TypeError("an API key is never pickled")
+# CODES, STOP_CODES, PROTOCOL_ERROR_STOP_AFTER and SYSTEM_PROMPT are the shared adapter's (answer_adapter.py)
 
 
 # ---------------------------------------------------------------------------------------------- the response shape
@@ -222,28 +166,6 @@ class _Response(_Strict):
                                   Field(max_length=MAX_SOURCES)]] = None
     search_results: Optional[Annotated[list[_SearchResult], Field(max_length=MAX_SOURCES)]] = None
     usage: Optional[_Usage] = None
-
-
-def _no_duplicates(pairs):
-    out = {}
-    for k, v in pairs:
-        if k in out:
-            raise ValueError("duplicate key")
-        out[k] = v
-    return out
-
-
-def money(x) -> Optional[str]:
-    """A provider cost (a JSON number, in USD) as a Decimal string to the micro-dollar, or None."""
-    if x is None:
-        return None
-    try:
-        if isinstance(x, float) and not math.isfinite(x):
-            return None
-        d = Decimal(str(x)).quantize(_MICRO)
-    except (InvalidOperation, ValueError):
-        return None
-    return str(d) if d >= 0 else None
 
 
 def unmodelled_keys(obj: dict) -> tuple:
@@ -445,8 +367,7 @@ def parse_agent_response(body: bytes, allowed_models: tuple = MODELS) -> Provide
         raise EngineError("ENGINE_PROTOCOL_ERROR", "RESPONSE_" + r.status.upper(), cost)
     if r.model not in allowed_models:
         raise EngineError("ENGINE_PROTOCOL_ERROR", "MODEL_NOT_ALLOWED", cost)
-    parts = [p for m in messages for p in m.content]
-    text = "".join(p.text for p in parts)
+    text = join_text([[p.text for p in m.content] for m in messages])     # WR-F011: one group per message item
     if not text.strip():
         raise EngineError("ENGINE_PROTOCOL_ERROR", "NO_ANSWER_TEXT", cost)
     if len(text) > MAX_ANSWER_CHARS:
@@ -471,108 +392,16 @@ def parse_agent_response(body: bytes, allowed_models: tuple = MODELS) -> Provide
     return ans
 
 
-# ---------------------------------------------------------------------------------------------- the network layer
-
-class _Stream(httpcore.NetworkStream):
-    def __init__(self, inner, left: Callable, guard: Callable):
-        self._s, self._left, self._guard = inner, left, guard
-
-    def read(self, max_bytes: int, timeout: Optional[float] = None) -> bytes:
-        while True:
-            self._guard()
-            left = self._left(timeout, httpcore.ReadTimeout)     # raises once the deadline has passed
-            part = min(left, READ_SLICE_S)
-            try:
-                return self._s.read(max_bytes, part)
-            except httpcore.ReadTimeout:
-                if part >= left:
-                    raise                                         # the whole time left is used up
-                # a slice ran out with time left: check the switch, then wait again
-
-    def write(self, buffer: bytes, timeout: Optional[float] = None) -> None:
-        self._guard()
-        self._s.write(buffer, self._left(timeout, httpcore.WriteTimeout))
-
-    def close(self) -> None:
-        self._s.close()
-
-    def start_tls(self, ssl_context, server_hostname=None, timeout=None):
-        self._guard()
-        return _Stream(self._s.start_tls(ssl_context, server_hostname, self._left(timeout, httpcore.ConnectTimeout)),
-                       self._left, self._guard)
-
-    def get_extra_info(self, info: str):
-        return self._s.get_extra_info(info)
-
-
-class _GuardedDeadlineBackend(httpcore.NetworkBackend):
-    """Every socket operation bounded by the time left until the question's deadline, the kill-switch guard checked
-    before each one, the host resolved INSIDE the deadline (on the shared resolver gate pattern) and every resolved
-    address required to be public (api.perplexity.ai never answers from a private address; one that does is
-    refused, so a poisoned resolver cannot point this client inside the network)."""
-
-    def __init__(self, monotonic: Callable[[], float], end: float, guard: Callable, resolver: _Resolver,
-                 inner=None, public: Optional[Callable[[str], bool]] = None):
-        self._b = inner or httpcore.SyncBackend()
-        self._mono, self._end, self._guard, self._resolver = monotonic, end, guard, resolver
-        if public is None:
-            from primitives.fetch import public_address as public
-        self._public = public
-
-    def left(self, timeout: Optional[float], exc: type) -> float:
-        left = self._end - self._mono()
-        if left <= 0:
-            raise exc("the question's overall deadline has passed")
-        return left if timeout is None else min(timeout, left)
-
-    def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
-        self._guard()
-        addrs = self._resolver(host, port, self.left(timeout, httpcore.ConnectTimeout))
-        if not addrs or any(not self._public(a) for a in addrs):
-            raise httpcore.ConnectError("the engine host resolved to a non-public address; refused")
-        last: Optional[Exception] = None
-        for ip in addrs:
-            self._guard()
-            left = self.left(timeout, httpcore.ConnectTimeout)
-            try:
-                inner = self._b.connect_tcp(ip, port, left, local_address, socket_options)
-            except (httpcore.ConnectError, httpcore.ConnectTimeout) as exc:
-                last = exc
-                continue
-            return _Stream(inner, self.left, self._guard)
-        raise last if last is not None else httpcore.ConnectError("the engine host does not resolve")
-
-    def connect_unix_socket(self, path, timeout=None, socket_options=None):
-        raise httpcore.ConnectError("unix sockets are never used")
-
-    def sleep(self, seconds: float) -> None:
-        time.sleep(seconds)
-
-
-class _Killed(Exception):
-    """Raised by the guard wrapper inside a socket operation; carries the switch's code out of httpx."""
-
-    def __init__(self, code: str):
-        super().__init__(code)
-        self.code = code
-
+# ---------------------------------------------------------------------------------------------- the engine
+#
+# The network layer (``_GuardedDeadlineBackend`` and its stream, the guard wrapper, the retry signal) and the ask loop
+# are the shared adapter's (answer_adapter.py, ADR 0046), moved there unchanged; this engine keeps its own resolver
+# gate of two and supplies only what is Perplexity's: the base URL and allow-listed host, the path per protocol, the
+# Bearer header, the request body and the parser.
 
 _GATE = _DnsGate(2)
 if hasattr(os, "register_at_fork"):
     os.register_at_fork(after_in_child=_GATE._after_fork_in_child)
-
-
-class _Retry(Exception):
-    def __init__(self, code: str, retry_after: Optional[float] = None):
-        super().__init__(code)
-        self.code, self.retry_after = code, retry_after
-
-
-def _retry_after(value: Optional[str]) -> Optional[float]:
-    """Whole seconds only (the documented form); anything else is ignored (the backoff applies)."""
-    if value is None or not re.fullmatch(r"\s*[0-9]{1,6}\s*", value):
-        return None
-    return float(int(value))
 
 
 def request_body(protocol: str, model: str, prompt: str) -> bytes:
@@ -593,7 +422,7 @@ def request_body(protocol: str, model: str, prompt: str) -> bytes:
     return json.dumps(doc).encode("utf-8")
 
 
-class PerplexityEngine:
+class PerplexityEngine(HttpAnswerEngine):
     """The answer-engine port for Perplexity. ``ask(prompt, guard=..., meter=...)`` returns a ProviderAnswer or raises
     EngineError (and nothing else for any network or protocol outcome)."""
 
@@ -601,13 +430,15 @@ class PerplexityEngine:
     metered = True
     accepts_guard = True
     name = ENGINE
+    BASE_URL = BASE_URL
+    ALLOWED_HOSTS = frozenset({HOST})
 
     def __init__(self, key: ApiKey, model: Optional[str] = None, timeout_s: float = 30.0, attempts: int = 3,
                  backoff_s: tuple = (0.5, 1.5), transport: Optional[httpx.BaseTransport] = None,
                  network_backend=None, monotonic: Callable[[], float] = time.monotonic,
                  sleep: Callable[[float], None] = time.sleep, resolve: Callable[[str, int], list] = _system_resolve,
                  dns_gate: Optional[_DnsGate] = None, rand: Callable[[], float] = random.random,
-                 public: Optional[Callable[[str], bool]] = None, protocol: str = DEFAULT_PROTOCOL):
+                 public: Optional[Callable[[str], bool]] = None, protocol: str = DEFAULT_PROTOCOL, wall=None):
         if not isinstance(key, ApiKey):
             raise TypeError("the key must be an ApiKey")
         if protocol not in PROTOCOLS:
@@ -615,23 +446,12 @@ class PerplexityEngine:
         model = DEFAULT_MODEL_BY_PROTOCOL[protocol] if model is None else model
         if model not in MODELS_BY_PROTOCOL[protocol]:
             raise ValueError("model not in the allowlist")
-        if not 1 <= attempts <= 3:
-            raise ValueError("attempts must be 1..3")
-        if not 1 <= timeout_s <= 120:
-            raise ValueError("timeout must be 1..120 s")
-        self._key = key
         self.protocol = protocol
         self.path = PATHS[protocol]
         self.models = MODELS_BY_PROTOCOL[protocol]
         self.model = model
-        self.timeout_s = float(timeout_s)
-        self.attempts = attempts
-        self.backoff_s = tuple(backoff_s)
-        self._transport = transport
-        self._inner = network_backend
-        self._mono, self._sleep, self._rand = monotonic, sleep, rand
-        self._resolver = _Resolver(resolve, dns_gate if dns_gate is not None else _GATE)
-        self._public = public
+        self._init_http(key, timeout_s, attempts, backoff_s, transport, network_backend, monotonic, sleep,
+                        _Resolver(resolve, dns_gate if dns_gate is not None else _GATE), rand, public, wall)
 
     def __repr__(self) -> str:
         return (f"PerplexityEngine(protocol={self.protocol!r}, model={self.model!r}, timeout_s={self.timeout_s}, "
@@ -643,147 +463,20 @@ class PerplexityEngine:
                 "models_allowed": list(self.models), "timeout_s": self.timeout_s, "attempts": self.attempts,
                 "key_source": self._key.source, "max_response_bytes": MAX_RESPONSE_BYTES}
 
-    # ------------------------------------------------------------------ public
+    # ------------------------------------------------------------------ the adapter hooks (answer_adapter.py)
 
-    def ask(self, prompt: str, model: Optional[str] = None, guard: Optional[Callable] = None,
-            meter=None) -> ProviderAnswer:
-        """One question, at most ``attempts`` requests, all within one hard deadline. ``guard`` is the kill-switch
-        check (raises to stop); ``meter`` charges every request against the run's budget reservation
-        (``before()`` raises ENGINE_BUDGET_EXHAUSTED; ``after(cost)``)."""
-        model = model or self.model
-        if model not in self.models or not isinstance(prompt, str) or not 1 <= len(prompt) <= 2000:
-            raise EngineError("ENGINE_PROTOCOL_ERROR", "REQUEST_REFUSED")
-        body = request_body(self.protocol, model, prompt)
+    def _path(self, model: str) -> str:
+        return self.path
+
+    def _auth_headers(self) -> dict:
+        return {"Authorization": "Bearer " + self._key.reveal()}
+
+    def _body(self, model: str, prompt: str) -> bytes:
+        return request_body(self.protocol, model, prompt)
+
+    def _parse(self, raw: bytes, model: str) -> ProviderAnswer:
         parse = parse_agent_response if self.protocol == AGENT else parse_response
-        end = self._mono() + self.timeout_s
-        last = "ENGINE_UNAVAILABLE"
-        for attempt in range(self.attempts):
-            self._check(guard)
-            if end - self._mono() <= 0:
-                break
-            if meter is not None:
-                meter.before()                       # raises EngineError(ENGINE_BUDGET_EXHAUSTED)
-            charged = False
-            try:
-                status, headers, raw = self._post(body, end, guard)
-                self._check(guard)                   # a switch engaged during the last read: drop the answer
-                if status == 200:
-                    ans = parse(raw, (model,))
-                    if meter is not None:
-                        meter.after(cost_of(ans))
-                        charged = True
-                    return ans
-                if status in (401, 402, 403):
-                    raise EngineError("ENGINE_AUTH_REFUSED")
-                if status == 429:
-                    raise _Retry("ENGINE_RATE_LIMITED", _retry_after(headers.get("retry-after")))
-                if 500 <= status <= 599:
-                    raise _Retry("ENGINE_UNAVAILABLE", _retry_after(headers.get("retry-after")))
-                raise EngineError("ENGINE_PROTOCOL_ERROR")
-            except _Retry as r:
-                last = r.code
-                pause = r.retry_after
-            except EngineError as e:
-                if meter is not None and not charged and e.cost is not None:
-                    # a response that is not an answer: charged what it reported when that is above the reserve,
-                    # never less than the reserve (the finally below charges the reserve otherwise)
-                    per_call = getattr(meter, "per_call", None)
-                    try:
-                        above = per_call is not None and Decimal(e.cost) > Decimal(str(per_call))
-                    except (InvalidOperation, ValueError):
-                        above = False
-                    if above:
-                        meter.after(e.cost)
-                        charged = True
-                raise
-            finally:
-                if meter is not None and not charged:
-                    meter.after(None)                 # sent, cost unknown: the reservation stays charged
-            if attempt + 1 >= self.attempts:
-                break
-            if pause is None:
-                base = self.backoff_s[min(attempt, len(self.backoff_s) - 1)] if self.backoff_s else 0.0
-                pause = base * (1.0 + 0.25 * self._rand())
-            elif pause > MAX_RETRY_AFTER_S:
-                break
-            if self._mono() + pause >= end:
-                break                                 # never sleep past the deadline: give the answer now
-            self._sleep(pause)
-        raise EngineError(last)
-
-    # ------------------------------------------------------------------ internals
-
-    @staticmethod
-    def _check(guard: Optional[Callable]) -> None:
-        if guard is None:
-            return
-        try:
-            guard(capability="ai_probe", provider=ENGINE)
-        except Exception as exc:   # noqa: BLE001 - the run's guard raises Killed; it becomes ENGINE_KILLED
-            code = getattr(exc, "code", None)
-            raise EngineError("ENGINE_KILLED", code if isinstance(code, str) else None) from None
-
-    def _post(self, body: bytes, end: float, guard: Optional[Callable]) -> tuple[int, dict, bytes]:
-        def g() -> None:
-            if guard is None:
-                return
-            try:
-                guard(capability="ai_probe", provider=ENGINE)
-            except Exception as exc:  # noqa: BLE001
-                raise _Killed(getattr(exc, "code", "KILLED")) from None
-
-        transport = self._transport
-        if transport is None:
-            transport = httpx.HTTPTransport(trust_env=False, http2=False, retries=0)
-            pool = getattr(transport, "_pool", None)
-            if pool is None or not hasattr(pool, "_network_backend"):
-                raise EngineError("ENGINE_NOT_CONNECTED", "NO_DEADLINE_BACKEND")    # never ask without a deadline
-            pool._network_backend = _GuardedDeadlineBackend(self._mono, end, g, self._resolver, inner=self._inner,
-                                                            public=self._public)
-        headers = {"Authorization": "Bearer " + self._key.reveal(), "Content-Type": "application/json",
-                   "Accept": "application/json", "Accept-Encoding": "identity",
-                   "User-Agent": "ZBM-SEO-Answer-Probe/0.1"}
-        left = end - self._mono()
-        if left <= 0:
-            raise _Retry("ENGINE_UNAVAILABLE")
-        try:
-            with httpx.Client(timeout=httpx.Timeout(left), transport=transport, follow_redirects=False,
-                              trust_env=False) as client:
-                with client.stream("POST", BASE_URL + self.path, headers=headers, content=body) as resp:
-                    status = resp.status_code
-                    kept = {"retry-after": resp.headers.get("retry-after")}
-                    if status != 200:
-                        return status, kept, b""          # an error body is never read, logged or parsed
-                    enc = resp.headers.get("content-encoding", "identity").strip().lower()
-                    ctype = resp.headers.get("content-type", "").split(";", 1)[0].strip().lower()
-                    if enc not in ("identity", "") or ctype != "application/json":
-                        raise EngineError("ENGINE_PROTOCOL_ERROR")
-                    declared = resp.headers.get("content-length")
-                    if declared and declared.isdigit() and int(declared) > MAX_RESPONSE_BYTES:
-                        raise EngineError("ENGINE_PROTOCOL_ERROR", "TOO_LARGE")
-                    chunks, size = [], 0
-                    for chunk in resp.iter_raw():
-                        if self._mono() >= end:
-                            raise _Retry("ENGINE_UNAVAILABLE")          # the deadline, mid-body
-                        size += len(chunk)
-                        if size > MAX_RESPONSE_BYTES:
-                            raise EngineError("ENGINE_PROTOCOL_ERROR", "TOO_LARGE")
-                        chunks.append(chunk)
-                    return status, kept, b"".join(chunks)
-        except (EngineError, _Retry):
-            raise
-        except _Killed as k:
-            raise EngineError("ENGINE_KILLED", k.code if isinstance(k.code, str) else None) from None
-        except (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError):
-            raise _Retry("ENGINE_UNAVAILABLE") from None
-        except Exception as exc:  # noqa: BLE001 - nothing from the network ever escapes as anything but a code
-            cause = exc
-            while cause is not None:
-                if isinstance(cause, _Killed):
-                    raise EngineError("ENGINE_KILLED", cause.code if isinstance(cause.code, str) else None) \
-                        from None
-                cause = cause.__cause__ or cause.__context__
-            raise EngineError("ENGINE_PROTOCOL_ERROR") from None
+        return parse(raw, (model,))
 
 
 class NotConnectedPerplexity:

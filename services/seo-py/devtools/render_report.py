@@ -114,8 +114,9 @@ def fetch(a: argparse.Namespace, client=None) -> tuple[bytes, dict]:
     if not isinstance(rows, list) or not any(isinstance(x, dict) and x.get("report_id") == rep["report_id"]
                                              and x.get("document_sha256") == rep["document_sha256"] for x in rows):
         raise ValueError("the service's recorded renders do not list this document")
-    meta = {k: rep[k] for k in ("report_id", "audit_id", "format", "document_sha256", "audit_report_sha256",
-                                "renderer_version")} | {"request_id": body["request_id"], "recorded": True}
+    meta = {k: rep.get(k) for k in ("report_id", "audit_id", "format", "document_sha256", "audit_report_hmac",
+                                    "audit_report_sha256", "renderer_version")} | {"request_id": body["request_id"],
+                                                                                   "recorded": True}
     return data, meta
 
 

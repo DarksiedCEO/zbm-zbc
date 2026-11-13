@@ -12,6 +12,15 @@ the tenant's latest audit) are fixed when the ingest is created, so exact paths 
 Retention: nothing identifying is kept, so expiry (SEO_LOG_RETENTION_DAYS) hides the per-ingest report and keeps
 totals; the append-only log holds no personal data that would need shredding.
 
+Sink job D: the log holds machine values only, so what an ingest retains is in the tenant's vault as blobs: the
+ingest's inputs (robots.txt and the sitemap sample, ``INGEST_INPUTS_FIELD``), each chunk's aggregate delta (its path
+templates are dictionary keys, ``LOG_DELTA_FIELD``) and the finished report (``LOG_REPORT_FIELD``). A log line keeps
+the blob ref, the keyed HMAC of the blob's canonical JSON, and counts and codes (a chunk: lines, non-bot, no
+User-Agent, quarantine reasons and per-family counts; a report: the outcome and the findings count). Uploaded log
+LINES are in neither: a chunk is parsed in memory and dropped. Memory keeps the counts; the full totals (templates,
+sketches, sample indices) are rebuilt from the chunk blobs on demand (``_log_full``), outside the lock, and a blob
+that cannot be read makes the ingest ``vault_unavailable`` (chunks and the finish refuse VAULT_UNAVAILABLE).
+
 Bounds (AEGIS 1472041 H2): at most SEO_LOG_MAX_OPEN_INGESTS open ingests per tenant, SEO_LOG_MAX_INGESTS ingests per
 tenant within a retention period, SEO_LOG_TENANT_BYTES bytes per tenant within a retention period, SEO_LOG_MAX_BYTES
 per ingest; per-ingest state is a fixed-size aggregate (templates capped per family, 256 sketch registers), and an
@@ -30,11 +39,13 @@ from agents import bots
 from agents import logs as logs_mod
 from clock import iso, parse_iso
 from envelope import envelope, finding, sha
-from errors import Conflict, Forbidden, Invalid, NotFound
+from errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from ledger import derived_id
 from primitives import Killed
 from primitives import robots as robots_mod
 from reasons import R
+import sink_guard
+from svc_vaulted import INGEST_INPUTS_FIELD, LOG_DELTA_FIELD, LOG_REPORT_FIELD, normalised, owner_view
 
 CHUNK_MAX = 90_000
 SEARCH_TOKENS = ("Googlebot", "Bingbot")
@@ -77,8 +88,9 @@ class LogsMixin:
         sitemap sample are dropped (and are never rebuilt at start-up: replay compacts as it goes)."""
         if g.get("evicted"):
             return
-        g.update(totals=_compact(g["totals"]), report=None, robots_text=None, sitemap_sample=None, evicted=True)
-        for cache in (self._log_robots, self._log_verify_cache, self._log_budget):
+        g.update(totals=_compact(g["totals"]), report=None, report_ref=None, robots_text=None, sitemap_sample=None,
+                 evicted=True, deltas=[])
+        for cache in (self._log_robots, self._log_verify_cache, self._log_budget, self._log_inputs, self._log_full):
             cache.pop(g["ingest_id"], None)
 
     def _sweep_ingests(self) -> int:
@@ -124,7 +136,11 @@ class LogsMixin:
             if body["domain"] not in t["domains"]:
                 raise Forbidden(R("DOMAIN_NOT_AUTHORIZED"))
             self._check_log_caps(tid, new_ingest=True)
-            sample = self._sitemap_sample(tid, body["domain"])
+            self._vaulted_key_check()                      # sink job D: nowhere to keep what an ingest retains
+            latest = self._latest_audit(tid, body["domain"])
+        # sink job B: the latest audit's report is read from the tenant's vault, outside the lock; one that cannot be
+        # read refuses VAULT_UNAVAILABLE (the ingest is never created against a sample that could not be read)
+        sample = self._sitemap_sample(tid, latest)
         guard = self.guard(tid, run="logs")
         robots_text, robots_status = None, "not_fetched"
         try:
@@ -137,39 +153,110 @@ class LogsMixin:
                 robots_text = rb.get("text")
         except Killed as k:
             raise _refusal(k) from None
-        with self.lock:
-            self._gate()
-            self.check_kill(tenant=tid, capability="logs", write=True)
-            self._selene_ok()
-            prev = self._idem(actor, rk, body)
-            if prev:
-                return self.log_ingest_view(tid, prev[1])
-            self._check_log_caps(tid, new_ingest=True)
-            iid = derived_id("lgi", tid, actor, rk)
-            data = {"ingest_id": iid, "tenant_id": tid, "domain": body["domain"], "scheme": body["scheme"],
-                    "format": body["format"], "key_fp": hashlib.sha256(self.settings.log_hash_key).hexdigest()[:16],
-                    "robots_status": robots_status, "robots_text": robots_text, "sitemap_sample": sample}
-            self._commit("log_ingest_created", self._req(data, actor, rk, body, iid), actor,
-                         evidence=("log_ingest_created", f"ingest:{iid}",
-                                   {"ingest_id": iid, "tenant_id": tid, "format": body["format"],
-                                    "domain_sha256": sha(body["domain"]), "robots_status": robots_status,
-                                    "robots_sha256": None if robots_text is None else sha(robots_text),
-                                    "sitemap_sample_sha256": None if sample is None else sha(sample)}, (actor, rk)))
-            return self.log_ingest_view(tid, iid)
+        if sink_guard.classify(robots_status) is None:     # a fetcher's status class is a code, or it is not kept
+            robots_status = "unknown"
+        # sink job D: robots.txt (crawled text) and the sitemap sample (paths) are the ingest's inputs blob,
+        # encrypted outside the lock; the line keeps its ref, its keyed HMAC and two facts
+        inputs = normalised({"v": 1, "robots_text": robots_text, "sitemap_sample": sample})
+        sealed = self._doc_seal(tid, INGEST_INPUTS_FIELD, inputs)
+        try:
+            with self.lock:
+                self._gate()
+                self.check_kill(tenant=tid, capability="logs", write=True)
+                self._selene_ok()
+                prev = self._idem(actor, rk, body)
+                if prev:
+                    return self.log_ingest_view(tid, prev[1])
+                self._check_log_caps(tid, new_ingest=True)
+                iid = derived_id("lgi", tid, actor, rk)
+                data = {"ingest_id": iid, "tenant_id": tid, "domain": body["domain"], "scheme": body["scheme"],
+                        "format": body["format"],
+                        "key_fp": hashlib.sha256(self.settings.log_hash_key).hexdigest()[:16],
+                        "robots_status": robots_status, "inputs_ref": sealed.ref, "inputs_hmac": sealed.hmac,
+                        "robots_present": robots_text is not None,
+                        "sitemap_sample_count": None if sample is None else len(sample)}
+                self._log_inputs[iid] = inputs
+                try:
+                    self._doc_commit(sealed, inputs, lambda: self._commit(
+                        "log_ingest_created", self._req(data, actor, rk, body, iid), actor,
+                        evidence=("log_ingest_created", f"ingest:{iid}",
+                                  {"ingest_id": iid, "tenant_id": tid, "format": body["format"],
+                                   "domain_sha256": sha(body["domain"]), "robots_status": robots_status,
+                                   "inputs_hmac": sealed.hmac}, (actor, rk))))
+                except BaseException:
+                    self._log_inputs.pop(iid, None)
+                    raise
+        finally:
+            sealed.discard()
+        return self.log_ingest_view(tid, iid)
 
     def _a_log_ingest_created(self, d, at):
+        legacy = "inputs_ref" not in d                      # a line written before sink job D carries the inputs
         self.log_ingests[d["ingest_id"]] = {
             "ingest_id": d["ingest_id"], "tenant_id": d["tenant_id"], "domain": d["domain"], "scheme": d["scheme"],
             "format": d["format"], "key_fp": d["key_fp"], "status": "open", "created_at": at, "next_seq": 1,
             "bytes": 0, "last_seen": False, "totals": logs_mod.empty_delta(), "report": None, "report_sha256": None,
-            "robots_status": d.get("robots_status"), "robots_text": d.get("robots_text"),
-            "sitemap_sample": d.get("sitemap_sample")}
+            "report_hmac": None, "report_ref": None, "facts": None,
+            "robots_status": d.get("robots_status"), "robots_text": d.get("robots_text") if legacy else None,
+            "sitemap_sample": d.get("sitemap_sample") if legacy else None,
+            "inputs_ref": d.get("inputs_ref"), "inputs_hmac": d.get("inputs_hmac"), "legacy": legacy,
+            "robots_present": d.get("robots_text") is not None if legacy else bool(d.get("robots_present")),
+            "sitemap_sample_count": (None if d.get("sitemap_sample") is None else len(d["sitemap_sample"]))
+            if legacy else d.get("sitemap_sample_count"),
+            "deltas": []}
 
     def _ingest(self, tid: str, iid: str) -> dict:
         g = self.log_ingests.get(iid)
         if g is None or g["tenant_id"] != tid:
             raise NotFound(R("INGEST_NOT_FOUND"))
         return g
+
+    # ------------------------------------------------------------------ the vaulted parts (sink job D)
+
+    def _ingest_inputs(self, tid: str, iid: str) -> dict:
+        """OUTSIDE the lock: ``{"robots_text", "sitemap_sample"}`` of an ingest (memory, else its blob). A blob that
+        cannot be read refuses VAULT_UNAVAILABLE: a chunk is never judged against inputs that are not the recorded
+        ones."""
+        with self.lock:
+            g = self._ingest(tid, iid)
+            if g["legacy"]:
+                return {"robots_text": g.get("robots_text"), "sitemap_sample": g.get("sitemap_sample")}
+            got = self._log_inputs.get(iid)
+            ref, mac = g["inputs_ref"], g["inputs_hmac"]
+        if got is None:
+            got = self._vaulted_open(tid, INGEST_INPUTS_FIELD, ref, mac)
+            if not isinstance(got, dict):
+                raise Unavailable(R("VAULT_UNAVAILABLE"))
+            with self.lock:
+                if iid in self.log_ingests and not self.log_ingests[iid].get("evicted"):
+                    self._log_inputs[iid] = got
+        return got
+
+    def _ingest_full(self, tid: str, iid: str) -> tuple:
+        """OUTSIDE the lock: (the ingest's FULL totals, the ``next_seq`` they were read at). Memory when this process
+        holds them for every recorded chunk; else rebuilt from the chunk blobs (each read for the owning tenant, its
+        HMAC checked). A chunk blob that cannot be read refuses VAULT_UNAVAILABLE."""
+        with self.lock:
+            g = self._ingest(tid, iid)
+            if g["legacy"]:
+                if g.get("vault_unavailable"):
+                    raise Unavailable(R("VAULT_UNAVAILABLE"))
+                return g["totals"], g["next_seq"]
+            refs = list(g["deltas"])
+            held = self._log_full.get(iid)
+            if held is not None and held[1] == len(refs):
+                return held[0], len(refs) + 1
+        total = logs_mod.empty_delta()
+        for ref, mac in refs:
+            delta = self._vaulted_open(tid, LOG_DELTA_FIELD, ref, mac)
+            if not isinstance(delta, dict):
+                raise Unavailable(R("VAULT_UNAVAILABLE"))
+            logs_mod.merge(total, delta)
+        with self.lock:
+            g = self.log_ingests.get(iid)
+            if g is not None and not g.get("evicted") and len(g["deltas"]) == len(refs):
+                self._log_full[iid] = (total, len(refs))
+        return total, len(refs) + 1
 
     # ------------------------------------------------------------------ chunks
 
@@ -194,11 +281,13 @@ class LogsMixin:
             log_hash_key = self.settings.log_hash_key
             self._check_log_key(g, log_hash_key)
             self._chunk_ok(g, body, nbytes)
+            self._vaulted_key_check()
             fmt = g["format"]
             cache = self._log_verify_cache.setdefault(iid, {})
             budget = self._log_budget.setdefault(iid, {"left": self.settings.bot_verify_max})
-            robots = self._robots_parsed(g)
-            sample = {p: i for i, p in enumerate(g["sitemap_sample"] or [])}
+        inputs = self._ingest_inputs(tid, iid)             # outside the lock (a vault read after a restart)
+        robots = self._robots_parsed(iid, inputs.get("robots_text"))
+        sample = {p: i for i, p in enumerate(inputs.get("sitemap_sample") or [])}
         try:
             self.guard(tid, run="logs")(capability="logs", agent="selene")
         except Killed as k:
@@ -206,26 +295,44 @@ class LogsMixin:
         delta = logs_mod.process_chunk(fmt, data, log_hash_key, self.ports.bot_verifier.verify, cache,
                                        budget, robots, sample)
         del data
-        with self.lock:
-            self._gate()
-            g = self._ingest(tid, iid)
-            self.check_kill(tenant=tid, capability="logs", write=True)
-            self._selene_ok()
-            self._check_log_key(g, log_hash_key)           # the key that produced this delta
-            self._check_log_key(g, self.settings.log_hash_key)
-            self._chunk_ok(g, body, nbytes)                # nothing moved while the lock was released
-            payload = {"ingest_id": iid, "seq": body["seq"], "lines": delta["lines"], "delta_sha256": sha(delta)}
-            self._commit("log_chunk", self._req({"ingest_id": iid, "seq": body["seq"], "last": body["last"],
-                                                 "bytes": nbytes, "delta": delta}, actor, rk, body, iid), actor,
-                         evidence=("log_chunk_ingested", f"ingest:{iid}", payload, (actor, rk)))
-            return self.log_ingest_view(tid, iid)
+        # sink job D: the delta (path templates are its keys) is this chunk's blob, encrypted outside the lock; the
+        # line keeps its ref, its keyed HMAC and the counts ``_apply`` and the views need
+        delta = normalised(delta)
+        counts = _compact(delta)
+        sealed = self._doc_seal(tid, LOG_DELTA_FIELD, delta)
+        try:
+            with self.lock:
+                self._gate()
+                g = self._ingest(tid, iid)
+                self.check_kill(tenant=tid, capability="logs", write=True)
+                self._selene_ok()
+                self._check_log_key(g, log_hash_key)           # the key that produced this delta
+                self._check_log_key(g, self.settings.log_hash_key)
+                self._chunk_ok(g, body, nbytes)                # nothing moved while the lock was released
+                held = self._log_full.get(iid)
+                payload = {"ingest_id": iid, "seq": body["seq"], "lines": delta["lines"], "delta_hmac": sealed.hmac}
+                line = {"ingest_id": iid, "seq": body["seq"], "last": body["last"], "bytes": nbytes,
+                        "delta_ref": sealed.ref, "delta_hmac": sealed.hmac, "counts": counts}
+                self._doc_commit(sealed, delta, lambda: self._commit(
+                    "log_chunk", self._req(line, actor, rk, body, iid), actor,
+                    evidence=("log_chunk_ingested", f"ingest:{iid}", payload, (actor, rk))))
+                n = len(g["deltas"])
+                if n == 1:
+                    self._log_full[iid] = (logs_mod.merge(logs_mod.empty_delta(), delta), 1)
+                elif held is not None and held[1] == n - 1:
+                    self._log_full[iid] = (logs_mod.merge(held[0], delta), n)
+                else:
+                    self._log_full.pop(iid, None)              # rebuilt from the blobs when it is next needed
+        finally:
+            sealed.discard()
+        return self.log_ingest_view(tid, iid)
 
-    def _robots_parsed(self, g: dict):
-        if g.get("robots_text") is None:
+    def _robots_parsed(self, iid: str, robots_text):
+        if robots_text is None:
             return None
-        rb = self._log_robots.get(g["ingest_id"])
+        rb = self._log_robots.get(iid)
         if rb is None:
-            rb = self._log_robots[g["ingest_id"]] = robots_mod.parse(g["robots_text"])
+            rb = self._log_robots[iid] = robots_mod.parse(robots_text)
         return rb
 
     def _check_log_key(self, g: dict, key: bytes) -> None:
@@ -246,18 +353,29 @@ class LogsMixin:
         g = self.log_ingests[d["ingest_id"]]
         if not g.get("evicted") and self._ingest_expired(g):
             self._evict_ingest(g)
-        if g.get("evicted"):
-            t, c = g["totals"], _compact(d["delta"])
+        full = None
+        if g["legacy"] and "delta_ref" in d and not g.get("evicted"):
+            # an ingest opened before sink job D keeps its full totals in memory: a later chunk's blob is read here
+            full = self._doc_applied(g["tenant_id"], LOG_DELTA_FIELD, d["delta_ref"], d["delta_hmac"])
+            if not isinstance(full, dict):
+                g["vault_unavailable"] = True              # the totals are incomplete: the finish refuses
+        if "delta" in d and not g.get("evicted"):          # a line written before sink job D carries its delta
+            logs_mod.merge(g["totals"], d["delta"])
+        elif isinstance(full, dict):
+            logs_mod.merge(g["totals"], full)
+        else:
+            # counts only in memory (the full delta is the chunk's blob, read when the report is built)
+            t, c = g["totals"], (d["counts"] if "counts" in d else _compact(d["delta"]))
             for k in ("lines", "non_bot", "no_user_agent"):
                 t[k] += c[k]
             for r, n in c["quarantined"].items():
                 t["quarantined"][r] = t["quarantined"].get(r, 0) + n
             for tok, f in c["families"].items():
                 tf = t["families"].setdefault(tok, {"requests": 0, "verified": 0, "spoofed": 0, "claimed": 0})
-                for k in tf:
+                for k in ("requests", "verified", "spoofed", "claimed"):
                     tf[k] += f[k]
-        else:
-            logs_mod.merge(g["totals"], d["delta"])
+        if "delta_ref" in d and not g.get("evicted") and not g["legacy"]:
+            g["deltas"].append((d["delta_ref"], d["delta_hmac"]))
         g["next_seq"] = d["seq"] + 1
         g["bytes"] += d["bytes"]
         g["last_seen"] = bool(d["last"])
@@ -275,38 +393,74 @@ class LogsMixin:
                 return self.log_ingest_view(tid, iid)
             if g["status"] != "open" or g.get("evicted") or self._ingest_expired(g):
                 raise Conflict(R("INGEST_CLOSED"))
-            report = self._log_report(iid, g)
-            rsha = sha(report)
-            self._commit("log_ingest_finished", self._req({"ingest_id": iid, "report": report, "report_sha256": rsha},
-                                                          actor, rk, body, iid), actor,
-                         evidence=("log_report_recorded", f"ingest:{iid}",
-                                   {"ingest_id": iid, "report_sha256": rsha, "outcome": report["outcome"]},
-                                   (actor, rk)))
-            self._log_verify_cache.pop(iid, None)
-            self._log_budget.pop(iid, None)
-            return self.log_ingest_view(tid, iid)
+            self._vaulted_key_check()
+        # sink job D: the inputs and the full totals come from the tenant's vault (memory when this process holds
+        # them), outside the lock; the report is normalised, HMAC-ed (keyed) and encrypted outside it as well
+        inputs = self._ingest_inputs(tid, iid)
+        totals, covered = self._ingest_full(tid, iid)
+        with self.lock:
+            g = self._ingest(tid, iid)
+            view = {"format": g["format"], "robots_status": g.get("robots_status")}
+        report = normalised(self._log_report(iid, view, totals, inputs))
+        facts = {"outcome": report["outcome"], "findings": len(report["envelope"].get("findings") or []),
+                 "lines": totals["lines"]}
+        sealed = self._doc_seal(tid, LOG_REPORT_FIELD, report)
+        try:
+            with self.lock:
+                self._gate()
+                g = self._ingest(tid, iid)
+                self.check_kill(tenant=tid, capability="logs", write=True)
+                self._selene_ok()
+                if self._idem(actor, rk, body):
+                    return self.log_ingest_view(tid, iid)
+                if g["status"] != "open" or g.get("evicted") or self._ingest_expired(g):
+                    raise Conflict(R("INGEST_CLOSED"))
+                if g["next_seq"] != covered:
+                    raise Conflict(R("CHUNK_SEQ"))         # a chunk arrived while the report was being built
+                data = {"ingest_id": iid, "report_ref": sealed.ref, "report_hmac": sealed.hmac, "facts": facts}
+                self._doc_commit(sealed, report, lambda: self._commit(
+                    "log_ingest_finished", self._req(data, actor, rk, body, iid), actor,
+                    evidence=("log_report_recorded", f"ingest:{iid}",
+                              {"ingest_id": iid, "report_hmac": sealed.hmac, "outcome": facts["outcome"]},
+                              (actor, rk))))
+                self._log_verify_cache.pop(iid, None)
+                self._log_budget.pop(iid, None)
+        finally:
+            sealed.discard()
+        return self.log_ingest_view(tid, iid)
 
     def _a_log_ingest_finished(self, d, at):
         g = self.log_ingests[d["ingest_id"]]
-        g.update(status="finished", finished_at=at, report=None if g.get("evicted") else d["report"],
-                 report_sha256=d["report_sha256"], robots_text=None)   # not needed any more: memory stays bounded
-        self._log_robots.pop(d["ingest_id"], None)
+        if "report" in d:                                  # a line written before sink job D carries the report
+            g.update(status="finished", finished_at=at, report=None if g.get("evicted") else d["report"],
+                     report_sha256=d["report_sha256"], robots_text=None)
+        else:
+            g.update(status="finished", finished_at=at, report_ref=None if g.get("evicted") else d["report_ref"],
+                     report_hmac=d["report_hmac"], facts=d.get("facts"), robots_text=None)
+        for cache in (self._log_robots, self._log_inputs, self._log_full):   # memory stays bounded
+            cache.pop(d["ingest_id"], None)
+        g["deltas"] = []
 
-    def _sitemap_sample(self, tid: str, domain: str) -> Optional[list]:
+    def _latest_audit(self, tid: str, domain: str) -> Optional[str]:
+        """Under the lock: the id of the tenant's latest completed audit of ``domain``."""
         latest = None
         for a in self.audits.values():
             if a["tenant_id"] == tid and a["domain"] == domain and a["status"] == "completed":
-                latest = a                                 # log order: the last one completed wins
+                latest = a["audit_id"]                     # log order: the last one completed wins
+        return latest
+
+    def _sitemap_sample(self, tid: str, latest: Optional[str]) -> Optional[list]:
+        """Outside the lock: Delia's sitemap sample in the report of audit ``latest`` (read from the vault)."""
         if latest is None:
             return None
-        for e in latest["report"]["agents"]:
+        for e in self._audit_recorded(tid, latest)["report"]["agents"]:
             if e["agent"] == "delia":
                 return list(e["facts"].get("sitemap_paths_sample") or [])
         return None
 
-    def _log_report(self, iid: str, g: dict) -> dict:
-        totals, sample, fmt = g["totals"], g["sitemap_sample"], g["format"]
-        robots_ok = g.get("robots_text") is not None
+    def _log_report(self, iid: str, g: dict, totals: dict, inputs: dict) -> dict:
+        sample, fmt = inputs.get("sitemap_sample"), g["format"]
+        robots_ok = inputs.get("robots_text") is not None
         findings, fams = [], {}
         for tok, f in sorted(totals["families"].items()):
             fam = bots.by_token(tok)
@@ -367,7 +521,10 @@ class LogsMixin:
 
     # ------------------------------------------------------------------ views
 
-    def log_ingest_view(self, tid: str, iid: str) -> dict:
+    def log_ingest_view(self, tid: str, iid: str, full: bool = True) -> dict:
+        """The owner's view. ``full``: with the report, read from the tenant's vault OUTSIDE the lock (sink job D)
+        and shown through the client-view masker; a report that cannot be read is ``None`` with
+        ``vault_unavailable: true``."""
         with self.lock:
             g = self._ingest(tid, iid)
             expired = self._ingest_expired(g)
@@ -375,18 +532,28 @@ class LogsMixin:
                 self._evict_ingest(g)
             t = g["totals"]
             out = {k: g[k] for k in ("ingest_id", "tenant_id", "domain", "scheme", "format", "key_fp", "created_at",
-                                     "next_seq", "bytes", "report_sha256", "robots_status")}
+                                     "next_seq", "bytes", "report_sha256", "report_hmac", "robots_status")}
             out["status"] = "expired" if expired else g["status"]
             out["totals"] = {"lines": t["lines"], "non_bot": t["non_bot"], "no_user_agent": t["no_user_agent"],
                              "quarantined": dict(t["quarantined"]),
                              "families": {k: {"requests": v["requests"], "verified": v["verified"],
                                               "spoofed": v["spoofed"], "claimed": v["claimed"]}
                                           for k, v in t["families"].items()}}
-            out["report"] = None if expired else g["report"]
+            inline = None if expired else g["report"]
+            ref, mac = (None, None) if expired else (g.get("report_ref"), g.get("report_hmac"))
             out["retention_days"] = self.settings.log_retention_days
             out["as_of"] = iso(self.now())
-            return out
+        report = inline
+        if full and inline is None and ref is not None:
+            report = self._vaulted_open(tid, LOG_REPORT_FIELD, ref, mac)
+            if report is None:
+                out["vault_unavailable"] = True            # never served from anywhere else
+            else:
+                report = owner_view(report)
+        out["report"] = report if full else None
+        return out
 
     def log_ingests_view(self, tid: str) -> list:
         with self.lock:
-            return [self.log_ingest_view(tid, i) for i, g in self.log_ingests.items() if g["tenant_id"] == tid][:1000]
+            return [self.log_ingest_view(tid, i, full=False)
+                    for i, g in self.log_ingests.items() if g["tenant_id"] == tid][:1000]

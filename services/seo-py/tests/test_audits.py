@@ -57,7 +57,9 @@ def test_own_property_audit_end_to_end(tmp_path, srv):
     st = {(e["event_type"], e["status"]) for e in ev}
     assert ("audit_requested", "committed") in st and ("audit_report_recorded", "committed") in st
     rec = h.ledger.of_type("audit_report_recorded")[0]["_payload"]
-    assert rec["report_sha256"] == a["report_sha256"] and rec["audit_id"] == a["audit_id"]
+    # sink job B: the ledger holds the report's KEYED hash (never a plain SHA-256 of the client's report)
+    assert rec["report_hmac"] == a["report_hmac"] and rec["audit_id"] == a["audit_id"]
+    assert len(a["report_hmac"]) == 64 and "report_sha256" not in rec and a["report_sha256"] is None
 
 
 def test_audit_is_retrievable_and_tenant_scoped(tmp_path, srv):
@@ -68,7 +70,7 @@ def test_audit_is_retrievable_and_tenant_scoped(tmp_path, srv):
     a = h.ok(audit(h), 201)
     aid = a["audit_id"]
     assert h.ok(h.get(f"/tenants/zbm/audits/{aid}"))["report"]["audit_id"] == aid
-    assert h.ok(h.get(f"/tenants/zbm/audits/{aid}", caller="hub", tenant="zbm"))["report_sha256"] == a["report_sha256"]
+    assert h.ok(h.get(f"/tenants/zbm/audits/{aid}", caller="hub", tenant="zbm"))["report_hmac"] == a["report_hmac"]
     fin = h.ok(h.get(f"/tenants/zbm/audits/{aid}", caller="finance_31"))
     assert "report" not in fin and fin["status"] == "completed"
     wrong = h.refused(h.get(f"/tenants/acme/audits/{aid}"), 404, "AUDIT_NOT_FOUND")
@@ -278,7 +280,7 @@ def test_ledger_loss_at_completion_leaves_an_interrupted_audit(tmp_path, srv):
     assert out["interrupted"] == 1
     h2 = h.restart()
     (b,) = h2.ok(h2.get("/tenants/zbm/audits"))
-    assert b["status"] == "interrupted" and b["report_sha256"] is None
+    assert b["status"] == "interrupted" and b["report_sha256"] is None and b["report_hmac"] is None
     ev = h2.ok(h2.get("/audit/evidence", caller="compliance_38"))["evidence"]
     assert ("audit_interrupted", "committed") in {(e["event_type"], e["status"]) for e in ev}
 
@@ -290,5 +292,5 @@ def test_completed_audit_survives_restart(tmp_path, srv):
     a = h.ok(audit(h), 201)
     h2 = h.restart()
     b = h2.ok(h2.get(f"/tenants/zbm/audits/{a['audit_id']}"))
-    assert b["report_sha256"] == a["report_sha256"] and b["report"] == a["report"]
+    assert b["report_hmac"] == a["report_hmac"] and a["report_hmac"] and b["report"] == a["report"]
     assert h2.ok(h2.get("/status"))["integrity"]["ok"] is True

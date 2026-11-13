@@ -12,7 +12,11 @@ TENANT = r"^[a-z][a-z0-9-]{1,39}$"
 DOMAIN = r"^[a-z0-9.-]{4,253}$"
 PATH = r"^/[\x21-\x7e]{0,500}$"
 INVOICE = r"^fin-inv-[0-9A-HJKMNP-TV-Z]{26}$"
-FINANCE_CLIENT = r"^[A-Za-z0-9._-]{1,100}$"          # finance-py models.CLIENT_ID_RE (Legal's party reference)
+# Finance (31) does not ISSUE client ids: it accepts a reference of ``[A-Za-z0-9._-]{1,100}`` (finance-py
+# models.CLIENT_ID_RE; Legal's party reference). This service writes the id to its log, so it takes the references
+# its sink guard can write (review 2b26d980 SHOULD 2): a letter or digit first, at most 64 characters (a code). The
+# rest is refused here or by ``svc_tenants.identifier_refused`` with 422, never at the sink with 503.
+FINANCE_CLIENT = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
 # Andre's override of an UNVERIFIABLE invoice check (Finance not configured, down, refusing us, or answering nonsense).
 # It never overrides a definitive answer from Finance, nor a reused invoice (ADR 0017 W3-2).
 InvoiceOverride = Literal["ANDRE_CONFIRMED_PAYMENT", "FINANCE_OUTAGE"]
@@ -136,13 +140,35 @@ class AgentMove(Strict):
     reason: Annotated[StrictStr, Field(pattern=r"^[A-Z_]{3,40}$")]
 
 
+class BrandTermRule(Strict):
+    """ADR 0046 review round 1 L1 (agents/brand_mention.py): how one brand term is matched. ``term`` must be one of
+    the prompt set's brand terms."""
+    term: Annotated[StrictStr, Field(min_length=2, max_length=80)]
+    case_sensitive: StrictBool = False
+    context_terms: Annotated[list[Annotated[StrictStr, Field(min_length=2, max_length=80)]], Field(max_length=10)] = []
+    negative_terms: Annotated[list[Annotated[StrictStr, Field(min_length=2, max_length=80)]],
+                              Field(max_length=10)] = []
+    common_word: Optional[StrictBool] = None
+
+
 class PromptSetCreate(Strict):
     request_id: RequestId
     name: Annotated[StrictStr, Field(pattern=r"^[a-z0-9][a-z0-9_-]{1,63}$")]
     brand_terms: Annotated[list[Annotated[StrictStr, Field(min_length=2, max_length=80)]],
                            Field(min_length=1, max_length=10)]
+    brand_term_rules: Annotated[list[BrandTermRule], Field(max_length=10)] = []
     competitor_domains: Annotated[list[Annotated[StrictStr, Field(pattern=DOMAIN)]], Field(max_length=20)] = []
     prompts: Annotated[list[Annotated[StrictStr, Field(min_length=3, max_length=500)]],
                        Field(min_length=1, max_length=50)]
     engines: Annotated[list[Literal["openai", "anthropic", "google", "perplexity"]],
                        Field(min_length=1, max_length=4)] = ["openai", "anthropic", "google", "perplexity"]
+
+
+class CitationRunCreate(Strict):
+    """ADR 0046: Callum's citation-source run for one of the tenant's domains and prompt sets; ``engines`` narrows the
+    prompt set's engines (never widens them)."""
+    request_id: RequestId
+    domain: Annotated[StrictStr, Field(pattern=DOMAIN)]
+    prompt_set_id: Annotated[StrictStr, Field(pattern=r"^seo-pst-[0-9a-f]{40}$")]
+    engines: Optional[Annotated[list[Literal["openai", "anthropic", "google", "perplexity"]],
+                                Field(min_length=1, max_length=4)]] = None

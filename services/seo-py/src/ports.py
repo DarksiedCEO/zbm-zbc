@@ -9,7 +9,9 @@ named NOT_CONNECTED port, and config.NOT_BUILT refuses to start if one is "selec
   answer_engines         openai, anthropic, google, perplexity (flag 1: Perplexity included). Perplexity has a real
                          adapter since Wave 4 (perplexity.py): connected only when an API key is configured
                          (SEO_PERPLEXITY_API_KEY_FILE, or SEO_PERPLEXITY_API_KEY on Railway); without one it is
-                         NOT_CONNECTED and the service starts as before. The other three stay NOT_CONNECTED.
+                         NOT_CONNECTED and the service starts as before. The other three have adapters since ADR
+                         0046 (openai_engine.py, anthropic_engine.py, google_engine.py, all on answer_adapter.py),
+                         each NOT_CONNECTED unless SEO_<ENGINE>_ENABLED=1 with a key.
   prompt_volume          Naomi's prompt-volume source
   first_party            Search Console, Bing Webmaster, server logs, analytics, CRM. Search Console is connected
                          (gsc_client.GscClient) only when SEO_GSC_SERVICE_ACCOUNT_FILE names a service-account key;
@@ -50,6 +52,10 @@ class ProviderAnswer:
     usage: Optional[dict] = None
     answer_sha256: Optional[str] = None
     finish_reason: Optional[str] = None
+    # stamped by the multi-engine adapter (answer_adapter.HttpAnswerEngine, ADR 0046): the engine's name and the ISO
+    # UTC time the answer was received; a fake engine may leave them None
+    provider: Optional[str] = None
+    asked_at: Optional[str] = None
 
 
 class NotConnectedEngine:
@@ -191,6 +197,29 @@ def perplexity_engine(settings):
                                        attempts=settings.perplexity_attempts, protocol=protocol)
 
 
+_ENGINE_WHY = {None: "not enabled: set SEO_{E}_ENABLED=1 with SEO_{E}_API_KEY_FILE (or SEO_{E}_API_KEY on Railway) "
+                     "and all its budgets above 0",
+               "MODEL_NOT_SUPPORTED": "SEO_{E}_MODEL is not on this engine's closed list; unset it (or set one of "
+                                      "models_allowed) and redeploy"}
+
+
+def answer_engine(settings, name: str):
+    """ADR 0046: the OpenAI / Anthropic / Google port for these settings — the adapter when the engine is enabled
+    with a key (and a usable model), NOT_CONNECTED otherwise. Switching provider is configuration only."""
+    import answer_adapter
+    from config import _engine_module
+    mod = _engine_module(name)
+    cfg = (getattr(settings, "answer_engines", None) or {}).get(name) or {}
+    why = _ENGINE_WHY.get(cfg.get("unavailable"), _ENGINE_WHY[None]).replace("{E}", name.upper())
+    if cfg.get("key") is None or cfg.get("unavailable") is not None:
+        return answer_adapter.NotConnectedAnswerEngine(name, why, cfg.get("unavailable"), mod.MODELS, mod.BASE_URL,
+                                                       mod.DOCS)
+    kw = {"max_searches": cfg["max_searches"]} if name == "anthropic" else {}
+    cls = {"openai": "OpenAIEngine", "anthropic": "AnthropicEngine", "google": "GoogleEngine"}[name]
+    return getattr(mod, cls)(cfg["key"], model=cfg["model"], timeout_s=cfg["timeout_s"], attempts=cfg["attempts"],
+                             **kw)
+
+
 @dataclass
 class Ports:
     fetcher: object = None
@@ -215,6 +244,8 @@ class Ports:
         engines = {n: NotConnectedEngine(n) for n in ANSWER_ENGINES}
         if settings is not None:
             engines["perplexity"] = perplexity_engine(settings)
+            for name in ("openai", "anthropic", "google"):           # ADR 0046
+                engines[name] = answer_engine(settings, name)
             from primitives.fetch import Fetcher
             fetcher = Fetcher.from_settings(settings)
             if settings.finance_url:

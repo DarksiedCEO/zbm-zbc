@@ -169,7 +169,13 @@ class Settings:
     perplexity_timeout_s: int = 30
     perplexity_attempts: int = 3
     perplexity_budget: dict = field(default_factory=lambda: dict(PERPLEXITY_BUDGET_OFF))
+    # ADR 0046: openai / anthropic / google, each {"enabled", "key" (answer_adapter.ApiKey, masked), "model",
+    # "unavailable", "timeout_s", "attempts", "budget", "max_searches"}; every engine OFF by default
+    answer_engines: dict = field(default_factory=dict, repr=False)
+    callum_resolve_urls: bool = False
+    callum_resolve_max: int = 40
     report_branding: object = field(default_factory=lambda: _default_branding())   # client_report.Branding
+    vault_key: Optional[object] = field(default=None, repr=False)    # vault.VaultKey (redacted repr; ADR 0051)
     bind_addr: str = "127.0.0.1"
     port: int = 8500
 
@@ -197,9 +203,8 @@ def _tokens(env, name: str, valid_name, what: str, service_token: str, others=()
 
 NOT_BUILT = {
     "SEO_RENDERER": "a headless renderer: none is wired (render stays NOT_CONNECTED; raw HTML only)",
-    "SEO_OPENAI_API_KEY_FILE": "the OpenAI answer-engine adapter: not built (AI-visibility probes NOT_CONNECTED)",
-    "SEO_ANTHROPIC_API_KEY_FILE": "the Anthropic answer-engine adapter: not built (probes NOT_CONNECTED)",
-    "SEO_GOOGLE_API_KEY_FILE": "the Google answer-engine adapter: not built (probes NOT_CONNECTED)",
+    # (ADR 0046) the OpenAI, Anthropic and Google answer-engine adapters are built: their key settings left this list
+    # and are read by _answer_engine below (NOT_CONNECTED unless SEO_<ENGINE>_ENABLED=1 with a key)
     "SEO_SEARCH_CONSOLE_CREDENTIALS_FILE": "renamed: the Search Console connector reads SEO_GSC_SERVICE_ACCOUNT_FILE "
                                            "(a Google service-account JSON key file)",
     "SEO_BING_WEBMASTER_KEY_FILE": "Bing Webmaster Tools (first-party truth): not built",
@@ -381,6 +386,51 @@ def _usd(env, name: str, default: str, lo: str, hi: str) -> str:
     return str(Decimal(raw).quantize(Decimal("0.000001")))
 
 
+def _vault(env, s: "Settings") -> None:
+    """ADR 0051 (job 2): the client citation vault key. ``SEO_VAULT_KEY`` / ``SEO_VAULT_KEY_PREVIOUS`` or, preferred,
+    ``SEO_VAULT_KEY_FILE`` / ``SEO_VAULT_KEY_PREVIOUS_FILE`` (the *_FILE rules: regular file, owned by this user, mode
+    0600 / 0400, no symlink); the ids stay plain variables (``SEO_VAULT_KEY_ID`` / ``SEO_VAULT_KEY_PREVIOUS_ID``).
+    A file and its variable both set refuses start. Nothing set: no key (with a data directory every citation run then
+    fails closed, VAULT_UNAVAILABLE). Errors name the variable, never its value."""
+    import vault
+    merged = {}
+    for name, file_name in ((vault.ENV_KEY, "SEO_VAULT_KEY_FILE"), (vault.ENV_PREVIOUS_KEY, "SEO_VAULT_KEY_PREVIOUS_FILE")):
+        path = (env.get(file_name) or "").strip()
+        plain = (env.get(name) or "").strip()
+        if path and plain:
+            raise RuntimeError(f"{file_name} and {name} are both set; set one")
+        if path:
+            raw = _secret_file_bytes(env, file_name, max_bytes=256)
+            try:
+                merged[name] = raw.decode("ascii")
+            except UnicodeDecodeError:
+                raise RuntimeError(f"{file_name} must hold the key as base64url text") from None
+            raw = None
+        elif plain:
+            merged[name] = plain
+    for name in (vault.ENV_KEY_ID, vault.ENV_PREVIOUS_KEY_ID):
+        if (env.get(name) or "").strip():
+            merged[name] = env.get(name)
+    try:
+        s.vault_key = vault.load_vault_key(merged)
+    except vault.VaultKeyInvalid as exc:
+        raise RuntimeError(str(exc)) from None
+    finally:
+        merged = None
+    # review 2b26d980 MUST 2: a key id is written to the log (an operator-text stub's ``key_id``), so one the sink
+    # guard would refuse there (key material, a strong-key prefix, 13+ digits) refuses START, naming the variable
+    # and the reason only; a date-stamped id (``2026-11``, ``k-20261110-01``) is a name and is accepted
+    if s.vault_key is not None:
+        import sink_guard
+        for name, kid in ((vault.ENV_KEY_ID, s.vault_key.key_id), (vault.ENV_PREVIOUS_KEY_ID,
+                                                                    s.vault_key.previous_key_id)):
+            reason = sink_guard.key_id_refusal(kid) if kid is not None else None
+            if reason is not None:
+                s.vault_key = None
+                raise RuntimeError(f"{name} cannot be written to the log (reason: {reason}): name the key with "
+                                   "lower-case letters, digits and hyphens, at most 12 digits, not key material")
+
+
 def _perplexity(env, s: "Settings") -> None:
     """ADR 0017 W4. The key comes from ``SEO_PERPLEXITY_API_KEY_FILE`` (preferred: the *_FILE rules — regular file,
     owned by this user, mode 0600/0400, no symlink) or, where the platform has no secret files (Railway service
@@ -415,6 +465,17 @@ def _perplexity(env, s: "Settings") -> None:
         "tenant_daily_spend_usd": _usd(env, "SEO_PERPLEXITY_TENANT_DAILY_SPEND_USD", "0", "0", "100000"),
         "reserve_usd_per_call": _usd(env, "SEO_PERPLEXITY_RESERVE_USD_PER_CALL", "0.05", "0.001", "5"),
     }
+    # ADR 0046 review round 1 L4: the per-run caps, OPT-IN for Perplexity. Neither set = no per-run cap (exactly the
+    # behaviour before); both set = they bind as for the other engines (0 = OFF: nothing is asked). One without the
+    # other refuses start (which cap is meant?).
+    run_calls = (env.get("SEO_PERPLEXITY_RUN_MAX_CALLS") or "").strip()
+    run_spend = (env.get("SEO_PERPLEXITY_RUN_MAX_SPEND_USD") or "").strip()
+    if bool(run_calls) != bool(run_spend):
+        raise RuntimeError("set both SEO_PERPLEXITY_RUN_MAX_CALLS and SEO_PERPLEXITY_RUN_MAX_SPEND_USD, or neither "
+                           "(neither = no per-run cap for Perplexity)")
+    if run_calls:
+        s.perplexity_budget["run_max_calls"] = _int(env, "SEO_PERPLEXITY_RUN_MAX_CALLS", 0, 0, 100_000)
+        s.perplexity_budget["run_max_spend_usd"] = _usd(env, "SEO_PERPLEXITY_RUN_MAX_SPEND_USD", "0", "0", "10000")
     if not path and not plain:
         return
     if path:
@@ -435,6 +496,118 @@ def _perplexity(env, s: "Settings") -> None:
     if value in ours:
         raise RuntimeError("the Perplexity API key must differ from every token this service accepts or sends")
     s.perplexity_key = key
+
+
+# ADR 0046: the other three answer engines. Every name spelled out (documented in the README, section "Answer
+# engines"). Each engine is OFF unless SEO_<ENGINE>_ENABLED=1; enabled without a key refuses start, a key without
+# the flag refuses start (which one is meant?), and every budget defaults to 0 = OFF (nothing is asked).
+ENGINE_ENV = {
+    "openai": {"enabled": "SEO_OPENAI_ENABLED", "key_file": "SEO_OPENAI_API_KEY_FILE", "key": "SEO_OPENAI_API_KEY",
+               "model": "SEO_OPENAI_MODEL", "timeout": "SEO_OPENAI_TIMEOUT_SECONDS",
+               "attempts": "SEO_OPENAI_MAX_ATTEMPTS", "daily_calls": "SEO_OPENAI_DAILY_CALLS",
+               "daily_spend_usd": "SEO_OPENAI_DAILY_SPEND_USD", "tenant_daily_calls": "SEO_OPENAI_TENANT_DAILY_CALLS",
+               "tenant_daily_spend_usd": "SEO_OPENAI_TENANT_DAILY_SPEND_USD",
+               "run_max_calls": "SEO_OPENAI_RUN_MAX_CALLS", "run_max_spend_usd": "SEO_OPENAI_RUN_MAX_SPEND_USD",
+               "reserve_usd_per_call": "SEO_OPENAI_RESERVE_USD_PER_CALL"},
+    "anthropic": {"enabled": "SEO_ANTHROPIC_ENABLED", "key_file": "SEO_ANTHROPIC_API_KEY_FILE",
+                  "key": "SEO_ANTHROPIC_API_KEY", "model": "SEO_ANTHROPIC_MODEL",
+                  "timeout": "SEO_ANTHROPIC_TIMEOUT_SECONDS", "attempts": "SEO_ANTHROPIC_MAX_ATTEMPTS",
+                  "daily_calls": "SEO_ANTHROPIC_DAILY_CALLS", "daily_spend_usd": "SEO_ANTHROPIC_DAILY_SPEND_USD",
+                  "tenant_daily_calls": "SEO_ANTHROPIC_TENANT_DAILY_CALLS",
+                  "tenant_daily_spend_usd": "SEO_ANTHROPIC_TENANT_DAILY_SPEND_USD",
+                  "run_max_calls": "SEO_ANTHROPIC_RUN_MAX_CALLS",
+                  "run_max_spend_usd": "SEO_ANTHROPIC_RUN_MAX_SPEND_USD",
+                  "reserve_usd_per_call": "SEO_ANTHROPIC_RESERVE_USD_PER_CALL",
+                  "max_searches": "SEO_ANTHROPIC_MAX_SEARCHES"},
+    "google": {"enabled": "SEO_GOOGLE_ENABLED", "key_file": "SEO_GOOGLE_API_KEY_FILE", "key": "SEO_GOOGLE_API_KEY",
+               "model": "SEO_GOOGLE_MODEL", "timeout": "SEO_GOOGLE_TIMEOUT_SECONDS",
+               "attempts": "SEO_GOOGLE_MAX_ATTEMPTS", "daily_calls": "SEO_GOOGLE_DAILY_CALLS",
+               "daily_spend_usd": "SEO_GOOGLE_DAILY_SPEND_USD", "tenant_daily_calls": "SEO_GOOGLE_TENANT_DAILY_CALLS",
+               "tenant_daily_spend_usd": "SEO_GOOGLE_TENANT_DAILY_SPEND_USD",
+               "run_max_calls": "SEO_GOOGLE_RUN_MAX_CALLS", "run_max_spend_usd": "SEO_GOOGLE_RUN_MAX_SPEND_USD",
+               "reserve_usd_per_call": "SEO_GOOGLE_RESERVE_USD_PER_CALL"},
+}
+# the reserve each request is charged when the provider reports no cost (none of the three does): conservative
+# defaults above the documented search charges (OpenAI: not stated; Anthropic $0.01 a search + tokens; Google
+# $0.014 a query after the free tier + tokens)
+ENGINE_DEFAULT_RESERVE = {"openai": "0.10", "anthropic": "0.10", "google": "0.05"}
+ENGINE_BUDGET_OFF = {"daily_calls": 0, "daily_spend_usd": "0.000000", "tenant_daily_calls": 0,
+                     "tenant_daily_spend_usd": "0.000000", "run_max_calls": 0, "run_max_spend_usd": "0.000000"}
+
+
+def _engine_module(name: str):
+    import anthropic_engine
+    import google_engine
+    import openai_engine
+    return {"openai": openai_engine, "anthropic": anthropic_engine, "google": google_engine}[name]
+
+
+def _answer_engine(env, s: "Settings", name: str) -> dict:
+    """ADR 0046. One engine's settings; never echoes a value (a mistyped value could be a key)."""
+    import answer_adapter
+    n = ENGINE_ENV[name]
+    mod = _engine_module(name)
+    enabled = _flag(env, n["enabled"])
+    path = (env.get(n["key_file"]) or "").strip()
+    plain = (env.get(n["key"]) or "").strip()
+    if path and plain:
+        raise RuntimeError(f"{n['key_file']} and {n['key']} are both set; set one (the file where the platform has "
+                           "secret files, the variable on Railway)")
+    if enabled and not (path or plain):
+        raise RuntimeError(f"{n['enabled']}=1 but no key: set {n['key_file']} (or {n['key']} on Railway), or unset "
+                           f"{n['enabled']} (fail closed: an enabled engine without a key is refused)")
+    if (path or plain) and not enabled:
+        raise RuntimeError(f"a {name} key is set but {n['enabled']} is not 1: set {n['enabled']}=1 to use it, or "
+                           "remove the key (fail closed: which one is meant?)")
+    raw_model = (env.get(n["model"]) or "").strip() or mod.DEFAULT_MODEL
+    unavailable = None
+    if raw_model not in mod.MODELS:
+        raw_model, unavailable = mod.DEFAULT_MODEL, "MODEL_NOT_SUPPORTED"     # this engine only; never start
+    out = {"enabled": enabled, "key": None, "model": raw_model, "unavailable": unavailable,
+           "timeout_s": _int(env, n["timeout"], 60, 5, 120), "attempts": _int(env, n["attempts"], 2, 1, 3),
+           "budget": {
+               "daily_calls": _int(env, n["daily_calls"], 0, 0, 1_000_000),
+               "daily_spend_usd": _usd(env, n["daily_spend_usd"], "0", "0", "100000"),
+               "tenant_daily_calls": _int(env, n["tenant_daily_calls"], 0, 0, 1_000_000),
+               "tenant_daily_spend_usd": _usd(env, n["tenant_daily_spend_usd"], "0", "0", "100000"),
+               "run_max_calls": _int(env, n["run_max_calls"], 0, 0, 100_000),
+               "run_max_spend_usd": _usd(env, n["run_max_spend_usd"], "0", "0", "10000"),
+               "reserve_usd_per_call": _usd(env, n["reserve_usd_per_call"], ENGINE_DEFAULT_RESERVE[name], "0.001",
+                                            "5")},
+           "max_searches": _int(env, n["max_searches"], 3, 1, 10) if "max_searches" in n else None}
+    if not enabled:
+        return out
+    if path:
+        raw = _secret_file_bytes(env, n["key_file"])
+        try:
+            value, source = raw.decode("ascii"), "file"
+        except UnicodeDecodeError:
+            raise RuntimeError(f"{n['key_file']} must hold the key as printable ASCII") from None
+    else:
+        value, source = plain, "env"
+    try:
+        key = answer_adapter.ApiKey(value, source)
+    except ValueError:
+        raise RuntimeError(f"the {name} API key must be 20..512 printable ASCII characters without spaces") from None
+    ours = {s.service_token, s.andre_token, s.ledger_token, s.finance_token, s.finance_caller_token,
+            s.compliance_token, s.compliance_caller_token, *s.caller_tokens.values(), *s.tenant_tokens.values()}
+    if s.perplexity_key is not None:
+        ours.add(s.perplexity_key.reveal())
+    for other in s.answer_engines.values():
+        if other.get("key") is not None:
+            ours.add(other["key"].reveal())
+    if value in ours:
+        raise RuntimeError(f"the {name} API key must differ from every token and key this service accepts or sends")
+    out["key"] = key
+    return out
+
+
+def _answer_engines(env, s: "Settings") -> None:
+    s.answer_engines = {}
+    for name in ("openai", "anthropic", "google"):
+        s.answer_engines[name] = _answer_engine(env, s, name)
+    s.callum_resolve_urls = _flag(env, "SEO_CALLUM_RESOLVE_URLS")
+    s.callum_resolve_max = _int(env, "SEO_CALLUM_RESOLVE_MAX", 40, 1, 200)
 
 
 def _default_branding():
@@ -502,6 +675,8 @@ def load(env: Optional[dict] = None) -> Settings:
     _compliance(env, s)
     _gsc(env, s)
     _perplexity(env, s)
+    _answer_engines(env, s)
+    _vault(env, s)
     s.report_branding = _branding(env)
     s.bind_addr = (env.get("SEO_BIND_ADDR") or "127.0.0.1").strip()
     s.port = _int(env, "SEO_PORT", 8500, 1024, 65535)

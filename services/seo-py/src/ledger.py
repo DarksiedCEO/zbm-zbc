@@ -30,6 +30,8 @@ from typing import Any, Protocol
 
 import httpx
 
+import sink_guard
+
 DEPARTMENT = "seo"
 SUMMARY_MAX = 280
 _EVENT_ID_RE = re.compile(r"[A-Za-z0-9._:-]{1,128}")
@@ -218,6 +220,12 @@ class Recorder:
         problems = event_field_problems(event_id, DEPARTMENT, event_type, actor, subject_id, clean)
         if problems:
             raise LedgerNotRecorded(f"ledger event would be refused: {', '.join(problems)}")
+        # sink job A: a payload holding anything but machine values (ids, codes, hashes, numbers) is refused here too,
+        # whichever caller built it; the message names paths only, never a value
+        try:
+            sink_guard.enforce(sink_guard.LEDGER + event_type, payload)
+        except sink_guard.SinkViolation as exc:
+            raise LedgerNotRecorded(f"ledger event would be refused: payload ({', '.join(exc.paths[:8])})") from None
         self.client.record_event(event_id=event_id, department=DEPARTMENT, event_type=event_type, actor=actor,
                                  subject_id=subject_id, payload=payload, summary=clean)
         return event_id

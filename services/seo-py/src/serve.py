@@ -140,6 +140,8 @@ def uvicorn_kwargs() -> dict:
         "h11_max_incomplete_event_size": MAX_HEADER_BYTES,
         "timeout_keep_alive": KEEP_ALIVE_TIMEOUT_S,
         "limit_concurrency": LIMIT_CONCURRENCY,
+        # review c13529af S4: no per-request access line (it would carry the request path and query string)
+        "access_log": False,
     }
 
 

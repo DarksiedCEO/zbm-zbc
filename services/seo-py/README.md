@@ -11,8 +11,8 @@ Perplexity's Agent API (`POST /v1/agent`, model `perplexity/sonar`, effort `fast
 only as a rollback, `SEO_PERPLEXITY_PROTOCOL=sonar`; ADR 0017 W4-8). Before any budget is raised, one hand-run
 request checks the real response shape: `python3 devtools/smoke_one_call.py --one-real-call` (W4-6 step 5a).
 Methodology: cited = returned by search (a URL counts as a citation when Perplexity's search returned it for the
-answer, in search order, and only `http`/`https` URLs count). Rendering, the
-other answer engines (OpenAI, Anthropic, Google), prompt volume, all first-party
+answer, in search order, and only `http`/`https` URLs count). The OpenAI, Anthropic and Google adapters are built
+(ADR 0046) and OFF by default (`SEO_<ENGINE>_ENABLED=1`, a key and every budget above 0). Rendering, prompt volume, all first-party
 sources (Search Console, Bing Webmaster Tools, logs, analytics, CRM), Zero-Day, ORCA Publish and Department 28
 clientfix are `NOT_CONNECTED` ports: they answer `NOT_CONNECTED`, never invented data, and setting any of their
 switches refuses start. This service never charges anyone and never calls Stripe.
@@ -108,6 +108,20 @@ MUST failure or ERROR.
 | `SEO_PERPLEXITY_DAILY_CALLS`, `SEO_PERPLEXITY_DAILY_SPEND_USD` | `0`, `0` | the global daily budget (UTC day) in requests and US dollars. **0 = OFF: no request is made** (fail closed) |
 | `SEO_PERPLEXITY_TENANT_DAILY_CALLS`, `SEO_PERPLEXITY_TENANT_DAILY_SPEND_USD` | `0`, `0` | the same per tenant. All four must be above 0 before Perplexity is ever asked anything |
 | `SEO_PERPLEXITY_RESERVE_USD_PER_CALL` | `0.05` | what each request reserves against the spend budgets before it is sent (0.001..5), and what it costs when Perplexity reports no cost |
+| `SEO_PERPLEXITY_RUN_MAX_CALLS`, `SEO_PERPLEXITY_RUN_MAX_SPEND_USD` | unset | ADR 0046 review round 1 L4: the per-run caps for Perplexity, **opt-in**. Neither set = no per-run cap (the behaviour before); both set = they bind as for the other engines (`RUN_CALL_CAP`, `RUN_SPEND_CAP`; 0 = OFF); one without the other refuses start |
+| `SEO_OPENAI_ENABLED`, `SEO_ANTHROPIC_ENABLED`, `SEO_GOOGLE_ENABLED` | `0` | ADR 0046: `1` turns that answer engine on. **Every engine is OFF by default.** `1` without a key refuses start; a key without `1` refuses start (which one is meant?) |
+| `SEO_OPENAI_API_KEY_FILE` / `SEO_OPENAI_API_KEY`, `SEO_ANTHROPIC_API_KEY_FILE` / `SEO_ANTHROPIC_API_KEY`, `SEO_GOOGLE_API_KEY_FILE` / `SEO_GOOGLE_API_KEY` | unset | the engine's key: the file form (the *_FILE rules: regular file owned by the service user, mode 0600/0400, no symlink) or the plain variable (Railway); both set refuses start; every key must differ from every token and every other key. Never logged, shown, recorded or reported (`/status` shows `key_source` only) |
+| `SEO_OPENAI_MODEL`, `SEO_ANTHROPIC_MODEL`, `SEO_GOOGLE_MODEL` | `gpt-6-astra` / `claude-sonnet-5-5` / `gemini-3.8-flash` | closed allowlist per engine (`openai_engine.MODELS`, `anthropic_engine.MODELS`, `google_engine.MODELS`); anything else leaves only that engine `NOT_CONNECTED` (`MODEL_NOT_SUPPORTED`), never echoed |
+| `SEO_OPENAI_TIMEOUT_SECONDS`, `SEO_ANTHROPIC_TIMEOUT_SECONDS`, `SEO_GOOGLE_TIMEOUT_SECONDS` | `60` | the hard overall deadline of one question (5..120), as for Perplexity |
+| `SEO_OPENAI_MAX_ATTEMPTS`, `SEO_ANTHROPIC_MAX_ATTEMPTS`, `SEO_GOOGLE_MAX_ATTEMPTS` | `2` | requests per question (1..3); retries only on 429, 5xx and transport errors |
+| `SEO_OPENAI_DAILY_CALLS`, `SEO_OPENAI_DAILY_SPEND_USD`, `SEO_OPENAI_TENANT_DAILY_CALLS`, `SEO_OPENAI_TENANT_DAILY_SPEND_USD`, `SEO_ANTHROPIC_DAILY_CALLS`, `SEO_ANTHROPIC_DAILY_SPEND_USD`, `SEO_ANTHROPIC_TENANT_DAILY_CALLS`, `SEO_ANTHROPIC_TENANT_DAILY_SPEND_USD`, `SEO_GOOGLE_DAILY_CALLS`, `SEO_GOOGLE_DAILY_SPEND_USD`, `SEO_GOOGLE_TENANT_DAILY_CALLS`, `SEO_GOOGLE_TENANT_DAILY_SPEND_USD` | `0` | the global and per-tenant daily budgets (UTC day) in requests and dollars. **0 = OFF: nothing is asked** |
+| `SEO_OPENAI_RUN_MAX_CALLS`, `SEO_OPENAI_RUN_MAX_SPEND_USD`, `SEO_ANTHROPIC_RUN_MAX_CALLS`, `SEO_ANTHROPIC_RUN_MAX_SPEND_USD`, `SEO_GOOGLE_RUN_MAX_CALLS`, `SEO_GOOGLE_RUN_MAX_SPEND_USD` | `0` | the per-run caps: requests and dollars ONE audit or ONE citation run may reserve on that engine (`RUN_CALL_CAP`, `RUN_SPEND_CAP`). **0 = OFF.** All six budgets must be above 0 before the engine is asked anything |
+| `SEO_OPENAI_RESERVE_USD_PER_CALL`, `SEO_ANTHROPIC_RESERVE_USD_PER_CALL`, `SEO_GOOGLE_RESERVE_USD_PER_CALL` | `0.10` / `0.10` / `0.05` | what each request reserves before it is sent and what it is charged. **A reserve ESTIMATE, not a measured cost:** none of the three APIs returns a dollar cost, so every request is booked at its reserve and the dollar budgets count estimates. The 4x cost guard can only act on a reported cost, so it cannot detect an overrun on these engines. Set a hard spend limit at each provider (its console's budget / usage limit) as the real ceiling |
+| `SEO_ANTHROPIC_MAX_SEARCHES` | `3` | the web search tool's `max_uses` per question (1..10) |
+| `SEO_CALLUM_RESOLVE_URLS` | `0` | ADR 0046: `1` lets Callum follow each cited URL's redirects and read its canonical through the SSRF-safe fetcher (robots.txt honoured, kill switches `capability:fetch` / `provider:web`); `0` = a redirector URL (Gemini grounding) is `INCONCLUSIVE` and every other URL is classified by its own host. A URL with a credential-shaped part is never fetched (a personal-data-shaped part alone does not block the fetch, ADR 0051); the log keeps a cited URL's host only (the full URL is in the client citation vault); a client URL whose redirect chain stops, is refused or lands on an error page is never a STRENGTH_URL (ADR 0046 B9) |
+| `SEO_CALLUM_RESOLVE_MAX` | `40` | distinct cited URLs fetched per citation run (1..200) |
+| `SEO_VAULT_KEY_FILE` (preferred) or `SEO_VAULT_KEY`, and `SEO_VAULT_KEY_ID` | unset | ADR 0051 (number to be confirmed at merge): the client citation vault key, base64url of exactly 32 random bytes (the file under the *_FILE rules: absolute path, regular file, owned by this user, mode 0600 / 0400, no symlink; the file and the variable both set refuses start), and its short id (a-z, 0-9, `-`, 1..32). Set together or not at all; anything malformed refuses. A citation run's WHOLE result (methodology, metrics, the MNC list, every row and each row's full evidence: cited URL, excerpt, title, hint) is encrypted as one blob into `SEO_DATA_DIR/citation_vault.jsonl` under the run's tenant; `seo_log.jsonl`, the ledger and events keep only the blob ref, one keyed hash of the result (`result_hmac`, HMAC-SHA256 under a sub-key of this key), the outcome code and counts (ADR 0051 decision 36, sink job C); the owner's view masks only high-precision findings (ADR 0051 job 3) and shows `vault_unavailable` when the blob cannot be read. Unset with `SEO_DATA_DIR`: every citation run fails closed (RUN_FAILED, VAULT_UNAVAILABLE) before any engine is asked, nothing written (never a plaintext fallback). Sink job D (ADR 0051 decisions 41-51): entity records, prompt sets and log ingests (robots.txt, sitemap sample, chunk deltas, the report) are vault blobs as well, a request body's free text is hashed with this key for idempotency, and the service log, the ledger, Python logging and error bodies carry machine values only; without the key those requests are refused `VAULT_UNAVAILABLE` (the service still starts: its own entity record is a named constant). In-memory mode (no data directory, non-production) without a key: a random key held in memory only. Never logged, shown or recorded. The key ID is written to the log (it names the key a stored text was sealed under), so it is a NAME: a date stamp is fine (`2026-11`, `k-20261110-01`); an id that is key material, a random token, a strong-key prefix, a credential label, or holds more than 12 digits refuses start (ADR 0051 decision 54). A real key is set on the live service only at merge time with Andre's approval |
+| `SEO_VAULT_KEY_PREVIOUS_FILE` (preferred) or `SEO_VAULT_KEY_PREVIOUS`, and `SEO_VAULT_KEY_PREVIOUS_ID` | unset | the key being retired during a rotation (ADR 0051): decrypt only, every new write uses the current key; must differ from the current key in bytes and id; the file and the variable both set refuses start |
 | `SEO_REPORT_BRAND_NAME`, `SEO_REPORT_BRAND_ACCENT` | `Z Best Media` / `#1f4e79` | white label of the client report: the preparer's name (1-60 letters, digits, spaces, `. , & ' ( ) -`) and accent colour (`#RRGGBB`); anything else refuses start |
 | `SEO_BIND_ADDR` / `SEO_PORT` | `127.0.0.1` / `8500` | where the API listens |
 | `SEO_REQUEST_HEAD_TIMEOUT_SECONDS`, `SEO_KEEP_ALIVE_TIMEOUT_SECONDS`, `SEO_LIMIT_CONCURRENCY`, `SEO_SWITCH_INTERVAL_SECONDS`, `SEO_DRAINS_MAX` | 10 / 5 / 128 / 0.001 / 512 | the hardened launcher (`src/serve.py`, shared with every Python service) |
@@ -128,8 +142,33 @@ service (recorded on the ledger); `... preview AUDIT.json ...` renders offline w
 The fetcher only ever connects to ports 80 and 443, accepts at most one content coding (gzip or deflate), decoded
 within the byte cap, and enforces one hard deadline (twice `SEO_FETCH_TIMEOUT_SECONDS`) over the whole fetch.
 
-**Not built — setting any of these refuses start:** `SEO_RENDERER`, `SEO_OPENAI_API_KEY_FILE`,
-`SEO_ANTHROPIC_API_KEY_FILE`, `SEO_GOOGLE_API_KEY_FILE`,
+**Answer engines** (ADR 0046): one provider-agnostic interface, `src/answer_adapter.py` (shared plumbing, not an
+agent): Perplexity (`src/perplexity.py`), OpenAI (`src/openai_engine.py`, Responses API + `web_search`), Anthropic
+(`src/anthropic_engine.py`, Messages API + `web_search_20250305`) and Google (`src/google_engine.py`, Gemini
+`generateContent` + Google Search grounding). Each has one allow-listed host, a hard deadline, bounded retries, a
+bounded strict parse, the budget meter and the kill switches `provider:<engine>` and `capability:ai_probe`.
+Switching provider is configuration only. None of the three new adapters has been called against its real API.
+**Spend is estimated, not tracked:** OpenAI, Anthropic and Google return no dollar cost, so each request is booked at
+its reserve ($0.10 / $0.10 / $0.05 by default) and the dollar budgets and per-run caps bound reserve estimates; the
+cost guard cannot see an overrun on these engines. Set a hard spend limit at each provider as the real ceiling.
+Google answers are attributed only to the exact allow-listed model: a `modelVersion` that differs, or is missing,
+is refused (`MODEL_NOT_ALLOWED` / `MODEL_UNVERIFIED`, fail closed). Gemini's grounding-URI format is unverified
+until a first live call; Callum treats every URL on `vertexaisearch.cloud.google.com` as an unresolved redirect.
+
+**Brand matching** (`src/agents/brand_mention.py`, prompt set `brand_term_rules`): whole words, case-insensitive
+unless `case_sensitive`; possessives match (`Acme's`), plurals do not (`Acmes`); optional `context_terms` (one must
+appear in the answer) and `negative_terms` (a match within 40 characters of a whole-word occurrence of one is
+discarded); whitespace (NBSP, runs of spaces) is normalised first. Mentions are confirmed by default, case-insensitive, as at a4af277 (`try acme`, `the iphone 15`;
+a URL in the answer text such as `github.com/acme` is a mention, never a citation). Only a term on the bundled
+common-word list (`src/agents/common_words.txt`, self-authored) or declared `common_word: true`, without a rule,
+needs confirmation: a capitalised match that does not start a sentence (a line, list item, task box, heading, blockquote,
+table cell, or text after `:` or an opening quote counts as a start; linear scanners, no regex backtracking), the client's domain named, the client cited,
+or another brand term that is not itself a common word. Unconfirmed hits are `LOW_CONFIDENCE` in citation runs
+and `MENTION_UNCONFIRMED` in the audit ("Possible mention, not confirmed", mention rate UNKNOWN, no page
+recommendation). A prompt set with such a term and no rule returns `warnings` on create and read, and the methodology
+names it.
+
+**Not built — setting any of these refuses start:** `SEO_RENDERER`,
 `SEO_SEARCH_CONSOLE_CREDENTIALS_FILE` (renamed: use `SEO_GSC_SERVICE_ACCOUNT_FILE`), `SEO_BING_WEBMASTER_KEY_FILE`, `SEO_PROMPT_VOLUME_PROVIDER`, `SEO_ZERO_DAY_URL`,
 `SEO_ORCA_PUBLISH_URL`, `SEO_CLIENTFIX_URL`.
 
@@ -149,11 +188,13 @@ within the byte cap, and enforces one hard deadline (twice `SEO_FETCH_TIMEOUT_SE
 | `GET /tenants/{tid}/entity` | scoped | the canonical entity record with source, provenance, authority, freshness, history |
 | `POST /tenants/{tid}/entity` | Andre | create a client tenant canonical record from1–5 supplied field records; exact replay returns its current view |
 | `POST /entities/{eid}/fields` | Andre | set one field (version-checked; the old value goes to history) |
-| `POST /tenants/{tid}/prompt-sets`, `GET .../{psid}` | dashboard, seo_agent | versioned prompt sets |
+| `POST /tenants/{tid}/prompt-sets`, `GET .../{psid}` | dashboard, seo_agent | versioned prompt sets; optional `brand_term_rules` (`[{term, case_sensitive, context_terms, negative_terms, common_word}]`, one per brand term) |
 | `POST /tenants/{tid}/audits` | dashboard, seo_agent (+ Andre for clients) | run an audit; `invoice_id` (Finance 31) required for a client tenant and verified with Finance; `invoice_override` (Andre, only when Finance cannot answer) |
 | `GET /tenants/{tid}/audits[/{aid}]` | scoped (finance_31 gets status only) | audits and reports |
 | `POST /tenants/{tid}/audits/{aid}/client-report` | Andre | the client-facing report of a completed audit, `{"request_id", "format": "markdown" \| "html"}`; recorded first (`client_report_rendered` with the document's SHA-256), answered as JSON with the document in `content` (ADR 0017, "Client report") |
 | `GET /tenants/{tid}/audits/{aid}/client-reports` | dashboard, compliance_38 | the recorded renders of one audit (ids and hashes, never the document) |
+| `POST /tenants/{tid}/citation-runs` | dashboard, seo_agent (+ Andre, a bound Finance client and Compliance's ALLOW for clients) | ADR 0046: Callum's citation-source run (`{"request_id", "domain", "prompt_set_id", "engines"?}`): every cited URL classified STRENGTH_URL / CANONICAL_TO_CLIENT / OPPORTUNITY_URL / LOOKALIKE_URL / INCONCLUSIVE, Mentioned-Not-Cited per answer (LOW_CONFIDENCE apart); recorded first |
+| `GET /tenants/{tid}/citation-runs[/{cid}]`, `GET .../{cid}/mnc-priority` | dashboard, seo_agent, hub (own tenant), compliance_38 | the runs; one run's rows (dashboard drill-down) and metrics; the `callum.mnc_priority/2` list for Roman and Adaeze |
 | `POST /tenants/{tid}/log-ingests`, `.../{iid}/chunks`, `.../{iid}/finish`; `GET` both | dashboard, seo_agent, hub (own tenant) | first-party log upload in line-aligned base64 chunks; Selene's `log_access` report (Wave 2) |
 | `GET /tenants/{tid}/audits/{aid}/drift?against={aid}` | scoped | search-truth drift between two completed audits (Wave 2) |
 | `POST /tenants/{tid}/schedules`, `.../{sid}/status`; `GET` both | dashboard, seo_agent (+ Andre for clients) | scheduled re-audits; drift report per consecutive pair (Wave 2) |
@@ -164,7 +205,8 @@ within the byte cap, and enforces one hard deadline (twice `SEO_FETCH_TIMEOUT_SE
 ## Layout
 
 `src/primitives/` the seven shared primitives (fetch, render, parse, diff / access-diff / link-diff / change-detect)
-and robots.txt; `src/agents/` Selene, Delia, Roman, the probe framework (Naomi, Callum), the entity check, Osei-lite,
+and robots.txt; `src/agents/` Selene, Delia, Roman, the probe framework (Naomi, Callum), Callum's citation
+classifier (`agents/callum.py`, ADR 0046), the entity check, Osei-lite,
 and the versioned bot family list; `src/svc_*.py` tenants and kill switches, the entity record, audits; the record-first
 plumbing in `src/service.py` and `src/store.py` is bizdev-py's.
 

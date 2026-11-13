@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import logging
 import re
 import socket
 import ssl
@@ -44,6 +45,11 @@ import httpx
 
 from primitives import Killed
 from primitives import robots as robots_mod
+
+# review c0c09bd1: a fetched URL (an operator's audit path, a cited URL) is never written to a log line: httpx /
+# httpcore log every request URL at INFO / DEBUG, so their loggers are held at WARNING
+for _name in ("httpx", "httpcore"):
+    logging.getLogger(_name).setLevel(logging.WARNING)
 
 PRODUCT_TOKEN = "ZBM-SEO-Audit"
 VERSION = "0.1"
@@ -110,6 +116,7 @@ class FetchResult:
     redirects: list = field(default_factory=list)        # [{"url", "status"}] in order
     detail: Optional[str] = None
     user_agent: str = "bot"                              # "bot" (ours) or "human" (access-diff only)
+    refused_redirect: Optional[dict] = None              # WR-F014: {"status", "location"} of a refused redirect
 
     @property
     def ok(self) -> bool:
@@ -139,8 +146,24 @@ class _Refused(Exception):
         self.detail = detail
 
 
+class _RefusedRedirect(_Refused):
+    """WR-F014: a 3xx whose Location httpx could not parse or encode (a raw-Unicode or malformed host). The hop and
+    its target are recorded, never dropped, so a caller can classify where the redirect pointed."""
+
+    def __init__(self, state: str, detail: str, status: int, location: str):
+        super().__init__(state, detail)
+        self.status, self.location = status, location
+
+
 class _NotConnected(_Refused):
     """No TCP connection to this address was made, so nothing was sent to it: the next vetted address may be tried."""
+
+
+def _refused_redirect(seen: dict, detail: str) -> None:
+    """Raise _RefusedRedirect when the response that failed was a redirect with a Location (WR-F014)."""
+    status, loc = seen.get("status"), seen.get("location")
+    if isinstance(status, int) and 300 <= status < 400 and isinstance(loc, str) and loc:
+        raise _RefusedRedirect("REFUSED_URL", detail, status, loc[:2000]) from None
 
 
 def _connect_order(addrs: list[str]) -> list[str]:
@@ -378,6 +401,7 @@ class Fetcher:
 
     # ------------------------------------------------------------------ one request (no redirects)
 
+
     def _one(self, url: str, target: tuple, ua: str, deadline: float, accept: str
              ) -> tuple[int, dict, Optional[bytes], str]:
         """One request to an address of ``target``, every one already vetted (resolved once per hop: no second answer
@@ -417,7 +441,12 @@ class Fetcher:
         try:
             transport = self.transport or install_deadline_backend(httpx.HTTPTransport(verify=self.verify,
                                                                                        trust_env=False))
-            with httpx.Client(timeout=t, transport=transport, follow_redirects=False, trust_env=False) as client:
+            seen: dict = {}
+
+            def _saw(r):                                   # runs before httpx parses the Location (WR-F014)
+                seen["status"], seen["location"] = r.status_code, r.headers.get("location")
+            with httpx.Client(timeout=t, transport=transport, follow_redirects=False, trust_env=False,
+                              event_hooks={"response": [_saw]}) as client:
                 with client.stream("GET", target, headers=headers, extensions=ext) as resp:
                     kept = {k: resp.headers.get(k)[:2000] for k in KEPT_HEADERS if resp.headers.get(k) is not None}
                     if 300 <= resp.status_code < 400 and resp.headers.get("location"):
@@ -444,6 +473,7 @@ class Fetcher:
         except httpx.InvalidURL:
             # WR-F008: httpx parses a redirect's Location itself (``response.next_request``) even when it does not
             # follow it, and raises InvalidURL (not an HTTPError) for one it cannot parse (``javascript:alert(1)``)
+            _refused_redirect(seen if "seen" in locals() else {}, "the redirect target is not a valid URL")
             raise _Refused("REFUSED_URL", "the redirect target is not a valid URL") from None
         except httpx.StreamError:
             raise _Refused("PROTOCOL_ERROR", "protocol error: StreamError") from None
@@ -451,6 +481,7 @@ class Fetcher:
             # AEGIS SEO Wave 3 L3: a redirect target httpx cannot encode or IDNA-encode (a full-width host
             # ``１２７.０.０.１``, ``xn--``) is a URL problem, not a connection failure. Nothing was connected to: the
             # request goes to the CHECKED address only, and a Location is followed only after _target re-checks it
+            _refused_redirect(seen if "seen" in locals() else {}, "the redirect target is not a valid URL")
             raise _Refused("REFUSED_URL", "the target or redirect target is not a valid URL") from None
         except httpx.TimeoutException as exc:
             if isinstance(exc, httpx.ConnectTimeout) and not _BUDGET.connected:
@@ -466,6 +497,7 @@ class Fetcher:
             raise _Refused("CONNECT_FAILED", "connection failed") from None
         except httpx.RemoteProtocolError as exc:
             if "location header" in str(exc).lower():       # httpx refuses to parse the redirect target itself
+                _refused_redirect(seen if "seen" in locals() else {}, "the redirect target is not a valid URL")
                 raise _Refused("REFUSED_URL", "the redirect target is not a valid URL") from None
             raise _Refused("PROTOCOL_ERROR", "protocol error: RemoteProtocolError") from None
         except (httpx.DecodingError, httpx.LocalProtocolError) as exc:
@@ -511,6 +543,13 @@ class Fetcher:
                 res.content_type, res.charset = _content_type(headers)
                 return res
             raise _Refused("TOO_MANY_REDIRECTS", f"more than {self.max_redirects} redirects")
+        except _RefusedRedirect as r:
+            # WR-F014: the refused redirect is recorded APART (``refused_redirect``: {status, location}; the target is
+            # never fetched). ``redirects`` and ``final_url`` keep their meaning (followed hops; where the fetch
+            # stopped), so every existing reader of a FetchResult is unchanged.
+            res.state, res.detail, res.final_url = r.state, r.detail, current
+            res.refused_redirect = {"status": r.status, "location": r.location}
+            return res
         except _Refused as r:
             res.state, res.detail, res.final_url = r.state, r.detail, current
             return res

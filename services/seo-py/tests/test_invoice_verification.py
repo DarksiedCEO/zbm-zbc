@@ -17,7 +17,7 @@ import pytest
 import config as config_mod
 import finance_client as fc
 from fixture_server import home_html, install_site
-from helpers import FakeLedger, Harness, base_env, derived, invoice_id, rid
+from helpers import FakeLedger, Harness, base_env, derived, invoice_id, rid, ruling_id
 from ports import Ports
 
 pytestmark = pytest.mark.local_http
@@ -442,7 +442,7 @@ def test_override_where_there_is_nothing_to_override_is_refused(tmp_path, srv):
               "INVOICE_OVERRIDE_NOT_ALLOWED")
     a = t.ok(paid_audit(t, invoice_id=invoice_id()), 201)
     assert a["invoice_verification"] == {"mode": "trust", "verdict": "UNCHECKED",   # ADR 0024: Compliance still asked
-                                         "compliance": {"verdict": "ALLOW", "ruling_id": f"cmp-rul-{CLIENT}",
+                                         "compliance": {"verdict": "ALLOW", "ruling_id": ruling_id(CLIENT),
                                                         "jurisdiction": "US-CA"}}
     assert t.ok(t.get("/status"))["invoice_verification"]["mode"] == "trust"
 
