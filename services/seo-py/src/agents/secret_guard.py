@@ -1179,7 +1179,8 @@ def _declared_alternatives(entry: str, spell) -> list:
     out = []
     if form.get("apart"):
         parts = tuple(view(w) for w in form["apart"].split(" "))
-        out.append(f"(?<!{first}){'[ _\\-]'.join(re.escape(w) for w in parts)}{_ending_alt(endings, last, None)}(?!{last})")
+        joined = "[ _\\-]".join(re.escape(w) for w in parts)          # (built outside the f-string: Python 3.11)
+        out.append(f"(?<!{first}){joined}{_ending_alt(endings, last, None)}(?!{last})")
     have = {"".join(words) + x for x in (endings or ("",))}
     for x in form.get("written", ()):
         units = view(x.replace(" ", ""))
@@ -1196,6 +1197,62 @@ _WRITTEN_RX = _alternation(dict.fromkeys(
     for x in _SCRIPT_FORMS.get(e, {}).get("written", ()) if k not in _script_letters(normalise(x))))
 _SCRIPT_SEQ = re.compile(_SCRIPT_SEQ.pattern + "".join("|" + a for a in _DECLARED)) if _DECLARED else _SCRIPT_SEQ
 _MARKED_SEQ = _seq_pattern(sp for sp, _k in _SPELL_KEYS if sp[0])
+
+# THE STRICT LANE'S WIDER JOINS (review of cbb6d7b7 F2, F3; ADR 0051 decision 75): ffd28ca8 and cbdf5e78 flagged a
+# script label whatever stood between its words or its letters (the strict lane read its letters in a row on the
+# letters-only view); the boundary rule kept only one space, "_" or "-" between words and " ", "_", "-", "." between
+# spelled units. The strict lane reads, besides ``_SCRIPT_SEQ``, the label's WHOLE words (the same boundaries, the
+# same proclitics and endings) joined by one to three characters that are no letter (``_STRICT_JOIN``), and the label
+# spelled one unit at a time with one to three such characters between two units (``_STRICT_GAP``). The client view
+# never read these (its letters had a space or "_" between them at most), and does not.
+_STRICT_JOIN = "[\\W\\d_]{1,3}"                          # one to three characters that are no letter
+_STRICT_GAP = "[\\W\\d_]"                                 # a character that is no letter (the spelled units)
+
+
+def _strict_spelled(units: str) -> str:
+    """``units`` spelled one at a time, one to three characters that are no letter between two (zero to three before
+    a mark that stays on its letter)."""
+    return re.escape(units[0]) + "".join(
+        _STRICT_GAP + ("{0,3}" if unicodedata.category(u)[0] == "M" else "{1,3}") + re.escape(u) for u in units[1:])
+
+
+def _strict_alternatives(entry: str, spell) -> list:
+    """The strict lane's wider joins of one entry (above): its words (and a compound's declared words apart) joined by
+    ``_STRICT_JOIN``, and its units spelled with ``_STRICT_GAP`` between them (a two-unit entry only as a whole word:
+    no letter right before or after it)."""
+    marked, unspaced, words, scripts, endings, prefix, glued = spell
+    units = "".join(words)
+    whole = len(units) < 3
+    first = last = ""
+    if not unspaced:
+        first, last = _word_class(scripts[0]), _word_class(scripts[-1])
+    lead = "(?<![^\\W\\d_])" if whole else ("" if unspaced else f"(?<!{first})")
+    end = "(?![^\\W\\d_])" if whole else ("" if unspaced else f"(?!{last})")
+    out = [f"{lead}{_strict_spelled(units)}{end}"]
+    if unspaced or marked:
+        return out
+    # (the declared written spellings that are not the entry's letters: the stem ffd28ca8 listed)
+    have = {units + x for x in (endings or ("",))}
+    for x in _SCRIPT_FORMS.get(entry, {}).get("written", ()):
+        w = _script_word_view(normalise(x.replace(" ", "")))
+        if w not in have:
+            out.append(f"(?<!{first}){_strict_spelled(w)}(?!{last})")
+    pre = "" if prefix is None else f"[{re.escape(prefix[0])}]{{0,{prefix[1]}}}"
+    ending = _ending_alt(endings, last, None)
+    parts = [words] if len(words) > 1 else []
+    apart = _SCRIPT_FORMS.get(entry, {}).get("apart")
+    if apart:
+        parts.append(tuple(_script_word_view(normalise(w)) for w in apart.split(" ")))
+    for ws in parts:
+        joined = _STRICT_JOIN.join(re.escape(w) for w in ws)
+        out.append(f"(?<!{first}){pre}{joined}{ending}(?!{last})")
+    return out
+
+
+_STRICT_SEQ = re.compile("|".join(a for e, (sp, _k) in zip(_SCRIPT, _SPELL_KEYS) if not sp[0]
+                                  for a in _strict_alternatives(e, sp)))
+_MARKED_STRICT = re.compile("|".join(a for e, (sp, _k) in zip(_SCRIPT, _SPELL_KEYS) if sp[0]
+                                     for a in _strict_alternatives(e, sp)))
 _SCRIPT_UNSPACED_RX = _alternation(k for sp, k in _SPELL_KEYS if sp[1] and not sp[0])
 
 
@@ -1274,12 +1331,42 @@ _WRITTEN = _WrittenTable()
 _FINAL_SIGMA = "\u03c2"
 
 
+def _greek_accented() -> dict:
+    """Greek base letter (lower case) -> the class of it and every lower-case Greek letter that is it with accents
+    only (tonos, dialytika, the polytonic marks: NFD the base letter + combining marks), made once at import."""
+    out: dict = {}
+    for a, b in ((0x370, 0x3ff), (0x1f00, 0x1fff)):
+        for o in range(a, b + 1):
+            c = chr(o)
+            d = unicodedata.normalize("NFD", c)
+            if c.lower() != c or len(d) < 2 or not all(unicodedata.combining(x) for x in d[1:]):
+                continue
+            base = d[0]
+            if base.isalpha() and _first_name(base) == "GREEK" and base.lower() == base:
+                out.setdefault(base, [base]).append(c)
+    return {k: "[" + "".join(v) + "]" for k, v in out.items()}
+
+
+# review of cbb6d7b7 F1: the Greek label glued with one word accented, or with the second (enclitic) accent, is the
+# label as written; each Greek letter of a glued spelling may carry accents. Only Greek: an Arabic letter with a hamza
+# or a madda is another letter (review cbdf5e78 S-2)
+_GREEK_ACCENTED = _greek_accented()
+
+
 def _written(w: str) -> str:
-    """The pattern of the word ``w`` (as written, through ``_WRITTEN``) letter for letter."""
-    return "".join("[\u03c2\u03c3]" if c == _FINAL_SIGMA else re.escape(c) for c in w)
+    """The pattern of the word ``w`` (as written, through ``_WRITTEN``) letter for letter; a Greek letter with or
+    without accents (``_GREEK_ACCENTED``)."""
+    out = []
+    for c in w:
+        if c == _FINAL_SIGMA:
+            out.append("[\u03c2\u03c3]")
+        else:
+            base = unicodedata.normalize("NFD", c)[0]
+            out.append(_GREEK_ACCENTED.get(base, re.escape(c)) if _first_name(base) == "GREEK" else re.escape(c))
+    return "".join(out)
 
 
-def _glued_alternatives(entry: str, spell) -> list:
+def _glued_alternatives(entry: str, spell, inword: str = "") -> list:
     """A multi-word label written GLUED (its words with nothing between them; review 0334eeae MUST A), read only AS
     WRITTEN: the words of the entry (and the entry's declared ``written`` spellings: the Greek label with its
     accents) through ``_WRITTEN`` (lower case, the tatweel dropped; no mark, accent, hamza or madda folded or
@@ -1288,7 +1375,9 @@ def _glued_alternatives(entry: str, spell) -> list:
     after it). The word view folds the hamza and madda away, so a glued alternative made on it read ordinary Arabic
     phrases as the label (review cbdf5e78 S-2); on the view as written they are other words. Not for an entry
     declared ``glued`` (its words are already read with nothing between them: the Persian label, the Russian "API
-    key"), a one-word entry, an unspaced one or a marked one."""
+    key"), a one-word entry, an unspaced one or a marked one. ``inword``: the same spellings INSIDE A LONGER
+    WRITTEN WORD (``_inword_alternatives``): "end", any letters before it (no word start); "any", any letters
+    before and after it (no word start, no word end)."""
     marked, unspaced, words, scripts, endings, prefix, glued = spell
     if marked or unspaced or glued or len(words) < 2:
         return []
@@ -1302,18 +1391,124 @@ def _glued_alternatives(entry: str, spell) -> list:
     if form.get("prefix") is not None:
         letters, n = form["prefix"]
         pre = f"[{re.escape(written(letters))}]{{0,{n}}}"
+    lead = "" if inword else f"(?<!{first}){pre}"
     tails = ("",) if form.get("endings") is None else tuple(written(x) for x in form["endings"])
-    spellings = [(tuple(written(w) for w in entry.split(" ")), tails)]
-    spellings += [(tuple(written(w) for w in x.split(" ")), ("",)) for x in form.get("written", ())]
+    words_w = tuple(written(w) for w in entry.split(" "))
+    if inword == "end":
+        tails = tuple(t for t in tails if t == "" or _inword_full_ending(words_w[-1] + t))
+    spellings = [(words_w, tails)]
+    key = _script_letters(normalise(entry))
+    for x in form.get("written", ()):
+        ws = tuple(written(w) for w in x.split(" "))
+        # (the client view, inside a longer word: only a full form it read before a separator, or the stem
+        # ffd28ca8 listed, which its client view read so)
+        if inword != "end" or _inword_full_ending(ws[-1]) or key not in _script_letters(normalise(x)):
+            spellings.append((ws, ("",)))
     out = []
-    for ws, ts in spellings:
+    for i, (ws, ts) in enumerate(spellings):
         ends = sorted(set(_written(t) for t in ts), key=len, reverse=True)
         tail = "" if ends == [""] else "(?:" + "|".join(ends) + ")"
-        out.append(f"(?<!{first}){pre}{''.join(_written(w) for w in ws)}{tail}(?!{last})")
+        close = f"{last}*(?:-{last}+)*" if inword == "any" else f"{tail}(?!{last})"
+        body = "".join(_written(w) for w in ws)
+        if i and key not in _script_letters(normalise("".join(ws))):
+            # the stem ffd28ca8 listed: as ffd28ca8 read it, its letters as listed (no accent: F1 is for the label's
+            # words); with letters after it (the strict lane) the sigma medial only, as its strict lane read it
+            # ("code" + a word in "prosv-", accented or with the final sigma, is other words: M2 of this round)
+            body = "".join("[\u03c2\u03c3]" if c == _FINAL_SIGMA else re.escape(c) for w in ws for c in w)
+            if inword == "any":
+                body = body.replace("[\u03c2\u03c3]", "\u03c3")
+        out.append(f"{lead}{body}{close}")
     return out
 
 
 _SCRIPT_GLUED = re.compile("|".join(a for e, (sp, _k) in zip(_SCRIPT, _SPELL_KEYS) for a in _glued_alternatives(e, sp)))
+
+
+# A LABEL INSIDE A LONGER WRITTEN WORD (review cbb6d7b7, ADR 0051 decision 75): the Korean compound with a noun before
+# the label ("administrator" + "password", one word, as Korean writes it), a word with a prefix letter that is not a
+# declared proclitic, the Russian "password" + an adjective ending. ffd28ca8 and cbdf5e78 read every such word
+# (the strict lane: the label's letters anywhere; the client view: the label's letters right before a separator and
+# a value); the boundary rule alone read none of them, and their values were shown to the owner. Read again, in BOTH
+# lanes, by ONE helper (``_inword_value``), ONLY when a separator and a value follow the word that holds the label
+# (``_CV_AFTER`` and ``_cv_valueish``, the client view's own test, read on the view as written): a word holding the
+# label's letters with no value after it stays an ordinary word (the joins the boundary rule closed: the Hindi,
+# Greek, Thai and Arabic ones of review cbdf5e78, which are not read by this rule). Per lane, as those releases read:
+#   strict  "any": the label (its words as the boundary rule reads them, or glued as written) with any letters of
+#           its script before and after it in the same word, and more words of the script joined to that word by
+#           "-" (the Russian "password-protected" written as a hyphenated compound);
+#   client  "end": the label with any letters before it, ending as the boundary rule ends it (its declared endings,
+#           then no letter of its script): the client view never read a label with more letters after it.
+# Not for the marked entries (Hindi, Thai: the Hindi label inside a longer written word is the closed join S-1, which
+# ffd28ca8 did not read) nor the unspaced ones (Han, kana: read anywhere in the letters, as always).
+# the full forms the client view of ffd28ca8 / cbdf5e78 read before a separator (``_CV_SCRIPT_FULL`` of section 5)
+_INWORD_FULL = ("\u043f\u0430\u0440\u043e\u043b\u044c",
+                "\u03ba\u03c9\u03b4\u03b9\u03ba\u03cc\u03c2 \u03c0\u03c1\u03cc\u03c3\u03b2\u03b1\u03c3\u03b7\u03c2")
+
+
+def _inword_full_ending(last_word: str) -> bool:
+    """``last_word`` (an entry's last word with one of its endings) is, letters only, the last word of a full form."""
+    k = _script_letters(normalise(last_word))
+    return any(_script_letters(normalise(f.split(" ")[-1])) == k for f in _INWORD_FULL)
+
+
+def _inword_alternatives(entry: str, spell, inword: str) -> tuple:
+    """(word view, view as written) alternatives of one entry inside a longer written word (``inword``: "end" or
+    "any", above): its words as the boundary rule spells them (and a compound's declared words apart), and its glued
+    spellings as written (``_glued_alternatives``)."""
+    marked, unspaced, words, scripts, endings, _prefix, glued = spell
+    if marked or unspaced:
+        return [], []
+    last = _word_class(scripts[-1])
+    # the client view: only the endings that make a form it read before a separator at ffd28ca8 / cbdf5e78 (none, or
+    # a full form of ``_INWORD_FULL``: the Russian nominative, the Greek label's genitive)
+    ends = tuple(x for x in (endings or ("",)) if x == "" or _inword_full_ending(words[-1] + x))
+    close = f"{last}*(?:-{last}+)*" if inword == "any" else f"{_ending_alt(ends, last, None)}(?!{last})"
+    # between two words of the label: a space, "_" or "-" in the strict lane, a space or "_" in the client view (as
+    # those releases read them there: no hyphen)
+    between = "[ _\\-]" if inword == "any" else "[ _]"
+    gap = between + "?" if glued else between
+    seq = [f"{gap.join(re.escape(w) for w in words)}{close}"]
+    apart = _SCRIPT_FORMS.get(entry, {}).get("apart")
+    if apart:
+        parts = tuple(_script_word_view(normalise(w)) for w in apart.split(" "))
+        seq.append(f"{between.join(re.escape(w) for w in parts)}{close}")
+    return seq, _glued_alternatives(entry, spell, inword)
+
+
+def _inword_patterns(inword: str) -> tuple:
+    alts = [_inword_alternatives(e, sp, inword) for e, (sp, _k) in zip(_SCRIPT, _SPELL_KEYS)]
+    seq = [a for s, _w in alts for a in s]
+    glued = [a for _s, w in alts for a in w]
+    return re.compile("|".join(seq)), (re.compile("|".join(glued)) if glued else None)
+
+
+_INWORD = {"any": _inword_patterns("any"), "end": _inword_patterns("end")}
+
+
+def _inword_value(v: str, inword: str) -> bool:
+    """A script label inside a longer written word of the view ``v`` (``inword``: "any" for the strict lane, "end"
+    for the client view), followed IN ``v`` by a separator and a value: the word view's pattern, then the glued
+    spellings on the view as written (``_cv_script_value``, the client view's reading of what follows a label)."""
+    seq, glued = globals()["_INWORD"][inword]
+    if _cv_script_value(v, seq) or (glued is not None and _cv_script_value(v, glued, _WRITTEN)):
+        return True
+    if inword != "any":
+        return False
+    # the strict lane: also a value-looking token after one to four characters that are no letter (a space, a tab,
+    # a line break, punctuation: ffd28ca8 flagged the label's letters whatever followed; a word of prose after it,
+    # its closing punctuation aside, is not a value, ``_cv_valueish``)
+    for rx, table in ((seq, None), (glued, _WRITTEN)):
+        if rx is None:
+            continue
+        wv = _script_word_view(v) if table is None else v.translate(table)
+        for end in _cv_script_ends(v, wv, rx.finditer(wv), table):
+            b = _INWORD_GAP_VALUE.match(v, end)
+            if b is not None and _cv_valueish(b.group("val").rstrip(".!?:")):
+                return True
+    return False
+
+
+_INWORD_GAP_VALUE = re.compile("[\\W_]{1,4}(?P<val>[^\\s\"'`<>|,;&)\\]]{4,})")
 _PIECE_RX = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[^\W\d_A-Za-z]+")
 _SIG_RX = re.compile(r"(?i)(?<![a-z])sig\s*[=:]")
 _LETTER_RUN = re.compile(r"[^\W\d_]+")
@@ -1348,7 +1543,12 @@ def _script_hit(v: str) -> bool:
         return True
     if g["_SCRIPT_GLUED"].search(v.translate(_WRITTEN)) is not None:
         return True
-    return g["_SCRIPT_SPLIT"].search(v.translate(_LOWER)) is not None
+    if g["_SCRIPT_SPLIT"].search(v.translate(_LOWER)) is not None:
+        return True
+    if g["_STRICT_SEQ"].search(_script_word_view(v)) is not None:
+        return True                                        # the strict lane's wider joins (decision 75)
+    # a label inside a longer written word, followed by a separator and a value (decision 75)
+    return _inword_value(v, "any")
 
 
 # a character of the marked blocks: only such a character, in an inspection view, is a letter of a marked entry on
@@ -1367,8 +1567,9 @@ def _marked_candidate(v: str) -> bool:
 def _marked_hit(text: str) -> bool:
     """A marked ``_SCRIPT`` label (spelled with a non-spacing mark: the Hindi and Thai entries) on a marked view of
     ``text``, its marks as written (``_MARKED_SEQ`` on the word view, the pattern the client view reads too)."""
-    seq = globals()["_MARKED_SEQ"]
-    return seq is not None and any(not mv.isascii() and seq.search(_script_word_view(mv)) is not None
+    seq, wide = globals()["_MARKED_SEQ"], globals()["_MARKED_STRICT"]
+    return seq is not None and any(not mv.isascii() and (seq.search(wv := _script_word_view(mv)) is not None
+                                                         or wide.search(wv) is not None)
                                    for mv in _marked_views(text))
 
 
@@ -3525,7 +3726,7 @@ def _cv_label(v: str) -> bool:
     if g["_SCRIPT_RX"].search(letters) is not None or (_WRITTEN_RX is not None and _WRITTEN_RX.search(letters)):
         # the strict lane's patterns (section 2a), then a value
         return (_cv_script_value(v, g["_SCRIPT_SEQ"]) or _cv_script_value(v, g["_SCRIPT_GLUED"], _WRITTEN)
-                or _cv_script_value(v, g["_SCRIPT_SPLIT"], _LOWER))
+                or _cv_script_value(v, g["_SCRIPT_SPLIT"], _LOWER) or _inword_value(v, "end"))
     return False
 
 

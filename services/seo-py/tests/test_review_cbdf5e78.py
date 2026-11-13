@@ -421,8 +421,11 @@ def test_the_greek_label_is_read_in_its_forms_and_nothing_glued_to_it():
     assert flagged(f"{GREEK_LABEL}{rs(r, LOWER, 3)}{r.randint(10, 99)}")
     glued = [GREEK_LABEL.replace(" ", ""), GREEK_CODE + "\u03c0\u03c1\u03bf\u03c2\u03b2\u03ac\u03c3\u03b7",
              GREEK_LABEL + "\u03c4\u03b1", "\u03c4\u03bf" + GREEK_LABEL.replace(" ", "")]
-    assert [flagged(f"{g}: {value(r)}") for g in glued] == [True, False, False, False]
-    assert [masked(f"{g}: {value(r)}") for g in glued] == [True, False, False, False]
+    # (round 7, decision 75: a label inside a longer written word is read before a value, as ffd28ca8 and cbdf5e78
+    # read it: the strict lane with letters after it, both lanes with a word before it; bare, only the label itself)
+    assert [flagged(f"{g}: {value(r)}") for g in glued] == [True, False, True, True]
+    assert [masked(f"{g}: {value(r)}") for g in glued] == [True, False, False, True]
+    assert [flagged(g) for g in glued] == [True, False, False, False]
 
 
 # ================================================================================================ MUST 2: Thai
@@ -543,11 +546,15 @@ def test_the_arabic_and_hebrew_labels_are_read_with_their_proclitics():
         for sep in SEPARATORS:
             t = f"{f}{sep}{value(r)}"
             assert flagged(t) and masked(t), (len(f), sep)
-    # not a declared proclitic, or a word between: not the label (glued, the hamza / madda forms of "with the
-    # word" + "family" + "secret" stay other words: ``test_arabic_phrases_are_not_masked``)
-    for f in ("\u0627" + word, word.replace(" ", " \u0648 "), "\u0627" + word.replace(" ", ""), "\u05d0" + hebrew,
-              hebrew + "\u05d5\u05ea"):
-        assert not flagged(f"{f}: {value(r)}") and not masked(f"{f}: {value(r)}")
+    # a word between: not the label (glued, the hamza / madda forms of "with the word" + "family" + "secret" stay
+    # other words: ``test_arabic_phrases_are_not_masked``)
+    f = word.replace(" ", " \u0648 ")
+    assert not flagged(f"{f}: {value(r)}") and not masked(f"{f}: {value(r)}")
+    # not a declared proclitic: not the label as a whole word (bare); before a value it is a label inside a longer
+    # written word (round 7, decision 75: read as ffd28ca8 and cbdf5e78 read it; letters after it, strict only)
+    for f in ("\u0627" + word, "\u0627" + word.replace(" ", ""), "\u05d0" + hebrew, hebrew + "\u05d5\u05ea"):
+        assert not flagged(f)
+        assert flagged(f"{f}: {value(r)}") and masked(f"{f}: {value(r)}") != f.startswith(hebrew)
 
 
 def test_no_script_label_is_read_on_an_ascii_folded_view():
@@ -560,7 +567,17 @@ def test_no_script_label_is_read_on_an_ascii_folded_view():
              "\u0647\u0631\u0645\u0632\u0639\u0628\u0648\u0631", "\u0645\u062d\u0627\u0631\u0645 \u0632 \u0639\u0628\u0648\u0631",
              "\u0627\u0644\u0647\u0631\u0645 \u0632 \u0639\u0628\u0648\u0631")
     for t in texts:
-        assert not masked(f"{t}: ready today") and not masked(f"{t}: {value(r)}") and sg.check(t) is None, len(t)
+        assert sg.check(t) is None, len(t)
+    # (round 7, decision 75; OWNER DECISION) "Hormuz" + "crossing" holds the Persian label inside a longer written
+    # word ON THE VIEW AS WRITTEN: before a value it is read as ffd28ca8 and cbdf5e78 read it (the client view
+    # with the words apart by a space or nothing, not a hyphen); the other three are read on no view
+    got = [masked(f"{t}: ready today") or masked(f"{t}: {value(r)}") for t in texts]
+    assert got == [True, False, True, False, False]
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(sg, "_INWORD", {k: (re.compile("(?!x)x"), None) for k in ("any", "end")})
+        prev.clear_guard_caches()
+        assert not any(masked(f"{t}: ready today") or masked(f"{t}: {value(r)}") for t in texts)
+    prev.clear_guard_caches()
 
 
 # ================================================================================================ S-3: spelled
@@ -595,9 +612,10 @@ def test_a_label_spelled_one_unit_at_a_time_is_read_with_one_separator():
             assert flagged(t) and masked(t), s
             for other in ("\uac00" + s + s.join(e), s.join(e) + s + "\uac00", "\uac00" + s.join(e), s.join(e) + "\uac00"):
                 assert not masked(f"{other}: {value(r)}"), s
-    # two separators mixed between the units is not the label
+    # two separators mixed between the units: not masked; (review of cbb6d7b7 F3) flagged by the strict lane, which
+    # reads the units with any non-letters between them, as ffd28ca8 and cbdf5e78 read them
     for t in ("\u043f_\u0430 \u0440_\u043e \u043b_\u044c", "\u043f-\u0430 \u0440-\u043e \u043b-\u044c"):
-        assert not flagged(f"{t}: {value(r)}") and not masked(f"{t}: {value(r)}")
+        assert flagged(f"{t}: {value(r)}") and not masked(f"{t}: {value(r)}")
 
 
 def test_residual_h_one_letter_words_joined_into_the_spelled_label_are_masked():
@@ -697,9 +715,11 @@ def test_korean_takes_its_particles_and_nothing_else():
     r = random.Random(SEED + 15)
     for f in ("\ube44\ubc00\ubc88\ud638", "\ube44\ubc00\ubc88\ud638\ub97c", "\ube44\ubc88\uc774", "\uc554\ud638\ub294", "\ud1a0\ud070\uc744"):
         assert flagged(f"{f}: {value(r)}") and masked(f"{f}: {value(r)}"), len(f)
-    # "encryption" ("cipher" + a suffix that is not a particle), "decipher" (a word before it): other words
-    for f in ("\uc554\ud638\ud654", "\ubcf5\ud638\ud654", "\ud574\uc554\ud638"):
+    # "encryption" ("cipher" + a suffix that is not a particle), "decryption": not masked; (round 7, decision 75)
+    # a word before the label is a label inside a longer written word: masked before a value, as at ffd28ca8
+    for f in ("\uc554\ud638\ud654", "\ubcf5\ud638\ud654"):
         assert not masked(f"{f}: {value(r)}"), len(f)
+    assert masked(f"\ud574\uc554\ud638: {value(r)}") and not flagged("\ud574\uc554\ud638")
 
 
 def test_mutation_with_the_second_pass_everywhere_the_greek_triples_read_as_latin_labels(monkeypatch):
@@ -827,6 +847,12 @@ def test_one_pattern_reads_the_script_labels_in_both_lanes(monkeypatch):
     texts = [f"{e}: {value(r)}" for e in (RUSSIAN, GREEK_LABEL, HEBREW, KOREAN)]
     assert all(flagged(t) and masked(t) for t in texts)
     monkeypatch.setattr(sg, "_SCRIPT_SEQ", re.compile("(?!x)x"))
+    monkeypatch.setattr(sg, "_STRICT_SEQ", re.compile("(?!x)x"))     # (and the strict lane's wider joins, round 7)
+    prev.clear_guard_caches()
+    assert not any(flagged(t.split(":")[0]) for t in texts)
+    # (round 7: the in-word rule and the strict lane's wider joins, decision 75, read a label too; all off, nothing
+    # is read)
+    monkeypatch.setattr(sg, "_INWORD", {k: (re.compile("(?!x)x"), None) for k in ("any", "end")})
     prev.clear_guard_caches()
     assert not any(flagged(t) or masked(t) for t in texts)
 

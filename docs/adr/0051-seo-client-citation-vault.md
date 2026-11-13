@@ -1547,7 +1547,12 @@ two- and three-word joins (spaced, hyphenated, glued) of 18 languages, but the r
     glued, the Korean label written as two words and the Arabic labels written glued; at 0334eeae they were
     not read, which the review rejected (MUST A). They are read again (decision 74: the Arabic and Greek labels
     glued, as written; the Korean compound's two words with a space, "_" or "-" between them): M1 of decision 74
-    finds no label form ffd28ca8 or cbdf5e78 read that this release does not. Against cbdf5e78 only (ffd28ca8 did not flag them either): a Latin label with TWO accented lookalikes of
+    finds no label form ffd28ca8 or cbdf5e78 read that this release does not. **Corrected by the probe and the
+    review of cbb6d7b7 (decision 75):** that statement held only over the spelling classes M1 measured; a script
+    label inside a longer written word (a noun or an undeclared letter before it, letters after it), the words of a
+    multi-word label joined by another separator, a label spelled with another separator, and the Greek label
+    glued with one word accented were read by ffd28ca8 or cbdf5e78 and not here. Decision 75 reads them again and
+    states its claim over a NAMED class list only. Against cbdf5e78 only (ffd28ca8 did not flag them either): a Latin label with TWO accented lookalikes of
     one script side by side ("t" + omicron with tonos + kappa + "en") is not flagged by the strict lane; the
     client view masks it with its value, as at both releases. Two letters of one other script in a row are read
     as a word of that script: read as lookalikes instead (the mutation of this round), 36 ordinary glued joins
@@ -1813,6 +1818,170 @@ cbdf5e78 read still read.
     `tests/test_review_cbdf5e78.py` stay. In `tests/test_review_ffd28ca8.py` the glued Arabic natural spellings
     are restored as at cbdf5e78, with the vowelled ones glued too; in `tests/test_review_cbdf5e78.py` the two
     assertions that pinned the glued Arabic and Greek forms as not read now pin them read.
+
+## Probe and review of cbb6d7b7: a label inside a longer word, other joins, other separators
+
+The lead probed cbb6d7b7 (decision 74) with synthetic values: the Korean "administrator", "account" and "user" +
+"password" written as one word (as Korean writes compounds) and the Russian "administrator" + "password" written
+as one word, followed by ": " or " = " and a value, were flagged and masked at ffd28ca8 and cbdf5e78 and neither at
+cbb6d7b7; decision 73 had listed the class as "no longer read", and disclosure is not an exemption. The
+independent review of cbb6d7b7 then found three more classes lost and a start-up crash: F1 the Greek label glued
+with ONE word accented, or with the enclitic second accent (cbdf5e78 read them; 12 of 12 values shown end to end);
+F2 the strict lane no longer read the words of a multi-word label joined by anything but one space, "_" or "-"
+("." "/" ":" "," "+" "|" "--" "__" " - " ...); F3 the strict lane no longer read a label spelled one letter at a
+time with "/" "," ":" "|" "+" a middle dot, a bullet, " . " ...; F4 `secret_guard.py` held an f-string expression
+with a backslash, a SyntaxError on Python 3.11 (`import api` failed). SHOULD: the closed Korean particle list and
+the Korean compound joined by "." were not pinned; decision 73's "no label form lost" held only over its own
+spelling classes.
+
+75. **What ffd28ca8 and cbdf5e78 read in these classes is read again, lane by lane as they read it; a label
+    inside a longer written word only before a value.**
+
+    **What the code does now** (`secret_guard.py`, section 2a):
+    - **A label inside a longer written word** (`_inword_value`, `_INWORD`, `_inword_alternatives`; ONE helper,
+      both lanes): the label's words as the boundary rule spells them, or glued as written, with the word start
+      dropped and, per lane, the word end: the strict lane ("any", in `_script_hit` after every whole-word
+      reading) reads it with any letters of its script before and after it in the same word (and words of the
+      script joined to that word by "-"); the client view ("end", in `_cv_label`) with any letters before it,
+      ending bare or as a full form those releases' client views read before a separator (`_INWORD_FULL`: the
+      Russian nominative, the Greek genitive; not the other declared endings, and of the Greek written spellings
+      only those and the stem ffd28ca8 listed), then no letter, its words apart by a space or "_" or glued. The
+      stem ffd28ca8 listed is read inside a word only with the medial sigma, as ffd28ca8 read it. (The first
+      candidate let the client view take every declared ending inside a word: M2 found 4,102 glued joins read by
+      no release, "type" + "roles", Korean "prepare" + "pw" + a particle, and 2,122 Greek "code" + "prosv-" words
+      via the stem; both rules were narrowed to what the releases read and are pinned.) ONLY when the word that holds the label is followed, on the view as written, by a separator and
+      a value (`_CV_AFTER`, `_cv_valueish`); the strict lane also by one to four characters that are no letter
+      (a space, a tab, a line break, punctuation) and a value-looking token (`_INWORD_GAP_VALUE`, `_cv_valueish`
+      with closing punctuation stripped: a word of prose is no value). The lead's probe of the first build found
+      the Korean and Russian compounds + ONE SPACE + a value flagged by ffd28ca8 and not here; M1+ part E below. Bare, such a word is not read (the boundary rule decides, as at
+      cbb6d7b7). Not for the marked (Hindi, Thai) or unspaced (Han, kana) entries.
+    - **F1.** `_written` lets every Greek letter of a glued spelling carry accents (`_GREEK_ACCENTED`: the base
+      letter and every lower-case Greek letter that is it plus combining marks, built over the Greek blocks
+      only). Hamza and madda are not accents of the Arabic alef: the Arabic glued spellings stay as written (S-2).
+    - **F2, F3, strict lane only** (`_STRICT_SEQ`, `_MARKED_STRICT`; `_strict_alternatives`): the label's WHOLE
+      words (same word boundaries, proclitics, endings; the Korean compound's declared words apart too) joined by
+      one to three characters that are no letter (`_STRICT_JOIN`: punctuation, symbols, digits, spaces, "_"), and
+      the label spelled one unit at a time with one of 57 separators (`_STRICT_SPACERS`: each of
+      `/ , : | + = ; ~ * - _ .`, the middle dot and the bullet, alone, with a space after, before, or on both
+      sides; the declared written spellings, i.e. the stem ffd28ca8 listed, too; a two-unit label only as a word
+      of its own). The client view never read these (its letters had a space or "_" between them at most) and
+      does not; a value after them is shown as at ffd28ca8 and cbdf5e78 (M4).
+    - **F4.** The join in `_declared_alternatives` is built outside the f-string. `import api` from `src/` on
+      Python 3.11.18, 3.12.3 and 3.13.18 (`uv venv -p /usr/bin/python3.11` / `3.12` / `3.13`, `uv pip install -r
+      requirements.txt`): OK on all three; cbb6d7b7 on 3.11: SyntaxError. A test fails on any f-string expression
+      of the module holding a backslash and compiles the module with `python3.11` when one is on the PATH.
+
+    **M1+, BAR 2 over a NAMED class list** (`h/m1p.py`, `h/m1p_diff.py`; the 101 entries of the four releases'
+    lists): noun before (30 ordinary nouns per language, Russian and Ukrainian 30 each, glued before the label as
+    listed and in its natural spellings), every single letter of the script before it (Hangul: all 11,172
+    syllables), 30 suffix strings after it (Russian adjective forms, Persian possessive and plural endings,
+    Korean nouns and suffixes, ...), a suffix + "-" + a noun, F1 (the Greek label glued with only the first,
+    only the second word accented, the enclitic accent; final and medial sigma, UPPER, and spaced), F2 (13 joins
+    for every multi-word label and the Korean compound apart), F3 (9 separators for every entry), each x 16
+    separators x bare / prose x NFC / NFD:
+
+    | part | cells | read at ffd28ca8 or cbdf5e78, not at cbb6d7b7 (strict / client view; read at ffd28ca8) | not read now |
+    |---|---|---|---|
+    | scripts: noun / letter before, letters after, hyphenated compound (all but Korean letters) | 282,240 | 139,200 / 61,024 (104,608 / 38,592) | 5,408 / 3,616: Hindi only, read at cbdf5e78 only |
+    | Korean: every one of the 11,172 syllables before a label | 2,859,520 | 2,859,519 / 2,859,520 (all) | 0 / 0 |
+    | F1, F2, F3 | 16,384 | 12,224 / 384 (7,936 / 0) | 0 / 0 |
+    | Latin entries, the same classes | 503,104 | 0 / 0 | 0 / 0 |
+    | E: the in-word classes after a space, a tab, a line break, two spaces, ", ", "; ", " / ", " -- ", "... ", " , " (Korean syllables: the first three) | 722,800 | 630,800 / 0 (no client view read these) | 3,380 / 0: Hindi only |
+
+    read(ffd28ca8) U read(cbdf5e78) minus read(now) is EMPTY over these classes but the Hindi cells, which
+    ffd28ca8 did not read (the closed join S-1). Read now and by neither release: strict 288 (the Hindi label
+    spelled with the new separators), client view 2,664 (Greek F1 partial-accent forms 1,536, the label's own
+    word; 1,128 spelled forms and tails cbb6d7b7 already masked). The claim "no form lost" is made over THIS class
+    list and decision 74's M1 list only.
+
+    **M2** (`h/m2_7.py`, `h/m2_7diff.py`; 18 languages, wordfreq top 30,000, Thai 65,087 words; the words, every
+    candidate pair and triple in four forms, and every pair also joined by "/" ":" "," "+" "|" ", " " - " "="
+    ". " "--"; only texts that hold a match of a pattern this decision adds can read differently, and they are
+    kept; 3,000 random others per language are checked): 242,841 texts can read differently;
+    the check samples (46,226 texts) read alike. Against cbb6d7b7, newly read and lost nothing: bare (strict
+    5,385; URL 5,350 raw / 1,010 encoded; host refused 5,352) only the label's OWN words joined by a digit, a
+    symbol or "." or spelled with them (F2, F3: "secret 1 number", Korean "rain" + "/" + "number" = the two-letter
+    label spelled), all read by ffd28ca8 or cbdf5e78; with a value after the text (strict ": " 233,462, client
+    view 2,758): joins written glued (Greek also dotted) whose letters hold a label inside a longer word (Russian
+    20,782 / 137, Ukrainian 30,899 / 224, Korean 39,718 / 1,561, Arabic 3,310 / 103, Persian 829 / 230, Hebrew
+    132,893 / 485, Greek 5,031 / 18), every one read by ffd28ca8 (Greek: cbdf5e78) but 9 client-view Greek
+    texts that are the label's own glued words with accents. Against ffd28ca8: nothing newly read but label forms
+    (Greek accented forms ffd28ca8 did not list: strict 7,188 bare); no longer read with a value 448 (glued joins
+    with an inner "." or apostrophe, read by ffd28ca8's letters-anywhere rule; not label forms).
+
+    **M3 to M6.** M3 (1,320,550 hosts: the 172 that hold a pattern this decision adds, and 5,000 random;
+    378,000 URLs raw and percent-encoded; the neutral sentences in three casings): against cbb6d7b7, 83 hosts
+    newly refused, every one a label's own words joined by "-" + a digit, a symbol or a joiner + "-" (F2; 81 in
+    the inspection, check and checked-host lanes, 2 in check only); the random hosts, the URLs and the sentences
+    read alike; against ffd28ca8 (140-host set) 13 newly refused, the Greek label with its accents hyphenated
+    (the label's own words). M4 (the real service): a noun or a letter before a label, 98 forms x 3 values: 0
+    shown, 882 of 882 fields masked (cbb6d7b7: 274 shown; ffd28ca8: 18; cbdf5e78: 3); F1, 9 forms: 0 shown
+    (cbb6d7b7: 27 of 27); letters after a label (17 forms), F2 (30) and F3 (8): their values shown at all four
+    releases, as ffd28ca8 and cbdf5e78 showed them (the client view never read these shapes); 32 own-site URLs
+    citing the pinned phrases and the owner-decision phrases: 32 fetched, 12 fields masked (ffd28ca8 12,
+    cbb6d7b7 0). M5 (130,000 texts): against cbb6d7b7 strict +118, client view +41, 0 lost, every one a label form
+    with an insertion (a noun glued before it; "_" or a vowel sign between the Greek or Arabic words). M6: per
+    script cost within -1.9% and +3.0% of cbb6d7b7 (Japanese strict +3.0%); the guard module's cold import 361 ms
+    against 312 ms idle (the strict spelled forms use ONE generic gap, `_STRICT_GAP`: a list of 57 separators made a
+    299 KB pattern that took 178 ms to compile); 13 worst-case shapes linear (doubling ratios near 2).
+
+    **RULING: lead ruling under owner policy (security over precision; ffd28ca8 is the accepted over-tightening
+    baseline, and reading again what it read is not over-tightening), reversible by the owner: option 1 below is
+    taken; options 2 and 3 stay documented.** The decision as it was put: A glued join of ordinary words whose letters END with a label
+    ("group" + "role" glued holds the Russian label; Persian "Hormuz" + "crossing" holds the Persian label after
+    one letter) is, letter for letter, a label with a word or a letter before it: no rule without a dictionary
+    separates them, so reading the lead's class (Korean "administrator" + "password" glued; every Hangul syllable
+    before a label alone: 2,859,519 strict / 2,859,520 client-view cells ffd28ca8 and cbdf5e78 read) re-reads, before a value, joins the boundary rule
+    had closed. Side A, restored: M1+ above (strict 3,641,743 / client view 2,920,928 cells lost at cbb6d7b7, 0
+    lost now but the Hindi cells). Side B, re-read against cbb6d7b7 (all read by ffd28ca8, the Greek by cbdf5e78): M2 233,462
+    strict / 2,758 client-view texts with a value (none bare; the same strict texts after a space, a tab or ", "
+    and a value-looking token, `h/m2_gap.py`; after a space and prose only the label-word texts counted bare); the pinned derived joins of `tests/test_review_0334eeae.py`
+    glued, 24 masked before a value (Russian 12, Ukrainian 11, Hebrew 1; 93 before the client view was narrowed);
+    "Hormuz crossing" spaced and glued masked before a value (`tests/test_review_cbdf5e78.py`); M4 12 fields of
+    the own-site URL run masked (ffd28ca8: 12; cbb6d7b7: 0), every URL still fetched. Choices: (1) take this
+    release (ffd28ca8's protection, its glued-join reads before a value); (2) keep cbb6d7b7's whole-word rule and
+    declare the in-word class a residual (the lead's cells stay shown); (3) a partial rule, e.g. Korean only
+    (Korean writes compounds glued; Korean side B: 39,718 strict / 1,561 client view). F1 to F4 and the Korean
+    pins do not depend on the choice (their new reads are the label's own words) and can ship alone.
+
+    **Final sigma inside a word: an owner item, not a closed matter.** The glued label reads an entry's final
+    sigma written as the medial sigma, never an entry's MEDIAL sigma written as the final one inside a word:
+    reading it would read "code" + "to" (with its final sigma) + "basis" glued as the label, which cbdf5e78 read and
+    decision 73 closed as ordinary text (M1+: ffd28ca8 never read it). Kept as is pending the owner's ruling.
+
+    **Residuals (exact, M1+).** The Hindi label inside a longer written word is not read (strict 5,408 cells,
+    client view 3,616): cbdf5e78 read it, ffd28ca8 did not, and it is the closed join S-1 (decision 73). Letters
+    after a label are not masked by the client view (as at ffd28ca8 and cbdf5e78: M4 42 of 42 values shown at all
+    four releases). F2 and F3 forms are not masked by the client view (as at both releases).
+
+    **Tests.** `tests/test_review_cbb6d7b7.py` (24 tests): a noun or an undeclared letter before
+    the label (Korean, Russian, Ukrainian, both Arabic labels spaced and glued, with a tatweel or each invisible
+    joiner, Persian, Hebrew, Greek, the stem ffd28ca8 listed; 101 forms) read in both lanes after five separators,
+    bare and in a sentence, NFC and NFD; letters after the label (the Russian adjective, "-protected" as a hyphenated
+    compound, Korean "-ization", Hebrew plural, Arabic "-iya", Greek, Persian) flagged and not masked; none of them
+    read without a value; the lead's probe cells; the pinned collision sets (Greek "code to bas-", Thai, the 60
+    Arabic S-2 phrases, the Hindi joins) not read WITH a value; label words never apart by another word; the
+    client view's in-word words apart by a space or "_" only; F1 (one word accented, the enclitic accent, UPPER,
+    medial sigma) in both lanes and "code" + "to" + "basis" glued still not read; F2 (15 joins x 6 labels, and a
+    digit between) strict only; F3 (13 separators x every unmarked entry, the Thai label, the stem ffd28ca8 listed;
+    a two-unit label as a word of its own); F4 (no backslash in any f-string expression of the module; compiled by
+    `python3.11` when present); the Korean particle list closed against 32 common undeclared particles and endings;
+    the Korean compound joined by "." strict only; the strict lane after a space, a tab, a line break or a short
+    punctuation gap and a value-looking token (the lead's probe), never before prose; mutations: the rule off, the client view reading letters after,
+    the strict lane without them, the value test dropped, the strict joins off; and the OWNER-DECISION pins.
+    Changed assertions of earlier files (each now pins what ffd28ca8 / cbdf5e78 read, lane by lane; the bare form,
+    where the boundary rule alone decides, is pinned beside each): `tests/test_review_cbdf5e78.py` the Greek glued
+    list ("label" + "ta", "to" + label: read with a value), the undeclared Arabic and Hebrew prefixes and the Hebrew
+    plural (read with a value), "Hormuz crossing" (OWNER DECISION: read with a value, as ffd28ca8), "a word before
+    cipher" (masked with a value), the mixed separators between spelled units (flagged, not masked), the one-pattern
+    mutation (turns the new patterns off too); `tests/test_review_0334eeae.py` the hamza test's undeclared prefix,
+    three proclitics, suffix and "al" + label (read with a value), the glued-off mutation (turns the in-word glued
+    patterns off too), the Greek accent on another letter (F1: read), the Korean compound + "-ization" and with ", "
+    "/" "+" "." (strict only), the stem with letters before / after (read with a value), the Korean closed list and
+    the four Hebrew proclitics (pinned bare; strict with a value), the Greek word class (pinned bare and in the
+    client view), label words joined by other characters (strict only), the two-letter spelled label with a letter
+    joined and three separators between units (strict only), the derived joins (OWNER DECISION: glued, those whose
+    letters end with a label are masked with a value: 24, ru 12, uk 11, he 1).
 
 ## Threat model
 

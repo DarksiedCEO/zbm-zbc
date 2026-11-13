@@ -145,9 +145,13 @@ def test_the_glued_alternative_reads_the_hamza_and_madda_as_written():
         g = e.replace(" ", "")
         assert all(read(p + g, r) == [True] * 8 for p in PROCLITIC_AR)
         assert all(read(p + q + g, r) == [True] * 8 for p in PROCLITIC_AR for q in PROCLITIC_AR)
-        assert read("\u0627" + g, r) == [False] * 8 and read(PROCLITIC_AR[:3] + g, r) == [False] * 8
-        # a word glued after it, or the label inside a longer word
-        assert read(g + "\u064a\u0629", r) == [False] * 8 and read("\u0627\u0644" + g, r) == [False] * 8
+        # a letter that is not a proclitic, three proclitics, a word glued after it, the label inside a longer word:
+        # not the label as a whole word (bare); before a value, a label inside a longer written word (round 7,
+        # decision 75, as ffd28ca8 read it: letters after it in the strict lane only)
+        for x in ("\u0627" + g, PROCLITIC_AR[:3] + g, g + "\u064a\u0629", "\u0627\u0644" + g):
+            assert not flagged(x) and not flagged(f"Note the {x} today.")
+        assert read("\u0627" + g, r) == [True] * 8 and read(PROCLITIC_AR[:3] + g, r) == [True] * 8
+        assert read(g + "\u064a\u0629", r) == [True, False] * 4 and read("\u0627\u0644" + g, r) == [True] * 8
 
 
 def test_the_known_trap_glued_on_the_word_view_masks_the_s2_phrases(monkeypatch):
@@ -166,6 +170,8 @@ def test_the_known_trap_glued_on_the_word_view_masks_the_s2_phrases(monkeypatch)
 def test_mutation_without_the_glued_pattern_the_glued_labels_are_not_read(monkeypatch):
     r = random.Random(SEED + 4)
     monkeypatch.setattr(sg, "_SCRIPT_GLUED", re.compile("(?!x)x"))
+    # (round 7: and the glued spellings of the in-word rule, decision 75, which read the same words as written)
+    monkeypatch.setattr(sg, "_INWORD", {k: (p[0], None) for k, p in sg._INWORD.items()})
     prev.clear_guard_caches()
     forms = [t for n, t in glued_forms() if not n.startswith("greek_ffd_stem")]
     assert all(not any(read(t, r)) for t in forms)
@@ -179,8 +185,9 @@ def test_the_greek_final_sigma_may_be_written_medial_never_the_other_way():
     to_basis = "\u03ba\u03c9\u03b4\u03b9\u03ba\u03bf\u03c2\u03c0\u03c1\u03bf\u03c2\u03b2\u03b1\u03c3\u03b7"
     assert read(to_basis, r) == [False] * 8
     assert read(GREEK_CODE + "\u03c0\u03c1\u03bf\u03c2\u03b2\u03ac\u03c3\u03b7\u03c2", r) == [False] * 8
-    # the accents are read as written: an accent on another letter is another spelling, not this label
-    assert read(GREEK_CODE + "\u03c0\u03c1\u03bf\u03c3\u03b2\u03ac\u03c3\u03b7\u03c2", r) == [False] * 8
+    # (review of cbb6d7b7 F1: each Greek letter of the glued label may carry an accent, as cbdf5e78 read it: an accent
+    # on another letter is the label written with that accent)
+    assert read(GREEK_CODE + "\u03c0\u03c1\u03bf\u03c3\u03b2\u03ac\u03c3\u03b7\u03c2", r) == [True] * 8
 
 
 def test_the_korean_compound_is_read_with_its_words_apart():
@@ -188,9 +195,14 @@ def test_the_korean_compound_is_read_with_its_words_apart():
     for sep in (" ", "_", "-"):
         assert read(KOREAN_SECRET + sep + KOREAN_NUMBER, r) == [True] * 8
         assert read(KOREAN_SECRET + sep + KOREAN_NUMBER + "\ub97c", r) == [True] * 8          # + a particle
-        assert read(KOREAN_SECRET + sep + KOREAN_NUMBER + "\ud654", r) == [False] * 8         # + not one
-    for sep in (", ", "/", " / ", "+"):
-        assert read(KOREAN_SECRET + sep + KOREAN_NUMBER, r) == [False] * 8
+        # + not one: not the label as a whole word; before a value, letters after a label (round 7, decision 75:
+        # the strict lane, as ffd28ca8 read it)
+        assert read(KOREAN_SECRET + sep + KOREAN_NUMBER + "\ud654", r) == [True, False] * 4
+        assert not flagged(KOREAN_SECRET + sep + KOREAN_NUMBER + "\ud654")
+    # (review of cbb6d7b7 F2: joined by another separator, the strict lane reads the compound's words, as ffd28ca8
+    # and cbdf5e78 read them; the client view never did)
+    for sep in (", ", "/", " / ", "+", ".", ". "):
+        assert read(KOREAN_SECRET + sep + KOREAN_NUMBER, r) == [True, False] * 4
 
 
 def test_the_stem_ffd28ca8_listed_is_read_as_it_read_it():
@@ -200,8 +212,11 @@ def test_the_stem_ffd28ca8_listed_is_read_as_it_read_it():
         assert read(s.join(GREEK_FFD_STEM), r) == [True] * 8
     # glued to another Greek letter it is another word (and it is no prefilter of ordinary text: "code" alone),
     # spelled or not, before or after
-    assert read(GREEK_FFD_STEM + "\u03b9\u03bf", r) == [False] * 8
-    assert read("\u03b1" + GREEK_FFD_STEM, r) == [False] * 8
+    # (round 7, decision 75: before a value, the stem inside a longer written word is read, as ffd28ca8 read it:
+    # with letters after it in the strict lane, with a letter before it in both; bare, it is another word)
+    assert read(GREEK_FFD_STEM + "\u03b9\u03bf", r) == [True, False] * 4
+    assert read("\u03b1" + GREEK_FFD_STEM, r) == [True] * 8
+    assert not flagged(GREEK_FFD_STEM + "\u03b9\u03bf") and not flagged("\u03b1" + GREEK_FFD_STEM)
     for s in (" ", "_", "-", "."):
         assert read("\u03b1" + s.join(GREEK_FFD_STEM), r) == [False] * 8
         assert read(s.join(GREEK_FFD_STEM) + "\u03b1", r) == [False] * 8
@@ -235,8 +250,10 @@ def test_label_words_stand_apart_by_one_space_underscore_or_hyphen_only():
     for e in (WORD, SECRET, PERSIAN, GREEK_ACCENTED[1]):
         for sep in (" ", "_", "-"):
             assert read(e.replace(" ", sep), r) == [True] * 8, sep
+        # (review of cbb6d7b7 F2: another join between the words is read by the strict lane only, as ffd28ca8 and
+        # cbdf5e78 read it; the client view reads a space, "_" or "-" only)
         for sep in (",", ", ", "/", " / ", "+", "  -", "=", "|", " _ "):
-            assert read(e.replace(" ", sep), r) == [False] * 8, sep
+            assert read(e.replace(" ", sep), r) == [True, False] * 4, sep
 
 
 def test_the_korean_particles_are_a_closed_list():
@@ -245,9 +262,10 @@ def test_the_korean_particles_are_a_closed_list():
     for e in ("\uc554\ud638", "\ud1a0\ud070", KOREAN):
         for p in ("\uc744", "\ub294", "\uc5d0\uc11c", "\ub4e4\uc758"):
             assert read(e + p, r) == [True] * 8
-        # "encryption", "tokenization", "ciphertext": other words
+        # "encryption", "tokenization", "ciphertext": other words, never masked; (round 7, decision 75) before a
+        # value the strict lane reads the label with letters after it, as ffd28ca8 did; bare, not
         for x in ("\ud654", "\ubb38", "\ud654\ub41c"):
-            assert read(e + x, r) == [False] * 8
+            assert read(e + x, r) == [True, False] * 4 and not flagged(e + x)
 
 
 def test_hebrew_takes_up_to_three_proclitic_letters():
@@ -255,8 +273,11 @@ def test_hebrew_takes_up_to_three_proclitic_letters():
     r = random.Random(SEED + 10)
     for pre in ("\u05d4", "\u05d5\u05d4", "\u05d5\u05e9\u05d4", "\u05d5\u05db\u05e9"):
         assert read(pre + HEBREW, r) == [True] * 8
+    # four: not the label as a whole word (bare, and inside a sentence with no value); before a value, a label
+    # inside a longer written word (round 7, decision 75, as ffd28ca8 read it)
     for pre in ("\u05d5\u05db\u05e9\u05d4", "\u05d5\u05de\u05e9\u05d4", "\u05e9\u05d5\u05d4\u05d1"):
-        assert read(pre + HEBREW, r) == [False] * 8
+        assert not flagged(pre + HEBREW) and not flagged(f"Note the {pre}{HEBREW} today.")
+        assert read(pre + HEBREW, r) == [True] * 8
 
 
 def test_a_two_letter_label_spelled_with_a_hyphen_or_dot_is_a_word_of_its_own():
@@ -265,8 +286,10 @@ def test_a_two_letter_label_spelled_with_a_hyphen_or_dot_is_a_word_of_its_own():
     two = "\ube44\ubc88"
     for s in "-.":
         assert read(two[0] + s + two[1], r) == [True] * 8
-        assert read(two[0] + s + two[1] + s + "\uac00", r) == [False] * 8           # a letter joined after it
-        assert read("\uac00" + s + two[0] + s + two[1], r) == [False] * 8           # and before it
+        # a letter joined after it, and before it: not masked; (review of cbb6d7b7 F3) the strict lane reads the
+        # spelled units with any non-letters between them, as ffd28ca8 and cbdf5e78 read them
+        assert read(two[0] + s + two[1] + s + "\uac00", r) == [True, False] * 4
+        assert read("\uac00" + s + two[0] + s + two[1], r) == [True, False] * 4
 
 
 def test_spelled_units_stand_apart_by_one_or_two_separators():
@@ -275,7 +298,8 @@ def test_spelled_units_stand_apart_by_one_or_two_separators():
     for s in "_-.":
         assert read(s.join(RUSSIAN), r) == [True] * 8
         assert read((s * 2).join(RUSSIAN), r) == [True] * 8
-        assert read((s * 3).join(RUSSIAN), r) == [False] * 8
+        # three: not masked; (review of cbb6d7b7 F3) flagged by the strict lane, as ffd28ca8 and cbdf5e78 read it
+        assert read((s * 3).join(RUSSIAN), r) == [True, False] * 4
 
 
 def test_a_spelled_mark_may_stay_on_its_letter():
@@ -308,10 +332,13 @@ def test_every_letter_and_mark_of_both_greek_blocks_continues_a_greek_word():
     assert len(chars) >= 300
     # spaced (the word view folds every accented letter into the basic block) and GLUED (the view as written keeps
     # the letters of Greek Extended as they are: only a class of both blocks stops them)
+    # (round 7, decision 75: before a value a label inside a longer written word is read, as ffd28ca8 and cbdf5e78
+    # read it; so the word class is pinned on the bare form, where the boundary rule alone decides, and on the
+    # client view after the label, which reads no letter after it)
     for label in (GREEK_ACCENTED[1], GREEK_ACCENTED[1].replace(" ", "")):
-        bad = [hex(ord(c)) for c in chars if flagged(f"{c}{label}: {value(r)}") or masked(f"{c}{label}: {value(r)}")]
+        bad = [hex(ord(c)) for c in chars if flagged(f"{c}{label}") or flagged(f"x {c}{label} x")]
         assert bad == []
-        bad = [hex(ord(c)) for c in chars if flagged(f"{label}{c}: {value(r)}") or masked(f"{label}{c}: {value(r)}")]
+        bad = [hex(ord(c)) for c in chars if flagged(f"{label}{c}") or masked(f"{label}{c}: {value(r)}")]
         assert bad == []
 
 
@@ -348,7 +375,7 @@ def test_boundary_joins_derived_from_the_entries_are_not_read():
     assert all(not any(k in _letters(w) for k in keys) for ws in SAMPLE.values() for w in ws)
     joins = derived_joins()
     assert sum(len(j) for j in joins.values()) >= 200 and sum(1 for j in joins.values() if j) >= 7
-    bad, own = [], 0
+    bad, own, glued_read = [], 0, []
     for lang, js in joins.items():
         for ws in js:
             # a join whose words glued ARE a label word (a declared form: "pa" + "rol'"): glued it is that word, and
@@ -359,9 +386,19 @@ def test_boundary_joins_derived_from_the_entries_are_not_read():
                 t = sep.join(ws)
                 if itself and sep in ("", " ") or lang == "th" and sep == "" and cbd.THAI in t:
                     continue                                   # (and residual (a): the Thai label as written)
-                if flagged(t) or masked(f"{t}: {value(r)}") or masked(f"{t}: ready today"):
+                if flagged(t) or sep != "" and (masked(f"{t}: {value(r)}") or masked(f"{t}: ready today")):
                     bad.append((lang, js.index(ws), sep))
+                elif sep == "" and (masked(f"{t}: {value(r)}") or masked(f"{t}: ready today")):
+                    # OWNER DECISION (round 7, decision 75): glued, the join's letters END with a label, which is
+                    # letter for letter a label with a word before it; before a value it is masked, as ffd28ca8
+                    # masked it. Only such joins: the in-word pattern takes the glued text up to its end
+                    seq, _glued = sg._INWORD["end"]
+                    wv = sg._script_word_view(sg.normalise(t))
+                    if not any(m.end() == len(wv) for m in seq.finditer(wv)):
+                        bad.append((lang, js.index(ws), sep))
+                    glued_read.append((lang, js.index(ws)))
     assert bad == [] and own > 0
+    assert len(glued_read) == 24                                    # ru 12, uk 11, he 1
 
 
 def test_a_new_bad_entry_is_caught_by_the_derived_joins(monkeypatch):
