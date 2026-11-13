@@ -186,7 +186,8 @@ def test_prompt_injection_in_pages_stays_data(tmp_path, srv):
     before = (dict(h.svc.tenants), h.svc.switch_view(), h.svc.entity_for_tenant("zbm")["version"])
     r = h.ok(audit(h), 201)["report"]
     holders = _strings_with(r, "IGNORE ALL PREVIOUS")
-    assert holders and all(p.get("untrusted") is True for p in holders)
+    # round 2: the page's text is no longer stored at all (title withheld; the entity check stores the comparison)
+    assert all(p.get("untrusted") is True for p in holders) and not holders
     mm = [f for e in r["agents"] for f in e["findings"] if f["code"] == "ENTITY_FIELD_MISMATCH"]
     assert [f["detail"]["field"] for f in mm] == ["name"] and mm[0]["decision"] == "ACT"
     assert (dict(h.svc.tenants), h.svc.switch_view(), h.svc.entity_for_tenant("zbm")["version"]) == before

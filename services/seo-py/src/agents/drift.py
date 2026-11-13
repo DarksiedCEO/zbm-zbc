@@ -11,7 +11,9 @@ assigned without the evidence listed with it; UNKNOWN is a valid answer and is u
                         fact that failed): the page's fetch state; the finding is itself a fetch failure
                         (``*_UNREADABLE``, a robots / sitemap check left incomplete); robots.txt unreachable or
                         too large; llms.txt unreadable; for a sitemap finding, that sitemap URL unreadable, or (a
-                        finding over all sitemaps) any sitemap fetch failure: the change says nothing about the site
+                        finding over all sitemaps) any sitemap fetch failure or robots check left unchecked; the
+                        finding's OWN ``detail.fetch_state`` (a canonical target, a sitemap) is present and not OK
+                        in either run (round 2 Osei M1): the change says nothing about the site
   R2 MEASUREMENT_ERROR  the ruler moved and the thing measured did not: the bot family list, the structured-data
                         rule table, the canonical entity record version, or (answer engines) the prompt set changed,
                         while the page / robots.txt is the same by fingerprint
@@ -35,7 +37,7 @@ from datetime import date
 from typing import Optional
 
 AGENT, TASK = "osei", "search_truth_drift"
-RULES_VERSION = "2026-11-13.1"   # .1 of 11-13: R1 per fact (a failed fetch is never a change, M-O1)
+RULES_VERSION = "2026-11-13.2"   # .2: R1 on a finding's own detail.fetch_state, either run (round 2 Osei M1)
 CLASSES = ("REAL_CHANGE", "MEASUREMENT_ERROR", "MODEL_DRIFT", "SURFACE_DRIFT", "SAMPLING_NOISE", "TOOL_FAILURE",
            "UNKNOWN")
 KEY_DETAIL = ("token", "field", "engine", "prompt_index")
@@ -94,6 +96,9 @@ def classify(agent: str, f: dict, a: dict, b: dict) -> tuple[str, dict]:
     ok = ("OK", "PARTIAL")
     if oa not in ok or ob not in ok:
         return "TOOL_FAILURE", {"rule": "R1", "outcome_before": oa, "outcome_after": ob}
+    own = _own_fetch_failed(agent, f, ea, eb)
+    if own is not None:
+        return "TOOL_FAILURE", {"rule": "R1", **own}
     failed = _fact_failed(agent, f, ea, eb)
     if failed is not None:
         return "TOOL_FAILURE", {"rule": "R1", **failed}
@@ -165,6 +170,24 @@ def classify(agent: str, f: dict, a: dict, b: dict) -> tuple[str, dict]:
 
 INCOMPLETE_CODES = frozenset({"ROBOTS_CHECK_INCOMPLETE", "SITEMAP_ROBOTS_CHECK_INCOMPLETE",
                               "LOG_ROBOTS_CHECK_INCOMPLETE"})
+
+
+def _own_fetch_failed(agent: str, f: dict, ea: Optional[dict], eb: Optional[dict]) -> Optional[dict]:
+    """The finding's own ``detail.fetch_state``, in either run's copy of it (same key), when present and not OK."""
+    k = key(agent, f)
+    states = []
+    for env in (ea, eb):
+        st = None
+        for x in (env or {}).get("findings", []):
+            if key(agent, x) == k:
+                st = (x.get("detail") or {}).get("fetch_state")
+                break
+        states.append(st)
+    mine = (f.get("detail") or {}).get("fetch_state")
+    if any(s not in (None, "OK") for s in states + [mine]):
+        return {"why": "this finding's own fetch did not succeed in one run", "fetch_state_before": states[0],
+                "fetch_state_after": states[1]}
+    return None
 
 
 def _codes_urls(env: Optional[dict], code: str) -> set:

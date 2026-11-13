@@ -74,6 +74,7 @@ HOSTILE_DNS = {"localhost": ["127.0.0.1"], "metadata.google.internal": ["169.254
 REBIND = "rebind.attacker.test"
 SECRET = "WARROOM-INTERNAL-SECRET-7f3a"
 MAX_BYTES = 256 * 1024
+ROBOTS_CUT = 500 * 1024          # RFC 9309 parse limit: robots.txt is read up to here (primitives/fetch.py)
 LOG_IP, LOG_UA = "66.249.66.1", "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
 PD_VALUE = "203.0.113.9|123-45-6789|4111111111111111"
 FIN_SERVICE, FIN_CALLER = "warroom-finance-service-token-" + "s" * 16, "warroom-finance-caller-token-" + "c" * 16
@@ -285,7 +286,7 @@ def setup(tmp):
     return SimpleNamespace(h=h, web=web, fin=fin, steps=[], snap=None, audit=None, needles=[], expected_code=None,
                            probe=None, kill_at=None, ledger_before=0, log_before=0, foreign=[], hostile=None,
                            switch=None, expect_quarantine=None, ingest_view=None, pd=False, gsc=None, pplx=None,
-                           pplx_ps=None, pplx_kill_at=None, cost=None, drift=None)
+                           pplx_ps=None, pplx_kill_at=None, cost=None, drift=None, r2=None)
 
 
 def teardown(ctx) -> None:
@@ -1258,9 +1259,16 @@ def drift_case(ctx, kind):
         ps = ctx.pplx_ps
     if kind == "tool_failure_before_llms":
         ctx.web.routes[(SITE, "/llms.txt")] = lambda req: (_ for _ in ()).throw(httpx.ConnectError("dropped"))
-    body = {"request_id": H.rid(), "domain": SITE, "scheme": "http", "paths": ["/", "/about"]}
+    # round 2: every case also plants a letters-only value (M5) and, where pages are read in both runs, a page whose
+    # canonical moves to a target that refuses connections in the newer run (Osei M1: a failed fetch of the
+    # finding's own target is TOOL_FAILURE, never REAL_CHANGE)
+    _plant_letters(ctx)
+    canon_case = kind != "tool_failure_after_robots"
+    _route(ctx, "/c", 200, FIXTURE.home_html(title="Contact Z Best Media", canonical="http://site.test/c"))
+    body = {"request_id": H.rid(), "domain": SITE, "scheme": "http",
+            "paths": ["/", "/about"] + (["/c"] if canon_case else [])}
     if ps:
-        body.update(paths=["/"], prompt_set_id=ps)
+        body.update(paths=["/", "/c"], prompt_set_id=ps)
     a = h.post("/tenants/zbm/audits", body)
     if kind == "real_change":
         _route(ctx, "/about", 200, FIXTURE.home_html(title="About Z Best Media", canonical="http://site.test/about",
@@ -1279,13 +1287,41 @@ def drift_case(ctx, kind):
                                                             transport=httpx.MockTransport(handle),
                                                             monotonic=ctx.pplx.clock, sleep=ctx.pplx.clock.sleep,
                                                             rand=lambda: 0.0)
+    if canon_case:
+        _route(ctx, "/c", 200, FIXTURE.home_html(title="Contact Z Best Media", canonical="http://site.test/c-new"))
+        ctx.web.routes[(SITE, "/c-new")] = _connect_fails
     body["request_id"] = H.rid()
     b = h.post("/tenants/zbm/audits", body)
     ctx.audit = b
     ids = [x.json().get("audit_id") for x in (a, b)]
     d = h.get(f"/tenants/zbm/audits/{ids[1]}/drift?against={ids[0]}")
-    ctx.drift = {"kind": kind, "http": d.status_code, "body": d.json() if d.status_code == 200 else None}
+    ctx.drift = {"kind": kind, "http": d.status_code, "body": d.json() if d.status_code == 200 else None,
+                 "reports": [x.json().get("report") for x in (a, b)], "canon_case": canon_case}
+    ctx.steps.append({"action": "drift_view", "status": d.status_code, "body": ctx.drift["body"]})
     return d
+
+
+def _letters_marker() -> str:
+    """A letters-only synthetic value (a name slug's or a secret word's shape), made in the worker per case."""
+    import secrets as _secrets
+    return "zq" + "".join(_secrets.choice("bcdfghjklmnpqrstvwxz") for _ in range(12))
+
+
+def _plant_letters(ctx) -> str:
+    """AEGIS Wave-1 round 2 M5: a letters-only value in crawled / declared URLs (robots Sitemap line, sitemap entry,
+    sitemap path): it must be readable nowhere (needles)."""
+    m = _letters_marker()
+    ctx.needles.append(m)
+    robots = ctx.web.routes.get((SITE, "/robots.txt"))
+    text = robots[1] if isinstance(robots, tuple) and isinstance(robots[1], str) else ROBOTS
+    _route(ctx, "/robots.txt", 200, text + f"Sitemap: http://site.test/sitemaps/{m}.xml\n", "text/plain")
+    _route(ctx, f"/sitemaps/{m}.xml", 200, _sitemap([f"http://site.test/team/{m}", "http://site.test/about"]),
+           "application/xml")
+    return m
+
+
+def _connect_fails(request):
+    raise httpx.ConnectError("refused (war room)")
 
 
 DRIFT_EXPECT = {"real_change": ("selene", "REAL_CHANGE"), "sampling_noise": ("callum", "SAMPLING_NOISE"),
@@ -1293,6 +1329,20 @@ DRIFT_EXPECT = {"real_change": ("selene", "REAL_CHANGE"), "sampling_noise": ("ca
                 "tool_failure_after_llms": ("delia", "TOOL_FAILURE"),
                 "tool_failure_before_llms": ("delia", "TOOL_FAILURE"),
                 "tool_failure_after_robots": ("selene", "TOOL_FAILURE")}
+
+
+_FAILED_FETCH_CODES = re.compile(r".*_(UNREADABLE|UNREACHABLE|INCOMPLETE|UNCHECKED)$|PAGE_BLOCKED_FOR_OUR_CRAWLER")
+
+
+def _finding_index(reports) -> dict:
+    """drift key -> [finding in the older report or None, in the newer or None] (agents/drift.py ``key``)."""
+    from agents import drift as drift_mod
+    out: dict = {}
+    for i, rep in enumerate(reports):
+        for e in (rep or {}).get("agents", []):
+            for f in e.get("findings", []):
+                out.setdefault(drift_mod.key(e["agent"], f), [None, None])[i] = f
+    return out
 
 
 def _drift_observe(ctx, state: dict) -> None:
@@ -1303,8 +1353,146 @@ def _drift_observe(ctx, state: dict) -> None:
     mine = [c for c in changes if c["agent"] == agent]
     state["drift_classes"] = sorted({c["class"] for c in mine})
     state["drift_expected_class_seen"] = want in state["drift_classes"]
-    # a failed fetch on either side is never a change about the site (ADR 0017 decision 11; AEGIS Wave-1 M-O1)
-    state["drift_failure_called_real"] = d["kind"].startswith("tool_failure") and "REAL_CHANGE" in state["drift_classes"]
+    # a failed fetch on either side is never a change about the site (ADR 0017 decision 11; AEGIS Wave-1 M-O1 and
+    # round 2 Osei M1): no change classed REAL_CHANGE whose finding, in either run, records a fetch that did not
+    # succeed (its own detail.fetch_state) or is itself a failed / incomplete observation
+    idx = _finding_index(d["reports"])
+    bad = []
+    for c in changes:
+        if c["class"] != "REAL_CHANGE":
+            continue
+        pair = idx.get(c["key"], [None, None])
+        states = [((f or {}).get("detail") or {}).get("fetch_state") for f in pair]
+        if any(s not in (None, "OK") for s in states) or _FAILED_FETCH_CODES.fullmatch(c["code"] or ""):
+            bad.append(c["code"])
+    if d["kind"].startswith("tool_failure") and d["kind"] != "tool_failure_after_robots":
+        bad += [c["code"] for c in mine if c["class"] == "REAL_CHANGE"]
+    if d["kind"] == "tool_failure_after_robots":
+        bad += [c["code"] for c in mine if c["class"] == "REAL_CHANGE"]
+    state["drift_failure_called_real"] = bool(bad)
+    if bad:
+        state["drift_failed_fetch_real_codes"] = sorted(set(bad))
+    # the canonical target that refused connections in the newer run was classified (a change), as TOOL_FAILURE;
+    # not applicable (True) where pages are not read in the newer run (robots.txt unreachable)
+    state["drift_canonical_failure_tool_failure"] = not d["canon_case"] or any(
+        c["url"] == "http://site.test/c" and c["code"].startswith("CANONICAL_TARGET") and c["class"] == "TOOL_FAILURE"
+        for c in changes)
+
+
+# ---------------------------------------------------------------------------------------------- round 2 cases
+
+R2_CHECKED_CODES = ("PAGE_BLOCKED_FOR_OUR_CRAWLER", "CANONICAL_TARGET_NOT_200", "SITEMAP_UNREADABLE",
+                    "LLMS_TXT_UNREADABLE", "ROBOTS_CHECK_INCOMPLETE", "PAGE_NOT_READ_ROBOTS_CHECK_INCOMPLETE",
+                    "CANONICAL_TARGET_UNCHECKED", "SITEMAP_ROBOTS_CHECK_INCOMPLETE")
+
+
+def _slow_routes(ctx, seconds: float) -> None:
+    for k, v in list(ctx.web.routes.items()):
+        if isinstance(v, tuple):
+            def later(request, v=v):
+                time.sleep(seconds)
+                return respond(*v)
+            ctx.web.routes[k] = later
+
+
+def round2(ctx, kind):
+    """AEGIS Wave-1 certification round 2 findings, one case each (M1-M5, the entity check, Osei M2)."""
+    ctx.r2 = {"kind": kind}
+    paths = ("/", "/about")
+    if kind == "reserved_allow":            # M1: "/%2A" is a literal *, so this allows nothing we audit
+        _route(ctx, "/robots.txt", 200, "User-agent: *\nDisallow: /\nAllow: /%2A\n", "text/plain")
+    elif kind == "reserved_disallow":       # M1: never a critical finding quoting "/*"
+        _route(ctx, "/robots.txt", 200, ROBOTS + "Disallow: /%2A\n", "text/plain")
+    elif kind == "invalid_utf8":            # M1: two different invalid octets never collide
+        _route(ctx, "/robots.txt", 200, "User-agent: *\nDisallow: /\nAllow: /x%FE\n", "text/plain")
+        _route(ctx, "/x%FF", 200, FIXTURE.home_html(canonical="http://site.test/x%FF"))
+        paths = ("/x%FF",)
+    elif kind == "slow_site":               # M2: an ordinary slow site is never blocked or unreadable
+        extra = [f"/p{i}" for i in range(4)]
+        for p in extra:
+            _route(ctx, p, 200, FIXTURE.home_html(canonical=f"http://site.test{p}-c"))
+            _route(ctx, f"{p}-c", 200, FIXTURE.home_html(canonical=f"http://site.test{p}-c"))
+        paths = ("/", "/about") + tuple(extra)
+        _slow_routes(ctx, 0.7)
+    elif kind == "filler_then_disallow":    # M3: a rule past 4,000 others is used
+        _route(ctx, "/robots.txt", 200, "User-agent: Googlebot\n" +
+               "".join(f"Disallow: /filler{i}/\n" for i in range(4000)) + "Disallow: /about\n\nUser-agent: *\n"
+               "Allow: /\nSitemap: http://site.test/sitemap.xml\n", "text/plain")
+    elif kind == "long_allow":              # M3: an allow of any length is used; nothing is refused
+        _route(ctx, "/robots.txt", 200, "User-agent: *\nAllow: /" + "a" * 2500 + "\nDisallow: /nothing\n",
+               "text/plain")
+    elif kind == "log_query":               # M4: path AND query, decoded once
+        _route(ctx, "/robots.txt", 200, ROBOTS + "Disallow: /*?sort=\nDisallow: /search?\nDisallow: /%2541\n",
+               "text/plain")
+    elif kind == "planted_names":           # M5: letters-only values in every crawled-URL surface
+        m = _plant_letters(ctx)
+        n = _letters_marker()
+        ctx.needles.append(n)
+        _route(ctx, "/", 301, "", "text/plain", location=f"/landing/{n}")
+        _route(ctx, f"/landing/{n}", 200, FIXTURE.home_html(canonical=f"http://site.test/author/{m}-{n}"))
+    elif kind == "entity_name":             # entity check: the page's business name is never stored
+        n = _letters_marker()
+        ctx.needles.append(n)
+        ld = ('{"@context":"https://schema.org","@type":"Organization","name":"' + n.title() +
+              '","url":"http://site.test/"}')
+        _route(ctx, "/", 200, FIXTURE.home_html(canonical="http://site.test/", ld=ld))
+    elif kind == "jsonld_too_large":        # Osei M2: truncated, its whole size, its own reason
+        big = '{"@context":"https://schema.org","@type":"Organization","name":"' + "n" * 400_000 + '"}'
+        _route(ctx, "/", 200, FIXTURE.home_html(canonical="http://site.test/", ld=big))
+        ctx.h.ports.fetcher = FETCH.Fetcher(timeout_s=1, max_bytes=2 * 1024 * 1024, max_redirects=3,
+                                            resolver=ctx.web.resolve, transport=httpx.MockTransport(ctx.web.handle))
+        ctx.r2["total_bytes"] = len(big.encode())
+    else:
+        raise ValueError(f"unknown round 2 kind {kind}")
+    r = audit(ctx, paths=paths)
+    if kind == "log_query":
+        lines = "".join(clf(p) + "\n" for p in ("/shop?sort=price", "/search?q=x", "/search?", "/%2541", "/A"))
+        ctx.steps.append({"action": "r2_ingest", **_ingest(ctx, lines.encode())})
+    if kind == "planted_names":
+        lines = "".join(clf(p) + "\n" for p in (f"/u/{ctx.needles[0]}", f"/blog/{ctx.needles[1]}"))
+        ctx.steps.append({"action": "r2_ingest", **_ingest(ctx, lines.encode())})
+    return r
+
+
+def _r2_observe(ctx, state: dict) -> None:
+    kind = ctx.r2["kind"]
+    body = ctx.audit.json() if ctx.audit.headers.get("content-type", "").startswith("application/json") else {}
+    rep = (body or {}).get("report") or {}
+    findings = [f for e in rep.get("agents", []) for f in e.get("findings", [])]
+    codes = {f["code"] for f in findings}
+    audited = {p for p in (rep.get("paths") or [])}
+    fetched = {r.split(" ", 2)[2] for r in ctx.web.requests}
+    ok = False
+    if kind in ("reserved_allow", "invalid_utf8"):
+        ok = not (audited & fetched) and state.get("page_states") == ["BLOCKED_BY_ROBOTS"]
+    elif kind == "reserved_disallow":
+        ok = not any(c.startswith("ROBOTS_BLOCKS") for c in codes) and state.get("page_states") == ["OK"]
+    elif kind == "slow_site":
+        ok = state.get("page_states") == ["OK"] and not codes & set(R2_CHECKED_CODES) and \
+            (state.get("agent_outcomes") or {}).get("delia") == "OK"
+    elif kind == "filler_then_disallow":
+        got = [f["detail"].get("blocked_paths") for f in findings if f["code"] == "ROBOTS_BLOCKS_SEARCH_CRAWLER"
+               and f["detail"].get("token") == "Googlebot"]
+        ok = got == [["/about"]] and "ROBOTS_LIMITS_EXCEEDED" not in codes
+    elif kind == "long_allow":
+        ok = state.get("page_states") == ["OK"] and "ROBOTS_LIMITS_EXCEEDED" not in codes
+    elif kind == "log_query":
+        fam = (((ctx.ingest_view or {}).get("report") or {}).get("envelope") or {}).get("facts", {}) \
+            .get("families", {}).get("Googlebot", {})
+        state["r2_robots_hits"] = fam.get("robots_disallowed_hits")
+        ok = fam.get("robots_disallowed_hits") == 4
+    elif kind in ("planted_names", "entity_name"):
+        ok = True if kind == "planted_names" else "ENTITY_FIELD_MISMATCH" in codes
+    elif kind == "jsonld_too_large":
+        osei_facts = next((e["facts"] for e in rep.get("agents", []) if e["agent"] == "osei"
+                           and e.get("task") == "data_hygiene"), {})
+        q = [x for x in osei_facts.get("quarantined", []) if x.get("kind") == "structured_data"]
+        ok = bool(q) and q[0].get("reason") == "JSONLD_TOO_LARGE" and q[0].get("truncated") is True and \
+            q[0].get("total_bytes") == ctx.r2["total_bytes"]
+    state["r2_expect_met"] = bool(ok)
+    outs = _outputs(ctx) + [json.dumps(rep)]
+    hay = [_fold(unquote(unquote(b))) for b in outs]
+    state["r2_leaks"] = sorted(n for n in ctx.needles if any(_fold(n) in x for x in hay))
 
 
 ACTIONS = {"gsc": gsc, "gsc_kill": gsc_kill, "site": site, "plant": plant, "snapshot": snapshot, "audit": audit, "bomb": bomb, "slow": slow,
@@ -1312,7 +1500,8 @@ ACTIONS = {"gsc": gsc, "gsc_kill": gsc_kill, "site": site, "plant": plant, "snap
            "two_clients": two_clients, "probe": probe, "personal_data_key": personal_data_key, "kill": kill,
            "release_without_andre": release_without_andre, "kill_mid_run": kill_mid_run, "paid_run": paid_run,
            "perplexity": perplexity, "answer_audit": answer_audit, "pplx_kill_mid_run": pplx_kill_mid_run,
-           "pplx_ledger_down": pplx_ledger_down, "robots_cost": robots_cost, "drift_case": drift_case}
+           "pplx_ledger_down": pplx_ledger_down, "robots_cost": robots_cost, "drift_case": drift_case,
+           "round2": round2}
 
 
 # ============================================================================================ observation
@@ -1358,6 +1547,13 @@ def _contained(hostile, state) -> bool:
         res = {"home": None, "robots": "robots", "sitemap": "sitemap", "llms": "llms_txt"}[b]
         if res is None:
             return "OK" not in pages and state.get("bodies_within_cap", False)
+        if res == "robots":
+            # round 2 (ADR 0017 R3): robots.txt is read up to the RFC 9309 parse limit and the rest is not decoded,
+            # so a bomb is contained either by a refusal or by that cut: what was kept is at most 500 KiB (a body that
+            # only DECLARES a huge length is read as far as it really goes, never past the cut)
+            rf = state.get("robots_fetch") or {}
+            if rs.get(res) in ("OK", "ok") and isinstance(rf.get("bytes"), int) and rf["bytes"] <= ROBOTS_CUT:
+                return True
         return rs.get(res) not in ("OK", "ok", "present")
     if kind == "slow":
         if a == "home":
@@ -1396,6 +1592,9 @@ def observe(ctx) -> dict:
             for o in obs.get("observations", []):
                 seen.setdefault(o["kind"], o["state"])
             state["resource_states"] = seen
+            sel = next((e["facts"] for e in rep["agents"] if e["agent"] == "selene"), {}) or {}
+            rf = (sel.get("robots") or {}).get("fetch") or {}
+            state["robots_fetch"] = {"bytes": rf.get("bytes"), "truncated": rf.get("truncated")}
             state["quarantined"] = sorted({q.get("reason") for q in obs.get("quarantined", [])})
             state["page_bytes_max"] = max([p["fetch"].get("bytes") or 0 for p in rep["pages"].values()] or [0])
             state["page_states"] = sorted({p["fetch"]["state"] for p in rep["pages"].values()})
@@ -1454,4 +1653,9 @@ def observe(ctx) -> dict:
         state["no_interpreter_stall"] = ctx.cost["stall_ms"] <= STALL_BOUND_MS
     if ctx.drift is not None:
         _drift_observe(ctx, state)
+        outs2 = _outputs(ctx) + [json.dumps(ctx.drift["reports"])]
+        hay = [_fold(unquote(unquote(b))) for b in outs2]
+        state["planted_readable"] = sorted(n for n in ctx.needles if any(_fold(n) in x for x in hay))
+    if ctx.r2 is not None:
+        _r2_observe(ctx, state)
     return state

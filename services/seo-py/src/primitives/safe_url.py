@@ -20,14 +20,32 @@ name with a non-code extension -> {file}.ext; a parameter segment (``;`` matrix 
 ``{param}`` (the part before a ``;`` judged on its own); a slug of plain words (letters, at most 4 digits) is kept;
 16+ hex, 20+ token characters, 8+ characters mixing letters and 2+ digits (in a stored crawled URL also 10+ with
 one digit), or over 40 characters -> {token}; any run of 4+ digits left -> {id}; short numeric segments next to each
-other with 7+ digits together -> {number}. A segment of letters only that is not slug-shaped is kept: a random
-all-letter token cannot be told from a word (limitation).
+other with 7+ digits together -> {number}. A segment of letters only that is not slug-shaped is kept by these rules
+(a random all-letter token cannot be told from a word by its shape): see the word rule below.
+
+Round 2 (AEGIS Wave-1 certification round 2 M5; decision 2026-11-09 "split storage from display"): a segment the
+rules above would keep readable is kept ONLY when it is ordinary (``words=True``, the stored form of crawled URLs
+and of log path templates): every word in it (split on ``- _ . ~ +``, case changes and letter / digit boundaries;
+1-4 digit numbers and single ASCII letters are words) is in the bundled ordinary-word list ``path_words.txt``
+(wordfreq top-N of the 18 languages used elsewhere in seo-py plus English, minus given names, surnames and common
+secret words, plus the exempt names that are also common words; the file header states sources, versions and
+counts), and the segment does not follow a person or secret context segment (``/user/<x>``, ``/author/<x>``,
+``/token/<x>``, ``/reset/<x>``: ``CONTEXT_NAME`` / ``CONTEXT_SECRET``). Anything else is stored as a keyed digest
+token ``{seg:xxxxxxxx}`` (HMAC-SHA-256 with the run's per-tenant path key, ``keyed()``; stable within a tenant so
+reports can still count and group), or ``{seg}`` when no key is set. Already-safe placeholders are kept as they
+are. Disclosed residual: a name, or a secret word, that is also a common word (``[exempt]`` in the data file) stays
+readable outside a context segment.
 """
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
+import hmac
+import os
 import re
 import unicodedata
+from contextvars import ContextVar
 from typing import Optional
 from urllib.parse import unquote, urlsplit
 
@@ -60,6 +78,103 @@ TEMPLATE_RULES = ("invisible characters removed; decode once; NFKC-normalise and
                   "{id}; short numeric segments next to each other with 7+ digits together -> {number}")
 _LOOKALIKE = lookalikes.Table()
 
+# ------------------------------------------------------------------------------------- ordinary words (round 2 M5)
+
+WORDS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "path_words.txt")
+CONTEXT_NAME = frozenset({"user", "users", "u", "profile", "profiles", "people", "person", "persons", "author",
+                          "authors", "member", "members", "team", "staff", "customer", "customers", "employee",
+                          "employees", "patient", "patients", "client", "clients", "contact", "contacts"})
+CONTEXT_SECRET = frozenset({"token", "tokens", "key", "keys", "apikey", "api-key", "api_key", "secret", "secrets",
+                            "password", "passwords", "passwd", "pwd", "reset", "reset-password", "session",
+                            "sessions", "sid", "otp", "invite", "invites", "invitation", "invitations", "verify",
+                            "verification", "confirm", "confirmation", "activate", "activation", "unsubscribe",
+                            "magic", "magic-link", "auth"})
+_WORDS: Optional[frozenset] = None
+_EXEMPT: Optional[frozenset] = None
+_KEY: ContextVar = ContextVar("seo_path_key", default=None)
+_PLACEHOLDER = re.compile(r"\{[a-z]+(?::[0-9a-f]{8})?\}(?:\.[a-z0-9]{1,5})?(?:;\{param\})?")
+_SPLIT = re.compile(r"[-_.~+;,=\s]+")
+_PH_ANY = re.compile(r"\{[a-z]+(?::[0-9a-f]{8})?\}")
+_CAMEL = re.compile(r"(?<=[a-z\u00df-\u00ff])(?=[A-Z\u00c0-\u00de])|(?<=[^\W\d_])(?=\d)|(?<=\d)(?=[^\W\d_])")
+
+
+def _load_words() -> tuple[frozenset, frozenset]:
+    global _WORDS, _EXEMPT
+    if _WORDS is None:
+        ordinary, exempt, section = set(), set(), None
+        with open(WORDS_FILE, encoding="ascii") as fh:
+            for line in fh:
+                line = line.rstrip("\n")
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("["):
+                    section = line
+                    continue
+                w = line.encode("ascii").decode("unicode_escape") if "\\" in line else line
+                (ordinary if section == "[ordinary]" else exempt).add(w)
+        _WORDS, _EXEMPT = frozenset(ordinary), frozenset(exempt)
+    return _WORDS, _EXEMPT
+
+
+def tenant_key(base: Optional[bytes], tenant_id: str) -> Optional[bytes]:
+    """The per-tenant path key: HMAC of the service's log hash key with the tenant id (None without a base key)."""
+    if not base:
+        return None
+    return hmac.new(base, b"seo-path-key\x00" + tenant_id.encode("utf-8"), hashlib.sha256).digest()
+
+
+@contextlib.contextmanager
+def keyed(key: Optional[bytes]):
+    """Within this block the stored forms digest non-ordinary segments with ``key`` (``{seg:xxxxxxxx}``)."""
+    tok = _KEY.set(key)
+    try:
+        yield
+    finally:
+        _KEY.reset(tok)
+
+
+def digest(value: str, purpose: str = "seg") -> Optional[str]:
+    """8 hex characters of HMAC-SHA-256(key, purpose NUL value), or None when no key is set."""
+    key = _KEY.get()
+    if not key:
+        return None
+    msg = purpose.encode("ascii") + b"\x00" + value.encode("utf-8", "surrogatepass")
+    return hmac.new(key, msg, hashlib.sha256).hexdigest()[:8]
+
+
+def seg_token(seg: str) -> str:
+    d = digest(seg)
+    return "{seg:" + d + "}" if d else "{seg}"
+
+
+def words_of(seg: str) -> list:
+    """The words of a segment: split on - _ . ~ + and white space, on case changes and on letter / digit
+    boundaries; NFC, case-folded."""
+    out = []
+    for part in _SPLIT.split(seg):
+        for w in _CAMEL.split(part):
+            if w:
+                out.append(unicodedata.normalize("NFC", w).casefold())
+    return out
+
+
+def ordinary_segment(seg: str) -> bool:
+    """Every word of ``seg`` is ordinary: in the bundled list, or a 1-4 digit number, or a single ASCII letter."""
+    words, _ = _load_words()
+    ws = words_of(seg)
+    if not ws:
+        return True
+    for w in ws:
+        if w.isdigit():
+            if len(w) <= 4 and w.isascii():
+                continue
+            return False
+        if len(w) == 1 and w.isascii() and w.isalpha():   # a single Latin letter; a CJK character may be a name
+            continue
+        if w not in words:
+            return False
+    return True
+
 
 def _digits(s: str) -> int:
     return sum(c.isdigit() for c in s)
@@ -69,7 +184,7 @@ def _slug(seg: str) -> bool:
     """A slug of plain words joined by ``-`` / ``_`` (``how-to-choose-running-shoes``, ``best-shoes-2024``): kept
     readable. Every piece is a word-like run of letters (a vowel, no run of 6+ consonants) or 1-4 digits, at most 4
     digits in all, at least one word, at most SLUG_MAX characters."""
-    if len(seg) > SLUG_MAX or not seg.isascii():
+    if len(seg) > SLUG_MAX:
         return False
     stem, dot, ext = seg.rpartition(".")
     if dot and ext.lower() in STATIC_EXT:           # how-to-choose-running-shoes.html
@@ -79,6 +194,13 @@ def _slug(seg: str) -> bool:
         return False
     words = 0
     for p in pieces:
+        if not p.isascii():
+            # round 2: a word in another script (or with accents) is a slug piece too; whether it may be stored
+            # readable is the word rule's decision (``ordinary_segment``)
+            if len(p) > 30 or not all(unicodedata.category(c)[0] in "LM" for c in p):
+                return False
+            words += 1
+            continue
         if not _WORD_PIECE.fullmatch(p):
             return False
         if p.isdigit():
@@ -122,6 +244,8 @@ def _segment(seg: str, strict: bool = False) -> str:
     own and every parameter becomes ``{param}`` (M-S5)."""
     if not seg:
         return ""
+    if _PLACEHOLDER.fullmatch(seg):            # an already-safe placeholder (a stored form read again) is kept
+        return seg
     folded = _LOOKALIKE.fold_cased(seg)
     if ";" in folded:
         if "@" in folded or _EMAIL.search(folded) or _AT_WORD.search(folded):
@@ -148,11 +272,12 @@ def _path(target: str) -> Optional[str]:
     return p
 
 
-def template_path(target: str, strict: bool = False) -> Optional[str]:
+def template_path(target: str, strict: bool = False, words: bool = False) -> Optional[str]:
     """A path with every identifier-looking part replaced by a typed placeholder; None when not a path.
     NFKC-normalised and confusables folded first (fullwidth digits and at-signs become ASCII). ``strict`` (the stored
-    form of crawled URLs, ``safe_path``) also templates a 10+ character segment with a single digit; the log and
-    Search Console templates keep their pinned rules."""
+    form of crawled URLs, ``safe_path``) also templates a 10+ character segment with a single digit; the Search
+    Console templates keep their pinned rules. ``words`` (stored crawled URLs and log path templates, round 2 M5): a
+    segment left readable must be ordinary (module doc), else it becomes ``{seg:xxxxxxxx}``."""
     if not isinstance(target, str):
         return None
     # war room (W3-3): invisible characters are removed BEFORE the one decode
@@ -172,6 +297,16 @@ def template_path(target: str, strict: bool = False) -> Optional[str]:
             for k in range(i, j):
                 out[k] = "{number}"
         i = max(j, i + 1)
+    if words:
+        for k, seg in enumerate(segs):
+            o = out[k]
+            if not seg or _PLACEHOLDER.fullmatch(o):
+                continue                                # wholly a placeholder already
+            prev = segs[k - 1].casefold() if k else ""
+            # what is still readable in the segment (placeholders taken out) must be ordinary
+            if prev in CONTEXT_NAME or prev in CONTEXT_SECRET or seg.startswith("~") \
+                    or not ordinary_segment(_PH_ANY.sub(" ", o)):
+                out[k] = seg_token(seg)
     return ("/" + "/".join(out))[:TEMPLATE_MAX]
 
 
@@ -180,7 +315,7 @@ def safe_path(path) -> Optional[str]:
     path; None for None."""
     if path is None:
         return None
-    t = template_path(path, strict=True) if isinstance(path, str) else None
+    t = template_path(path, strict=True, words=True) if isinstance(path, str) else None
     return t if t is not None else "{unreadable}"
 
 

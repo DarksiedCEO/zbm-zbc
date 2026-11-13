@@ -43,9 +43,10 @@ LIMITS = ["Observed from one network location at one time; a CDN or firewall may
           "Rendering is not connected: content inserted by JavaScript was not seen."]
 HTML_TYPES = ("text/html", "application/xhtml+xml")
 CANONICAL_CHECK_MAX = 5
-# AEGIS Wave-1 M-S1: the bot family x path robots.txt matrix of one run is bounded by this time budget; decisions
-# left once it is spent are reported undecided (ROBOTS_CHECK_INCOMPLETE, outcome PARTIAL), never computed late.
-MATRIX_BUDGET_S = 3.0
+# AEGIS Wave-1 M-S1, round 2 M2: the bot family x path robots.txt matrix of one run is bounded by this COUNTED work
+# (primitives/robots.py ``Work``, no clock); decisions left once it is spent are reported undecided
+# (ROBOTS_CHECK_INCOMPLETE, outcome PARTIAL), never as allowed or blocked.
+MATRIX_WORK = robots_mod.STEP_WORK_UNITS
 
 
 def noindex_for(fetch, extract: Optional[dict], token: str) -> bool:
@@ -68,12 +69,19 @@ def noindex_engines(fetch, extract: Optional[dict]) -> list:
     return [e for e, tok in bots.ENGINE_SEARCH_BOT.items() if noindex_for(fetch, extract, tok)]
 
 
+def noindex_bots(fetch, extract: Optional[dict]) -> list:
+    """Every bot family token (agents/bots.py) the page asks not to index it, each scoped to that bot (round 2 NIT:
+    a ``GPTBot`` meta noindex is reported for GPTBot, not for every engine and not nowhere)."""
+    return [f["token"] for f in bots.FAMILIES if noindex_for(fetch, extract, f["token"])]
+
+
 def _safe_meta(robots_meta: dict) -> dict:
     return {name: [d for _, d in robots_directives(", ".join(v))] for name, v in robots_meta.items()}
 
 
 def _safe_rule(rule: Optional[str]) -> Optional[str]:
-    """A robots.txt rule (crawled text) as stored: its kind and its templated pattern (primitives/safe_url.py)."""
+    """A robots.txt rule (crawled text; always a rule as written in the file) as stored: its kind and its templated
+    pattern (primitives/safe_url.py)."""
     if not rule:
         return rule
     kind, _, pat = rule.partition(": ")
@@ -145,7 +153,10 @@ def run(ctx) -> tuple[dict, dict]:
         return envelope(AGENT, TASK, "KILLED", [], methodology=METHODOLOGY.format(v=bots.VERSION),
                         limitations=LIMITS, reason=k.code, facts=facts), pages
     if fetched == 0:
-        outcome = "BLOCKED" if all(p["fetch"].state == "BLOCKED_BY_ROBOTS" for p in pages.values()) else "FAILED"
+        states = {p["fetch"].state for p in pages.values()}
+        # round 2 M3: this service's own refusal (counted work spent) is never "blocked"
+        outcome = "BLOCKED" if states == {"BLOCKED_BY_ROBOTS"} else \
+            "INSUFFICIENT_EVIDENCE" if states and states <= {"BLOCKED_BY_ROBOTS", "ROBOTS_CHECK_INCOMPLETE"} else "FAILED"
     else:
         outcome = "OK" if fetched == len(ctx.paths) and not facts.get("robots_matrix_undecided") else "PARTIAL"
     facts["render_states"] = {p: v["render"]["state"] for p, v in pages.items()}
@@ -162,6 +173,8 @@ def _robots_findings(ctx, rb: dict, facts: dict) -> list:
     out = []
     url = ctx.origin + "/robots.txt"
     if rb["status_class"] in ("unreachable", "too_large"):
+        # too_large: kept from round 1 for a body this service could not read at all; robots.txt is now read up to
+        # the RFC 9309 parse limit (fetch ``truncate_at``), so a large file is truncated, not too_large
         out.append(finding("ROBOTS_UNREACHABLE", "critical", "measured", "ACT", url=url, capability="P2",
                            detail={"fetch_state": rb["fetch"]["state"], "status": rb["fetch"]["status"],
                                    "effect": "crawlers following RFC 9309 treat the whole site as disallowed"}))
@@ -171,21 +184,31 @@ def _robots_findings(ctx, rb: dict, facts: dict) -> list:
                            detail={"status": rb["fetch"]["status"], "effect": "no rules: everything allowed"}))
     parsed = rb["parsed"]
     matrix = {}
-    budget = robots_mod.Budget(MATRIX_BUDGET_S)
+    work = robots_mod.Work(MATRIX_WORK)
+    approximate = bool(parsed is not None and parsed.truncated)
     for fam in bots.FAMILIES:
         per_path = {}
         for path in ["/"] + [p for p in ctx.paths if p != "/"]:
-            d = parsed.decide(fam["token"], path, budget) if parsed else {"allowed": rb["default_allow"],
-                                                                          "group": "none", "rule": None}
+            d = parsed.decide(fam["token"], path, work) if parsed else {"allowed": rb["default_allow"],
+                                                                        "group": "none", "rule": None}
             per_path[path] = d
         matrix[fam["token"]] = {"purpose": fam["purpose"], "operator": fam["operator"],
                                 "paths": {p: {"allowed": d["allowed"], "group": d["group"]} for p, d in
                                           per_path.items()}}
+        # S11: an undecided path (None) is never counted as blocked
         blocked = [p for p, d in per_path.items() if d["allowed"] is False]
         if not blocked:
             continue
         rules = sorted({_safe_rule(d["rule"]) for d in per_path.values() if d["rule"] and d["allowed"] is False})[:5]
-        if fam["token"] in bots.SEARCH_TOKENS:
+        if approximate:
+            # round 2 M3: a decision from a file cut at the parse limit is approximate: never a measured block
+            out.append(finding("ROBOTS_BLOCK_APPROXIMATE", "info", "measured", "INSUFFICIENT_EVIDENCE", url=url,
+                               capability="P2",
+                               detail={"token": fam["token"], "blocked_paths": blocked[:20], "rules": rules,
+                                       "cap": "robots_bytes", "cap_value": robots_mod.MAX_BYTES,
+                                       "note": "robots.txt is longer than the parse limit; rules past it were not "
+                                               "read, so this decision may differ for a crawler that reads more"}))
+        elif fam["token"] in bots.SEARCH_TOKENS:
             out.append(finding("ROBOTS_BLOCKS_SEARCH_CRAWLER", "critical" if "/" in blocked else "high", "measured",
                                "ACT", url=url, capability="P2",
                                detail={"token": fam["token"], "blocked_paths": blocked[:20], "rules": rules}))
@@ -196,20 +219,24 @@ def _robots_findings(ctx, rb: dict, facts: dict) -> list:
                                        "rules": rules, "note": "may be an intentional policy; a founder / client "
                                                                "decision, not a defect"}))
     facts["robots_matrix"] = matrix
-    if budget.undecided:
-        facts["robots_matrix_undecided"] = budget.undecided
+    facts["robots_matrix_work"] = {"units": work.units, "limit": work.limit}
+    if work.undecided:
+        facts["robots_matrix_undecided"] = work.undecided
         out.append(finding("ROBOTS_CHECK_INCOMPLETE", "info", "measured", "INSUFFICIENT_EVIDENCE", url=url,
-                           capability="P2", detail={"undecided": budget.undecided, "budget_s": MATRIX_BUDGET_S,
+                           capability="P2", detail={"undecided": work.undecided, "cap": "step_work_units",
+                                                    "cap_value": work.limit,
                                                     "note": "robots.txt decisions left undecided when this run's "
-                                                            "time budget was spent (no claim either way)"}))
+                                                            "counted work was spent (no claim either way)"}))
     if parsed is not None and parsed.lines_ignored:
         out.append(finding("ROBOTS_LINES_IGNORED", "low", "measured", "WATCH", url=url, capability="P2",
                            detail={"lines_ignored": parsed.lines_ignored}))
     if parsed is not None and parsed.limits_exceeded():
+        # round 2 NIT: a file over the parse limit is never parsed silently
         out.append(finding("ROBOTS_LIMITS_EXCEEDED", "medium", "measured", "WATCH", url=url, capability="P2",
-                           detail={**parsed.limits(), "effect": "over a bound this service fails closed: a disallow "
-                                   "is read as a broader prefix, an allow over a bound is not used, and this "
-                                   "service's own crawler does not trust an allow from an incomplete rule set"}))
+                           detail={**parsed.limits(), "effect": "robots.txt is longer than 500 KiB: it was read up "
+                                   "to that limit (RFC 9309 2.5; Google documents the same limit) and rules past it "
+                                   "were not read; decisions from it are reported as approximate"}))
+        facts["robots"]["truncated"] = True
     if parsed is not None and parsed.bom_stripped:
         facts["robots"]["bom_stripped"] = True
     return out
@@ -219,8 +246,19 @@ def _page_findings(ctx, path: str, f, extract: Optional[dict], canon_checked: in
     url = ctx.url(path)
     out = []
     if f.state == "BLOCKED_BY_ROBOTS":
+        why = (f.robots or {}).get("reason")
+        note = "robots.txt could not be fetched (RFC 9309: everything disallowed); the page was not read" \
+            if why == "unreachable" else "robots.txt disallows ZBM-SEO-Audit here; the page was not read"
         out.append(finding("PAGE_BLOCKED_FOR_OUR_CRAWLER", "info", "measured", "INSUFFICIENT_EVIDENCE", url=url,
-                           detail={"note": "robots.txt disallows ZBM-SEO-Audit here; the page was not read"}))
+                           detail={"reason": why or "rule", "note": note}))
+        return out, canon_checked
+    if f.state == "ROBOTS_CHECK_INCOMPLETE":
+        # round 2 M2/M3: this service's own refusal, with its own code; it says nothing about robots.txt
+        out.append(finding("PAGE_NOT_READ_ROBOTS_CHECK_INCOMPLETE", "info", "measured", "INSUFFICIENT_EVIDENCE",
+                           url=url, detail={"reason": (f.robots or {}).get("reason"),
+                                            "note": "this service could not complete its own robots.txt check "
+                                                    "within its bounds, so it did not read the page; no claim "
+                                                    "about robots.txt"}))
         return out, canon_checked
     if not f.ok:
         out.append(finding("PAGE_UNREACHABLE", "high", "measured", "INSUFFICIENT_EVIDENCE", url=url,
@@ -242,10 +280,19 @@ def _page_findings(ctx, path: str, f, extract: Optional[dict], canon_checked: in
         return out, canon_checked
     engines = noindex_engines(f, extract)
     noindex = bool(engines)
+    nbots = noindex_bots(f, extract)
     if noindex:
         out.append(finding("NOINDEX", "high" if path == "/" else "medium", "measured", "TEST", url=url,
-                           detail={"engines": engines, "x_robots_tag": safe_x_robots(f.headers.get("x-robots-tag")),
+                           detail={"engines": engines, "bots": nbots,
+                                   "x_robots_tag": safe_x_robots(f.headers.get("x-robots-tag")),
                                    "robots_meta": _safe_meta(extract["robots_meta"]) if extract else {}}))
+    elif nbots:
+        # round 2 NIT: a noindex aimed only at crawlers that are no engine's search crawler (GPTBot, CCBot, ...):
+        # reported, scoped to those bots
+        out.append(finding("NOINDEX_FOR_BOT", "info", "measured", "WATCH", url=url,
+                           detail={"bots": nbots, "x_robots_tag": safe_x_robots(f.headers.get("x-robots-tag")),
+                                   "robots_meta": _safe_meta(extract["robots_meta"]) if extract else {},
+                                   "note": "applies only to the named crawlers; may be an intentional policy"}))
     if extract is None:
         return out, canon_checked
     canons = extract["canonicals"]
@@ -276,7 +323,11 @@ def _page_findings(ctx, path: str, f, extract: Optional[dict], canon_checked: in
             if cf.state == "KILLED":
                 raise Killed(cf.detail or "KILLED")
             ctx.osei.observed("page_canonical_target", c, cf.state)
-            if not cf.ok or cf.status != 200 or cf.redirects:
+            if not cf.ok:
+                # round 2: our own fetch failed or was refused: nothing measured about the target
+                out.append(finding("CANONICAL_TARGET_UNCHECKED", "info", "measured", "INSUFFICIENT_EVIDENCE",
+                                   url=url, detail={"canonical": safe_url(c), "fetch_state": cf.state}))
+            elif cf.status != 200 or cf.redirects:
                 out.append(finding("CANONICAL_TARGET_NOT_200", "high", "measured", "ACT", url=url,
                                    detail={"canonical": safe_url(c), "fetch_state": cf.state, "status": cf.status,
                                            "redirected": bool(cf.redirects)}))

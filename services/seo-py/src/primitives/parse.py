@@ -119,7 +119,9 @@ class _Extractor(HTMLParser):
             self._skip = max(0, self._skip - 1)
             if self._ld is not None:
                 if len(self.scripts_ld) < MAX_JSONLD_BLOCKS:
-                    self.scripts_ld.append("".join(self._ld)[:MAX_JSONLD_BYTES + 1])
+                    full = "".join(self._ld)
+                    # round 2 Osei M2: the block's whole size is kept beside the bounded prefix
+                    self.scripts_ld.append((full[:MAX_JSONLD_BYTES + 1], len(full.encode("utf-8", "surrogatepass"))))
                 self._ld = None
         elif tag in ("style", "noscript", "template"):
             self._skip = max(0, self._skip - 1)
@@ -179,7 +181,7 @@ def parse_html(html: str, base_url: str) -> dict:
         "canonicals_invalid": sum(1 for a in canon_abs if a is None),
         "canonicals_valid": sum(1 for a in canon_abs if a),
         "hreflang": hreflang[:200], "headings": p.headings, "links": links,
-        "jsonld_raw_count": len(p.scripts_ld), "jsonld": [validate_jsonld(b) for b in p.scripts_ld],
+        "jsonld_raw_count": len(p.scripts_ld), "jsonld": [validate_jsonld(b, n) for b, n in p.scripts_ld],
         "text_length": len(text), "text_sample": text[:20_000], "elements": p.elements,
         "scripts": p.script_count, "parse_error": error,
         "viewport": any((m.get("name") or "").lower() == "viewport" for m in metas),
@@ -243,10 +245,16 @@ def _size(raw: str) -> dict:
     return {"bytes": len(b), "sha256": hashlib.sha256(b).hexdigest()}
 
 
-def validate_jsonld(raw: str) -> dict:
-    """One ``<script type="application/ld+json">`` block -> {valid_json, nodes: [{types, issues, props}]}."""
+def validate_jsonld(raw: str, total_bytes: Optional[int] = None) -> dict:
+    """One ``<script type="application/ld+json">`` block -> {valid_json, nodes: [{types, issues, props}]}.
+    ``total_bytes``: the whole block's UTF-8 size when the caller kept only a prefix of it. A block over
+    MAX_JSONLD_BYTES characters is not parsed (round 2 Osei M2): ``truncated``, ``bytes`` and ``sha256`` of the
+    first MAX_JSONLD_BYTES characters read (``sha256_basis`` says so) and ``total_bytes`` of the whole block."""
     if len(raw) > MAX_JSONLD_BYTES:
-        return {"valid_json": False, "error": "BLOCK_TOO_LARGE", "nodes": [], **_size(raw)}
+        prefix = _size(raw[:MAX_JSONLD_BYTES])
+        return {"valid_json": False, "error": "BLOCK_TOO_LARGE", "nodes": [], "truncated": True, **prefix,
+                "sha256_basis": f"the first {MAX_JSONLD_BYTES} characters of the block (a truncated prefix)",
+                "total_bytes": total_bytes}
     try:
         doc = json.loads(raw.strip().removeprefix("<!--").removesuffix("-->"))
     except (ValueError, RecursionError):

@@ -2985,7 +2985,7 @@
   {
    "id": "robots-matching-cost",
    "persona": "a site whose robots.txt is built to make the matcher slow (backtracking wildcards, tens of thousands of rules, many named groups, a long sitemap)",
-   "basis": "ADR 0017 decision 11 and the AEGIS Wave-1 certification M-S1: robots.txt matching is linear (no regular expression), rules are compiled once per file, bounded (MAX_PATTERN, MAX_WILDCARDS, MAX_RULES_PER_GROUP, MAX_PATH) and every step has a time budget; the reviewer measured 3.0 s per URL, 63 s per request and 268.7 s at a4af277 for these shapes",
+   "basis": "ADR 0017 decision 11 and the AEGIS Wave-1 certification M-S1: robots.txt matching is linear (no regular expression), rules are compiled once per file, and (round 2) every step's matching is bounded by counted work, not a clock or rule caps; the reviewer measured 3.0 s per URL, 63 s per request and 268.7 s at a4af277 for these shapes; round 2: each case also requires that the ordinary pages the hostile file ALLOWS are read (a cost bound or a rule cap must never turn into refusing allowed pages: M2 / M3)",
    "seeds": [
     {
      "literal": [
@@ -3085,13 +3085,24 @@
       "key": "state_unchanged",
       "value": true
      }
+    },
+    {
+     "id": "allowed_pages_are_read",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "page_states",
+      "value": [
+       "OK"
+      ]
+     }
     }
    ]
   },
   {
    "id": "drift-classification",
    "persona": "a site that changes, or fails to answer, between two audits (and an answer engine whose citations vary by chance)",
-   "basis": "ADR 0017 decision 11 (a failed fetch is TOOL_FAILURE, never a change) and the drift rules R1..R8 (agents/drift.py; AEGIS Wave-1 M-O1: R1 per fact, either side)",
+   "basis": "ADR 0017 decision 11 (a failed fetch is TOOL_FAILURE, never a change) and the drift rules R1..R8 (agents/drift.py; AEGIS Wave-1 M-O1: R1 per fact, either side); round 2 (re-review of 89fae32b): every case also plants a letters-only value in crawled URLs (M5: readable nowhere) and, where pages are read in both runs, moves a page's canonical to a target that refuses connections in the newer run (Osei M1: classified TOOL_FAILURE, never REAL_CHANGE)",
    "seeds": [
     {
      "literal": [
@@ -3183,6 +3194,127 @@
      "args": {
       "key": "drift_failure_called_real",
       "value": false
+     }
+    },
+    {
+     "id": "canonical_target_failure_is_tool_failure",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "drift_canonical_failure_tool_failure",
+      "value": true
+     }
+    },
+    {
+     "id": "planted_letters_only_value_readable_nowhere",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "planted_readable",
+      "value": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "robots-and-safety-round-2",
+   "persona": "a site whose robots.txt uses reserved and invalid percent-encodings, very long or very many rules, or answers slowly; crawled URLs and markup that carry name-shaped values",
+   "basis": "AEGIS Wave-1 certification round 2 (re-review of 89fae32b): M1 RFC 9309 2.2.2 octet comparison, M2 counted work not a clock, M3 a bound never yields a measured finding, M4 the log robots check on path and query decoded once, M5 letters-only values stored as keyed digests, the entity check storing the comparison, Osei M2 an oversized JSON-LD block recorded truncated with its whole size",
+   "seeds": [
+    {
+     "literal": [
+      "reserved_allow",
+      "reserved_disallow",
+      "invalid_utf8",
+      "slow_site",
+      "filler_then_disallow",
+      "long_allow",
+      "log_query",
+      "planted_names",
+      "entity_name",
+      "jsonld_too_large"
+     ],
+     "basis": "one per round 2 finding (M1 x3, M2, M3 x2, M4, M5, entity check, Osei M2)"
+    }
+   ],
+   "input_field": "kind",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "site"
+    },
+    {
+     "action": "snapshot"
+    },
+    {
+     "action": "round2",
+     "args": {
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "audit_completes",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "audit_status_completed",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_request_reached_a_non_public_address",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "internal_requests",
+      "value": []
+     }
+    },
+    {
+     "id": "no_internal_content_anywhere",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "secret_leaked",
+      "value": false
+     }
+    },
+    {
+     "id": "round_2_behaviour",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "r2_expect_met",
+      "value": true
+     }
+    },
+    {
+     "id": "planted_values_readable_nowhere",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "r2_leaks",
+      "value": []
+     }
+    },
+    {
+     "id": "crawled_content_changes_no_state",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "state_unchanged",
+      "value": true
      }
     }
    ]

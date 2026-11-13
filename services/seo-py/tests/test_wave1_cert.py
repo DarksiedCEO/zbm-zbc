@@ -43,16 +43,21 @@ def run3(web: Web, paths=("/",), **kw):
 # ============================================================================================ robots (M-S1, S-S1)
 
 def _regex_match_len(pattern: str, path: str):
-    """The a4af277 matcher (regex per rule), kept here as the oracle for the linear matcher's answers."""
+    """A regex matcher (one per rule, as at a4af277), kept here as the oracle for the linear matcher's answers.
+    Round 2 (M1): on RFC 9309 octets - the pattern is split on its raw ``*`` / final ``$`` first, each piece and the
+    path in their canonical form (robots.canon), specificity = canonical octets."""
+    while "**" in pattern:
+        pattern = pattern.replace("**", "*")
     anchored = pattern.endswith("$")
-    body = robots_mod._norm(pattern[:-1] if anchored else pattern)
-    rx = "".join(".*" if c == "*" else re.escape(c) for c in body)
-    return len(pattern) if re.match(rx + ("$" if anchored else ""), path) else None
+    pieces = [robots_mod.canon(x, True) for x in (pattern[:-1] if anchored else pattern).split("*")]
+    rx = ".*".join(re.escape(x) for x in pieces)
+    n = sum(len(x) for x in pieces) + len(pieces) - 1 + (1 if anchored else 0)
+    return n if re.match(rx + ("$" if anchored else ""), path, re.S) else None
 
 
 def _oracle_allowed(rules, path: str) -> bool:
     best = None
-    p = robots_mod._norm(path or "/")
+    p = robots_mod.canon(path or "/")
     if p == "/robots.txt":
         return True
     for allow, pattern in rules:
@@ -120,34 +125,36 @@ def test_hostile_wildcards_are_linear_not_backtracking(monkeypatch):
     rb = robots_mod.parse(text)
     calls["find"] = 0
     rb.decide("Googlebot", "/" + "a" * 4000)
-    assert calls["find"] <= 4000 * (robots_mod.MAX_WILDCARDS + 1)
+    assert calls["find"] <= 4000 * 11               # 11 pieces per rule: at most one search each
 
 
-def test_bounds_fail_closed_and_are_counted():
-    over = "/x" + "y" * robots_mod.MAX_PATTERN
+def test_no_rule_bounds_every_rule_is_used_exactly():
+    # round 2 M3: shortening / dropping rules gave decisions and quoted rules that were not the file's. The only
+    # bound is the parse limit; within it every rule is used as written.
+    over = "/x" + "y" * 2500
     rb = robots_mod.parse(f"User-agent: *\nDisallow: {over}$\nAllow: {over}z\n")
-    lim = rb.limits()
-    assert lim["patterns_shortened"] == 1 and lim["rules_not_used"] == 1 and rb.limits_exceeded()
-    # the shortened disallow matches at least what it matched (it was anchored; now a prefix)
-    assert rb.allowed("Googlebot", over) is False and rb.allowed("Googlebot", over + "more") is False
+    assert not rb.limits_exceeded()
+    assert rb.allowed("Googlebot", over) is False and rb.allowed("Googlebot", over + "more") is True
+    assert rb.allowed("Googlebot", over + "z") is True
     d = rb.decide("Googlebot", "/elsewhere")
-    assert d["allowed"] is True and d["complete"] is False      # an allow over a bound was not used
-    wild = "/" + "*a" * (robots_mod.MAX_WILDCARDS + 3)
+    assert d["allowed"] is True and d["complete"] is True
+    wild = "/" + "*a" * 13
     rb = robots_mod.parse(f"User-agent: *\nDisallow: {wild}\n")
-    assert rb.limits()["patterns_shortened"] == 1 and rb.allowed("x", "/" + "a" * 30) is False
-    many = "User-agent: *\n" + "".join(f"Disallow: /r{i}\n" for i in range(robots_mod.MAX_RULES_PER_GROUP + 5))
+    assert rb.allowed("x", "/" + "a" * 12) is True and rb.allowed("x", "/" + "a" * 13) is False
+    many = "User-agent: *\n" + "".join(f"Disallow: /r{i}\n" for i in range(4005))
     rb = robots_mod.parse(many)
-    assert rb.limits()["rules_not_used"] == 5 and rb.decide("x", "/ok")["complete"] is False
-    dup = robots_mod.parse("User-agent: *\n" + "Disallow: /x\n" * 40_000)
+    assert rb.allowed("x", "/r4004") is False and rb.decide("x", "/ok")["complete"] is True
+    dup = robots_mod.parse("User-agent: *\n" + "Disallow: /x\n" * 39_000)     # within the 500 KiB parse limit
     assert not dup.limits_exceeded() and len(dup.groups[0].rules) == 1 and dup.allowed("x", "/x") is False
 
 
 def test_budget_spent_leaves_decisions_undecided():
     rb = robots_mod.parse("User-agent: *\nDisallow: /a\n")
-    b = robots_mod.Budget(0)
+    b = robots_mod.Work(0)
     d = rb.decide("x", "/a", b)
-    assert d["allowed"] is None and d["undecided"] == "budget" and b.undecided == 1
-    assert rb.decide("x", "/" + "p" * (robots_mod.MAX_PATH + 1))["allowed"] is None
+    assert d["allowed"] is None and d["undecided"] == "work" and b.undecided == 1
+    # round 2: a long path is decided (its cost is counted), never left undecided by a length cap
+    assert rb.decide("x", "/a" + "p" * 5000)["allowed"] is False
 
 
 def test_bom_before_the_first_group_is_stripped():
@@ -159,7 +166,7 @@ def test_bom_before_the_first_group_is_stripped():
 
 
 def test_selene_matrix_budget_degrades_to_partial(monkeypatch):
-    monkeypatch.setattr(selene, "MATRIX_BUDGET_S", 0.0)
+    monkeypatch.setattr(selene, "MATRIX_WORK", 0)
     web = site(Web())
     _, s, _, _, _ = run3(web, ["/", "/about"])
     assert s["outcome"] == "PARTIAL" and "ROBOTS_CHECK_INCOMPLETE" in codes(s)
@@ -167,17 +174,19 @@ def test_selene_matrix_budget_degrades_to_partial(monkeypatch):
 
 
 def test_fetcher_refuses_when_its_robots_check_cannot_decide(monkeypatch):
-    monkeypatch.setattr(fetch_mod, "ROBOTS_CHECK_BUDGET_S", 0.0)
+    monkeypatch.setattr(fetch_mod, "ROBOTS_CHECK_WORK", 0)
     web = site(Web())
     f = web.fetcher().fetch("http://site.test/about", robots_cache={})
-    assert f.state == "BLOCKED_BY_ROBOTS" and "bounds" in f.detail
+    # round 2 M2: this service's own refusal has its own state, never BLOCKED_BY_ROBOTS
+    assert f.state == "ROBOTS_CHECK_INCOMPLETE" and "counted work" in f.detail
 
 
-def test_fetcher_does_not_trust_an_allow_from_an_incomplete_rule_set():
-    many = "User-agent: *\n" + "".join(f"Disallow: /r{i}\n" for i in range(robots_mod.MAX_RULES_PER_GROUP + 1))
+def test_fetcher_reads_a_large_rule_set_whole():
+    # round 2 M3: 4,001 rules are all used (no rule cap), so "/" is allowed and fetched, and nothing is "exceeded"
+    many = "User-agent: *\n" + "".join(f"Disallow: /r{i}\n" for i in range(4001))
     web = site(Web(), robots=many)
     c, s, _, _, pages = run3(web)
-    assert pages["/"]["fetch"].state == "BLOCKED_BY_ROBOTS" and "ROBOTS_LIMITS_EXCEEDED" in codes(s)
+    assert pages["/"]["fetch"].state == "OK" and "ROBOTS_LIMITS_EXCEEDED" not in codes(s)
 
 
 def test_hostile_robots_audit_finishes_within_bound():
@@ -245,9 +254,20 @@ def test_selene_ok_vs_partial():
     assert s["outcome"] == "PARTIAL"
 
 
-def test_robots_too_large_is_robots_unreachable_with_quarantine_size():
-    web = site(Web(), robots="User-agent: *\nAllow: /\n" + "#" * (fetch_mod.ROBOTS_MAX_BYTES + 10))
-    c, s, _, _, _ = run3(web, max_bytes=fetch_mod.ROBOTS_MAX_BYTES)
+def test_robots_too_large_is_robots_unreachable_with_quarantine_size(monkeypatch):
+    # round 2: robots.txt is now read up to the RFC 9309 parse limit (a longer file is truncated and reported,
+    # test_wave1_cert_r2); a body the fetcher still could not read at all keeps this behaviour
+    web = site(Web())
+    real = fetch_mod.Fetcher.fetch
+
+    def too_large(self, url, **kw):
+        r = real(self, url, **kw)
+        if url.endswith("/robots.txt"):
+            r.state, r.body = "TOO_LARGE", None
+            r.partial = {"bytes_read": 5, "sha256": hashlib.sha256(b"12345").hexdigest(), "declared": None}
+        return r
+    monkeypatch.setattr(fetch_mod.Fetcher, "fetch", too_large)
+    c, s, _, _, _ = run3(web)
     f = by_code(s, "ROBOTS_UNREACHABLE")
     assert f and f[0]["severity"] == "critical" and s["facts"]["robots"]["status_class"] == "too_large"
     q = [x for x in c.osei.quarantined if x["kind"] == "robots"][0]
@@ -478,11 +498,11 @@ def test_listed_url_robots_check_is_for_googlebot(robots, flag):
 
 
 def test_listed_url_robots_check_budget(monkeypatch):
-    monkeypatch.setattr(delia, "URL_CHECK_BUDGET_S", 0.0)
+    monkeypatch.setattr(delia, "URL_CHECK_WORK", 0)
     web = site(Web())
     _, _, d, _, _ = run3(web)
-    # "/" was decided by Selene's matrix already (kept, free); "/about" is left undecided
-    assert d["outcome"] == "PARTIAL" and d["facts"]["robots_unchecked"] == 1
+    # round 2: every decision is charged (a remembered one too), so with no work both listed URLs are undecided
+    assert d["outcome"] == "PARTIAL" and d["facts"]["robots_unchecked"] == 2
     assert "SITEMAP_ROBOTS_CHECK_INCOMPLETE" in codes(d)
 
 
@@ -911,7 +931,7 @@ def test_search_crawler_5xx_threshold(tmp_path, n, errors, flag):
 
 
 def test_log_chunk_robots_budget(tmp_path, monkeypatch):
-    monkeypatch.setattr(logs_mod, "ROBOTS_CHUNK_BUDGET_S", 0.0)
+    monkeypatch.setattr(logs_mod, "ROBOTS_CHUNK_WORK", 0)
     web = site(Web(), robots="User-agent: *\nDisallow: /x\nSitemap: http://site.test/sitemap.xml\n")
     h = _h(tmp_path, web, durable=False)
     env = _finish(h, _send_log(h, [_clf("192.0.2.5", "/x"), _clf("192.0.2.5", "/y")]))["report"]["envelope"]

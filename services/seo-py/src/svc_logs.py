@@ -38,7 +38,7 @@ from errors import Conflict, Forbidden, Invalid, NotFound
 from ledger import derived_id
 from primitives import Killed
 from primitives import robots as robots_mod
-from primitives.safe_url import safe_path
+from primitives.safe_url import keyed, safe_path, tenant_key
 from reasons import R
 
 CHUNK_MAX = 90_000
@@ -134,6 +134,7 @@ class LogsMixin:
             sample = self._sitemap_sample(tid, body["domain"])
         guard = self.guard(tid, run="logs")
         robots_text, robots_status = None, "not_fetched"      # robots_text: memory only (M-S3)
+        robots_truncated = False
         try:
             guard(capability="logs", agent="selene")
             if self.ports.fetcher is not None:
@@ -142,6 +143,7 @@ class LogsMixin:
                     raise Killed(rb["fetch"]["detail"] or "KILLED_GLOBAL")
                 robots_status = rb["status_class"]
                 robots_text = rb.get("text")
+                robots_truncated = bool(rb.get("truncated"))
         except Killed as k:
             raise _refusal(k) from None
         with self.lock:
@@ -164,7 +166,7 @@ class LogsMixin:
                                     "robots_sha256": robots_sha,
                                     "sitemap_sample_sha256": None if sample is None else sha(sample)}, (actor, rk)))
             if robots_text is not None:
-                self._log_robots[iid] = robots_mod.parse(robots_text)       # in memory only
+                self._log_robots[iid] = robots_mod.parse(robots_text, truncated=robots_truncated)   # memory only
             return self.log_ingest_view(tid, iid)
 
     def _a_log_ingest_created(self, d, at):
@@ -215,8 +217,9 @@ class LogsMixin:
             self.guard(tid, run="logs")(capability="logs", agent="selene")
         except Killed as k:
             raise _refusal(k) from None
-        delta = logs_mod.process_chunk(fmt, data, log_hash_key, self.ports.bot_verifier.verify, cache,
-                                       budget, robots, sample, robots_expected=robots_expected)
+        with keyed(tenant_key(log_hash_key, tid)):          # round 2 M5: per-tenant digests of path segments
+            delta = logs_mod.process_chunk(fmt, data, log_hash_key, self.ports.bot_verifier.verify, cache,
+                                           budget, robots, sample, robots_expected=robots_expected)
         del data
         with self.lock:
             self._gate()

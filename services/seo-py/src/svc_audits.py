@@ -34,6 +34,7 @@ from ledger import derived_id
 from primitives import Killed
 from primitives import diff as diff_mod
 from primitives.parse import SCHEMA_RULES_VERSION
+from primitives.safe_url import keyed, tenant_key
 from reasons import R
 
 log = logging.getLogger("seo.audits")
@@ -239,7 +240,13 @@ class AuditsMixin:
             self.audits[d["audit_id"]]["failure"] = dict(d["failure"])
 
     def _run_audit(self, aid: str, tid: str, body: dict, ps: Optional[dict]) -> dict:
-        """The run, outside the service lock: Selene, Delia, Roman, the entity check, Callum, Naomi."""
+        """The run, outside the service lock, with this tenant's path key set for every stored URL form (round 2
+        M5: a non-ordinary path segment is stored as a keyed digest, stable within the tenant)."""
+        with keyed(tenant_key(getattr(self.settings, "log_hash_key", None), tid)):
+            return self._run_audit_keyed(aid, tid, body, ps)
+
+    def _run_audit_keyed(self, aid: str, tid: str, body: dict, ps: Optional[dict]) -> dict:
+        """The run: Selene, Delia, Roman, the entity check, Callum, Naomi."""
         o = osei.Osei(self.clock)
         started = iso(self.now())
         ctx = RunContext(fetcher=self.ports.fetcher, renderer=self.ports.renderer, guard=self.guard(tid),

@@ -164,9 +164,26 @@ def _status_class(s: int) -> str:
     return f"{s // 100}xx" if 100 <= s <= 599 else "other"
 
 
-# AEGIS Wave-1 M-S1: one chunk's robots.txt checks are bounded by this time budget; bot requests left unchecked are
-# counted (``robots_unchecked``) and the ingest report is PARTIAL, never a stalled upload.
-ROBOTS_CHUNK_BUDGET_S = 1.0
+# AEGIS Wave-1 M-S1, round 2 M2: one chunk's robots.txt checks are bounded by this COUNTED work (no clock); bot
+# requests left unchecked are counted (``robots_unchecked``) and the ingest report is PARTIAL, never a stalled upload.
+ROBOTS_CHUNK_WORK = robots_mod.STEP_WORK_UNITS
+
+
+def request_target(target: str) -> Optional[str]:
+    """The path and query of a logged request target AS WRITTEN (percent-encoding untouched, fragment dropped), for
+    the robots.txt check (round 2 M4: RFC 9309 matches the path WITH its query, and robots.canon decodes it once;
+    ``_path`` decodes and drops the query, so it is only for templating and the sitemap sample)."""
+    try:
+        if "://" in target:
+            p = urlsplit(target)
+            out = (p.path or "/") + (f"?{p.query}" if p.query else "")
+        else:
+            out = target.split("#", 1)[0]
+    except ValueError:
+        return None
+    if not out.startswith("/") or len(out) > PATH_MAX or any(ord(c) < 0x20 or ord(c) == 0x7F for c in out):
+        return None
+    return out
 
 
 def empty_delta() -> dict:
@@ -183,12 +200,12 @@ def process_chunk(fmt: str, data: bytes, key: bytes, verify: Callable[[str, str]
     """One chunk -> an aggregate delta with nothing identifying in it. ``verify(ip, token)`` is the port (raw IP in
     memory only); ``seen`` caches verdicts in memory for this ingest; ``budget["left"]`` bounds port lookups;
     ``robots`` the parsed robots.txt fixed at ingest creation (in memory only); ``robots_expected``: the ingest had
-    one, so a bot request not checked against it (not in memory any more, or over the time budget) is counted
+    one, so a bot request not checked against it (not in memory any more, or past the chunk's counted work) is counted
     ``robots_unchecked``; ``sample`` {path_digest of a sitemap path: index}."""
     out = empty_delta()
     q = out["quarantined"]
     sample = sample or {}
-    rbudget = robots_mod.Budget(ROBOTS_CHUNK_BUDGET_S)
+    rwork = robots_mod.Work(ROBOTS_CHUNK_WORK)
     for raw in data.split(b"\n"):
         raw = raw.rstrip(b"\r")
         if not raw.strip():
@@ -225,21 +242,22 @@ def process_chunk(fmt: str, data: bytes, key: bytes, verify: Callable[[str, str]
         sc = _status_class(rec["status"])
         fam["status"][sc] = fam["status"].get(sc, 0) + 1
         exact = _path(rec["path"])
-        tpl = template_path(rec["path"])
+        tpl = _su.template_path(rec["path"], words=True)    # round 2 M5: non-ordinary segments -> keyed digest
         if tpl is not None:
             if tpl in fam["templates"] or len(fam["templates"]) < TEMPLATES_PER_FAMILY:
                 fam["templates"][tpl] = fam["templates"].get(tpl, 0) + 1
             else:
                 fam["templates_dropped"] += 1
-        if exact is not None:
-            if robots is not None:
-                verdict = robots.allowed(tok, exact, rbudget)
-                if verdict is False:
-                    fam["robots_blocked"] += 1
-                elif verdict is None:
-                    out["robots_unchecked"] += 1
-            elif robots_expected:
+        target = request_target(rec["path"])
+        if robots is not None:
+            verdict = robots.allowed(tok, target, rwork) if target is not None else None
+            if verdict is False:
+                fam["robots_blocked"] += 1
+            elif verdict is None:
                 out["robots_unchecked"] += 1
+        elif robots_expected:
+            out["robots_unchecked"] += 1
+        if exact is not None:
             if sample:
                 i = sample.get(path_digest(key, exact))
                 if i is not None and i not in fam["sample_hits"]:

@@ -47,9 +47,11 @@ MAX_CHILDREN = 10
 DECOMPRESSED_MAX = 8 * 1024 * 1024
 BLOCK_SAMPLE = 500
 SAMPLE_PATHS = 500
-# AEGIS Wave-1 M-S1 / M-D2: the listed-URL robots.txt check of one run is bounded by this time budget; URLs left
-# once it is spent are counted ``robots_unchecked`` and the outcome is PARTIAL.
-URL_CHECK_BUDGET_S = 2.0
+URLS_KEPT_MAX = 100_000
+# AEGIS Wave-1 M-S1 / M-D2, round 2 M2: the listed-URL robots.txt check of one run is bounded by this COUNTED work
+# (primitives/robots.py ``Work``; no clock: a slow site never spends it); URLs left once it is spent are counted
+# ``robots_unchecked`` and the outcome is PARTIAL.
+URL_CHECK_WORK = robots_mod.STEP_WORK_UNITS
 ROOT_NAMES = ("urlset", "sitemapindex", "rss", "feed", "html", "channel")
 METHODOLOGY = ("Sitemaps discovered from robots.txt Sitemap lines on this site, else /sitemap.xml; parsed as "
                "sitemaps.org 0.9 (urlset / sitemapindex, children followed up to {c}); XML with DOCTYPE or ENTITY "
@@ -152,19 +154,40 @@ def _no_dtd_scan(body: bytes) -> Optional[str]:
     return None
 
 
+_DECL = re.compile(r"^\s*<\?xml[^>]{0,200}?\?>")
+
+
+def _utf32_to_utf8(body: bytes) -> Optional[bytes]:
+    """expat cannot read UTF-32 (round 2 NIT): a UTF-32 document is decoded here and handed on as UTF-8 with its
+    XML declaration dropped (it names the old encoding). None when it is not valid UTF-32."""
+    enc = xml_encoding(body)
+    if not enc.startswith("utf-32"):
+        return body
+    try:
+        text = body.decode(enc)
+    except (UnicodeDecodeError, LookupError):
+        return None
+    return _DECL.sub("", text.lstrip("\ufeff"), count=1).encode("utf-8")
+
+
 def _xml(ctx, kind: str, url: str, body: bytes):
     """Parse sitemap XML or quarantine it. Returns (root element or None, the quarantine record or None)."""
     if _declares_dtd(body):
         return None, ctx.osei.quarantine(kind, "XML_DOCTYPE_REFUSED", url, body)
+    original, body = body, _utf32_to_utf8(body)
+    if body is None:
+        return None, ctx.osei.quarantine(kind, "XML_MALFORMED", url, original)
+    if _declares_dtd(body):
+        return None, ctx.osei.quarantine(kind, "XML_DOCTYPE_REFUSED", url, body)
     scan = _no_dtd_scan(body)
     if scan == "dtd":
-        return None, ctx.osei.quarantine(kind, "XML_DOCTYPE_REFUSED", url, body)
+        return None, ctx.osei.quarantine(kind, "XML_DOCTYPE_REFUSED", url, original)
     if scan == "malformed":
-        return None, ctx.osei.quarantine(kind, "XML_MALFORMED", url, body)
+        return None, ctx.osei.quarantine(kind, "XML_MALFORMED", url, original)
     try:
         return ET.fromstring(body), None
     except (ET.ParseError, ValueError, RecursionError):
-        return None, ctx.osei.quarantine(kind, "XML_MALFORMED", url, body)
+        return None, ctx.osei.quarantine(kind, "XML_MALFORMED", url, original)
 
 
 def _shape(v: str) -> str:
@@ -216,7 +239,7 @@ def _sitemaps(ctx, facts: dict) -> list:
     facts["sitemaps_cross_host_not_read"] = su.safe_urls(cross, 50)
     facts["sitemaps_cross_host_count"] = len(cross)
     queue = same[:MAX_CHILDREN] or [ctx.url("/sitemap.xml")]
-    seen, urls, lastmods, read, failures = set(), [], [], 0, 0
+    seen, urls, lastmods, read, failures, total_urls = set(), [], [], 0, 0, 0
     children_followed = children_cross_host = children_over_cap = 0
     while queue:
         sm = queue.pop(0)
@@ -277,14 +300,17 @@ def _sitemaps(ctx, facts: dict) -> list:
             if loc is None or not (loc.text or "").strip():
                 continue
             file_urls += 1
-            if len(urls) < 100_000:
+            if len(urls) < URLS_KEPT_MAX:
                 urls.append((loc.text.strip(), sm))
             if lm is not None and lm.text:
                 lastmods.append((lm.text.strip(), sm))
+        total_urls += file_urls
         if file_urls > MAX_URLS_PER_FILE:
             out.append(finding("SITEMAP_TOO_MANY_URLS", "high", "measured", "ACT", url=su.safe_url(sm),
                                capability="P3", detail={"urls": file_urls, "limit": MAX_URLS_PER_FILE}))
-    facts.update(sitemaps_read=read, sitemap_fetch_failures=failures, sitemap_urls=len(urls),
+    # round 2: what was read is disclosed, never implied complete (sitemaps attempted vs read; URLs listed vs kept)
+    facts.update(sitemaps_read=read, sitemap_fetch_failures=failures, sitemap_urls=total_urls,
+                 sitemaps_attempted=len(seen), sitemap_urls_examined=len(urls), sitemap_urls_examined_max=URLS_KEPT_MAX,
                  sitemap_children_followed=children_followed, sitemap_children_cross_host=children_cross_host,
                  sitemap_children_over_cap=children_over_cap)
     templates, digests = [], []
@@ -312,7 +338,8 @@ def _sitemaps(ctx, facts: dict) -> list:
 def _url_checks(ctx, urls: list, facts: Optional[dict] = None) -> list:
     out, bad_abs, other_host, blocked = [], [], [], []
     parsed = ctx.robots.get("parsed") if ctx.robots else None
-    budget = robots_mod.Budget(URL_CHECK_BUDGET_S)
+    work = robots_mod.Work(URL_CHECK_WORK)
+    checked = 0
     for i, (u, sm) in enumerate(urls):
         p = split_url(u)
         if p is None or p.scheme not in ("http", "https") or not p.hostname:
@@ -323,10 +350,17 @@ def _url_checks(ctx, urls: list, facts: Optional[dict] = None) -> list:
             continue
         if parsed is not None and i < BLOCK_SAMPLE:
             path = (p.path or "/") + (f"?{p.query}" if p.query else "")
-            if parsed.allowed("Googlebot", path, budget) is False:
+            verdict = parsed.allowed("Googlebot", path, work)
+            if verdict is not None:
+                checked += 1
+            if verdict is False:
                 blocked.append(u)
-    if facts is not None and budget.undecided:
-        facts["robots_unchecked"] = budget.undecided
+    if facts is not None:
+        facts["robots_checked"] = checked
+        facts["robots_check_sample_max"] = BLOCK_SAMPLE
+        facts["robots_check_work"] = {"units": work.units, "limit": work.limit}
+    if facts is not None and work.undecided:
+        facts["robots_unchecked"] = work.undecided
     if bad_abs:
         out.append(finding("SITEMAP_LOC_NOT_ABSOLUTE", "medium", "measured", "ACT", capability="P3",
                            detail={"count": len(bad_abs), "examples": su.safe_urls(bad_abs, 5)}))
@@ -337,11 +371,12 @@ def _url_checks(ctx, urls: list, facts: Optional[dict] = None) -> list:
         out.append(finding("SITEMAP_LISTS_ROBOTS_BLOCKED_URL", "medium", "measured", "ACT", capability="P3",
                            detail={"count": len(blocked), "examples": su.safe_urls(blocked, 5),
                                    "checked_for": "Googlebot"}))
-    if facts is not None and budget.undecided:
+    if facts is not None and work.undecided:
         out.append(finding("SITEMAP_ROBOTS_CHECK_INCOMPLETE", "info", "measured", "INSUFFICIENT_EVIDENCE",
-                           capability="P3", detail={"undecided": budget.undecided, "budget_s": URL_CHECK_BUDGET_S,
+                           capability="P3", detail={"undecided": work.undecided, "cap": "step_work_units",
+                                                    "cap_value": work.limit,
                                                     "note": "listed URLs not checked against robots.txt within "
-                                                            "this run's time budget (no claim either way)"}))
+                                                            "this run's counted work (no claim either way)"}))
     return out
 
 

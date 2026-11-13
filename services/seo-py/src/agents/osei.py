@@ -24,7 +24,7 @@ REFRESH_TIERS = {"robots": timedelta(days=1), "sitemap": timedelta(days=1), "llm
                  "page": timedelta(days=7), "structured_data": timedelta(days=7), "ai_probe": timedelta(days=7),
                  "entity_record": timedelta(days=180)}
 REASONS = ("XML_DOCTYPE_REFUSED", "XML_MALFORMED", "TOO_LARGE", "NOT_UTF8", "JSONLD_INVALID",
-           "PROVIDER_ANSWER_MALFORMED", "DECOMPRESS_FAILED")
+           "PROVIDER_ANSWER_MALFORMED", "DECOMPRESS_FAILED", "JSONLD_TOO_LARGE")
 
 
 QUARANTINED_MAX = 200
@@ -41,7 +41,7 @@ class Osei:
 
     def quarantine(self, kind: str, reason: str, url: Optional[str], data: Optional[bytes], *,
                    partial: Optional[dict] = None, size: Optional[int] = None, digest: Optional[str] = None,
-                   basis: Optional[str] = None) -> dict:
+                   basis: Optional[str] = None, total: Optional[int] = None) -> dict:
         """One quarantined input: reason, size and SHA-256 (ADR 0017 decision 15), never its content; the URL only
         in its safe form (primitives/safe_url.py). ``data``: the bytes in hand; ``partial``: a fetch stopped
         TOO_LARGE ({"bytes_read", "sha256", "declared"}: the size and hash are of the bytes read before the stop,
@@ -61,6 +61,9 @@ class Osei:
         elif size is not None:
             q["bytes"], q["sha256"] = size, digest
             q["size_basis"] = basis or "the answer as this service serialised it (no raw body was in hand)"
+            if total is not None or reason == "JSONLD_TOO_LARGE":
+                # round 2 Osei M2: a prefix was read; the record says so and gives the whole size when known
+                q["truncated"], q["total_bytes"] = True, total
         else:
             q["size_basis"] = "no bytes were in hand (the failure came before any body)"
         if len(self.quarantined) < QUARANTINED_MAX:
