@@ -173,9 +173,12 @@ LIMITS = [
     "bidi characters, spelled digits, vanity toll-free numbers, and e-mails spelled, bracketed, base64 / base32 / "
     "hex / URL-encoded, rot13 or reversed, whole or chunked, inside surrounding text. Over-dropped on purpose: any "
     "query whose digits, read across such gaps, are a valid card, phone or SSN number however they are grouped "
-    "('10001 2025', 'version 10.0.19045.3803', a date followed by a time, a tire size with its load index). The "
-    "rule also drops some non-addresses shaped like '<number> <word> st' "
-    "or '<number> <word> court'. Derived "
+    "('10001 2025', 'version 10.0.19045.3803', a date followed by a time, a tire size with its load index). "
+    "Since round 19 spelled vanity numbers, every at-word and dot-word with any top-level domain, addresses "
+    "followed by any text and one number word among digits are caught too, while tire sizes, UPC / EAN / ISBN "
+    "codes with a valid check digit, part numbers and flight times are kept unless their digits are such a value. "
+    "The rule also drops some non-addresses shaped like '<number> <word> st' "
+    "or '<number> <word> court' followed by any text. Derived "
     "variants are never built from a query with a capitalised word, nor from a frame adding a word outside a "
     "closed vocabulary."),
     "The ledger is computed on request and handed out once; it is not stored (only its SHA-256 and counts).",
@@ -444,7 +447,7 @@ def build(tenant_id: str, run_id: str, generated_at: str, brands: list, gsc: Sou
         if not norm:
             return None
         cls = sp.classify_query(raw, brands)
-        if cls != PII_CLASS:
+        if cls != PII_CLASS and norm != raw:             # round 19: the same text is not classified twice
             cls = sp.classify_query(norm, brands)        # the normalised text too (fullwidth digits, case)
         if cls == PII_CLASS:
             return None
@@ -692,12 +695,15 @@ def _derive(entries: list, rows: list, brands: list, run_id: str) -> tuple[list,
             if h in support[f]["heads"]:
                 continue
             v = " ".join(f.replace("{head}", h).split())
-            if v in seen or sp.classify_query(v, brands) == PII_CLASS:
+            if v in seen:
+                continue
+            v_cls = sp.classify_query(v, brands)         # round 19: classified once, not twice
+            if v_cls == PII_CLASS:
                 continue
             seen.add(v)
             out.append({
                 "key": row_key(v), "query": observed(v), "tier": "EMERGING", "origin": "derived",
-                "intent_class": sp.classify_query(v, brands), "emerging_kinds": emerging_kinds(v),
+                "intent_class": v_cls, "emerging_kinds": emerging_kinds(v),
                 "metrics": {"search_console": None, "bing_webmaster": None},
                 "volume_status": "UNKNOWN_NOT_MEASURED", "market_volume": None,
                 "opportunity": {"status": "NOT_APPLICABLE", "why": "not measured", "data_class": "modeled",

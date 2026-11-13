@@ -95,9 +95,17 @@ def test_list_mandated_drops(q):
 
 STILL_KEPT = ["11/8/2025 7pm", "10/31/2025 halloween 7pm", "90210 2024 restaurants", "2025-11-08 hotel",
               "chrome 124.0.6367.91 download", "python 3.12.4", "iphone 15 pro max 256gb", "225/45r17 tires",
-              "deals at walmart", "meeting at 2pm", "polka dot dress at target", "the dot com bubble",
+              "deals at walmart", "meeting at 2pm", "the dot com bubble",
               "dos camas hotel barato", "one two three song", "800 thread count sheets",
               "rug cleaner near me", "\u6771\u4eac \u30db\u30c6\u30eb \u5b89\u3044", "5w30 oil 5 qt"]
+
+
+def test_still_kept_moved_list_mandated():
+    # priya-spec/1 (C6 any TLD, D20 reversed; G-7): moved from STILL_KEPT - read backwards, "polka dot dress at
+    # target" is a mailbox with the TLD "polka"; the independent oracle labels it list-mandated
+    from conformance.oracle import priya_list
+    q = "polka dot dress at target"
+    assert priya_list.mandated(q) and sp.classify_query(q, BRANDS) == "pii_suspect"
 
 
 @pytest.mark.parametrize("q", STILL_KEPT)
