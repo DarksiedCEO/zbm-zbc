@@ -40,9 +40,13 @@ def tally():
     return _T
 
 
-def adr_table() -> dict:
+def adr_table(corpus: str = "oq") -> dict:
+    """The machine-readable table of ADR 0047's round entry for one ordinary corpus: {class: (n, dropped, mandated,
+    not mandated)}; the frozen corpus between ``priya-oq-table`` markers, a reviewer's corpus (priya-spec/1.1 C-5)
+    between ``priya-oq-table-<corpus>`` markers."""
     text = ADR.read_text(encoding="utf-8")
-    block = text.split("<!-- priya-oq-table:begin -->")[1].split("<!-- priya-oq-table:end -->")[0]
+    tag = "priya-oq-table" if corpus == "oq" else "priya-oq-table-" + corpus
+    block = text.split(f"<!-- {tag}:begin -->")[1].split(f"<!-- {tag}:end -->")[0]
     out = {}
     for line in block.splitlines():
         m = re.match(r"\|\s*([a-z_]+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|\s*(\d+)\s*\|", line)

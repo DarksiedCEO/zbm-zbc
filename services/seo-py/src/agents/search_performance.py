@@ -49,7 +49,12 @@ import lookalikes
 from agents import logs as logs_mod
 
 AGENT, TASK = "osei", "search_performance"
-VERSION = "2026-11-08.19"                     # query classes, templating and the aggregation rules below
+VERSION = "2026-11-08.20"                     # query classes, templating and the aggregation rules below
+# 2026-11-08.20 (review round 20, priya-spec/1.1): the closed at-word / dot-word lists (C-1, any case); e-mails and
+#    addresses glued to fullwidth / ideographic punctuation and CJK context (C-2); composed gaps counted one
+#    character for one (``script_view``); a number word inside an ordinary word read only as a gap between two
+#    units (C-4); URL-encoded e-mails reversed; a keyword after a spelled dot-word is the top-level domain; a short
+#    e-mail encoded and followed by a word
 # 2026-11-08.19 (review round 19): spelled vanity numbers and gaps inside the toll-free code; every at-word / dot-word
 #    and any top-level domain of 2-24 letters in spelled e-mails, '_' / '-' spellings; addresses followed by any
 #    amount of text; one number word among digits, number words glued to gap letters or digits; the round-18 glued
@@ -297,6 +302,49 @@ MAX_QUERY_CHARS = 512        # longer text is not classified (it is pii_suspect)
 
 
 _ADDR_TOKEN_EDGE = re.compile(r"^[^a-z0-9#]+|[^a-z0-9]+$")
+_ADDR_GLUE = re.compile(r"[:;!?\"()\[\]{}<>|]|\.(?=[a-z])")
+
+
+def script_view(q: str) -> str:
+    """Round 20 (priya-spec/1.1 C-2, CP-3): the query read ONE CHARACTER FOR ONE CHARACTER, the way the list counts a
+    gap: invisible and format characters and marks removed, a decimal digit of any script made its ASCII digit, a
+    character NFKC makes one ASCII character (fullwidth letters, digits and punctuation, mathematical letters,
+    circled digits) made it, an accented Latin letter made its base, the ideographic space ' ' and full stop '.',
+    every OTHER letter (another script) made one '#', and any other character (a symbol, "\u2036" too, which NFKC
+    makes two) kept as itself; lower case. The detection form can make one character two or more (NFKC "\u2036" ->
+    two primes; the lookalike fold Cyrillic "\u044e" -> "io"), so a gap of three characters there may read as four
+    or more; here it never does, and a word of another script glued to a value ("lane\u0430\u0434\u0440\u0435\u0441",
+    "com\u0440\u0443") is set apart from it. '' when the query is ASCII (the detection form is then the same)."""
+    if q.isascii():
+        return ""
+    out = []
+    for c in unicodedata.normalize("NFC", lookalikes.strip_invisible(q)):
+        cat = unicodedata.category(c)
+        if c.isascii():
+            out.append(c.lower())
+        elif cat in ("Mn", "Me", "Cf"):
+            continue
+        elif cat == "Nd":
+            out.append(str(unicodedata.digit(c)))
+        elif c in "\u3002\uff61\uff0e\u2024\ufe52":
+            out.append(".")
+        elif c == "\u3000":
+            out.append(" ")
+        elif cat[0] == "Z" or c.isspace():
+            out.append(c)                   # a separator of the list (D06), not a word end (see _WORD_END)
+        else:
+            n = unicodedata.normalize("NFKC", c)
+            if len(n) == 1 and n.isascii():
+                out.append(n.lower())
+                continue
+            base = "".join(x for x in unicodedata.normalize("NFKD", c) if unicodedata.category(x)[0] != "M")
+            if len(base) == 1 and base.isascii() and base.isalpha():
+                out.append(base.lower())
+            elif c.isalpha():
+                out.append("#")
+            else:
+                out.append(c)
+    return "".join(out)
 
 
 def _address_core(folded: str) -> str:
@@ -304,8 +352,11 @@ def _address_core(folded: str) -> str:
     punctuation trimmed from the ends of the others, so surrounding text of another script or symbols never stops the
     address rule ("17 elm way \u3067\u3059", "\u300c 62 oak lane, \U0001f600")."""
     out = []
-    # round 19: non-ASCII punctuation and symbols glued to a word ("al\u300c20997 hill ave") separate words too
+    # round 19: non-ASCII punctuation and symbols glued to a word ("al\u300c20997 hill ave") separate words too;
+    # round 20 (priya-spec/1.1 C-2): so do the ASCII forms NFKC makes of fullwidth and ideographic punctuation
+    # ("st\uff1a" -> "st:", "lane\u3002" -> "lane.") and a full stop glued to the next word ("st.itineraire")
     folded = "".join(" " if not c.isascii() and unicodedata.category(c)[0] in "PSZ" else c for c in folded)
+    folded = _ADDR_GLUE.sub(" ", folded)
     for tok in folded.split():
         tok = _ADDR_TOKEN_EDGE.sub("", tok)
         if any(c.isascii() and c.isalnum() for c in tok):
@@ -1059,29 +1110,136 @@ def digit_stream_hit(text: str) -> bool:
 _NW_ANY = re.compile("|".join(sorted(_NUMBER_WORDS, key=len, reverse=True)))
 _NW_IN_WORD = re.compile("|".join(sorted((w for w in _NUMBER_WORDS if w != "oh"), key=len, reverse=True)))
 _ALNUM_RUN = re.compile(r"[^\W_]+")
-_LETTER_RUN = re.compile(r"[^\W\d_]+")
 
 
-def _number_word_token(tok: str) -> str:
-    """One word of the text with its number words made digits (round 19): a whole number word always; number words
-    inside a longer word only when the word then holds no run of more than ``STREAM_GAP`` letters, so the leftover
-    letters are gaps of the list ("fivexzero" -> "5x0", "2one5" -> "215", "dosp" -> "2p"; "nineteen", "seventy" stay
-    words). An ordinary word read so ("phone" -> "ph1") only adds one digit, which the stream counts only inside a
-    value of the list."""
+def _number_word_token(tok: str, lead: int = 0, trail: int = 0) -> tuple:
+    """One word of the text with its number words made digits: (reading, letters after its last unit or None when
+    no unit was read). A whole number word always; number words inside a longer word only as ``_segmented`` reads
+    them (round 19: leftover letters are gaps of the list; round 20, priya-spec/1.1 C-4: a leftover is a gap only
+    BETWEEN two units, so it may begin or end the word only by ``lead`` / ``trail`` letters, the room a gap to the
+    neighbouring word's unit leaves)."""
     d = _NUMBER_WORDS.get(tok)
     if d is not None:
-        return d
-    sub, k = _NW_IN_WORD.subn(lambda m: _NUMBER_WORDS[m.group()], tok)
-    if not k:
-        return tok
-    if any(len(r) > STREAM_GAP for r in _LETTER_RUN.findall(sub)):
-        return tok
-    return sub
+        return d, 0
+    if tok.isdigit():
+        return tok, 0
+    if _NW_IN_WORD.search(tok):
+        seg = _segmented(tok, lead, trail)
+        if seg is not None:
+            return seg
+    last = max(tok.rfind(c) for c in "0123456789")          # a digit is a unit: letters after it may be a gap
+    return tok, (len(tok) - last - 1 if last >= 0 else None)
+
+
+_IN_WORD_UNITS = tuple(sorted((w for w in _NUMBER_WORDS if w != "oh"), key=len, reverse=True))
+
+
+def _unit_offset(tok: str) -> int | None:
+    """How many letters (0-``STREAM_GAP``) stand before the first unit of a word (a digit or a number word), or None."""
+    for k in range(min(STREAM_GAP, len(tok) - 1) + 1):
+        if k and tok[k - 1].isdigit():
+            return None
+        if tok[k].isdigit() or (tok in _NUMBER_WORDS and not k) or any(tok.startswith(w, k) for w in _IN_WORD_UNITS):
+            return k
+    return None
+
+
+def _segmented(tok: str, lead: int, trail: int) -> tuple | None:
+    """Round 20 (priya-spec/1.1 C-4, CP-3): the word read as UNITS (a digit, or a number word other than "oh") and
+    gaps of 1-``STREAM_GAP`` letters between two units, every unit made a digit ("fivexzero" -> "5x0",
+    "ninefdosix" -> "9fdo6": the gap may hold letters of a number word); up to ``lead`` letters may stand before the
+    first number word and ``trail`` after the last (the part of a gap to the next word's unit; letters before or
+    after a DIGIT are only letters). Returns (reading, letters after the last unit), or None when no such reading
+    exists ("phone", "someone", "fourteen" as words). Backward dynamic programme over the positions: linear in the
+    word's length."""
+    n = len(tok)
+    # unit_at[i]: (end, digit) of a unit at i whose rest reads; rest[i]: after a unit ending at i, the gap length
+    # (0-3) to the next unit, or -1 when the word may end here (nothing follows, or at most ``trail`` letters)
+    unit_at = [None] * (n + 1)
+    rest = [None] * (n + 1)
+    rest[n] = -1
+    tail = n                       # tok[tail:] is letters only
+    while tail > 0 and not tok[tail - 1].isdigit():
+        tail -= 1
+    for i in range(n - 1, -1, -1):
+        c = tok[i]
+        if c.isdigit():
+            if rest[i + 1] is not None:
+                unit_at[i] = (i + 1, c)
+        else:
+            for w in _IN_WORD_UNITS:
+                if tok.startswith(w, i) and rest[i + len(w)] is not None:
+                    unit_at[i] = (i + len(w), _NUMBER_WORDS[w])
+                    break
+        for g in range(STREAM_GAP + 1):
+            k = i + g
+            if k >= n or (g and tok[k - 1].isdigit()):
+                break
+            if unit_at[k] is not None:
+                rest[i] = g
+                break
+        # the word may end after this unit when only letters follow and the unit is a digit (letters after a digit
+        # are just letters) or they fit the trail
+        if rest[i] is None and i >= tail and i and (tok[i - 1].isdigit() or n - i <= trail):
+            rest[i] = -1
+    # the first unit: a digit anywhere after leading letters, or a number word after at most ``lead`` letters
+    start = None
+    for k in range(n):
+        if k and tok[k - 1].isdigit():
+            break
+        if unit_at[k] is not None and (tok[k].isdigit() or k <= lead):
+            start = k
+            break
+    if start is None:
+        return None
+    out, i = [tok[:start]], start
+    while True:
+        j, d = unit_at[i]
+        out.append(d)
+        g = rest[j]
+        if g == -1:
+            out.append(tok[j:])
+            return "".join(out), n - j
+        out.append(tok[j:j + g])
+        i = j + g
+
+
+# the white space that ends a word for ``_number_words_read`` (typed between words: ASCII white space and the
+# ideographic space); every other space character (U+2009, U+00A0 ...) is a separator of the list (D06), so a gap of
+# a thin space and a letter between two units ("cuatro\u2009msiete") is a gap, while "2025 phone" holds a word
+_WORD_END = frozenset(" \t\n\r\f\v\u3000")
+
+
+def _number_words_read(folded: str) -> str:
+    """The text with its number words made digits (``_number_word_token``), separators kept. A word's leftover
+    letters may face a neighbouring word only through a stretch of separators with no word-ending white space
+    (``_WORD_END``), the whole gap at most ``STREAM_GAP`` characters ("dosP\u21d2ocho": "P" and the arrow are one
+    gap); white space ends a word, so "2025 phone" holds no number word (priya-spec/1.1 C-4)."""
+    toks = list(_ALNUM_RUN.finditer(folded))
+    out, pos, prev = [], 0, None           # prev: letters after the previous word's last unit (None: no unit)
+    for i, m in enumerate(toks):
+        a, b = m.span()
+        lead = trail = 0
+        if i and prev is not None:
+            before = folded[toks[i - 1].end():a]
+            if not any(c in _WORD_END for c in before):
+                lead = STREAM_GAP - len(before) - prev
+        if i + 1 < len(toks):
+            after = folded[b:toks[i + 1].start()]
+            off = _unit_offset(toks[i + 1].group()) if not any(c in _WORD_END for c in after) else None
+            if off is not None:
+                trail = STREAM_GAP - len(after) - off
+        reading, prev = _number_word_token(m.group(), max(lead, 0), max(trail, 0))
+        out.append(folded[pos:a])
+        out.append(reading)
+        pos = b
+    out.append(folded[pos:])
+    return "".join(out)
 
 
 def spelled_views(folded: str) -> list:
     """Round 19 (spelled digits with any gap of the list, ONE number word enough): the text with its number words
-    made digits (``_number_word_token``) and its separators kept, the same with every separator (P*, S*, Z*, C*
+    made digits (``_number_words_read``) and its separators kept, the same with every separator (P*, S*, Z*, C*
     character but '+') removed, so the gaps the stream counts are the letters between digits ("cinco, a, W, cero" ->
     "5aW0"; round 18's ``spelled_stream``, which needed two whole number words), and the text with only its WHOLE
     number words made digits (for the vanity rule, whose seven letters may hold a number word: "mattres"). [] when the
@@ -1091,7 +1249,7 @@ def spelled_views(folded: str) -> list:
     # a value needs digits, or three number words or more (a vanity code spelled: "one eight zero zero" + a word)
     if not found or (len(found) < 3 and not any(c.isdigit() for c in folded)):
         return []
-    kept = _ALNUM_RUN.sub(lambda m: _number_word_token(m.group()), folded)
+    kept = _number_words_read(folded)
     if kept == folded:
         return []
     joined = "".join(c for c in kept if c == "+" or unicodedata.category(c)[0] not in "PSZC")
@@ -1118,21 +1276,26 @@ def _vanity_any(t: str) -> bool:
 # Spanish "arroba", "punto", in brackets or not) counts only between markers (never inside a word: "what", "dotted"),
 # and a chunk space inside a keyword or a label ("a t", "exa mple") is tolerated.
 _MARK_CHARS = frozenset("[](){}<>")
-# round 19: every at-word and dot-word of the languages the classifier reads (English, Spanish / Portuguese, French,
-# Italian, German); round 18 read only at / arroba and dot / punto
-AT_WORDS = ("at", "arroba", "arobase", "chiocciola", "klammeraffe")
-DOT_WORDS = ("dot", "punto", "ponto", "punkt")
+# round 20 (priya-spec/1.1 C-1): the CLOSED at-word and dot-word lists of the spec (English, Spanish / Portuguese,
+# French, Italian, German, Polish, Hungarian, Scandinavian, Dutch, romanised Russian; dot-words also Norwegian,
+# Finnish, Turkish, Indonesian), any case; round 19 read five at-words and four dot-words (no French "point")
+AT_WORDS = ("at", "arroba", "arobase", "chiocciola", "klammeraffe", "at-zeichen", "malpa", "kukac", "snabel-a",
+            "apenstaartje", "sobaka")
+DOT_WORDS = ("dot", "punto", "point", "ponto", "punkt", "kropka", "pont", "prikk", "piste", "nokta", "titik")
 _ROT13 = str.maketrans("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
                        "nopqrstuvwxyzabcdefghijklmNOPQRSTUVWXYZABCDEFGHIJKLM")
 
 
 def _kw_alternation(words) -> str:
-    # each keyword with an optional chunk marker between any two of its letters ("a|t", "arro|ba")
-    return "|".join(r"\|?".join(w) for w in sorted(set(words), key=len, reverse=True))
+    # each keyword with an optional chunk marker between any two of its letters ("a|t", "arro|ba"); a keyword written
+    # with a hyphen ("at-zeichen", "snabel-a") also without it, so "at zeichen" / "at_zeichen" (a marker) is read too
+    forms = set(words) | {w.replace("-", "") for w in words}
+    return "|".join(r"\|?".join(w) for w in sorted(forms, key=len, reverse=True))
 
 
 _KW_AT = re.compile(r"(?<=\|)(?:" + _kw_alternation(AT_WORDS) + r")(?=\|)")
-_KW_DOT = re.compile(r"(?<=\|)(?:" + _kw_alternation(DOT_WORDS) + r")(?=\|)")
+_KW_EITHER = re.compile(r"(?<=\|)(?:(?P<at>" + _kw_alternation(AT_WORDS) + r")|" + _kw_alternation(DOT_WORDS)
+                        + r")(?=\|)")
 # the at-keyword in every view (as written, rot13, reversed, both): the cheap gate before any view is built
 _KW_AT_ANY = re.compile(r"@|(?<=\|)(?:" + _kw_alternation(
     [v for w in AT_WORDS for v in (w, w[::-1], w.translate(_ROT13), w[::-1].translate(_ROT13))]) + r")(?=\|)")
@@ -1140,8 +1303,9 @@ _KW_AT_ANY = re.compile(r"@|(?<=\|)(?:" + _kw_alternation(
 # followed by a chunk marker
 _TLD_ANY = r"(?:[a-z]\|?){1,23}[a-z]"
 _LABEL = r"(?:[a-z0-9\-]\|?){1,63}"
+# round 20 (C-2): a full stop may end the top-level domain before the marker ("com\u3002" is NFKC "com.")
 _MAILBOX = re.compile(r"[a-z0-9_+\-]\|?@\|?" + _LABEL + r"(?:\.\|?" + _LABEL + r"){0,4}?\.\|?" + _TLD_ANY
-                      + r"(?=\||$)")
+                      + r"(?=\.?(?:\||$))")
 _EMAIL_CORE = re.compile(r"[a-z0-9_.+\-]@[a-z0-9\-]")
 # a whole mailbox at the start of a decoded prefix (the plain-word base32 check: the bytes after it are context's)
 _MAILBOX_AT_START = re.compile(r"[a-z0-9._%+\-]{1,64}@[a-z0-9\-]{1,63}(?:\.[a-z0-9\-]{1,63}){0,4}\.[a-z]{2,24}")
@@ -1176,8 +1340,17 @@ def _marker_string(t: str) -> str:
 
 
 def _despelled(m: str) -> str:
-    """The marker string with spelled keywords made '@' and '.' (markers kept)."""
-    return _KW_DOT.sub(".", _KW_AT.sub("@", m))
+    """The marker string with spelled keywords made '@' and '.' (markers kept). Round 20: a keyword right after a
+    spelled dot-word is the top-level domain's letters ("... dot at": Austria's TLD is an at-word), not a keyword."""
+    out, pos, after_dot = [], 0, -1
+    for x in _KW_EITHER.finditer(m):
+        if x.start() == after_dot + 1:
+            continue
+        out += (m[pos:x.start()], "@" if x.group("at") else ".")
+        pos = x.end()
+        after_dot = x.end() if not x.group("at") else -1
+    out.append(m[pos:])
+    return "".join(out)
 
 
 def rot13(t: str) -> str:
@@ -1186,7 +1359,10 @@ def rot13(t: str) -> str:
 
 def _mailbox_any(d: str) -> bool:
     # the despelled view as written, rot13'd and reversed ("spelled, then rot13 / reversed"); any TLD of 2-24 letters
-    # (priya-spec/1 C6): "polka dot dress at target" read backwards IS a mailbox shape of the list
+    # (priya-spec/1 C6). Round 20: "polka dot dress at target" is DROPPED for the composed-pair bar (CP-2, CP-4 per
+    # ordered pair <= 5%), not for one list rule: it is the pair reversed -> spelled of a mailbox whose TLD is the
+    # letters of "polka" reversed, and every value of that pair has its shape (the views of ``_email_views`` read it
+    # too: the marker string of the words reversed, read backwards)
     return bool(_MAILBOX.search(d) or _MAILBOX.search(rot13(d)) or _MAILBOX.search(d[::-1]))
 
 
@@ -1219,7 +1395,6 @@ def _email_views(folded: str) -> bool:
 
 # the characters of base64 (standard and URL-safe), base32, hex and percent encoding
 _ENC_TOKEN = re.compile(r"[A-Za-z0-9+/=_\-%]+")
-_ENC_EDGE = re.compile(r"^[^A-Za-z0-9+/=_\-%]+|[^A-Za-z0-9+/=_\-%]+$")
 _PLAIN_TOKEN = re.compile(r"[a-z]+")
 # round 19: each encoding read as a STREAM from the window's start (its longest prefix in the alphabet), so one decode
 # per window start gives every prefix of the window (base64 decodes in blocks of 4, base32 of 8, hex of 2)
@@ -1233,13 +1408,17 @@ ENC_SPAN_CHARS = 400
 
 def _printable_prefix(raw: bytes) -> str | None:
     """The decoded bytes up to the first one that is not printable ASCII (tab, CR, LF allowed), when that prefix is 8+
-    bytes, or 5+ bytes and 90% of the whole (a short number read as hex is not text); else None."""
+    bytes, or 5+ bytes and 90% of the whole (a short number read as hex is not text), or (round 20) 6-7 bytes holding
+    an '@' with a byte before it and three after it: a short e-mail ("ab@c.de") whose window runs on into the next
+    word of the query decodes to the e-mail and then that word's bytes; else None."""
     k = 0
     for b in raw:
         if not (32 <= b < 127 or b in (9, 10, 13)):
             break
         k += 1
-    return raw[:k].decode("ascii") if k >= 8 or (k >= 5 and k >= 0.9 * len(raw)) else None
+    if k >= 8 or (k >= 5 and k >= 0.9 * len(raw)) or (k >= 6 and 64 in raw[1:k - 3]):
+        return raw[:k].decode("ascii")
+    return None
 
 
 def _decodings(s: str):
@@ -1317,7 +1496,10 @@ def encoded_email(cased: str, depth: int = 0) -> bool:
     if not cased.isascii():
         cased = "".join(" " if not c.isascii() and (c.isalpha() or unicodedata.category(c)[0] in "PSZM") else c
                         for c in cased)
-    toks = [_ENC_EDGE.sub("", t) for t in cased.split()]     # "wcm90b24ubWU=," -> "wcm90b24ubWU="
+    # round 20 (priya-spec/1.1 C-2): every character outside the encodings' alphabet separates words, so the ASCII
+    # forms NFKC makes of fullwidth / ideographic punctuation glued to a chunk ("call\uff1aamFy..." -> "call:amFy...",
+    # "nummer\u3002c2Fy..." -> "nummer.c2Fy...") never hide it; round 19 trimmed such characters at word ends only
+    toks = _ENC_TOKEN.findall(cased)
     n = len(toks)
     ok = [_ENC_TOKEN.fullmatch(t) is not None for t in toks]
     plain = [ok[i] and _PLAIN_TOKEN.fullmatch(toks[i]) is not None for i in range(n)]
@@ -1443,8 +1625,8 @@ def generic_exempt(text: str) -> str:
 # templater keeps, unchanged): "<name> at <domain> dot|. <tld>" in any bracket spelling, or "<name> at <mail
 # provider>". "deals at walmart", "meeting at 2pm" are not e-mails; "john at gmail dot com", "john (at) gmail (dot)
 # com", "john at gmail.com", "jane at gmail" are.
-_AT_W = "|".join(AT_WORDS)                      # round 19: every at-word / dot-word (round 16 read "at" / "dot")
-_DOT_W = "|".join(DOT_WORDS)
+_AT_W = "|".join(sorted(AT_WORDS, key=len, reverse=True))     # round 19: every at-word / dot-word (round 16: at, dot)
+_DOT_W = "|".join(sorted(DOT_WORDS, key=len, reverse=True))
 _AT = r"(?:\b(?:" + _AT_W + r")\b|[\[(<{]\s*(?:" + _AT_W + r")\s*[\])>}]|\(\s*@\s*\)|\[\s*@\s*\])"
 _DOT = r"(?:\.|\b(?:" + _DOT_W + r")\b|[\[(<{]\s*(?:" + _DOT_W + r"|\.)\s*[\])>}])"
 _MAIL_PROVIDERS = (r"gmail|googlemail|yahoo|ymail|hotmail|outlook|live|msn|icloud|me|mac|aol|proton(?:mail)?|pm|gmx|"
@@ -1521,10 +1703,16 @@ def _percent_chunked_email(folded: str) -> bool:
     if "%" not in folded:
         return False
     joined = _PCT_SPLIT.sub(r"%\1\2", folded)
-    if joined == folded:
-        return False
-    u = unquote(joined)
-    return bool(_EMAIL_CORE.search(u)) or email_views_hit(u)
+    if joined != folded:
+        u = unquote(joined)
+        if _EMAIL_CORE.search(u) or email_views_hit(u):
+            return True
+    # round 20 (CP: URL-encoded, then reversed whole or word by word): "ofni.elpmaxe04%enaj" read backwards decodes
+    for v in (folded[::-1], " ".join(w[::-1] for w in folded.split())):
+        u = unquote(_PCT_SPLIT.sub(r"%\1\2", v))
+        if u != v and (_EMAIL_CORE.search(u) or email_views_hit(u)):
+            return True
+    return False
 
 
 def _spelled_hit(folded: str) -> bool:
@@ -1565,6 +1753,12 @@ def _classify_core(q: str, brands: list, _depth: int = 0) -> str:
             or _percent_chunked_email(undecoded) \
             or encoded_email(t) or (raw_form != t and encoded_email(raw_form)) \
             or (core != folded and looks_like_address(core)):
+        return "pii_suspect"
+    # round 20: the same rules on the per-character view (``script_view``: one character for one, one '#' per
+    # letter of another script)
+    xs = script_view(q if "%" not in q else unquote(unquote(unquote(q)))) if q else ""
+    if xs and (digit_stream_hit(xs) or _vanity_any(xs) or _spelled_hit(xs) or email_views_hit(xs)
+               or looks_like_address(_address_core(xs.replace("#", " ")))):
         return "pii_suspect"
     # exemptions below this line touch ONLY the generic digit-run / token rules (and the IP check)
     versioned = _RFC_NUMBER.sub(lambda m: m.group(1) + " #", _VERSION.sub(lambda m: m.group(1) + " #", folded))

@@ -16,7 +16,7 @@ from agents import search_performance as sp
 
 YEAR_DATE_KEEP = [
     # the reviewer's examples
-    "2023 2024 honda civic", "2024 2025 home sales",
+    "iphone 2023 2024", "best phone 2025 2026", "2023 2024 honda civic", "2024 2025 home sales",
     "2024-12-25 hotel deals", "2025-01-01 hours", "2010 2020 ohio state", "2025/11/08 hotel",
     "2025-01-01 holidays",
     # year pairs / ranges + products, model years, seasons
@@ -24,7 +24,7 @@ YEAR_DATE_KEEP = [
     # a valid SSN stream: closed list item 1)
     "2019 2020 2021 toyota camry", "2022 vs 2023 honda accord", "2024 to 2025 tax brackets",
     "2020-2021 nba season", "2023/2024 premier league", "2024-25 school year calendar", "2018 2019 ford f150 parts",
-    "2021 2022 2023 subaru outback", "1990 2000 movies",
+    "2021 2022 2023 subaru outback", "2024 2025 phone deals", "1990 2000 movies",
     "2024 2025 world cup qualifiers", "nfl 2024 2025 schedule", "2023 2024 ohio state football",
     "2025 2026 holiday hours", "best laptops 2024 2025", "honda civic 2016 2017 2018", "2015-2020 jeep wrangler",
     # dates in every common order + common words
@@ -40,16 +40,17 @@ def test_year_and_date_queries_are_kept(q):
     assert sp.classify_query(q, ["acme"]) != "pii_suspect", q
 
 
-# priya-spec/1 (D14, G-7): moved here from YEAR_DATE_KEEP - the independent oracle of the conformance suite labels
-# each list-mandated (one number word, whole or inside a word, among years spells a valid SSN across gaps of at most
-# three characters; THE RULE has no year exemption)
-LIST_MANDATED_R19 = ["iphone 2023 2024", "best phone 2025 2026", "2024-2025 one piece", "2024 2025 phone deals",
-                     "2025 2026 one punch man", "the one 2001 2002"]
+# priya-spec/1 (D14, G-7): moved here from YEAR_DATE_KEEP in round 19 - each holds ONE WHOLE number word among years,
+# and the list rule D14 (one number word among a value's digits) + C5 (an SSN stream across gaps of at most three
+# characters; THE RULE has no year exemption) makes it a value: the independent oracle names the rule
+# spelled_stream_ssn. Round 20 (priya-spec/1.1 C-4): "iphone 2023 2024", "best phone 2025 2026" and "2024 2025 phone
+# deals" are back in YEAR_DATE_KEEP - a number word inside an ordinary word ("phone") is not a list disguise
+LIST_MANDATED_R19 = ["2024-2025 one piece", "2025 2026 one punch man", "the one 2001 2002"]
 
 
 @pytest.mark.parametrize("q", LIST_MANDATED_R19)
 def test_list_mandated_year_queries_drop(q):
-    assert priya_list.mandated(q), q
+    assert priya_list.mandated(q) == "spelled_stream_ssn", q
     assert sp.classify_query(q, ["acme"]) == "pii_suspect", q
 
 
@@ -71,9 +72,16 @@ def _probe():
 def test_year_date_probe_has_no_over_drop():
     qs = list(_probe())
     dropped = [q for q in qs if sp.classify_query(q, ["acme"]) == "pii_suspect"]
-    # priya-spec/1 (G-7): no drop but those the independent oracle labels list-mandated (a number word among years)
-    mandated = [q for q in qs if priya_list.mandated(q)]
-    assert len(qs) == 1080 and dropped == mandated, [q for q in dropped if q not in mandated][:10]
+    rule = {q: priya_list.mandated(q) for q in qs}
+    # round 20 (G-7, priya-spec/1.1 C-4): the original strength - NOTHING is dropped in the set the independent oracle
+    # does not label list-mandated ...
+    assert len(qs) == 1080 and [q for q in dropped if not rule[q]] == [], [q for q in dropped if not rule[q]][:10]
+    # ... and each of the others is justified by one named list rule: D14 + C5 (spelled_stream_ssn), a WHOLE number
+    # word ("one", "oh") among the years; no number word inside a word ("phone", "someone", "money") counts
+    named = [q for q in qs if rule[q]]
+    assert len(named) == 85 and dropped == named
+    assert all(rule[q] == "spelled_stream_ssn" and {"one", "oh"} & set(q.split()) for q in named)
+    assert not any(rule[q] for q in qs if not {"one", "oh"} & set(q.split()))
 
 
 @pytest.mark.parametrize("q", ["4111 1111 1111 1111", "4000 2019 2020 2021", "123-45-6789", "call 555 010 0199",

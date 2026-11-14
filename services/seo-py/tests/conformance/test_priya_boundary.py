@@ -16,7 +16,7 @@ from priya_common import dropped
 pytestmark = pytest.mark.conformance
 FAMILIES = {"gap_exactly_3", "gap_mixed_1_3", "nd_block", "invisible", "number_words", "one_number_word",
             "plus_gap_0_3", "e164_8", "e164_15", "uatp_diners36", "vanity_code", "encoding", "chunk_every_position",
-            "whole_query_rot13_reversal"}
+            "whole_query_rot13_reversal", "at_dot_words", "at_dot_words_cjk_glued"}
 
 
 def test_M2_boundary_set_every_case_drops():
@@ -27,7 +27,9 @@ def test_M2_boundary_set_every_case_drops():
     assert sum(kept.values()) == 0, dict(kept)
 
 
-BOUNDARY_SIZE = 14300            # the builder's enumeration (a generator change must change this: drift guard)
+# the builder's enumeration (a generator change must change this: drift guard). Round 20: 14,300 + 1,452 (the
+# priya-spec/1.1 C-1 / C-2 families: 121 at-word x dot-word pairs x 3 spellings x 2 cases, alone and CJK-glued)
+BOUNDARY_SIZE = 15752
 
 
 def test_M2_other_script_context_inside_a_word_reversed_spelled_email():

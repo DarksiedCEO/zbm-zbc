@@ -47,6 +47,10 @@ FAMILIES = {
     "address_names": lambda n: "12 " + "oak " * (n // 4), "rot13_words": lambda n: "wnar ng rknzcyr " * (n // 16),
     "mixed_all": lambda n: "1a at QUJD %4 one [.] " * (n // 22), "fullwidth": lambda n: "\uff11\uff41" * (n // 2),
     "zero_width_digits": lambda n: "1\u200b" * (n // 2), "filler_words": lambda n: "to 12 " * (n // 6),
+    # round 20: the per-character script view, the in-word reading and the closed at / dot-word lists
+    "wide_letter_gaps": lambda n: "one\u044e\u044btwo\u2036" * (n // 9),
+    "in_word_numbers": lambda n: "phonefourxfive " * (n // 15),
+    "at_dot_words_cjk": lambda n: "a kukac b kropka c\u3002\u8bf7 " * (n // 23),
 }
 SIZES = (64, 128, 256, 384, 512)
 
@@ -87,7 +91,7 @@ def _check(ratio_max: float, abs_max: float, rounds: int = 5):
 
 @pytest.mark.conformance
 def test_PF2_linear_and_bounded_ci():
-    assert len(FAMILIES) >= 26
+    assert len(FAMILIES) >= 30
     _check(3.0, 0.100)
 
 

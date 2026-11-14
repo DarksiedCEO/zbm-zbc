@@ -165,9 +165,12 @@ def test_one_number_word_among_digits():
 
 
 def test_one_number_word_next_to_years_is_list_mandated():
-    """priya-spec/1 D14 / THE RULE: no year or date exemption for a number word among digits."""
-    for q in ("2024 2025 one piece", "iphone 2023 2024", "the one 2001 2002", "best phone 2025 2026"):
+    """priya-spec/1 D14 / THE RULE: no year or date exemption for a WHOLE number word among digits. Round 20
+    (priya-spec/1.1 C-4): a number word inside an ordinary word is not a list disguise ("iphone", "phone")."""
+    for q in ("2024 2025 one piece", "the one 2001 2002"):
         assert _drop(q), q
+    for q in ("iphone 2023 2024", "best phone 2025 2026", "2024 2025 phone deals"):
+        assert not _drop(q), q
 
 
 def test_number_words_inside_words_need_gap_sized_leftovers():
@@ -341,5 +344,7 @@ def test_priya_classifies_each_text_once(monkeypatch):
 # measured at 2026-11-08.19 (search_performance) on ordinary_r19(24000): 1,760 of 24,000; 1,708 by a rule of the list
 # (the digit stream / SSN / vanity on the text as written) and 52 by older rules outside it (the round-12 homoglyph
 # view, 39; the round-15 de-separated phone shape whose exchange may start 0 or 1, 13). ADR 0047 has the table.
+# round 20: zip_year 428 -> 427 (priya-spec/1.1 C-4: one query whose only extra digit was a number word inside an
+# ordinary word is kept now; the oracle labels it not mandated)
 MEASURED_R19 = {"date": 55, "date_time": 389, "flight": 115, "model_number": 1, "part_number": 17, "price": 1,
-                "size": 21, "tire_size": 527, "upc_isbn": 123, "version": 83, "zip_year": 428}
+                "size": 21, "tire_size": 527, "upc_isbn": 123, "version": 83, "zip_year": 427}

@@ -25,7 +25,7 @@ ROUND14_KEEP = [
     "2025-11-08/2025-11-09 hotel", "2001 2002 2003 2004 2005 honda",
     "1960s 1970s music", "2025 01 01 holiday", "20251108 log", "firmware 2.3.11.4 router",
     "rfc 9110 2022", "1980s 1990s 2000s hits", "windows 10.0.22631 update",
-    "ios 17.1.2 battery", "2024/12/25 2025/01/01 hotel", "2025-12-24/2025-12-26 christmas",
+    "ios 17.1.2 battery", "2024/12/25 2025/01/01 hotel", "2025-12-24/2025-12-26 christmas", "iphone 2023 2024",
 ]
 # round 15: ZIP + year is a GENERIC exemption; the SSN detector (never exempted) decides. "90210 2024" is not a valid
 # SSN (area 902), "10001 2025" is one (100-01-2025): kept and dropped respectively. Structural over-drops, disclosed:
@@ -39,11 +39,10 @@ def test_a_date_never_hides_a_card_phone_or_ssn(q):
     assert sp.classify_query(q, ["acme"]) == "pii_suspect", q
 
 
-def test_round14_keep_moved_list_mandated():
-    # priya-spec/1 (G-7): moved from ROUND14_KEEP - "phone" holds "one", and 1 + 2023 + 2024 is a valid SSN across
-    # gaps of at most three characters; the independent oracle labels it list-mandated
-    q = "iphone 2023 2024"
-    assert priya_list.mandated(q) and sp.classify_query(q, ["acme"]) == "pii_suspect"
+def test_round14_keep_is_not_list_mandated():
+    # round 20 (priya-spec/1.1 C-4): "iphone 2023 2024" is back in ROUND14_KEEP - the "one" inside "phone" is not a
+    # number word of the list, and the independent oracle labels nothing in it
+    assert priya_list.mandated("iphone 2023 2024") is None
 
 
 @pytest.mark.parametrize("q", ROUND14_KEEP)

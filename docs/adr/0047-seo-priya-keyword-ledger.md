@@ -157,9 +157,13 @@ addresses** and **street addresses** (the address rule below). Disguises, each a
 2. digits in any script (every Unicode decimal-digit block) or fullwidth;
 3. zero-width and bidi characters anywhere;
 4. spelled digits (English and Spanish number words, mixed with digits - one word is enough - run together,
-   glued to gap letters or separated);
-5. e-mails spelled (at-words `at`, `arroba`, `arobase`, `chiocciola`, `klammeraffe`; dot-words `dot`, `punto`,
-   `ponto`, `punkt`; any top-level domain of 2-24 letters; also written with `_` / `-` around the words), bracketed (`[at]`, `(at)`, `{at}`, `<at>`, `[@]`, `[.]`,
+   glued to gap letters or separated; a number word inside a longer ordinary word, `phone`, is not one: priya-spec/1.1
+   C-4);
+5. e-mails spelled (the CLOSED lists of priya-spec/1.1 C-1, any case: at-words `at`, `arroba`, `arobase`,
+   `chiocciola`, `klammeraffe`, `at-zeichen`, `malpa`, `kukac`, `snabel-a`, `apenstaartje`, `sobaka`; dot-words
+   `dot`, `punto`, `point`, `ponto`, `punkt`, `kropka`, `pont`, `prikk`, `piste`, `nokta`, `titik`; any top-level
+   domain of 2-24 letters; also written with `_` / `-` around the words; glued to fullwidth / ideographic
+   punctuation and CJK context, C-2), bracketed (`[at]`, `(at)`, `{at}`, `<at>`, `[@]`, `[.]`,
    `(dot)` ...), base64 (standard or URL-safe, padded or not), base32 (either case, padded or not), hex,
    URL-encoded (whole or partly), rot13 or reversed (the whole text or each word), each whole or chunked (split
    into pieces with spaces);
@@ -167,7 +171,7 @@ addresses** and **street addresses** (the address rule below). Disguises, each a
 
 A query that ADR 0017's classifier calls `pii_suspect` (e-mails in any spelling, one phone-like run of 7+ digits not
 an ISO date, id- or secret-like words, and — added in review round 1, reworked in rounds 2 to 4,
-`search_performance` rules `2026-11-08.19`, so Osei's query classes use it too - address forms and over-long text):
+`search_performance` rules `2026-11-08.20`, so Osei's query classes use it too - address forms and over-long text):
 - an id- or secret-like word (round 4 narrowed this from the log templater's rule, which dropped model numbers, tire
   sizes, decimals and years — `24acc636a003`, `225/65r17`, `3.5`, `2012` — as ids): an e-mail in any spelling, a
   UUID, 16+ hex characters, a JWT-like dotted token, 20+ token characters, anything over 40 characters, a
@@ -463,7 +467,6 @@ an ISO date, id- or secret-like words, and — added in review round 1, reworked
   an exchange starting 0), so they stay, disclosed. The table (columns: class, n, dropped, mandated, not mandated,
   then 644b4901 dropped, 644b4901 not mandated, 65f8b92a dropped):
 
-<!-- priya-oq-table:begin -->
 | class | n | dropped | mandated | not mandated | 644b4901 dropped | 644b4901 not mandated | 65f8b92a dropped |
 |---|---|---|---|---|---|---|---|
 | plain_text | 2500 | 0 | 0 | 0 | 0 | 0 | 0 |
@@ -486,7 +489,6 @@ an ISO date, id- or secret-like words, and — added in review round 1, reworked
 | business_address | 500 | 500 | 500 | 0 | 500 | 0 | 500 |
 | quantity | 1000 | 0 | 0 | 0 | 0 | 0 | 0 |
 | date_time | 900 | 731 | 731 | 0 | 731 | 0 | 0 |
-<!-- priya-oq-table:end -->
 
   **Cost (PF):** measured in process CPU time (the build machine is shared with other builders' jobs: load about 4
   on 2 cores, so wall-clock times there count other processes; the suite's perf module does the same). PF-1, the
@@ -511,6 +513,175 @@ an ISO date, id- or secret-like words, and — added in review round 1, reworked
   **Also pinned (builder corpora, final code):** round 18's ordinary corpus 162 of 24,000 dropped (unchanged since
   round 18), round 19's `ordinary_r19` 1,760 of 24,000, its composed corpus (`composed_r19`, 42,000) 0 kept - in
   `tests/test_query_privacy_r18.py` / `_r19.py`.
+- **Round 20 - review rv-priya19 closed against `priya-spec/1` and its v1.1 clarifications** (rules `2026-11-08.20`;
+  the round-19 entry above is SUPERSEDED where the review contradicted it: its suite instantiated the at-word /
+  dot-word cells narrowly - no French `point` - and its matrix kept 4,133 of the review's 291,200 cases). v1.1
+  (lead, 2026-11-13) changes no bar: C-1 closes the at-word and dot-word lists (at: `at arroba arobase chiocciola
+  klammeraffe at-zeichen malpa kukac snabel-a apenstaartje sobaka`; dot: `dot punto point ponto punkt kropka pont
+  prikk piste nokta titik`; any case, every at-word x every dot-word x any TLD of 2-24 letters); C-2 adds the NFKC
+  forms of fullwidth punctuation, the ideographic full stop and comma, and CJK context glued without spaces; C-3 makes
+  the composed bar <= 5% for EVERY ordered pair (<= 1% overall unchanged); C-4 says a number word inside a longer
+  ordinary word is not a list disguise; C-5 makes the reviewers' generators part of the permanent suite. Every number
+  below was measured on the final code by the suite (`tests/conformance/`) or by the same generators.
+  **What changed** (`search_performance.py`): (1) `AT_WORDS` / `DOT_WORDS` are the C-1 lists; a hyphenated at-word
+  is also read spaced or run together (`_kw_alternation`); a keyword right after a spelled dot-word is the top-level
+  domain's letters (`_despelled`: Austria's TLD is the at-word `at`); (2) C-2: the top-level domain may end with a
+  full stop before the next marker (`_MAILBOX`: `com` + U+3002 is NFKC `com.`); the address core splits the ASCII forms of
+  fullwidth punctuation and a full stop glued to the next word (`_ADDR_GLUE`); every character outside the
+  encodings' alphabet separates words for the encoded-e-mail search (`encoded_email`); (3) the per-character view
+  `script_view` (the query read one character for one, other-script letters one `#`, symbols NFKC widens kept
+  whole) runs the digit stream, the vanity rule, the spelled reading, the e-mail views and the address rule: the
+  lookalike fold makes Cyrillic `U+044E` two letters and NFKC makes `U+2036` two characters, so a gap of three there read as
+  four or more (review: composed nanp `gap_other -> spelled_en` 8.6%, ssn `spelled_mixed -> gap_other` 7.5%; vanity
+  with Cyrillic gap letters 128 - outside the spec but closed by the same view); (4) C-4: a number word inside a word
+  is read only as a gap BETWEEN two units (`_number_words_read`, `_segmented`, `_unit_offset`): leftover letters at a
+  word's edge count only toward a unit across a stretch of separators with no typed white space (`_WORD_END`: ASCII
+  white space and U+3000; other space characters are separators of the list, D06), the whole gap at most three
+  characters, so `iphone 2023 2024`, `best phone 2025 2026`, `2024 2025 phone deals` are kept again (restored to the
+  KEEP lists of rounds 13 and 14) while `dosP` + U+21D2 U+2994 + `ocho` (a gap of a letter and two symbols between two number
+  words) is read; the word is segmented by a linear dynamic programme, not the leftmost match (`ninefdosix`);
+  (5) URL-encoded e-mails reversed whole or word by word (`_percent_chunked_email`); (6) found by this round's own
+  tests, not by the review: an e-mail of six or seven characters (`ab@c.de`) base64 / base32 / hex encoded and
+  FOLLOWED by a word was kept (its window decodes to the e-mail and then the word's bytes, a printable prefix under
+  eight bytes): `_printable_prefix` also reads a 6-7 byte prefix holding an `@` with a byte before it and three
+  after it (0 of 8,000 such probes kept now; the three OQ tables below are unchanged by it). `polka dot dress at target`
+  stays DROPPED, and for the composed-pair bar, not one list rule: it is the ordered pair reversed -> spelled of a
+  mailbox (CP-2 / CP-4; that pair would keep every value it makes); `test_query_privacy_r18` pins it with the reason.
+  The suite (C-5, item 9): the reviewers' generators ported as `tests/conformance/rvgen/` (rv-priya18 `gen`,
+  `build_bnd`, `build_p1p2`, `build_ord`, `oracle`; rv-priya19 `g1`-`g7`, `oracle19`; non-ASCII literals as escapes,
+  drivers as functions, the random call order unchanged): each reproduces the review's own data file case for case
+  (sha256 pinned in `test_priya_manifest.py`: p1 452,000, bnd 70,346, p2v2 42,476, ord 22,600, m1 291,200, b19
+  11,532, cp19 43,680, oq19 24,400); the corpus registry `corpora.py`; `data/manifest.json` (drift guard of every
+  corpus); the FROZEN lost-protection bits `data/baseline/<corpus>.<release>.bits.gz` written once by
+  `devtools/conformance/calibrate.py` from `git archive` exports of 644b4901 and 65f8b92a (LP runs without git
+  history now); `devtools/conformance/mutants.py` (55 mutants) and `gate.sh`; the builder's own generator now
+  draws every C-1 pair (Y of D16-D18 = the at-word; the boundary set gains 1,452 at-word x dot-word cases, alone and
+  CJK-glued: 15,752); `test_query_privacy_r20.py` pins every finding.
+  **Before (5bf0d2a5) / after, every corpus** (kept = Priya keeps the row: raw text and stored key both kept).
+  rv-priya19's corpora: M-1 m1 (291,200) **4,133 -> 0** (e-mail spelled / bracketed with `point` 1,758 + 973, `_` /
+  `-` spellings 1,076 of which 169 glued to U+3002 + CJK, reversed / chunked 25; addresses glued to fullwidth or
+  ideographic punctuation 142; vanity 159); boundary b19 (11,532) 4 -> 0; composed cp19 (43,680) **307 (0.703%) ->
+  1** (0.002%), worst ordered pair 21.4% (e-mail spelled -> rot13) -> 1.4% (that one case: vanity spelled_hyphen -> zw_bidi, 1 of 70); cpx (4,000, the
+  review's file) 125 -> 0, worst 7.5% -> 0%; the suite's draw of the same ten pairs (`rv19_cpx19`, 4,000) 0 kept;
+  lost protection on the review's `lp_in` (4,449): 5 -> 0 (the upper-case `AROBASE ... Point` e-mails 644b4901
+  dropped only by an accidental base32 reading). rv-priya18's corpora: P1 p1 (452,000) 0 -> 0; boundary bnd (70,346)
+  0 -> 0; composed p2v2 (42,476) 5 -> 0; the attack corpus 676 + 40,672: 0 -> 0. The builder's suite (final code):
+  matrix CI draw (N = 5, 7,800 cases) 0, heavy draw (N = 200, 312,000) 0, boundary set 15,752: 0, composed 4,000 and
+  42,000: 0. **CP-4 (v1.1 C-3):** every ordered pair of every composed corpus <= 5% (worst 1.4%, the one cp19 case above; every other pair 0%);
+  overall composed 4,000 and 42,000: 0; p2v2 0 of 42,476; cp19 1 of 43,680 (0.002%); cpx 0 of 4,000; cpx19 0 of 4,000. **LP:** 0 of BASE kept on every personal-data corpus of the registry (frozen bits; BASE =
+  dropped by 644b4901 or 65f8b92a: 1,182,610 of 1,338,134 cases). **Service path** (fake Search Console and Bing
+  rows -> Priya -> POST response, run views, audit export, every file under the data dir, logs, ledger events): CI
+  1,000 list rows + 1,000 ordinary rows, heavy 12,000 builder rows and 12,000 reviewer rows: **0 at every output**.
+  **OQ, ordinary queries** - each corpus labelled by BOTH independent oracles (the suite's `oracle/priya_list.py`,
+  updated for C-1 / C-4 from the spec's text, and the review's `rvgen/rv19_oracle.py`); they agree on every drop of
+  all three corpora (0 disagreements) and 0 mandated queries are kept. The frozen corpus `oq` (24,400): dropped
+  2,762, list-mandated 2,683, **not mandated 79, disclosed** (P-r9): version numbers 55, flights 11, part
+  numbers 13 (the rules and causes of round 19, unchanged); ZIP + year 714 of 800 (round 19's table said 716: two
+  `mattress <zip> <year>` queries whose only extra digit was the `tres` inside `mattress` are kept now, C-4; the
+  review's measurement of 2 not-mandated ZIP + year drops is gone with them). rv-priya18's `ord` (22,600): dropped
+  1,955, mandated 1,751, **not mandated 204**: UPC / ISBN codes 200 - 199 with an INVALID
+  check digit (the generic 7-digit run: the GTIN exemption needs a valid check digit, which `test_query_privacy_r20`
+  pins - the review's mutant removing it changed exactly these 199 verdicts) and 1 whose twelve digits read as hex
+  hold an `@` between two characters (the encoded-e-mail rule) - and tire sizes 4 (3 by the round-12 homoglyph
+  view, 1 by the generic digit run).
+  rv-priya19's `oq19` (24,400): dropped 2,643, mandated 2,383, **not mandated
+  260**: tire sizes written `lt` / `p` + width / ratio with a slash and a load index 216 (the generic
+  digit-run rules), flights 25 (24 by the round-15 de-separated phone shape, 1 by the homoglyph view), version
+  numbers 18 (the homoglyph view), product codes 1 (a UPC whose digits read as hex hold an `@` shape: the
+  encoded-e-mail rule). Against 5bf0d2a5 only drops
+  went away (oq 2 ZIP + year, oq19 22 part numbers `... phone case`, ord 4 prices: each a number word inside an
+  ordinary word). The tables (columns: class, n, dropped, mandated, not mandated - the suite asserts them equal, cell
+  for cell - then dropped at 5bf0d2a5, 644b4901, 65f8b92a):
+
+<!-- priya-oq-table:begin -->
+| class | n | dropped | mandated | not mandated | 5bf0d2a5 dropped | 644b4901 dropped | 65f8b92a dropped |
+|---|---|---|---|---|---|---|---|
+| plain_text | 2500 | 0 | 0 | 0 | 0 | 0 | 0 |
+| multilingual | 2500 | 0 | 0 | 0 | 0 | 0 | 0 |
+| question | 2000 | 0 | 0 | 0 | 0 | 0 | 0 |
+| local | 1500 | 0 | 0 | 0 | 0 | 0 | 0 |
+| price | 1200 | 0 | 0 | 0 | 0 | 0 | 0 |
+| size | 1200 | 33 | 33 | 0 | 33 | 33 | 0 |
+| tire_size | 900 | 394 | 394 | 0 | 394 | 675 | 495 |
+| model_number | 1500 | 0 | 0 | 0 | 0 | 0 | 261 |
+| date | 1000 | 0 | 0 | 0 | 0 | 0 | 0 |
+| time | 600 | 0 | 0 | 0 | 0 | 0 | 0 |
+| year | 1000 | 0 | 0 | 0 | 0 | 0 | 0 |
+| zip | 1000 | 0 | 0 | 0 | 0 | 0 | 0 |
+| zip_year | 800 | 714 | 714 | 0 | 716 | 714 | 714 |
+| version | 1000 | 248 | 193 | 55 | 248 | 257 | 278 |
+| flight | 900 | 127 | 116 | 11 | 127 | 514 | 518 |
+| product_code | 900 | 2 | 2 | 0 | 2 | 714 | 714 |
+| part_number | 1500 | 13 | 0 | 13 | 13 | 1500 | 1500 |
+| business_address | 500 | 500 | 500 | 0 | 500 | 500 | 500 |
+| quantity | 1000 | 0 | 0 | 0 | 0 | 0 | 0 |
+| date_time | 900 | 731 | 731 | 0 | 731 | 731 | 0 |
+<!-- priya-oq-table:end -->
+
+<!-- priya-oq-table-rv18_ord:begin -->
+| class | n | dropped | mandated | not mandated | 5bf0d2a5 dropped | 644b4901 dropped | 65f8b92a dropped |
+|---|---|---|---|---|---|---|---|
+| plain_text | 2500 | 0 | 0 | 0 | 0 | 0 | 0 |
+| multilingual | 2500 | 0 | 0 | 0 | 0 | 0 | 0 |
+| question | 2000 | 0 | 0 | 0 | 0 | 0 | 0 |
+| local | 1500 | 0 | 0 | 0 | 0 | 0 | 0 |
+| price | 1200 | 1 | 1 | 0 | 5 | 1 | 1 |
+| size | 1200 | 0 | 0 | 0 | 0 | 0 | 0 |
+| tire_size | 900 | 309 | 305 | 4 | 309 | 527 | 337 |
+| model_number | 1500 | 0 | 0 | 0 | 0 | 82 | 140 |
+| date | 1000 | 0 | 0 | 0 | 0 | 0 | 0 |
+| time | 600 | 0 | 0 | 0 | 0 | 0 | 0 |
+| date_time | 900 | 524 | 524 | 0 | 524 | 571 | 47 |
+| year | 1000 | 0 | 0 | 0 | 0 | 0 | 0 |
+| zip | 1000 | 0 | 0 | 0 | 0 | 0 | 0 |
+| zip_year | 800 | 536 | 536 | 0 | 536 | 536 | 536 |
+| version | 1000 | 112 | 112 | 0 | 112 | 111 | 182 |
+| flight | 600 | 0 | 0 | 0 | 0 | 0 | 0 |
+| product_code | 900 | 289 | 89 | 200 | 289 | 311 | 311 |
+| business_address | 500 | 173 | 173 | 0 | 173 | 173 | 173 |
+| quantity | 1000 | 11 | 11 | 0 | 11 | 11 | 11 |
+<!-- priya-oq-table-rv18_ord:end -->
+
+<!-- priya-oq-table-rv19_oq19:begin -->
+| class | n | dropped | mandated | not mandated | 5bf0d2a5 dropped | 644b4901 dropped | 65f8b92a dropped |
+|---|---|---|---|---|---|---|---|
+| plain_text | 2500 | 0 | 0 | 0 | 0 | 0 | 0 |
+| multilingual | 2500 | 0 | 0 | 0 | 0 | 0 | 0 |
+| question | 2000 | 0 | 0 | 0 | 0 | 0 | 0 |
+| local | 1500 | 0 | 0 | 0 | 0 | 0 | 0 |
+| price | 1200 | 1 | 1 | 0 | 1 | 1 | 1 |
+| size | 1200 | 0 | 0 | 0 | 0 | 0 | 0 |
+| tire_size | 900 | 397 | 181 | 216 | 397 | 648 | 467 |
+| model_number | 1500 | 0 | 0 | 0 | 0 | 0 | 390 |
+| date | 1000 | 0 | 0 | 0 | 0 | 0 | 0 |
+| time | 600 | 0 | 0 | 0 | 0 | 0 | 0 |
+| year | 1000 | 0 | 0 | 0 | 0 | 0 | 0 |
+| zip | 1000 | 0 | 0 | 0 | 0 | 0 | 0 |
+| zip_year | 800 | 718 | 718 | 0 | 718 | 718 | 718 |
+| version | 1000 | 18 | 0 | 18 | 18 | 21 | 151 |
+| flight | 900 | 270 | 245 | 25 | 270 | 317 | 319 |
+| product_code | 900 | 2 | 1 | 1 | 2 | 628 | 628 |
+| part_number | 1500 | 0 | 0 | 0 | 22 | 1500 | 1500 |
+| business_address | 500 | 500 | 500 | 0 | 500 | 500 | 500 |
+| quantity | 1000 | 0 | 0 | 0 | 0 | 0 | 0 |
+| date_time | 900 | 737 | 737 | 0 | 737 | 735 | 0 |
+<!-- priya-oq-table-rv19_oq19:end -->
+
+  **Cost (PF, process CPU time; the build machine is shared):** PF-1, the median per-query cost of the whole Priya
+  path on OQ (every 4th query, best of 3, two runs): now 321.1 / 320.6 us, at 644b4901 544.7 / 556.4 us (-41.1% / -42.4%), at 65f8b92a 515.9 / 516.0 us (-37.8% / -37.9%). PF-2, the 30 adversarial families at 64-512
+  characters (three new: other-script letters the fold widens, number words inside words, C-1 words with CJK glue):
+  worst at 512 characters 30.33 ms (`to 12` filler runs), then 17.25 ms (`a at b dot` runs) and 16.77 ms (C-1 words with CJK glue); the largest ratio of any doubling 2.35x (`mixed_all`, 64 -> 128 characters).
+  **Mutants (G-6):** 55 mutants of `devtools/conformance/mutants.py` - the eight spec pins, the review's two
+  behavioural survivors (the reversed-window search of encoded e-mails, the GTIN check digit), the review's other
+  mutants where the code still holds their text, and 30 over round 20's code: **54 killed, 3 shown equivalent** (all eight pins and both review survivors killed; three of round 20's own were killed only after this round added the cases they missed: an NFKC multi-letter gap with a separator, a rot13 / word-reversed spelled e-mail ended by U+2026 before CJK, a short URL-encoded e-mail reversed). Equivalent: `p_key_never` (Priya skipping the stored key: no case of the 1,338,134 personal-data cases nor of 4,000 whitespace probes has its raw text kept and its key dropped - the key only collapses white space and casefolds, which the detection form already tolerates); `w_no_raw` (a window's undecoded form: the whole query's undecoded form is already read by the detectors, and a window is whole tokens of it separated from the rest by ordinary words of 2+ letters, so every window match is a whole-text match; 0 verdicts change on the review's 63,274-case e-mail sample); `n28` (U+3000 in `_WORD_END`: no U+3000 reaches `_number_words_read` - `clean_text` makes every space character a space and `script_view` makes U+3000 a space).
+  **Residuals (spec section 8 and the review's outside-spec list):** P-r1 .. P-r11 as round 19; vanity numbers
+  whose seven keypad characters hold a number word (the review's 31 at M-1 are dropped now; cp19 keeps
+  1: `1one...`); `lt` / `p` tire sizes with a slash (216 in oq19, disclosed; 4 tire sizes in ord); UPC / ISBN with an
+  invalid check digit (199 in ord, disclosed) and a 12-digit code whose hex reading holds an `@` shape (1 in ord, 1
+  in oq19, disclosed); a gap holding typed white space next to a number word's
+  leftover letters (`cuatro m siete` is two words, C-4); the review's `m1s` smoke file (an earlier generator, not
+  reproduced) holds 2 UK postcode shapes outside the address rule (`cf15a`, an inward `0rd`: both oracles label
+  them not mandated).
 - a street address: a house number (at the start, or after a space not preceded by `top` / `best`), an optional
   direction, 1-3 street-name tokens (none a stop or quantity word such as `near`, `in`, `best`, `hour`, `bedroom`,
   `lane`, `way`), then a suffix. `old`, `new`, `good` may start a street name (`17 old mill road`, `40 good hope

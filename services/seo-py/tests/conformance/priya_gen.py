@@ -159,16 +159,21 @@ def vanity_disguise(rng, dname: str, y: str) -> str:
 VANITY_D = ("D01", "D06", "D08", "D09", "D10", "D11", "D12", "D14", "D15")
 
 # ------------------------------------------------------------------ e-mail (C6)
-EMAIL_Y = {"en": ("at", "dot"), "es": ("arroba", "punto"), "pt": ("arroba", "ponto"), "fr": ("arobase", "dot"),
-           "it": ("chiocciola", "punto"), "de": ("klammeraffe", "punkt")}
+# priya-spec/1.1 C-1: the CLOSED at-word and dot-word lists; the Y dimension of D16-D18 is the at-word, each value
+# draws its dot-word from the whole list (every pair at N >= 200; ``test_C1_every_at_word_x_every_dot_word`` takes
+# every pair in the CI lane). Round 19 drew six language pairs only (no French "point")
+AT_WORDS = ("at", "arroba", "arobase", "chiocciola", "klammeraffe", "at-zeichen", "malpa", "kukac", "snabel-a",
+            "apenstaartje", "sobaka")
+DOT_WORDS = ("dot", "punto", "point", "ponto", "punkt", "kropka", "pont", "prikk", "piste", "nokta", "titik")
+EMAIL_Y = {a: a for a in AT_WORDS}
 
 
 def _mailbox(rng) -> str:
     return r19.email_unlisted(rng) if rng.random() < 0.5 else rc.email(rng)
 
 
-def _spelled(rng, v: str, y: str, bracketed: bool) -> str:
-    at, dot = EMAIL_Y[y]
+def _spelled(rng, v: str, y: str, bracketed: bool, dot: str | None = None) -> str:
+    at, dot = y, dot or rng.choice(DOT_WORDS)
     case = rng.choice((str.lower, str.upper, str.title))
     local, dom = v.split("@")
     if bracketed:
@@ -180,8 +185,8 @@ def _spelled(rng, v: str, y: str, bracketed: bool) -> str:
     return " ".join((local + at_s + dot_s.join(dom.split("."))).split())
 
 
-def _sep_spelled(rng, v: str, y: str) -> str:
-    at, dot = EMAIL_Y[y]
+def _sep_spelled(rng, v: str, y: str, dot: str | None = None) -> str:
+    at, dot = y, dot or rng.choice(DOT_WORDS)
     s = rng.choice(("_", "-", " _", "- "))
     local, dom = v.split("@")
     return local + s + at + s + (s + dot + s).join(dom.split("."))
@@ -221,7 +226,7 @@ def email_disguise(rng, dname: str, y: str, x: str) -> str:
                            lambda: _encode(rng, v), lambda: _rot_rev(rng, v)))()
         return in_context(rng, x, rc.chunk(rng, base))
     if dname == "D22":                                   # the WHOLE query (context included) rot13'd / reversed
-        q = in_context(rng, x, rng.choice((v, _spelled(rng, v, "en", False))))
+        q = in_context(rng, x, rng.choice((v, _spelled(rng, v, "at", False))))
         return rng.choice((lambda t: codecs.encode(t, "rot13"), lambda t: t[::-1],
                            lambda t: " ".join(w[::-1] for w in t.split(" "))))(q)
     raise KeyError(dname)
@@ -372,8 +377,8 @@ def boundary():
             yield "encoding", f
             for i in range(1, len(f)):
                 yield "chunk_every_position", f[:i] + " " + f[i:]
-        for f in (_spelled(random.Random(4), v, "es", False), _spelled(random.Random(5), v, "de", True),
-                  _sep_spelled(random.Random(6), v, "en")):
+        for f in (_spelled(random.Random(4), v, "arroba", False, "punto"),
+                  _spelled(random.Random(5), v, "klammeraffe", True, "punkt"), _sep_spelled(random.Random(6), v, "at", "dot")):
             for i in range(1, len(f)):
                 if f[i - 1] != " " and f[i] != " ":
                     yield "chunk_every_position", f[:i] + " " + f[i:]
@@ -381,6 +386,25 @@ def boundary():
             q = "rug cleaner " + t + " tonight"
             for view in (codecs.encode(q, "rot13"), q[::-1], " ".join(w[::-1] for w in q.split())):
                 yield "whole_query_rot13_reversal", view
+    # priya-spec/1.1 C-1 / C-2: every at-word x every dot-word, spelled / bracketed / with '_' or '-', lower and UPPER
+    # case, a top-level domain of every length 2-24; alone and glued to CJK context by ideographic / fullwidth
+    # punctuation (U+3002, U+3001, U+FF1A) with no space
+    rng = random.Random(f"{SEED}:atdot")
+    glue = ("\u3002", "\u3001", "\uff1a")
+    k = 0
+    for at in AT_WORDS:
+        for dot in DOT_WORDS:
+            local, dom = rc.email(rng).split("@")
+            label = dom.split(".")[0]
+            tld = J(rng.choice(string.ascii_lowercase) for _ in range(2 + k % 23))
+            v = f"{local}@{label}.{tld}"
+            for f in (_spelled(rng, v, at, False, dot), _spelled(rng, v, at, True, dot), _sep_spelled(rng, v, at, dot)):
+                for case in (str.lower, str.upper):
+                    t = case(f)
+                    yield "at_dot_words", t
+                    g = glue[k % 3]
+                    yield "at_dot_words_cjk_glued", "\u8bf7\u8054\u7cfb" + g + t + g + "\u8c22\u8c22"
+                    k += 1
 
 
 # ------------------------------------------------------------------ composed pairs (section 3), structural

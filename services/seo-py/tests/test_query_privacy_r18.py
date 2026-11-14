@@ -101,11 +101,14 @@ STILL_KEPT = ["11/8/2025 7pm", "10/31/2025 halloween 7pm", "90210 2024 restauran
 
 
 def test_still_kept_moved_list_mandated():
-    # priya-spec/1 (C6 any TLD, D20 reversed; G-7): moved from STILL_KEPT - read backwards, "polka dot dress at
-    # target" is a mailbox with the TLD "polka"; the independent oracle labels it list-mandated
+    # priya-spec/1 (G-7): moved from STILL_KEPT in round 19. Round 20 (priya-spec/1.1 C-4): not ONE list rule but the
+    # composed-pair bar (CP-2 / CP-4, every ordered pair <= 5%): the query is the pair reversed -> spelled of a
+    # mailbox (its words despelled and read backwards); kept, that ordered pair would keep every value it makes
     from conformance.oracle import priya_list
     q = "polka dot dress at target"
-    assert priya_list.mandated(q) and sp.classify_query(q, BRANDS) == "pii_suspect"
+    value = q.replace(" dot ", ".").replace(" at ", "@")[::-1]          # the mailbox the pair starts from
+    assert value[::-1].replace(".", " dot ").replace("@", " at ") == q and value.count("@") == 1
+    assert priya_list.mandated(q) == "email" and sp.classify_query(q, BRANDS) == "pii_suspect"
 
 
 @pytest.mark.parametrize("q", STILL_KEPT)

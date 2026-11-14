@@ -11,7 +11,7 @@ Reading of the list (priya-spec/1 sections 1-2, CP-3):
   other character counts as ONE character of a gap;
 - units: a digit; a number word (English zero..nine; Spanish cero..nueve, uno / una) standing as a whole word, or
   inside a run of letters that splits completely into number words and runs of at most three other letters ("oh"
-  only as a whole word);
+  only as a whole word), a leftover run only BETWEEN two units (priya-spec/1.1 C-4: "phone" is a word);
 - the stream: consecutive groups of units whose gaps are at most three characters of any kind; every window of
   whole consecutive groups is read as one number: a card (13-19 digits, Luhn, an issuer prefix or UATP 1 / 15), an
   SSN (9 digits, valid parts), a NANP phone (10, or 11 after a 1; area code and exchange 2-9), or after a '+' up to
@@ -20,7 +20,7 @@ Reading of the list (priya-spec/1 sections 1-2, CP-3):
   its digits, then seven keypad characters (letters / digits, at least one letter) with at most three
   non-alphanumeric characters before and between them, not glued to letters or digits on either side;
 - e-mail: a mailbox (local part, '@', labels, '.', a TLD of 2-24 letters) as written, with the at-words / dot-words
-  of section D16 read as '@' / '.', brackets and '_' / '-' around them, rot13'd, reversed (whole or word by word),
+  of priya-spec/1.1 C-1 read as '@' / '.', brackets and '_' / '-' around them, rot13'd, reversed (whole or word by word),
   or base64 / base32 / hex / percent encoded (whole words, chunks joined);
 - address: the ADR 0047 address rule, written out below from the ADR's text."""
 
@@ -54,6 +54,9 @@ def chars(q: str) -> str:
         if cat == "Nd":
             out.append(str(unicodedata.digit(c)))
             continue
+        if cat[0] == "Z" and c not in " \u3000":
+            out.append(c)          # a space character other than the typed ones: a separator of the list (D06)
+            continue
         n = unicodedata.normalize("NFKC", c)
         if len(n) == 1 and n.isascii() and (n.isalnum() or not c.isascii()):
             c = n
@@ -66,9 +69,12 @@ def chars(q: str) -> str:
     return "".join(out)
 
 
-def _split_letters(run: str):
+def _split_letters(run: str, lead_max: int = GAP, trail_max: int = GAP):
     """Split a run of ASCII letters into [(digit or None, text)]: number words and leftover runs of at most three
-    letters; None when the run does not split so (or holds no number word)."""
+    letters between them; None when the run does not split so (or holds no number word). priya-spec/1.1 C-4 (CP-3: a
+    gap stands only BETWEEN two units): a leftover may begin the run only with at most ``lead_max`` letters and end
+    it only with at most ``trail_max`` (the room a gap to the neighbouring unit leaves), so "phone", "someone",
+    "oneplus" standing as words hold no number word."""
     best = {len(run): []}
     for i in range(len(run) - 1, -1, -1):
         options = []
@@ -77,6 +83,10 @@ def _split_letters(run: str):
                 options.append([(d, w)] + best[i + len(w)])
         for k in range(1, GAP + 1):
             j = i + k
+            if i == 0 and k > lead_max:
+                break
+            if j == len(run) and k > trail_max:
+                continue
             if j in best and (not best[j] or best[j][0][0] is not None):
                 options.append([(None, run[i:j])] + best[j])
         if options:
@@ -87,25 +97,67 @@ def _split_letters(run: str):
     return seq
 
 
+def _first_word_at(run: str):
+    """How many letters stand before the first number word of a letter run (0-3), or None."""
+    for k in range(min(GAP, len(run)) + 1):
+        if any(run.startswith(w, k) for w in WORDS):
+            return k
+    return None
+
+
+# the white space typed between words (ASCII, and the ideographic space): it ends a word
+_WORD_END = re.compile("[ \t\n\r\f\v\u3000]")
+
+
 def units(text: str) -> tuple[str, list]:
     """The text with number words read as digits (a whole word, or a letter run that splits as ``_split_letters``
     says), and how many number words were read. Positions: each number word becomes ONE character (its digit), so
-    gaps are measured in the remaining characters."""
+    gaps are measured in the remaining characters. A letter run's leftover may face a neighbouring unit (a digit, or
+    a number word of the next / previous run) directly, or across characters that are neither letters, digits nor
+    typed white space, the whole gap at most three characters; typed white space ends a word (priya-spec/1.1
+    C-4)."""
     out, n, i = [], 0, 0
-    for m in re.finditer(r"[a-z]+", text):
+    runs = list(re.finditer(r"[a-z]+", text))
+    prev_tail = None                          # letters after the last unit read before this run, None: no unit
+    last_end = 0
+    for idx, m in enumerate(runs):
         out.append(text[i:m.start()])
         run = m.group()
+        between = text[last_end:m.start()]
+        # digits between the previous run and this one are units; letters after them: none
+        last_digit = re.search(r"\d(?=\D*$)", between)
+        if last_digit:
+            stretch = between[last_digit.end():]
+            lead = GAP - len(stretch) if not _WORD_END.search(stretch) else 0
+        elif idx and prev_tail is not None and not _WORD_END.search(between):
+            lead = GAP - len(between) - prev_tail
+        else:
+            lead = 0
+        nxt = text[m.end():]
+        stretch = re.match(r"[^a-z0-9]*", nxt).group()
+        follow = nxt[len(stretch):]
+        trail = 0
+        if not _WORD_END.search(stretch) and follow:
+            if follow[0].isdigit():
+                trail = GAP - len(stretch)
+            else:
+                k = _first_word_at(re.match(r"[a-z]*", follow).group())
+                if k is not None:
+                    trail = GAP - len(stretch) - k
         if run in WORDS or run in WHOLE_ONLY:
             out.append(WORDS.get(run) or WHOLE_ONLY[run])
             n += 1
+            prev_tail = 0
         else:
-            seq = _split_letters(run)
+            seq = _split_letters(run, max(lead, 0), max(trail, 0))
             if seq is None:
                 out.append(run)
+                prev_tail = None
             else:
                 out.append("".join(d if d is not None else t for d, t in seq))
                 n += sum(1 for d, _ in seq if d is not None)
-        i = m.end()
+                prev_tail = len(seq[-1][1]) if seq[-1][0] is None else 0
+        i = last_end = m.end()
     out.append(text[i:])
     return "".join(out), n
 
@@ -176,8 +228,10 @@ def vanity(text: str) -> bool:
 
 
 # ------------------------------------------------------------------ e-mail
-AT_WORDS = ("at", "arroba", "arobase", "chiocciola", "klammeraffe")
-DOT_WORDS = ("dot", "punto", "ponto", "punkt")
+# priya-spec/1.1 C-1: the closed at-word and dot-word lists (any case; a hyphenated word also spaced or run together)
+AT_WORDS = ("at", "arroba", "arobase", "chiocciola", "klammeraffe", "at-zeichen", "malpa", "kukac", "snabel-a",
+            "apenstaartje", "sobaka")
+DOT_WORDS = ("dot", "punto", "point", "ponto", "punkt", "kropka", "pont", "prikk", "piste", "nokta", "titik")
 _MAILBOX = re.compile(r"[a-z0-9_+\-.]@[a-z0-9\-]+(?:\.[a-z0-9\-]+)*\.[a-z]{2,24}(?![a-z])")
 _BRACKET = r"[\[\(\{<]"
 _CLOSE = r"[\]\)\}>]"
@@ -186,10 +240,14 @@ _CLOSE = r"[\]\)\}>]"
 def _despell(t: str) -> str:
     """At-words and dot-words (bare between spaces, or in brackets, or between '_' / '-') read as '@' / '.'; spaces
     around '@' and '.' removed."""
-    for words, sym in ((AT_WORDS, "@"), (DOT_WORDS, ".")):
-        alt = "|".join(words)
+    # dot-words first: an at-word right after a dot-word is the top-level domain's letters ("... dot at")
+    for words, sym in ((DOT_WORDS, "."), (AT_WORDS, "@")):
+        forms = set(words) | {w.replace("-", " ") for w in words} | {w.replace("-", "") for w in words}
+        alt = "|".join(re.escape(w) for w in sorted(forms, key=len, reverse=True))
         t = re.sub(_BRACKET + r"\s*(?:" + alt + r"|" + re.escape(sym) + r")\s*" + _CLOSE, " " + sym + " ", t)
-        t = re.sub(r"(?:(?<=\s)|(?<=^)|(?<=[_\-]))(?:" + alt + r")(?=\s|$|[_\-])", sym, t)
+        t = re.sub(r"(?:(?<=\s)|(?<=^)|(?<=[_\-]))(?:" + alt + r")(?=\s|$|[_\-])",
+                   lambda m, t=t, sym=sym: m.group() if sym == "@" and t[:m.start()].rstrip(" \t_-").endswith(".")
+                   else sym, t)
     t = re.sub(r"[\s_\-]*([@.])[\s_\-]*", r"\1", t)
     return t
 
@@ -229,7 +287,8 @@ def email(raw: str, text: str) -> bool:
     if any(_mail_any(v) or _MAILBOX.search(_despell(v)[::-1]) for v in views):
         return True
     # chunks: consecutive words joined (their edge punctuation set aside)
-    words = [re.sub(r"^[^a-z0-9@\[\(\{<]+|[^a-z0-9@\]\)\}>]+$", "", w) for w in text.split()]
+    # (a chunk boundary may fall next to the '.' of the domain: "x@y. zz" - a full stop is kept at a word's edge)
+    words = [re.sub(r"^[^a-z0-9@.\[\(\{<]+|[^a-z0-9@.\]\)\}>]+$", "", w) for w in text.split()]
     for i in range(len(words)):
         for j in range(i + 1, min(len(words), i + 12) + 1):
             if _mail_any("".join(words[i:j])):

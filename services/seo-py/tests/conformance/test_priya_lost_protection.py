@@ -1,73 +1,140 @@
 """priya-spec/1 section 4 (LP-1..LP-3): no query dropped by 644b4901 OR by 65f8b92a on the personal-data corpora is
-kept now, cell by cell. The baselines are the two releases' classifiers, read from git history at run time (the frozen
-bits of SUITE_PLAN C-1, ``data/baseline/``, replace this when the lead's calibration commits them); without history
-the test is skipped with that reason. CI: the matrix CI draw, the boundary set, 4,000 composed pairs, the round-10
-single attack corpus; heavy: the matrix at N = 200, 42,000 composed pairs, the composed attack corpus."""
+kept now, case by case. LP-1 BASE is FROZEN: ``data/baseline/<corpus>.<release>.bits.gz`` (two bits per case: raw
+text dropped, row dropped - raw or stored key), written once by ``devtools/conformance/calibrate.py`` from ``git archive`` exports of
+the two releases (SUITE_PLAN C-1), so these tests need no git history. The corpora are ``corpora.PERSONAL``: the
+builder's matrix (CI and heavy draws), boundary set, composed pairs and the round-10 attack corpus, and the
+reviewers' corpora (priya-spec/1.1 C-5). CI: every CI corpus whole and the CI stride of the heavy ones; heavy:
+everything. The heavy lane also re-derives the bits of the CI corpora from git history when it is present."""
 
 from __future__ import annotations
 
+import gzip
+import json
 import subprocess
 import types
 from pathlib import Path
 
-import attack_corpus as ac
-import priya_gen as g
+import corpora
 import pytest
 from priya_common import dropped
 
-BASES = ("644b4901725fdd077dac60a0703591d6ce1a4088", "65f8b92ace21cdce68c38ad6880184a0bee537b9")
+DATA = Path(__file__).resolve().parent / "data"
 REPO = Path(__file__).resolve().parents[4]
-_CACHE: dict = {}
 
 
-def _base(rev: str):
-    if rev in _CACHE:
-        return _CACHE[rev]
-    try:
-        src = subprocess.run(["git", "show", f"{rev}:services/seo-py/src/agents/search_performance.py"], cwd=REPO,
-                             capture_output=True, check=True, timeout=60).stdout.decode()
-    except (OSError, subprocess.SubprocessError):
-        pytest.skip(f"git history of {rev[:8]} not available (frozen baseline bits not calibrated yet)")
-    mod = types.ModuleType(f"search_performance_{rev[:8]}")
-    exec(compile(src, f"<{rev[:8]}>", "exec"), mod.__dict__)
-
-    def drops(q: str) -> bool:
-        key = " ".join(mod.clean_text(q or "", keep_script_marks=True).casefold().split())
-        return mod.classify_query(q, ["acme"]) == "pii_suspect" or mod.classify_query(key, ["acme"]) == "pii_suspect"
-    _CACHE[rev] = drops
-    return drops
+def _bits(name: str, rev: str) -> bytes:
+    path = DATA / "baseline" / f"{name}.{rev}.bits.gz"
+    return gzip.decompress(path.read_bytes())
 
 
-def _lost(corpus) -> dict:
-    bases = [_base(r) for r in BASES]
-    lost = {}
-    for key, q in corpus:
-        if any(b(q) for b in bases) and not dropped(q):
-            lost[key] = lost.get(key, 0) + 1
+def _dropped_at(raw: bytes, i: int) -> bool:
+    return bool((raw[(2 * i) // 8] >> ((2 * i) % 8)) & 1 or (raw[(2 * i + 1) // 8] >> ((2 * i + 1) % 8)) & 1)
+
+
+def _lost(name: str, heavy: bool) -> dict:
+    m = json.loads((DATA / "manifest.json").read_text())
+    n = m["corpora"][name]["n"]
+    bases = [_bits(name, r) for r in corpora.REVISIONS]
+    assert all(len(b) == (2 * n + 7) // 8 for b in bases), name
+    rows = enumerate(corpora.rows(name)) if heavy else ((i, (k, q)) for i, k, q in corpora.ci_rows(name))
+    lost, seen = {}, 0
+    for i, (key, q) in rows:
+        seen += 1
+        if any(_dropped_at(b, i) for b in bases):
+            if not dropped(q):
+                lost[key] = lost.get(key, 0) + 1
+    assert seen and (seen == n or not heavy), (name, seen, n)
     return lost
+
+
+def _none_lost(names, heavy: bool) -> None:
+    lost = {n: _lost(n, heavy) for n in names}
+    assert all(v == {} for v in lost.values()), {n: v for n, v in lost.items() if v}      # case ids and counts only
+
+
+REVIEWER = ("rv18_p1", "rv18_bnd", "rv18_p2v2", "rv19_m1", "rv19_b19", "rv19_cp19", "rv19_cpx19")
 
 
 @pytest.mark.conformance
 def test_LP1_LP2_matrix_ci_draw():
-    assert _lost((":".join(c), q) for c, _k, q in g.matrix(5)) == {}
+    _none_lost(["matrix5"], False)
 
 
 @pytest.mark.conformance
 def test_LP1_LP2_boundary_set():
-    assert _lost(g.boundary()) == {}
+    _none_lost(["boundary"], False)
 
 
 @pytest.mark.conformance
 def test_LP1_LP2_composed_ci_and_attack_corpus():
-    assert _lost((c + ":" + n, q) for c, n, q in g.composed(4000)) == {}
-    assert _lost((b + ":" + n, t) for b, n, t in ac.cases()) == {}
+    _none_lost(["composed4000", "attack676"], False)
+
+
+@pytest.mark.conformance
+def test_LP1_LP2_reviewer_corpora_ci():
+    """priya-spec/1.1 C-5: the reviewers' corpora are personal-data corpora of LP-1 too (their CI stride)."""
+    _none_lost(REVIEWER, False)
 
 
 @pytest.mark.conformance_heavy
 def test_LP1_LP2_heavy_draws():
-    assert _lost((":".join(c), q) for c, _k, q in g.matrix(200)) == {}
-    assert _lost((c + ":" + n, q) for c, n, q in g.composed(42000)) == {}
-    assert _lost((b + ":" + n, t) for b, n, t in ac.composed_cases()) == {}
+    _none_lost(["matrix200", "composed42000", "attack40672"], True)
+
+
+@pytest.mark.conformance_heavy
+def test_LP1_LP2_reviewer_corpora_heavy():
+    _none_lost(REVIEWER, True)
+
+
+@pytest.mark.conformance
+def test_LP1_every_personal_corpus_has_frozen_bits():
+    assert set(REVIEWER) | {"matrix5", "boundary", "composed4000", "attack676", "matrix200", "composed42000",
+                            "attack40672"} == set(corpora.PERSONAL)
+    for n in corpora.PERSONAL:
+        for r in corpora.REVISIONS:
+            assert (DATA / "baseline" / f"{n}.{r}.bits.gz").is_file(), (n, r)
+
+
+def _git_base(rev: str):
+    try:
+        src = subprocess.run(["git", "show", f"{rev}:services/seo-py/src/agents/search_performance.py"], cwd=REPO,
+                             capture_output=True, check=True, timeout=60).stdout.decode()
+    except (OSError, subprocess.SubprocessError):
+        pytest.skip(f"git history of {rev[:8]} not available (the frozen bits stand)")
+    mod = types.ModuleType(f"search_performance_{rev[:8]}")
+    exec(compile(src, f"<{rev[:8]}>", "exec"), mod.__dict__)
+    return mod
+
+
+BASES = tuple(corpora.REVISIONS.values())
+_CACHE: dict = {}
+
+
+def _base(rev: str):
+    """The release's Priya decision read from git history (heavy lane only: the A/B of PF-1 and the re-derivation
+    below): raw text, then the key as round 10's ``clean_text`` makes it."""
+    if rev not in _CACHE:
+        mod = _git_base(rev)
+
+        def drops(q: str) -> bool:
+            key = " ".join(mod.clean_text(q or "", keep_script_marks=True).casefold().split())
+            return mod.classify_query(q, ["acme"]) == "pii_suspect" or mod.classify_query(key, ["acme"]) == \
+                "pii_suspect"
+        _CACHE[rev] = drops
+    return _CACHE[rev]
+
+
+@pytest.mark.conformance_heavy
+def test_LP1_frozen_bits_rederived_from_git_history_raw_lane():
+    """The raw-text lane of the frozen bits equals each release's classifier read from git history (the key lane
+    needs the release's priya.normalize and is re-derived by calibrate.py)."""
+    for short, full in corpora.REVISIONS.items():
+        mod = _git_base(full)
+        for name in ("boundary", "attack676", "rv19_b19"):
+            raw = _bits(name, short)
+            for i, (_k, q) in enumerate(corpora.rows(name)):
+                assert bool((raw[(2 * i) // 8] >> ((2 * i) % 8)) & 1) == (
+                    mod.classify_query(q, ["acme"]) == "pii_suspect"), (short, name, i)
 
 
 @pytest.mark.conformance
