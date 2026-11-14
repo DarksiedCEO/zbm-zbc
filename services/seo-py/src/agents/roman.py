@@ -279,6 +279,12 @@ def _skips(headings: list) -> list:
     return out
 
 
+def _indexable(noindex: Optional[bool]) -> Optional[bool]:
+    """Readiness ``indexable``: the negation of the noindex decision; an undecided one (selene.noindex_for None,
+    rv-wave1v2r2 #1) stays undecided, never a pass by omission."""
+    return None if noindex is None else not noindex
+
+
 def _readiness(ctx, path, f, x, h1, sd_errors, sd_invalid, entity, work=None) -> dict:
     rb = ctx.robots or {}
     parsed = rb.get("parsed")
@@ -293,7 +299,7 @@ def _readiness(ctx, path, f, x, h1, sd_errors, sd_invalid, entity, work=None) ->
         else:
             allowed = bool(rb.get("default_allow"))
         results = {
-            "crawler_allowed": allowed, "indexable": not noindex_for(f, x, token),
+            "crawler_allowed": allowed, "indexable": _indexable(noindex_for(f, x, token)),
             "title_present": bool(x["title"]),
             "single_h1": len(h1) == 1, "structured_data_valid": bool(x["jsonld"]) and not sd_errors and not sd_invalid,
             "entity_markup": entity, "text_in_raw_html": x["text_length"] >= RAW_TEXT_MIN,

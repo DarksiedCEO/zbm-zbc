@@ -85,6 +85,10 @@ def test_A_33_big_numbers_are_accepted_by_the_sink_guard():
 # Public-Domain = self-authored data
 ALLOWED_LICENCES = {"CC-BY-4.0", "Unicode-3.0", "MIT-CMU", "CNRI-Python", "PDFium", "MIT", "BSD-2-Clause",
                     "BSD-3-Clause", "Apache-2.0", "PSF-2.0", "ISC", "Public-Domain"}
+# Path-scoped exceptions: (notice section path, licence) -> reason. Applies ONLY to that exact path; never global.
+PATH_LICENCE_EXCEPTIONS = {
+    ("src/agents/public_suffix_list.dat", "MPL-2.0"): "owner decision 2026-11-14 A-32",
+}
 
 
 def test_A_32_no_forbidden_data_in_the_build_and_every_source_noticed():
@@ -100,7 +104,22 @@ def test_A_32_no_forbidden_data_in_the_build_and_every_source_noticed():
     text = notices.read_text(encoding="utf-8")
     for data in [p for p in SRC.rglob("*") if p.is_file() and p.suffix in (".txt", ".dat", ".json")]:
         assert data.name in text, f"{data.name} has no THIRD_PARTY_NOTICES entry"
-    for m in re.finditer(r"- Licen[cs]e:\s*([A-Za-z0-9.\-]+)", text):
-        assert m.group(1) in ALLOWED_LICENCES, m.group(1)
+    # every licence line is checked within its "## <path>" section, so an exception cannot leak to another file
+    sections = re.split(r"(?m)^## ", text)
+    seen_licences = 0
+    used_exceptions = set()
+    for sec in sections[1:]:
+        path = sec.splitlines()[0].strip()
+        for m in re.finditer(r"- Licen[cs]e:\s*([A-Za-z0-9.\-]+)", sec):
+            seen_licences += 1
+            lic = m.group(1)
+            if lic in ALLOWED_LICENCES:
+                continue
+            key = (path, lic)
+            assert key in PATH_LICENCE_EXCEPTIONS, f"{path}: {lic}"
+            assert (REPO / "services" / "seo-py" / path).is_file(), f"exception path missing: {path}"
+            used_exceptions.add(key)
+    assert seen_licences == len(re.findall(r"- Licen[cs]e:", text)), "licence line outside a ## section"
+    assert used_exceptions <= set(PATH_LICENCE_EXCEPTIONS)
     check_ran("A-32", 1)
     assert os and json

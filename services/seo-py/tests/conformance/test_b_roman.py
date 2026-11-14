@@ -149,6 +149,74 @@ def test_B_RO_05_lang_invalid_finding_and_readiness_fail():
         assert rd[eng]["checks"]["lang_declared"] == "fail", (eng, rd[eng])
 
 
+def _ext_tag(r):
+    """A tag with extensions and / or private use, its subtags often repeating a variant's spelling (RFC 5646 2.2.5
+    / 2.2.6: only a repeated VARIANT or a repeated SINGLETON is invalid; extension and private-use subtags may
+    repeat anything)."""
+    alnum = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+    def word(n):
+        return "".join(r.choice(alnum) for _ in range(n))
+    variants = r.sample(["1901", "1996", "fonipa", "abcde", "valencia"], r.randint(0, 2))
+    t = r.choice(["en", "de", "de-DE", "sr-Latn", "zh-Hant-TW", "en-US"]) + "".join("-" + v for v in variants)
+    pool = variants + ["abcde", "1901", "ca", "gregory", word(2), word(5), word(8)]
+    singles = r.sample(list("abcdeuvt0129"), r.randint(1, 3))
+    if r.random() < 0.15:
+        singles.append(singles[0])                         # a repeated singleton: invalid
+    for sg in singles:
+        t += "-" + sg + "".join("-" + r.choice(pool) for _ in range(r.randint(1, 3)))
+    if r.random() < 0.5:
+        t += "-x" + "".join("-" + r.choice(pool + [word(1)]) for _ in range(r.randint(1, 3)))
+    return t.upper() if r.random() < 0.1 else t
+
+
+@pytest.mark.parametrize("tag", ["en-a-abcde-b-abcde", "de-DE-1901-u-1901", "de-1996-a-1996", "en-a-bbb-x-bbb",
+                                 "en-fonipa-x-fonipa", "sr-Latn-u-ca-gregory-t-ca", "en-a-abcde-x-a-abcde"])
+def test_B_RO_05_extension_subtags_may_repeat_a_variant(tag):
+    """rv-wave1v2r2 #3 (reviewer mutant n17): an extension or private-use subtag that spells like a variant is not a
+    variant; these RFC-valid tags are valid (stored language[-script][-region])."""
+    assert bcp47.well_formed(tag) and bcp47.stored(tag) not in ("invalid", None)
+    from agents_run import coding
+    with coding():
+        assert roman.safe_lang(tag) == bcp47.stored(tag), (tag, roman.safe_lang(tag))
+
+
+@pytest.mark.parametrize("seed", [3, 5])
+def test_B_RO_05_generated_extension_and_private_use_tags_equal_the_oracle(seed):
+    from agents_run import coding
+    from primitives import codes as codes_mod
+    r = rng(seed, "ro05-ext")
+    seen = set()
+    with coding():
+        for i in range(2000):
+            t = _ext_tag(r)
+            want = bcp47.stored(t)
+            if isinstance(want, tuple):
+                want = codes_mod.code("lang", want[1])
+            seen.add("invalid" if want == "invalid" else "valid")
+            assert roman.safe_lang(t) == want, (t, roman.safe_lang(t), want)
+    assert seen == {"invalid", "valid"}, seen
+    check_ran("B-RO-05", 4000)                     # two seeds of 2,000
+
+
+@pytest.mark.parametrize("title,n", [("  Z   Best  ", 6), ("a\tb\nc", 5), ("   ", 0)])
+def test_B_RO_01_title_measured_white_space_folded_in_the_extract(title, n):
+    """rv-wave1v2r2 #5 ro-18: Roman folds white space in the title of the extract it is given (a stored / older
+    extract), whatever the parser did to it."""
+    from agents import selene
+    from agents_run import coding
+    from cert_web import ctx
+    web = site(Web())
+    web.route("/", page(ld=ORG_LD))
+    c = ctx(web)
+    with coding():
+        _, pages = selene.run(c)
+        pages["/"]["extract"]["title"] = title
+        r = roman.run(c, pages)
+    p = r["facts"]["pages"]["/"]
+    assert p["title_length"] == n and p["title_empty"] is (n == 0)
+
+
 @pytest.mark.parametrize("lang", ["", " ", "\t"])
 def test_B_RO_05_lang_missing(lang):
     web = site(Web())

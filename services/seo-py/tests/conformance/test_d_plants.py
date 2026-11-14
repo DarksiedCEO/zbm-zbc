@@ -52,6 +52,7 @@ def planted(tmp_path_factory):
             s.log_ingest(built["lines"])
         results.append((built, a))
     out = s.stored_outputs()
+    ct = dict(s.ciphertext_lines)
     displays = []
     for built, a in results:
         d = s.audit_resolved(a["audit_id"])
@@ -61,10 +62,16 @@ def planted(tmp_path_factory):
     plants_all = [p for p in plants_all if plants.constants_free(p[2], consts)]
     if len(results) > 2:
         plants_all = [p for p in plants_all if p[0] != "logs" or True]
-    return {"out": out, "displays": displays, "plants": plants_all, "reports": [a for _, a in results]}
+    return {"out": out, "displays": displays, "plants": plants_all, "reports": [a for _, a in results], "ct": ct}
 
 
 def test_D_05_A_18_planted_values_readable_nowhere(planted):
+    # rv-wave1v2r2 #4: only vault lines that AUTHENTICATE under the service's key have their nonce / ciphertext
+    # left out of the scan (harness.service._without_proven_ciphertext); every vault-shaped line must be one
+    scanner.self_test()             # base64 forms count only when the token decodes to the whole value
+    ct = planted["ct"]
+    assert ct["vault_shaped"] > 0 and ct["authenticated"] == ct["vault_shaped"], ct
+    assert "[authenticated-ciphertext]" in planted["out"]
     leaks = collections.Counter()
     examples = {}
     for agent, surface, value, _ in planted["plants"]:

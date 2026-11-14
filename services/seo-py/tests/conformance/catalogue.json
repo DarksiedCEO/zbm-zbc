@@ -521,6 +521,177 @@
    "spec_item": "B-EN-02",
    "status": "live",
    "test": "test_b_entity.py::test_B_EN_02_missing_fields_named_only"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (reviewer probe or mutant, ported)",
+   "id": "rv3-noindex-raw",
+   "source": "rv-wave1v2r2 review of b1611751 (work/probe): noix2.py: noindex decided on cut stored copies, 200/600 hostile combinations wrong",
+   "spec_item": "B-SE-12",
+   "status": "live",
+   "test": "test_b_selene.py::test_B_SE_12_A_27_decided_on_raw_values_past_every_storage_bound"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (reviewer probe or mutant, ported)",
+   "id": "rv3-noindex-caps",
+   "source": "rv-wave1v2r2 review of b1611751 (work/probe): noix3.py: noindex just past each storage cap dropped silently",
+   "spec_item": "A-27",
+   "status": "live",
+   "test": "test_b_selene.py::test_A_27_the_reviewers_cap_cases_are_noindex"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (reviewer probe or mutant, ported)",
+   "id": "rv3-noindex-bound",
+   "source": "rv-wave1v2r2 review of b1611751 (work/probe): a real bound must disclose, never report indexable by omission",
+   "spec_item": "A-27",
+   "status": "live",
+   "test": "test_b_selene.py::test_A_27_x_robots_tag_past_the_raw_bound_is_undecided_never_indexable"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (reviewer probe or mutant, ported)",
+   "id": "rv3-meta-stored-bound",
+   "source": "rv-wave1v2r2 review of b1611751 (work/probe): n02 / n20: the stored meta copy bounds, counted",
+   "spec_item": "A-27",
+   "status": "live",
+   "test": "test_b_selene.py::test_A_27_the_stored_meta_copy_is_bounded_and_what_it_leaves_out_is_counted"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (reviewer probe or mutant, ported)",
+   "id": "rv3-ro15",
+   "source": "rv-wave1v2r2 review of b1611751 (work/probe): mutant ro-15 (indexable forced true) unkilled, false equivalent",
+   "spec_item": "B-RO-10",
+   "status": "live",
+   "test": "test_b_selene.py::test_B_RO_10_readiness_indexable_follows_the_noindex_decision"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (reviewer probe or mutant, ported)",
+   "id": "rv3-n17",
+   "source": "rv-wave1v2r2 review of b1611751 (work/probe): mutant n17: extension subtags counted as variants",
+   "spec_item": "B-RO-05",
+   "status": "live",
+   "test": "test_b_roman.py::test_B_RO_05_extension_subtags_may_repeat_a_variant"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (reviewer probe or mutant, ported)",
+   "id": "rv3-n17-gen",
+   "source": "rv-wave1v2r2 review of b1611751 (work/probe): generated extension / private-use tags vs RFC 5646 oracle",
+   "spec_item": "B-RO-05",
+   "status": "live",
+   "test": "test_b_roman.py::test_B_RO_05_generated_extension_and_private_use_tags_equal_the_oracle"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (reviewer probe or mutant, ported)",
+   "id": "rv3-lg16",
+   "source": "rv-wave1v2r2 review of b1611751 (work/probe): mutant lg-16: SPOOFED_CRAWLER_REQUESTS never emitted",
+   "spec_item": "B-LG-02",
+   "status": "live",
+   "test": "test_b_logs.py::test_B_LG_02_a_claim_dns_refutes_is_spoofed"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (reviewer probe or mutant, ported)",
+   "id": "rv3-lg17",
+   "source": "rv-wave1v2r2 review of b1611751 (work/probe): mutant lg-17: LOG_ROBOTS_CHECK_INCOMPLETE never emitted",
+   "spec_item": "B-LG-03",
+   "status": "live",
+   "test": "test_b_logs.py::test_B_LG_03_requests_past_the_robots_work_are_log_robots_check_incomplete"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (reviewer probe or mutant, ported)",
+   "id": "rv3-lg20",
+   "source": "rv-wave1v2r2 review of b1611751 (work/probe): mutant lg-20: ROBOTS_DISALLOWED_PATHS_REQUESTED never emitted",
+   "spec_item": "B-LG-03",
+   "status": "live",
+   "test": "test_b_logs.py::test_B_LG_03_robots_matched_once_on_path_and_query"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (reviewer probe or mutant, ported)",
+   "id": "rv3-lg12",
+   "source": "rv-wave1v2r2 review of b1611751 (work/probe): mutant lg-12: the sample key-id guard",
+   "spec_item": "B-LG-05",
+   "status": "live",
+   "test": "test_b_logs.py::test_B_LG_05_a_sample_coded_under_another_codes_key_is_never_matched"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (reviewer probe or mutant, ported)",
+   "id": "rv3-lg02",
+   "source": "rv-wave1v2r2 review of b1611751 (work/probe): mutant lg-02: false equivalent",
+   "spec_item": "A-30",
+   "status": "live",
+   "test": "test_b_logs.py::test_A_30_robots_expected_but_absent_is_unchecked_never_allowed"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (reviewer probe or mutant, ported)",
+   "id": "rv3-de12",
+   "source": "rv-wave1v2r2 review of b1611751 (work/probe): mutant de-12: false equivalent",
+   "spec_item": "A-08",
+   "status": "live",
+   "test": "test_a_xml.py::test_A_08_doctype_in_a_comment_like_position_is_refused"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (reviewer probe or mutant, ported)",
+   "id": "rv3-os06",
+   "source": "rv-wave1v2r2 review of b1611751 (work/probe): mutant os-06: false equivalent",
+   "spec_item": "B-OS-01",
+   "status": "live",
+   "test": "test_b_osei.py::test_B_OS_01_a_reason_or_basis_off_the_closed_lists_is_refused"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (reviewer probe or mutant, ported)",
+   "id": "rv3-ro18",
+   "source": "rv-wave1v2r2 review of b1611751 (work/probe): mutant ro-18: false equivalent",
+   "spec_item": "B-RO-01",
+   "status": "live",
+   "test": "test_b_roman.py::test_B_RO_01_title_measured_white_space_folded_in_the_extract"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (reviewer probe or mutant, ported)",
+   "id": "rv3-d05-flake",
+   "source": "rv-wave1v2r2 review of b1611751 (work/probe): D-05 failed 1 in 10: base64 core coincidence in random ciphertext",
+   "spec_item": "D-05",
+   "status": "live",
+   "test": "test_d_plants.py::test_D_05_A_18_planted_values_readable_nowhere"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "literal",
+   "id": "rv3-ft18",
+   "source": "Wave-1 v2 round 3 build: mutant ft-18 (stored X-Robots-Tag lines joined with \", \") survived r3-mut-all",
+   "spec_item": "B-SE-12",
+   "status": "live",
+   "test": "test_b_selene.py::test_B_SE_12_D_01_a_bot_prefix_never_reaches_the_next_header_line_in_the_stored_copy"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "literal",
+   "id": "rv3-de12-bare",
+   "source": "Wave-1 v2 round 3 build: mutant de-12 (doctype half of the XML text check dropped) survived r3-mut-all",
+   "spec_item": "A-08",
+   "status": "live",
+   "test": "test_a_xml.py::test_A_08_B_DE_05_a_bare_doctype_with_no_entity_in_a_comment_like_position_is_refused"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "literal",
+   "id": "rv3-c05",
+   "source": "Wave-1 v2 round 3 build: ported mutant rv-c05 (any text/ or application/ media type stored readable) survived r3-mut-all",
+   "spec_item": "B-SE-11",
+   "status": "live",
+   "test": "test_b_codes.py::test_B_SE_11_D_01_a_media_type_off_the_closed_list_is_coded_even_under_text_or_application"
   }
  ],
  "spec": "wave1-spec/1",

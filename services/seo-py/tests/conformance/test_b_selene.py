@@ -272,6 +272,129 @@ def test_B_SE_12_same_name_meta_tags_are_combined(seed):
     check_ran("B-SE-12", ran * 3)                    # three seeds of 200
 
 
+_FILL = ("nofollow", "noarchive", "nosnippet", "max-snippet:-1", "max-image-preview:large", "notranslate",
+         "noimageindex", "index", "follow", "all")
+_NAMES = ("robots", "ROBOTS", "Robots", "googlebot", "bingbot", "gptbot", "otherbot")
+
+
+def _hostile_noix_case(r):
+    """rv-wave1v2r2 #1 (the reviewer's B-SE-12 cap probe noix2.py, ported): every shape that went past a STORAGE
+    bound of round 2 (20 directives a tag, 100 distinct a name, 50 header lines, 50 items or 2,000 characters a
+    line), plus ordinary mixes."""
+    kind = r.randrange(6)
+    headers, metas = [], []
+    if kind == 0:      # two to four same-name meta tags, noindex in any of them
+        name = r.choice(_NAMES)
+        for _ in range(r.randint(2, 4)):
+            ds = [r.choice(_FILL) for _ in range(r.randint(1, 4))]
+            if r.random() < 0.4:
+                ds.insert(r.randint(0, len(ds)), r.choice(["noindex", "NOINDEX", "none"]))
+            metas.append((name if r.random() < 0.8 else r.choice(_NAMES), ", ".join(ds)))
+    elif kind == 1:    # one tag of 15-30 directives, noindex late
+        ds = [f"x-dir{i}" for i in range(r.randint(15, 30))]
+        ds.insert(r.randint(len(ds) - 6, len(ds)), "noindex")
+        metas.append((r.choice(_NAMES), ", ".join(ds)))
+    elif kind == 2:    # 80-160 distinct directives across same-name tags, noindex in the last tag
+        name = r.choice(_NAMES)
+        for t in range(r.randint(4, 8)):
+            metas.append((name, ", ".join(f"d{t}x{i}" for i in range(20))))
+        metas.append((name, "noindex"))
+    elif kind == 3:    # 40-60 X-Robots-Tag headers, noindex in a late one
+        n = r.randint(40, 60)
+        headers = ["noarchive"] * n
+        headers[r.randint(n - 15, n - 1)] = r.choice(["noindex", "googlebot: noindex", "bingbot: none"])
+    elif kind == 4:    # one X-Robots-Tag value of 150-260 items (over 2,000 characters), noindex at the end
+        headers = [", ".join(["nosnippet"] * r.randint(150, 260)) + ", noindex"]
+    else:              # ordinary mixes
+        for _ in range(r.randint(0, 2)):
+            headers.append(r.choice(["", "googlebot: ", "bingbot: ", "gptbot: "]) +
+                           ", ".join(r.choice(_FILL + ("noindex", "none")) for _ in range(r.randint(1, 3))))
+        for _ in range(r.randint(0, 3)):
+            metas.append((r.choice(_NAMES), ", ".join(r.choice(_FILL + ("noindex",)) for _ in range(r.randint(1, 3)))))
+    return kind, headers, metas
+
+
+def _noix_run(headers, metas, path="/"):
+    import httpx
+    web = site(Web())
+    head = "".join(f"<meta name='{a}' content='{c}'>" for a, c in metas)
+    body = page(head=head, ld=ORG_LD).encode()
+    hl = [("content-type", "text/html")] + [("x-robots-tag", h) for h in headers]
+    web.routes[("site.test", path)] = (lambda req, b=body, h=hl: httpx.Response(200, headers=h,
+                                                                               stream=httpx.ByteStream(b)))
+    c, s, _, rr, _, _ = run3(web, (path,))
+    return s, rr
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3])
+def test_B_SE_12_A_27_decided_on_raw_values_past_every_storage_bound(seed):
+    """rv-wave1v2r2 #1: the noindex decision is made on the RAW values (spec 0.1), whatever bounds the STORED copy
+    has: per engine equal to the oracle on 200 hostile combinations a seed (the reviewer found 200 of 600
+    mismatched at b1611751)."""
+    r = rng(seed, "se12-raw")
+    kinds = set()
+    for i in range(200):
+        kind, headers, metas = _hostile_noix_case(r)
+        kinds.add(kind)
+        s, _ = _noix_run(headers, metas)
+        want = sorted(e for e, tok in bots.ENGINE_SEARCH_BOT.items() if onoix.noindex(tok, headers, metas))
+        got = by_code(s, "NOINDEX")
+        assert (sorted(got[0]["detail"]["engines"]) if got else []) == want, (kind, len(headers), metas[:2], got)
+        assert "NOINDEX_CHECK_INCOMPLETE" not in codes(s)        # every case is within the raw bound
+    assert kinds == set(range(6)), kinds
+    check_ran("B-SE-12", 600)
+    check_ran("A-27", 200)
+
+
+@pytest.mark.parametrize("headers,metas", [
+    ([], [("robots", ", ".join([f"d{i}" for i in range(20)] + ["noindex"]))]),       # 21st directive of a tag
+    ([], [("robots", ", ".join(["nofollow"] * 20 + ["noindex"]))]),
+    (["noarchive"] * 50 + ["noindex"], []),                                          # 51st header line
+    ([", ".join(["nosnippet"] * 50 + ["noindex"])], []),                             # 51st item of a line
+    ([("a" * 2001) + ", noindex"], []),                                              # past 2,000 characters
+    ([], [("robots", ", ".join(f"t{t}x{i}" for i in range(20))) for t in range(5)] + [("robots", "noindex")]),
+    ([], [("robots", "x" * 600 + ", noindex")]),                                     # past the 500-char attr copy
+])
+def test_A_27_the_reviewers_cap_cases_are_noindex(headers, metas):
+    """rv-wave1v2r2 #1 (noix3.py, ported): each former storage cap with the noindex just past it."""
+    s, rr = _noix_run(headers, metas)
+    assert sorted(one(s, "NOINDEX")["detail"]["engines"]) == sorted(bots.ENGINE_SEARCH_BOT)
+    rd = rr["facts"]["engine_readiness_heuristic"]["/"]
+    assert all(rd[e]["checks"]["indexable"] == "fail" for e in rd), rd
+
+
+def test_A_27_x_robots_tag_past_the_raw_bound_is_undecided_never_indexable():
+    """rv-wave1v2r2 #1: X-Robots-Tag lines past fetch.XROBOTS_RAW_MAX octets are not read. When nothing read says
+    noindex, the page is NOT reported indexable: NOINDEX_CHECK_INCOMPLETE info/measured/IE (engines, the bound),
+    readiness ``indexable: undecided``, outcome PARTIAL. A noindex read before the bound still decides."""
+    from primitives import fetch as fetch_mod
+    filler = ["noarchive, " + "nosnippet, " * 200 + "notranslate"] * (fetch_mod.XROBOTS_RAW_MAX // 2000 + 4)
+    assert sum(len(h) for h in filler) > fetch_mod.XROBOTS_RAW_MAX
+    s, rr = _noix_run(filler + ["noindex"], [])
+    assert "NOINDEX" not in codes(s)
+    f = one(s, "NOINDEX_CHECK_INCOMPLETE")
+    assert sev(f) == ("info", "measured", "INSUFFICIENT_EVIDENCE") and f["detail"]["cap_value"] == \
+        fetch_mod.XROBOTS_RAW_MAX and sorted(f["detail"]["engines"]) == sorted(bots.ENGINE_SEARCH_BOT)
+    assert s["outcome"] == "PARTIAL" and s["facts"]["noindex_undecided_pages"] == 1
+    rd = rr["facts"]["engine_readiness_heuristic"]["/"]
+    assert all(rd[e]["checks"]["indexable"] == "undecided" for e in rd), rd
+    s2, _ = _noix_run(["googlebot: noindex"] + filler, [])
+    assert one(s2, "NOINDEX")["detail"]["engines"] == ["google"]
+    assert sorted(one(s2, "NOINDEX_CHECK_INCOMPLETE")["detail"]["engines"]) == \
+        sorted(e for e in bots.ENGINE_SEARCH_BOT if e != "google")
+
+
+@pytest.mark.parametrize("noindex", [True, False])
+def test_B_RO_10_readiness_indexable_follows_the_noindex_decision(noindex):
+    """rv-wave1v2r2 #3 ro-15: readiness ``indexable`` per engine is the negation of B-SE-12 (fail for an engine
+    the page asks not to index, pass for the others)."""
+    metas = [("googlebot", "noindex")] if noindex else [("robots", "index, follow")]
+    _, rr = _noix_run([], metas)
+    rd = rr["facts"]["engine_readiness_heuristic"]["/"]
+    want = {e: ("fail" if noindex and e == "google" else "pass") for e in rd}
+    assert {e: rd[e]["checks"]["indexable"] for e in rd} == want
+
+
 CANON_CASES = [
     ("<link rel='canonical' href='javascript:x'>", {"CANONICAL_INVALID"}),
     ("<link rel='canonical' href='http://site.test/'><link rel='canonical' href='http://site.test/b'>",
@@ -427,3 +550,60 @@ def test_B_SE_07_one_ignored_line_is_reported():
     web = site(Web(), robots="User-agent: *\nCrawl-delay: 5\nAllow: /\n")
     _, s, _, _, _, _ = run3(web)
     assert one(s, "ROBOTS_LINES_IGNORED")["detail"]["lines_ignored"] == 1
+
+
+def test_B_SE_12_a_result_without_raw_lines_decides_on_its_stored_copy():
+    """A FetchResult built without the raw lines (stored, or made by hand) and an extract without
+    ``robots_meta_noindex`` (an older extract) still decide B-SE-12 per bot, on the copies they carry."""
+    from agents import selene
+    from primitives.fetch import FetchResult
+    f = FetchResult(url="http://site.test/", state="OK", status=200, headers={"x-robots-tag": "bingbot: noindex"},
+                    content_type="text/html")
+    assert selene.noindex_engines(f, None) == ["bing"]
+    x = {"robots_meta": {"googlebot": ["noindex"], "robots": ["index"]}}
+    assert selene.noindex_engines(FetchResult(url="http://site.test/", state="OK"), x) == ["google"]
+    assert selene.noindex_for(FetchResult(url="http://site.test/", state="OK"), x, "bingbot") is False
+
+
+def test_A_27_the_stored_meta_copy_is_bounded_and_what_it_leaves_out_is_counted():
+    """rv-wave1v2r2 #1: the STORED copy of the meta robots directives keeps 20 directives a tag and 100 distinct
+    a name (D-01: closed list readable, others coded); everything it leaves out is counted in
+    ``robots_meta_not_stored``; the decision (``robots_meta_noindex``) is made on every tag whole."""
+    from primitives.parse import ROBOTS_META_MAX_DIRECTIVES, parse_html
+    one_tag = "<meta name='robots' content='" + ", ".join(f"a{i}" for i in range(25)) + ", noindex'>"
+    x = parse_html(page(head=one_tag), "http://site.test/")
+    assert x["robots_meta"]["robots"] == [f"a{i}" for i in range(20)] and x["robots_meta_not_stored"] == 6
+    assert x["robots_meta_noindex"] == ["robots"]
+    many = "".join("<meta name='googlebot' content='" + ", ".join(f"t{t}x{i}" for i in range(20)) + "'>"
+                   for t in range(6)) + "<meta name='GoogleBot' content='none'>"
+    x = parse_html(page(head=many), "http://site.test/")
+    assert len(x["robots_meta"]["googlebot"]) == ROBOTS_META_MAX_DIRECTIVES == 100
+    assert x["robots_meta_not_stored"] == 21 and x["robots_meta_noindex"] == ["googlebot"]
+
+
+@pytest.mark.parametrize("lines, want", [
+    (["googlebot: nofollow", "noindex"], ("googlebot: nofollow\nnoindex", "googlebot: nofollow, noindex")),
+    (["bingbot: noarchive", "none"], ("bingbot: noarchive\nnone", "bingbot: noarchive, none")),
+])
+def test_B_SE_12_D_01_a_bot_prefix_never_reaches_the_next_header_line_in_the_stored_copy(lines, want):
+    """mutant ft-18: each X-Robots-Tag header line is kept on its own in the STORED copy (safe_url.HEADER_SEP), so
+    a ``<bot>:`` prefix in one line never applies to the directives of the next (B-SE-12); the stored-copy fallback
+    of ``selene.noindex_engines`` then decides noindex for EVERY engine, as the raw lines do."""
+    import dataclasses
+
+    import httpx
+
+    from agents import selene
+    web = site(Web())
+    body = page(ld=ORG_LD).encode()
+    hl = [("content-type", "text/html")] + [("x-robots-tag", v) for v in lines]
+    web.routes[("site.test", "/")] = (lambda req, b=body, h=hl: httpx.Response(200, headers=h,
+                                                                               stream=httpx.ByteStream(b)))
+    r = web.fetcher().fetch("http://site.test/", robots_cache={})
+    assert r.state == "OK", r.state
+    assert r.headers.get("x-robots-tag") == want[0]
+    assert r.summary()["x_robots_tag"] == want[1]
+    every = sorted(bots.ENGINE_SEARCH_BOT)
+    assert sorted(selene.noindex_engines(r, None)) == every
+    stored = dataclasses.replace(r, x_robots_raw=(), x_robots_incomplete=False)
+    assert sorted(selene.noindex_engines(stored, None)) == every

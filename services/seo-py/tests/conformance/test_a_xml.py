@@ -159,3 +159,44 @@ def test_A_11_a_valid_50_mib_gzip_at_448_to_1_stays_within_96_mib(served):
     assert d["facts"]["sitemap_urls"] == n and not codes(d) & {"SITEMAP_TOO_LARGE", "SITEMAP_UNREADABLE",
                                                                "SITEMAP_DECOMPRESS_FAILED"}, codes(d)
     assert peak <= 96 * 2 ** 20, f"peak {peak / 2 ** 20:.1f} MiB"
+
+
+@pytest.mark.parametrize("where", ["comment", "cdata", "after_root"])
+def test_A_08_doctype_in_a_comment_like_position_is_refused(where):
+    """rv-wave1v2r2 #5 de-12 (A-08 'DOCTYPE in a comment-like position'; B-DE-05 'DOCTYPE / ENTITY looked for in
+    the DECODED text'): a DOCTYPE / ENTITY spelled where expat itself would not take it for a declaration (a
+    comment, a CDATA section, after the root) is still refused by the text check: XML_DOCTYPE_REFUSED."""
+    from agents_run import one, sev
+    dtd = "<!DOCTYPE x [<!ENTITY a 'b'>]>"
+    url = "<url><loc>http://site.test/a</loc></url>"
+    ns = "http://www.sitemaps.org/schemas/sitemap/0.9"
+    body = {"comment": f"<?xml version='1.0'?><!-- {dtd} --><urlset xmlns='{ns}'>{url}</urlset>",
+            "cdata": f"<?xml version='1.0'?><urlset xmlns='{ns}'>{url}<x><![CDATA[{dtd}]]></x></urlset>",
+            "after_root": f"<?xml version='1.0'?><urlset xmlns='{ns}'>{url}</urlset><!-- {dtd} -->"}[where]
+    web = site(Web())
+    web.route("/sitemap.xml", body, ctype="application/xml")
+    c, _, d, _, _, _ = run3(web)
+    f = one(d, "SITEMAP_QUARANTINED")
+    assert sev(f) == ("high", "measured", "ACT") and f["detail"]["why"] == "XML_DOCTYPE_REFUSED", f
+    assert d["facts"]["sitemap_urls"] == 0
+
+
+@pytest.mark.parametrize("where", ["comment", "cdata", "after_root"])
+def test_A_08_B_DE_05_a_bare_doctype_with_no_entity_in_a_comment_like_position_is_refused(where):
+    """C3 de-12 (A-08 'DOCTYPE in a comment-like position'; B-DE-05 'DOCTYPE / ENTITY looked for in the DECODED
+    text'): a DOCTYPE with NO entity declaration, spelled where expat would not take it for a declaration (a comment,
+    a CDATA section, after the root), is refused by the DOCTYPE half of the text check alone: XML_DOCTYPE_REFUSED."""
+    from agents_run import one, sev
+    dtd = "<!DOCTYPE urlset SYSTEM 'http://dtd.test/x.dtd'>"
+    url = "<url><loc>http://site.test/a</loc></url>"
+    ns = "http://www.sitemaps.org/schemas/sitemap/0.9"
+    body = {"comment": f"<?xml version='1.0'?><!-- {dtd} --><urlset xmlns='{ns}'>{url}</urlset>",
+            "cdata": f"<?xml version='1.0'?><urlset xmlns='{ns}'>{url}<x><![CDATA[{dtd}]]></x></urlset>",
+            "after_root": f"<?xml version='1.0'?><urlset xmlns='{ns}'>{url}</urlset><!-- {dtd} -->"}[where]
+    assert "<!entity" not in body.lower()
+    web = site(Web())
+    web.route("/sitemap.xml", body, ctype="application/xml")
+    c, _, d, _, _, _ = run3(web)
+    f = one(d, "SITEMAP_QUARANTINED")
+    assert sev(f) == ("high", "measured", "ACT") and f["detail"]["why"] == "XML_DOCTYPE_REFUSED", f
+    assert d["facts"]["sitemap_urls"] == 0

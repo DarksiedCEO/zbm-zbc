@@ -7,7 +7,7 @@ import json
 import pytest
 
 from agents import logs as logs_mod
-from agents_run import by_code, codes
+from agents_run import by_code, codes, one, sev
 from cert_web import Web, site, sitemap
 from common import check_ran, rng
 from gen import plants
@@ -84,6 +84,10 @@ def test_B_LG_03_robots_matched_once_on_path_and_query(svc):
     done = svc.log_ingest([clf("192.0.2.5", p) for p in reqs])
     g = _env(done)["facts"]["families"]["Googlebot"]
     assert g["robots_disallowed_hits"] == 3, g          # %2541 decodes once to %41, never to 'A'
+    # rv-wave1v2r2 #2 lg-20: the disallowed hits are reported (B-LG-03)
+    f = one(_env(done), "ROBOTS_DISALLOWED_PATHS_REQUESTED")
+    assert sev(f) == ("low", "measured", "WATCH") and f["detail"]["token"] == "Googlebot" and \
+        f["detail"]["requests"] == 3
     rb = svc.web.routes[("site.test", "/robots.txt")][1].encode()
     want = sum(1 for p in reqs if not rfc9309.allowed(rb, "Googlebot", p.encode()))
     assert want == 3
@@ -201,3 +205,67 @@ def test_B_LG_03_undecided_lines_are_unchecked_never_blocked():
     rb = robots_mod.parse(robots_gen.needle(99).decode())
     d = _chunk([clf("192.0.2.5", "/" + "a" * 2047 + str(i)) for i in range(200)], robots=rb)
     assert d["robots_unchecked"] > 0 and d["families"]["Googlebot"]["robots_blocked"] == 0
+
+
+def test_B_LG_02_a_claim_dns_refutes_is_spoofed(tmp_path):
+    """rv-wave1v2r2 #2 lg-16: with the DNS verifier connected (fake resolvers here, no network), a claimed
+    Googlebot whose reverse name is not Google's is SPOOFED_CRAWLER_REQUESTS medium/measured/TEST; a forward-
+    confirmed one is verified."""
+    from ports import DnsBotVerifier
+    names = {"66.249.66.1": "crawl-66-249-66-1.googlebot.com", "66.249.66.9": "crawler.example.net"}
+    ver = DnsBotVerifier(rdns=lambda ip: names[ip], forward=lambda host: [ip for ip, h in names.items() if h == host])
+    web = site(Web())
+    s = Svc(tmp_path, web, bot_verifier=ver)
+    try:
+        done = s.log_ingest([clf("66.249.66.1", "/a")] * 30 + [clf("66.249.66.9", "/b")] * 12)
+    finally:
+        s.close()
+    env = _env(done)
+    g = env["facts"]["families"]["Googlebot"]
+    assert g["verified"] == 30 and g["spoofed"] == 12 and g["requests"] == 42, g
+    f = one(env, "SPOOFED_CRAWLER_REQUESTS")
+    assert sev(f) == ("medium", "measured", "TEST") and f["detail"]["token"] == "Googlebot" and \
+        f["detail"]["requests"] == 12
+    assert "bot_dns_verification" not in env.get("not_connected", [])
+
+
+def test_B_LG_03_requests_past_the_robots_work_are_log_robots_check_incomplete(tmp_path):
+    """rv-wave1v2r2 #2 lg-17: bot requests whose robots.txt decision ran out of counted work are reported
+    LOG_ROBOTS_CHECK_INCOMPLETE info/measured/IE (requests counted), the outcome PARTIAL; never counted blocked."""
+    from gen import robots_gen
+    web = site(Web(), robots=robots_gen.needle(99).decode())
+    s = Svc(tmp_path, web)
+    try:
+        done = s.log_ingest([clf("192.0.2.5", "/" + "a" * 2047 + str(i)) for i in range(200)])
+    finally:
+        s.close()
+    env = _env(done)
+    f = one(env, "LOG_ROBOTS_CHECK_INCOMPLETE")
+    n = env["facts"]["robots_unchecked_requests"]
+    assert sev(f) == ("info", "measured", "INSUFFICIENT_EVIDENCE") and f["detail"]["requests"] == n > 0
+    assert env["outcome"] == "PARTIAL" and not env["facts"]["families"]["Googlebot"]["robots_disallowed_hits"]
+
+
+def test_B_LG_05_a_sample_coded_under_another_codes_key_is_never_matched():
+    """rv-wave1v2r2 #2 lg-12 (B-LG-05 with B-DR-05): the sitemap sample is matched only under the codes key it was
+    made with; a sample recorded under another key id gives no index (its codes are not this key's), even when
+    the codes themselves are equal."""
+    import svc_logs
+    sample = {"templates": ["/a", "/b"], "codes": ["{c:path:00000000000000aa}", "{c:path:00000000000000bb}"],
+              "codes_key_id": "key-1"}
+    assert svc_logs._sample_index(sample, "key-1") == {"{c:path:00000000000000aa}": 0, "{c:path:00000000000000bb}": 1}
+    assert svc_logs._sample_index(sample, "key-2") == {} and svc_logs._sample_index(sample, None) == {}
+    assert svc_logs._sample_index(None, "key-1") == {}
+
+
+def test_A_30_robots_expected_but_absent_is_unchecked_never_allowed():
+    """rv-wave1v2r2 #5 lg-02: when an ingest has robots.txt but its parsed form is not given to a chunk, every bot
+    request is counted robots_unchecked (never a silent 'allowed', never blocked)."""
+    d = _chunk([clf("192.0.2.5", "/p%d" % i) for i in range(25)], robots=None)
+    assert d["robots_unchecked"] == 0
+    from agents_run import coding
+    data = ("\n".join(clf("192.0.2.5", "/p%d" % i) for i in range(25)) + "\n").encode()
+    with coding():
+        d2 = logs_mod.process_chunk("combined", data, b"k" * 32, lambda ip, t: "unverified", {}, {"left": 0},
+                                    robots=None, robots_expected=True)
+    assert d2["robots_unchecked"] == 25 and d2["families"]["Googlebot"]["robots_blocked"] == 0

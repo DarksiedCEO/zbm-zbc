@@ -213,3 +213,17 @@ def test_B_CD_04_names_like_but_not_well_known_are_not_readable():
     with codes.coding(_coder(), own=OWN):
         for bad in ("/post-sitemap.xmlzz", "/sitemap.xml.bak", "/robots.txtx", "/xsitemap.xml"):
             assert "sitemap" not in su.safe_path(bad) and "robots" not in su.safe_path(bad), bad
+
+
+def test_B_SE_11_D_01_a_media_type_off_the_closed_list_is_coded_even_under_text_or_application():
+    """C3 rv-c05 (B-SE-11 'content type from the closed media-type list else {c:ctype:..}'; D-01): only a media type
+    ON the closed MEDIA_TYPES list is stored readable; one off it is coded, also when it starts "text/" or
+    "application/" (a crawled value can carry a tenant / plant token in its subtype)."""
+    with codes.coding(_coder(), own=OWN):
+        for ok in ("text/html", "application/xml", "image/png"):
+            assert ok in su.MEDIA_TYPES and su.safe_ctype(ok) == ok
+        for bad in ("text/x-tenant-secret-7f3a", "application/vnd.plant-token-91c2+json", "text/plain2",
+                    "application/xmlx", "image/x-private-9d1e"):
+            assert bad not in su.MEDIA_TYPES
+            out = su.safe_ctype(bad)
+            assert CODE.fullmatch(out) and out.startswith("{c:ctype:"), (bad, out)

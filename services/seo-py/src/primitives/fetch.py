@@ -75,6 +75,8 @@ URL_MAX = 16_384
 # B-RB-08 / B-SE-03: robots.txt is read to its parse limit of DECODED octets; the bytes on the wire are bounded only
 # by this (and the deadline), so a body that decodes small (gzip of empty members) is read, never refused
 ROBOTS_WIRE_MAX = 64 * 1024 * 1024
+XROBOTS_RAW_MAX = 64 * 1024     # B-SE-12: X-Robots-Tag octets kept whole for the noindex decision (all lines)
+_XR_RAW = "x-robots-tag;raw"     # in-flight key of the raw lines, taken off ``headers`` before a result is returned
 DECODE_STEP = 1024 * 1024        # A-11: the most one zlib call returns (output is streamed in steps of this size)
 # Only the web's standard ports are fetched (AEGIS L2): a URL or redirect naming any other port (an admin console, a
 # database, a service on a non-web port of a public host) is refused REFUSED_PORT.
@@ -138,6 +140,11 @@ class FetchResult:
     # "unreachable": robots.txt answered 5xx / could not be fetched, RFC 9309 complete disallow)
     robots: Optional[dict] = None
     status_seen: bool = False                            # a response status line arrived before the fetch stopped
+    # B-SE-12 / A-27 (rv-wave1v2r2 #1): the X-Robots-Tag header lines AS SENT, for decisions in memory only (never
+    # in ``summary`` or any stored form; ``headers["x-robots-tag"]`` stays the bounded stored copy). Bounded by
+    # XROBOTS_RAW_MAX octets in all; ``x_robots_incomplete`` when lines past that bound were not kept.
+    x_robots_raw: tuple = ()
+    x_robots_incomplete: bool = False
 
     @property
     def ok(self) -> bool:
@@ -524,6 +531,13 @@ class Fetcher:
                     xr = resp.headers.get_list("x-robots-tag")
                     if xr:                                # each header line on its own (safe_url.HEADER_SEP)
                         kept["x-robots-tag"] = safe_url_mod.HEADER_SEP.join(v[:2000] for v in xr[:50])
+                        raw, n = [], 0
+                        for v in xr:
+                            n += len(v.encode("utf-8", "surrogateescape"))
+                            if n > XROBOTS_RAW_MAX:
+                                break
+                            raw.append(v)
+                        kept[_XR_RAW] = (tuple(raw), len(raw) < len(xr))
                     if 300 <= resp.status_code < 400 and resp.headers.get("location"):
                         loc = resp.headers.get("location")
                         if len(loc.encode("utf-8", "surrogateescape")) > LOCATION_MAX:
@@ -665,6 +679,7 @@ class Fetcher:
                     if hop == self.max_redirects:
                         raise _Refused("TOO_MANY_REDIRECTS", f"more than {self.max_redirects} redirects")
                     continue
+                res.x_robots_raw, res.x_robots_incomplete = headers.pop(_XR_RAW, ((), False))
                 res.final_url, res.status, res.headers, res.body = current, status, headers, body
                 res.content_type, res.charset = _content_type(headers)
                 return res

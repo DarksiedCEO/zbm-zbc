@@ -107,3 +107,14 @@ def test_B_OS_05_refresh_tier_table():
     assert {k: v.days for k, v in osei.REFRESH_TIERS.items()} == {
         "robots": 1, "sitemap": 1, "llms_txt": 7, "page": 7, "structured_data": 7, "ai_probe": 7,
         "entity_record": 180}
+
+
+@pytest.mark.parametrize("reason,basis", [("SOMETHING_ELSE", None), ("too_large", None), ("TOO_LARGE", "raw"),
+                                          ("XML_MALFORMED", "whole")])
+def test_B_OS_01_a_reason_or_basis_off_the_closed_lists_is_refused(reason, basis):
+    """rv-wave1v2r2 #5 os-06: the reason and the size basis come from the closed lists of B-OS-01; anything else
+    is refused (ValueError) and nothing is recorded."""
+    o = _o()
+    with pytest.raises(ValueError):
+        o.quarantine("sitemap", reason, "http://site.test/s.xml", b"x", basis=basis)
+    assert o.summary()["quarantined"] == []

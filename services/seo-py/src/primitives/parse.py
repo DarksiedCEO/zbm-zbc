@@ -64,6 +64,10 @@ class _Extractor(HTMLParser):
         self.title: Optional[str] = None
         self._in_title = False
         self.metas: list = []
+        # B-SE-12 / A-27 (rv-wave1v2r2 #1): the meta robots names (closed list: robots + the bot family tokens) whose
+        # RAW content holds noindex / none in ANY of its tags; decided on the whole attribute value (the page body is
+        # already bounded by the fetch cap), never on the cut, bounded copy stored in ``robots_meta``
+        self.robots_noindex: set = set()
         self.links_rel: list = []
         self.headings: list = []
         self._heading: Optional[list] = None
@@ -89,6 +93,10 @@ class _Extractor(HTMLParser):
         elif tag == "meta":
             self.metas.append({k: _s(v) for k, v in a.items() if k in ("name", "property", "content", "http-equiv",
                                                                        "charset")})
+            rname = " ".join((a.get("name") or "").split()).lower()
+            if (rname in ROBOTS_META_NAMES or rname in _family_names()) and a.get("content") and any(
+                    x.strip().lower() in ("noindex", "none") for x in a["content"].split(",")):
+                self.robots_noindex.add(rname)
         elif tag == "link":
             if len(self.links_rel) < MAX_LINKS:
                 self.links_rel.append({"rel": _s(a.get("rel", ""), 100).lower(), "href": _s(a.get("href"), URL_MAX + 1),
@@ -156,16 +164,25 @@ def parse_html(html: str, base_url: str) -> dict:
         error = type(exc).__name__
     metas = p.metas
     robots_meta = {}
+    not_stored = 0
     description = None
     for mt in metas:
         name = (mt.get("name") or "").lower()
         if (name in ROBOTS_META_NAMES or name in _family_names()) and mt.get("content"):
             # B-SE-12 (rv-wave1v2 #1): every same-name tag counts; the directives of all of them are combined
             # (distinct, in order of appearance, bounded) so a noindex in an earlier tag is never overwritten
+            # The STORED copy is bounded (20 directives a tag, ROBOTS_META_MAX_DIRECTIVES distinct a name) and what
+            # it leaves out is counted (``robots_meta_not_stored``); decisions use ``robots_meta_noindex`` (raw)
             have = robots_meta.setdefault(name, [])
-            for x in [x.strip().lower() for x in mt["content"].split(",") if x.strip()][:20]:
-                if x not in have and len(have) < ROBOTS_META_MAX_DIRECTIVES:
+            toks = [x.strip().lower() for x in mt["content"].split(",") if x.strip()]
+            not_stored += max(0, len(toks) - 20)
+            for x in toks[:20]:
+                if x in have:
+                    continue
+                if len(have) < ROBOTS_META_MAX_DIRECTIVES:
                     have.append(x)
+                else:
+                    not_stored += 1
         elif name == "description" and description is None:
             description = mt.get("content")
     canonicals = [lk["href"] for lk in p.links_rel if "canonical" in lk["rel"].split() and lk["href"]]
@@ -183,7 +200,8 @@ def parse_html(html: str, base_url: str) -> dict:
     text = " ".join(" ".join(p.text_parts).split())
     return {
         "title": _s(p.title, 1000), "description": description, "lang": p.html_lang,
-        "robots_meta": robots_meta, "canonicals": [a for a in canon_abs if a][:10],
+        "robots_meta": robots_meta, "robots_meta_noindex": sorted(p.robots_noindex),
+        "robots_meta_not_stored": not_stored, "canonicals": [a for a in canon_abs if a][:10],
         # WR-F009: hrefs that are not readable http(s) URLs are counted, never kept as None
         "canonicals_invalid": sum(1 for a in canon_abs if a is None),
         "canonicals_valid": sum(1 for a in canon_abs if a),

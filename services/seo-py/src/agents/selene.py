@@ -29,8 +29,8 @@ from primitives import render as render_mod
 from primitives import robots as robots_mod
 from primitives.parse import parse_html
 from primitives import codes
-from primitives.safe_url import robots_directives, robots_rules, safe_ctype, safe_path, safe_url, safe_urls, \
-    safe_x_robots
+from primitives.safe_url import ROBOTS_DIRECTIVES, robots_directives, robots_rules, safe_ctype, safe_path, safe_url, \
+    safe_urls, safe_x_robots
 
 AGENT, TASK = "selene", "crawlability"
 METHODOLOGY = ("Fetched robots.txt (RFC 9309: 4xx = no rules, 5xx/unreachable = everything disallowed) and each "
@@ -58,30 +58,70 @@ def finding(*a, url: Optional[str] = None, **k) -> dict:
     return _finding(*a, url=safe_url(url), **k)
 
 
-def noindex_for(fetch, extract: Optional[dict], token: str) -> bool:
+def _raw_header_noindex(lines) -> set:
+    """B-SE-12 on the RAW X-Robots-Tag lines (rv-wave1v2r2 #1: no item, line or length cap): the targets of a
+    noindex / none: ``None`` for every crawler, else the lower-cased bot named by the ``<bot>:`` prefix before it.
+    The grammar of safe_url.robots_rules (whose output is the bounded STORED form), on every item of every line."""
+    out = set()
+    for line in lines:
+        bot = None
+        for item in line.split(","):
+            it = item.strip()
+            if not it:
+                continue
+            head, sep, rest = it.partition(":")
+            h = head.strip().lower()
+            if sep and h not in ROBOTS_DIRECTIVES:
+                bot = h
+                head = rest.strip().partition(":")[0]
+                h = head.strip().lower()
+            if h in ("noindex", "none"):
+                out.add(bot)
+    return out
+
+
+def noindex_for(fetch, extract: Optional[dict], token: str) -> Optional[bool]:
     """Whether the page asks ``token``'s crawler not to index it (AEGIS Wave-1 S-S2): an X-Robots-Tag directive
     applies to every crawler unless it follows a ``<bot>:`` prefix, and then only to that bot; a meta robots tag
-    applies to every crawler when its name is ``robots``, else only to the crawler it names."""
+    applies to every crawler when its name is ``robots``, else only to the crawler it names. Decided on the RAW
+    values (spec 0.1; rv-wave1v2r2 #1): every header line and item as sent (up to fetch.XROBOTS_RAW_MAX octets) and
+    every meta tag's whole content (parse ``robots_meta_noindex``). ``None`` (undecided, never "indexable") when
+    header lines past that bound were not read and nothing read says noindex."""
     t = token.lower()
-    for bot, d, _ in robots_rules(fetch.headers.get("x-robots-tag")):
-        if d in ("noindex", "none") and (bot is None or bot == t):
-            return True
+    raw = getattr(fetch, "x_robots_raw", ())
+    if raw or not fetch.headers.get("x-robots-tag"):
+        targets = _raw_header_noindex(raw)
+    else:                                       # a result built without the raw lines (stored / older): the copy
+        targets = {bot for bot, d, _ in robots_rules(fetch.headers.get("x-robots-tag")) if d in ("noindex", "none")}
+    if None in targets or t in targets:
+        return True
     if extract:
-        for name, v in extract["robots_meta"].items():
-            if name in ("robots", t) and ("noindex" in v or "none" in v):
+        if "robots_meta_noindex" in extract:
+            if "robots" in extract["robots_meta_noindex"] or t in extract["robots_meta_noindex"]:
                 return True
+        else:
+            for name, v in extract["robots_meta"].items():
+                if name in ("robots", t) and ("noindex" in v or "none" in v):
+                    return True
+    if getattr(fetch, "x_robots_incomplete", False):
+        return None
     return False
 
 
 def noindex_engines(fetch, extract: Optional[dict]) -> list:
     """The answer / search engines whose crawler the page asks not to index it (bots.ENGINE_SEARCH_BOT)."""
-    return [e for e, tok in bots.ENGINE_SEARCH_BOT.items() if noindex_for(fetch, extract, tok)]
+    return [e for e, tok in bots.ENGINE_SEARCH_BOT.items() if noindex_for(fetch, extract, tok) is True]
+
+
+def noindex_undecided_engines(fetch, extract: Optional[dict]) -> list:
+    """The engines for which the noindex decision is undecided (header lines past the raw bound not read)."""
+    return [e for e, tok in bots.ENGINE_SEARCH_BOT.items() if noindex_for(fetch, extract, tok) is None]
 
 
 def noindex_bots(fetch, extract: Optional[dict]) -> list:
     """Every bot family token (agents/bots.py) the page asks not to index it, each scoped to that bot (round 2 NIT:
     a ``GPTBot`` meta noindex is reported for GPTBot, not for every engine and not nowhere)."""
-    return [f["token"] for f in bots.FAMILIES if noindex_for(fetch, extract, f["token"])]
+    return [f["token"] for f in bots.FAMILIES if noindex_for(fetch, extract, f["token"]) is True]
 
 
 def _safe_meta(robots_meta: dict) -> dict:
@@ -176,7 +216,9 @@ def _run(ctx) -> tuple[dict, dict]:
         outcome = "BLOCKED" if states == {"BLOCKED_BY_ROBOTS"} else \
             "INSUFFICIENT_EVIDENCE" if states and states <= {"BLOCKED_BY_ROBOTS", "ROBOTS_CHECK_INCOMPLETE"} else "FAILED"
     else:
-        outcome = "OK" if fetched == len(ctx.paths) and not facts.get("robots_matrix_undecided") else "PARTIAL"
+        facts["noindex_undecided_pages"] = sum(1 for x in findings if x["code"] == "NOINDEX_CHECK_INCOMPLETE")
+        outcome = "OK" if fetched == len(ctx.paths) and not facts.get("robots_matrix_undecided") and \
+            not facts["noindex_undecided_pages"] else "PARTIAL"
     facts["render_states"] = {safe_path(p): v["render"]["state"] for p, v in pages.items()}
     return envelope(AGENT, TASK, outcome, findings, methodology=METHODOLOGY.format(v=bots.VERSION),
                     limitations=LIMITS, not_connected=not_connected, facts=facts), pages
@@ -319,6 +361,15 @@ def _page_findings(ctx, path: str, f, extract: Optional[dict], canon_checked: in
                            detail={"bots": nbots, "x_robots_tag": safe_x_robots(f.headers.get("x-robots-tag")),
                                    "robots_meta": _safe_meta(extract["robots_meta"]) if extract else {},
                                    "note": "applies only to the named crawlers; may be an intentional policy"}))
+    undecided = [e for e in noindex_undecided_engines(f, extract) if e not in engines]
+    if undecided:
+        # rv-wave1v2r2 #1: X-Robots-Tag lines past fetch.XROBOTS_RAW_MAX octets were not read and nothing read says
+        # noindex: the page is NOT reported indexable for these engines (no claim either way), disclosed here
+        out.append(finding("NOINDEX_CHECK_INCOMPLETE", "info", "measured", "INSUFFICIENT_EVIDENCE", url=url,
+                           detail={"engines": undecided, "cap": "x_robots_tag_octets",
+                                   "cap_value": fetch_mod.XROBOTS_RAW_MAX,
+                                   "note": "X-Robots-Tag header lines past the bound were not read; whether the page "
+                                           "asks these engines not to index it is undecided"}))
     if extract is None:
         return out, canon_checked
     canons = extract["canonicals"]

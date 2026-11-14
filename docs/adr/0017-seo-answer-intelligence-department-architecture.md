@@ -1532,9 +1532,13 @@ V2. **Evidence map and owner displays** (spec 0.1, D-02f-h, D-06). Each audit's 
    same append as the report). `GET .../audits/{aid}?resolve=evidence` answers only the hub caller authenticated as
    the tenant (any other caller: 403 `EVIDENCE_OWNER_ONLY`) with every code resolved and cleaned (controls removed,
    160 characters); the client report (Markdown / HTML) resolves the same way before its own cleaning. A lost map
-   shows `[not available]` and `evidence_available: false`, never an error. Measured by the independent review of
-   c9caac1d (rv-wave1v2): the owner display resolved 4,520 of 4,520 planted codes (D-06), and 0 of 12,285 planted
-   values were readable in any stored or returned form (D-05).
+   shows `[not available]` and `evidence_available: false`, never an error. Measured by the conformance suite's
+   planted fixture at round 3 (12 audits, 2 log ingests): 0 of 6,396 scanned plants readable in any stored or
+   returned form (D-05), and the owner display resolved 136 of 136 plants on surfaces a stored report references
+   by code (D-06; a value-destroying placeholder has nothing to resolve). The scan's base64 forms count only when
+   the token decodes to the whole value, and vault lines are left out of it only when their ciphertext
+   authenticates under the service key (76 of 76 lines); round 3 found a base64 core matching random ciphertext
+   by coincidence in one fast-tier run of ten.
 V3. **Robots and fetch** (spec sections 1-2). A sitemap or an ignored line no longer ends a run of user-agent lines
    (only a rule does; Google's parser; found by the conformance suite's RFC 9309 oracle); lines end at CR, LF or CRLF
    only; the parse limit is 512,000 OCTETS of the decoded body; robots.txt answering 429 is unreachable (Q-06); a body
@@ -1548,7 +1552,8 @@ V3. **Robots and fetch** (spec sections 1-2). A sitemap or an ignored line no lo
    loaded 2-vCPU box, a whole step (2,000,000 units) of the costliest shapes cost 0.299 s CPU in the builder's
    harness (needle of 50 octets x 4,348 rules, 2,047-octet paths; the same harness on 91db0abb: 3.57-8.09 s) and
    0.45 s in the independent review's harness (rv-wave1v2); both within the spec's 2.0 s a step (B-RB-09), and the
-   machine's speed is the factor (R-13). Units per CPU millisecond ranged 1,856 (24,908 distinct prefixes) to
+   machine's speed is the factor (R-13). (0.45 s: the review's number as reported to this build, not re-measured
+   here.) Units per CPU millisecond ranged 1,856 (24,908 distinct prefixes) to
    10,505 (27,530 rules all tried): 5.7x. The review's RFC 9309 differential found 0 disagreements in 288,000
    decisions. Patterns and paths are compared as octet UNITS (one
    character per escaped octet): before, a literal piece could match the hex digit inside an escape (`Disallow:
@@ -1571,8 +1576,17 @@ V4. **Agents.** Selene: same site includes subdomains of the registered domain (
    `application/gzip` at `/sitemap.xml` is read; the streamed reader had lost the media-type rule of 91db0abb, found
    by the old suite); UTF-16 and UTF-32 are decoded here (expat refuses `utf-16-le` spellings); a measured 404 / 410
    is `SITEMAP_MISSING` and counts in `sitemap_fetch_failures` (outcome PARTIAL, as at 91db0abb); the log sample is
-   the codes of whole paths. Selene (round 2): the directives of every same-name meta robots tag are combined (a
-   noindex in a first tag was lost to a second). Roman: `lang` is validated
+   the codes of whole paths. Selene: noindex (B-SE-12, A-27) is decided on the RAW values (round 3): every
+   X-Robots-Tag line and item as sent (`fetch.FetchResult.x_robots_raw`, in memory only, up to 65,536 octets of
+   header lines in all, `XROBOTS_RAW_MAX`) and every meta robots tag's whole content, all same-name tags
+   combined (parse `robots_meta_noindex`). The STORED copies keep their bounds: 50 header lines of 2,000
+   characters, 20 directives a meta tag and 100 distinct a name, closed-list directives readable and others coded;
+   what the meta copy leaves out is counted (`robots_meta_not_stored`). Past the raw header bound the decision is
+   never "indexable" by omission: a noindex read before it still decides; otherwise `NOINDEX_CHECK_INCOMPLETE`
+   (info, INSUFFICIENT_EVIDENCE; engines, `cap_value` 65,536), readiness `indexable: undecided`, Selene outcome
+   PARTIAL (`noindex_undecided_pages`). Before round 3 the decision was made on the stored copies, and the review
+   found 200 of 600 hostile combinations wrong; the suite now holds that probe (3 x 200, 0 mismatches) and the
+   reviewer's cap cases. Roman: `lang` is validated
    against the CLDR validity data (`primitives/cldr_validity.txt`, Unicode-3.0, CLDR 48, the BCP 47 private-use
    ranges qaa~qtz / Qaaa~Qabx / AA QM~QZ XA~XZ ZZ included: CLDR files them `reserved` and `private_use`);
    `LANG_INVALID` (low, ACT) and readiness `lang_declared: fail` for a tag that is not BCP 47 (a repeated variant or
@@ -1588,10 +1602,14 @@ V5. **Suite and war room.** The conformance suite (one test or family per spec i
    `large-sitemaps`, `codes-and-drift`, `vault-unavailable-audit`). Mutants: `devtools/conformance/mutants.py`.
 V6. **Owner items (open).** (a) B-UL-02 against B-SE-01: B-SE-01 names `ROBOTS_UNREACHABLE` critical / ACT for an
    unreachable robots.txt; B-UL-02, read literally, would make the network-failure case (this service's own failed
-   observation) INSUFFICIENT_EVIDENCE / info. The build follows B-SE-01, the item that names the code; the
-   independent review accepted that; the spec text is the owner's to reconcile. (b) A-32: the base's
+   observation) INSUFFICIENT_EVIDENCE / info. The build follows B-SE-01, the item that names the code; that is this
+   build's reading, not a measured or reviewed result; the spec text is the owner's to reconcile. (b) A-32: the base's
    `agents/public_suffix_list.dat` is MPL-2.0, not on the approved licence list; unchanged here, the owner's
-   decision.
+   decision. (c) B-RB-01 says a group applies when its user-agent value EQUALS the crawler's product token;
+   `primitives/robots.py` takes the token before a `/` (Google's parser: `User-agent: Googlebot/2.1` is a
+   Googlebot group), and the RFC 9309 oracle follows the spec text. The reviewer's mutant r08 (the raw value) is
+   therefore the spec-literal behaviour and no honest test kills it; robots is a certified row and is unchanged:
+   the owner's to decide.
 
 ## Unlock list
 

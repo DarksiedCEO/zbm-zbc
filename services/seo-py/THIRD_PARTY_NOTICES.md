@@ -7,7 +7,8 @@ Every data file bundled in this service's source tree (`src/`) and in its test t
 ## src/primitives/cldr_validity.txt
 
 - What: the language, script and region subtags of the CLDR validity data (statuses regular, special,
-  macrolanguage, macroregion, deprecated, private_use, unknown), one line per kind; used by Roman to validate a
+  macrolanguage, macroregion, deprecated, private_use, reserved, unknown; `reserved` holds part of the
+  BCP 47 private-use ranges qaa~qtz, Qaaa~Qabx, AA, QM~QZ, XA~XZ), one line per kind; used by Roman to validate a
   page's `lang` (spec B-RO-05, D-01 L, Q-05).
 - Source: Unicode CLDR release-48, github.com/unicode-org/cldr commit acd6d88ae493633240e19a87a721076a8a75c310
   (2025-10-23), `common/validity/{language,script,region}.xml`, derived by `devtools/conformance/cldr_extract.py`.
@@ -29,7 +30,7 @@ Every data file bundled in this service's source tree (`src/`) and in its test t
 - Source: publicsuffix.org (Mozilla).
 - License: MPL-2.0
 - Note: MPL-2.0 is not on the owner-approved list of spec A-32 (CC-BY-4.0, Unicode-3.0, MIT-CMU, CNRI-Python,
-  PDFium) and is a file-level copyleft licence: OPEN QUESTION for the owner (Wave-1 v2 report). The file is unmodified.
+  PDFium) and is a file-level copyleft licence: APPROVED by the owner on 2026-11-14 (A-32): shipped unmodified with this notice; any change to the file itself is published under MPL-2.0. The file is unmodified.
 
 ## src/agents/common_words.txt
 
