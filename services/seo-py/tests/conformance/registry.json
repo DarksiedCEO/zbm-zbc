@@ -1,0 +1,307 @@
+{
+ "spec": "priya-spec/1.1",
+ "floor": 136,
+ "items": {
+  "Z-1": [
+   "test_priya_matrix.py::test_M3_Z1_every_cell_alone_and_in_context_drops_ci",
+   "test_priya_service_path.py::test_Z1_Z2_service_path_list_rows_reach_no_output",
+   "test_priya_reviewer_corpora.py::test_C5_Z1_rv19_m1_ci",
+   "test_priya_c2_glue.py::test_C2_every_glue_character_in_every_position_for_every_class"
+  ],
+  "Z-2": [
+   "test_priya_service_path.py::test_Z1_Z2_service_path_list_rows_reach_no_output",
+   "test_priya_service_path.py::test_Z2_service_path_heavy_12000_list_rows"
+  ],
+  "C1": [
+   "test_priya_classes_closed.py::test_C1_card_values_are_cards"
+  ],
+  "C2": [
+   "test_priya_classes_closed.py::test_C2_nanp_values_are_nanp"
+  ],
+  "C3": [
+   "test_priya_classes_closed.py::test_C3_e164_values_are_e164"
+  ],
+  "C4": [
+   "test_priya_classes_closed.py::test_C4_vanity_values_are_vanity"
+  ],
+  "C5": [
+   "test_priya_classes_closed.py::test_C5_ssn_values_are_ssns"
+  ],
+  "C6": [
+   "test_priya_classes_closed.py::test_C6_email_values_are_mailboxes_any_tld"
+  ],
+  "C7": [
+   "test_priya_classes_closed.py::test_C7_address_values_are_addresses"
+  ],
+  "M-1": [
+   "test_priya_matrix.py::test_M1_matrix_shape",
+   "test_priya_matrix.py::test_M1_generators_are_pure_functions_of_seed_and_index"
+  ],
+  "M-2": [
+   "test_priya_boundary.py::test_M2_boundary_set_every_case_drops"
+  ],
+  "M-3": [
+   "test_priya_matrix.py::test_M3_Z1_every_cell_alone_and_in_context_drops_ci"
+  ],
+  "CP-1": [
+   "test_priya_composed.py::test_CP1_transforms_per_class"
+  ],
+  "CP-2": [
+   "test_priya_composed.py::test_CP2_every_ordered_pair_outside_one_family"
+  ],
+  "CP-3": [
+   "test_priya_composed.py::test_CP3_structural_no_gap_over_three_and_none_inside_a_word"
+  ],
+  "CP-4": [
+   "test_priya_composed.py::test_CP4_residual_ci_4000",
+   "test_priya_composed.py::test_CP4_residual_heavy_42000",
+   "test_priya_reviewer_corpora.py::test_C5_CP4_rv20_cp20_ci",
+   "test_priya_reviewer_corpora.py::test_C5_CP4_rv20_cp20_heavy"
+  ],
+  "LP-1": [
+   "test_priya_lost_protection.py::test_LP1_LP2_matrix_ci_draw",
+   "test_priya_lost_protection.py::test_LP1_LP2_boundary_set",
+   "test_priya_lost_protection.py::test_LP1_LP2_composed_ci_and_attack_corpus",
+   "test_priya_lost_protection.py::test_LP1_LP2_heavy_draws",
+   "test_priya_lost_protection.py::test_LP1_every_personal_corpus_has_frozen_bits",
+   "test_priya_lost_protection.py::test_LP1_LP2_full_glue_set_and_glued_vanity"
+  ],
+  "LP-2": [
+   "test_priya_lost_protection.py::test_LP1_LP2_matrix_ci_draw"
+  ],
+  "LP-3": [
+   "test_priya_lost_protection.py::test_LP3_glued_trim_only_for_the_closed_unit_model_list"
+  ],
+  "OQ-1": [
+   "test_priya_ordinary.py::test_OQ1_corpus_shape"
+  ],
+  "OQ-2": [
+   "test_priya_ordinary.py::test_OQ2_every_drop_labelled"
+  ],
+  "OQ-3": [
+   "test_priya_ordinary.py::test_OQ3_list_mandated_drops_are_required"
+  ],
+  "OQ-4": [
+   "test_priya_ordinary.py::test_OQ4_not_mandated_drops_equal_the_adr_table",
+   "../test_query_privacy_r21.py::test_sizes_and_product_codes_that_decode_to_a_short_x_at_y_are_kept"
+  ],
+  "OQ-5": [
+   "test_priya_ordinary.py::test_OQ5_text_classes_drop_nothing"
+  ],
+  "OI-1": [
+   "test_priya_owner_items.py::test_OI1_zip_plus_year_spelling_an_ssn_is_dropped"
+  ],
+  "OI-2": [
+   "test_priya_owner_items.py::test_OI2_separator_spelled_emails_are_dropped"
+  ],
+  "OI-3": [
+   "test_priya_owner_items.py::test_OI3_plus_up_to_three_characters_before_the_first_digit"
+  ],
+  "PF-1": [
+   "test_priya_perf.py::test_PF1_median_rise_vs_both_baselines_heavy"
+  ],
+  "PF-2": [
+   "test_priya_perf.py::test_PF2_linear_and_bounded_ci",
+   "test_priya_perf.py::test_PF2_linear_and_bounded_heavy",
+   "test_priya_perf.py::test_PF2_over_long_query_is_dropped_whole"
+  ],
+  "PF-3": [
+   "../test_query_privacy_r19.py::test_priya_classifies_each_text_once"
+  ],
+  "G-6": [
+   "test_priya_mutants_pinned.py::test_G6_m09_e164_at_eight_digits",
+   "test_priya_mutants_pinned.py::test_G6_m10_plus_separated_from_the_first_digit",
+   "test_priya_mutants_pinned.py::test_G6_context_window_check",
+   "test_priya_mutants_pinned.py::test_G6_vanity_gap_of_three",
+   "test_priya_mutants_pinned.py::test_G6_address_context_of_three_tokens_and_more",
+   "test_priya_mutants_pinned.py::test_G6_card_at_thirteen_digits",
+   "test_priya_mutants_pinned.py::test_G6_uatp_on",
+   "test_priya_mutants_pinned.py::test_G6_diners_36_on",
+   "../test_query_privacy_r20.py::test_encoded_email_reversed_is_read_by_the_reversed_window_search",
+   "../test_query_privacy_r20.py::test_gtin_exemption_needs_a_valid_check_digit",
+   "../test_query_privacy_r21.py::test_address_inside_ascii_brackets_glued_to_words",
+   "../test_query_privacy_r21.py::test_upper_case_address_glued_to_a_word_of_another_script_raw_text"
+  ],
+  "G-9": [
+   "test_priya_routes.py::test_G9_no_auth_is_401",
+   "test_priya_routes.py::test_G9_other_departments_are_refused_and_get_no_ledger_body",
+   "test_priya_routes.py::test_G9_cross_tenant_reads_see_nothing"
+  ],
+  "D01": [
+   "test_priya_matrix.py::test_D01_matrix_ci",
+   "test_priya_matrix.py::test_D01_matrix_heavy"
+  ],
+  "D02": [
+   "test_priya_matrix.py::test_D02_matrix_ci",
+   "test_priya_matrix.py::test_D02_matrix_heavy"
+  ],
+  "D03": [
+   "test_priya_matrix.py::test_D03_matrix_ci",
+   "test_priya_matrix.py::test_D03_matrix_heavy"
+  ],
+  "D04": [
+   "test_priya_matrix.py::test_D04_matrix_ci",
+   "test_priya_matrix.py::test_D04_matrix_heavy"
+  ],
+  "D05": [
+   "test_priya_matrix.py::test_D05_matrix_ci",
+   "test_priya_matrix.py::test_D05_matrix_heavy"
+  ],
+  "D06": [
+   "test_priya_matrix.py::test_D06_matrix_ci",
+   "test_priya_matrix.py::test_D06_matrix_heavy"
+  ],
+  "D07": [
+   "test_priya_matrix.py::test_D07_matrix_ci",
+   "test_priya_matrix.py::test_D07_matrix_heavy"
+  ],
+  "D08": [
+   "test_priya_matrix.py::test_D08_matrix_ci",
+   "test_priya_matrix.py::test_D08_matrix_heavy"
+  ],
+  "D09": [
+   "test_priya_matrix.py::test_D09_matrix_ci",
+   "test_priya_matrix.py::test_D09_matrix_heavy"
+  ],
+  "D10": [
+   "test_priya_matrix.py::test_D10_matrix_ci",
+   "test_priya_matrix.py::test_D10_matrix_heavy"
+  ],
+  "D11": [
+   "test_priya_matrix.py::test_D11_matrix_ci",
+   "test_priya_matrix.py::test_D11_matrix_heavy"
+  ],
+  "D12": [
+   "test_priya_matrix.py::test_D12_matrix_ci",
+   "test_priya_matrix.py::test_D12_matrix_heavy"
+  ],
+  "D13": [
+   "test_priya_matrix.py::test_D13_matrix_ci",
+   "test_priya_matrix.py::test_D13_matrix_heavy"
+  ],
+  "D14": [
+   "test_priya_matrix.py::test_D14_matrix_ci",
+   "test_priya_matrix.py::test_D14_matrix_heavy"
+  ],
+  "D15": [
+   "test_priya_matrix.py::test_D15_matrix_ci",
+   "test_priya_matrix.py::test_D15_matrix_heavy"
+  ],
+  "D16": [
+   "test_priya_matrix.py::test_D16_matrix_ci",
+   "test_priya_matrix.py::test_D16_matrix_heavy"
+  ],
+  "D17": [
+   "test_priya_matrix.py::test_D17_matrix_ci",
+   "test_priya_matrix.py::test_D17_matrix_heavy"
+  ],
+  "D18": [
+   "test_priya_matrix.py::test_D18_matrix_ci",
+   "test_priya_matrix.py::test_D18_matrix_heavy"
+  ],
+  "D19": [
+   "test_priya_matrix.py::test_D19_matrix_ci",
+   "test_priya_matrix.py::test_D19_matrix_heavy"
+  ],
+  "D20": [
+   "test_priya_matrix.py::test_D20_matrix_ci",
+   "test_priya_matrix.py::test_D20_matrix_heavy"
+  ],
+  "D21": [
+   "test_priya_matrix.py::test_D21_matrix_ci",
+   "test_priya_matrix.py::test_D21_matrix_heavy"
+  ],
+  "D22": [
+   "test_priya_matrix.py::test_D22_matrix_ci",
+   "test_priya_matrix.py::test_D22_matrix_heavy"
+  ],
+  "D23": [
+   "test_priya_matrix.py::test_D23_matrix_ci",
+   "test_priya_matrix.py::test_D23_matrix_heavy"
+  ],
+  "D24": [
+   "test_priya_matrix.py::test_D24_matrix_ci",
+   "test_priya_matrix.py::test_D24_matrix_heavy"
+  ],
+  "v1.1-C-1": [
+   "test_priya_boundary.py::test_M2_boundary_set_every_case_drops",
+   "../test_query_privacy_r20.py::test_the_lists_are_the_closed_lists_of_the_spec",
+   "../test_query_privacy_r20.py::test_every_at_word_with_every_dot_word_in_every_spelling_and_case",
+   "../test_query_privacy_r20.py::test_hyphenated_at_words_spaced_and_run_together",
+   "../test_query_privacy_r20.py::test_every_pair_rot13_reversed_and_word_reversed_and_chunked",
+   "../test_query_privacy_r20.py::test_uppercase_french_spelled_emails_round18_dropped_by_accident_now_by_rule"
+  ],
+  "v1.1-C-2": [
+   "../test_query_privacy_r20.py::test_spelled_emails_ended_by_ideographic_or_fullwidth_punctuation_before_cjk_context",
+   "../test_query_privacy_r20.py::test_addresses_glued_to_fullwidth_or_ideographic_punctuation_and_context",
+   "../test_query_privacy_r20.py::test_encoded_email_chunks_glued_to_fullwidth_punctuation_in_context",
+   "../test_query_privacy_r20.py::test_bracketed_email_chunked_inside_its_brackets_in_context",
+   "../test_query_privacy_r20.py::test_spelled_email_glued_to_a_long_word_of_another_script",
+   "../test_query_privacy_r20.py::test_address_glued_to_a_word_of_another_script_with_no_punctuation",
+   "../test_query_privacy_r20.py::test_rot13_or_word_reversed_spelled_email_ended_by_an_ellipsis_before_cjk",
+   "test_priya_c2_glue.py::test_C2_every_glue_character_in_every_position_for_every_class",
+   "../test_query_privacy_r21.py::test_address_glued_by_every_glue_character_to_a_latin_word",
+   "../test_query_privacy_r21.py::test_email_tld_glued_by_every_glue_character_before_cjk_arabic_devanagari",
+   "../test_query_privacy_r21.py::test_encoded_email_glued_or_chunked_by_every_glue_character",
+   "../test_query_privacy_r21.py::test_sep_spelled_email_ended_by_an_ascii_full_stop_glued_to_cjk",
+   "../test_query_privacy_r21.py::test_encoded_email_chunked_one_character_a_word_is_still_dropped",
+   "../test_query_privacy_r21.py::test_address_with_an_ascii_full_stop_glued_to_the_next_word",
+   "../test_query_privacy_r21.py::test_sep_spelled_email_whose_local_part_ends_in_an_at_word"
+  ],
+  "v1.1-C-3": [
+   "test_priya_composed.py::test_CP4_residual_heavy_42000",
+   "test_priya_reviewer_corpora.py::test_C5_CP4_rv18_p2v2_ci",
+   "test_priya_reviewer_corpora.py::test_C5_CP4_rv18_p2v2_heavy",
+   "test_priya_reviewer_corpora.py::test_C5_CP4_rv19_cp19_ci",
+   "test_priya_reviewer_corpora.py::test_C5_CP4_rv19_cp19_heavy",
+   "test_priya_reviewer_corpora.py::test_C5_CP4_rv19_cpx19_ci",
+   "test_priya_reviewer_corpora.py::test_C5_CP4_rv19_cpx19_heavy",
+   "../test_query_privacy_r20.py::test_gap_of_three_characters_that_normalisation_widens",
+   "../test_query_privacy_r20.py::test_digit_groups_with_widened_gaps_and_no_number_word",
+   "../test_query_privacy_r20.py::test_gap_of_a_separator_space_and_a_letter_touching_a_number_word",
+   "../test_query_privacy_r20.py::test_number_word_touching_letters_and_symbols_of_one_gap",
+   "../test_query_privacy_r20.py::test_vanity_with_other_script_letters_the_fold_widens",
+   "../test_query_privacy_r20.py::test_url_encoded_email_reversed_whole_or_word_by_word",
+   "../test_query_privacy_r20.py::test_script_view_counts_one_character_for_one",
+   "../test_query_privacy_r20.py::test_gap_of_letters_nfkc_writes_as_two_or_three_letters",
+   "../test_query_privacy_r20.py::test_short_url_encoded_email_reversed_whole_or_word_by_word"
+  ],
+  "v1.1-C-4": [
+   "../test_query_privacy_r20.py::test_number_word_inside_an_ordinary_word_is_not_a_disguise",
+   "../test_query_privacy_r20.py::test_ordinary_words_holding_number_words_next_to_digit_groups_are_kept",
+   "../test_query_privacy_r20.py::test_in_word_reading_needs_units_on_both_sides_of_every_gap",
+   "../test_query_privacy_r20.py::test_polka_dot_dress_stays_dropped_for_the_composed_pair_bar",
+   "../test_query_privacy_r13.py::test_year_date_probe_has_no_over_drop",
+   "test_priya_c2_glue.py::test_C4_spelled_code_digit_glued_to_the_keypad_letters",
+   "../test_query_privacy_r21.py::test_spelled_code_digit_glued_to_the_keypad_letters",
+   "../test_query_privacy_r21.py::test_a_number_word_glued_to_an_ordinary_word_without_a_code_and_seven_is_kept"
+  ],
+  "v1.1-C-5": [
+   "test_priya_reviewer_corpora.py::test_C5_reviewer_corpora_in_the_registry",
+   "test_priya_manifest.py::test_C5_ported_generators_reproduce_the_reviews_files",
+   "test_priya_manifest.py::test_manifest_corpus_stream_is_frozen",
+   "test_priya_lost_protection.py::test_LP1_LP2_reviewer_corpora_ci",
+   "test_priya_lost_protection.py::test_LP1_LP2_reviewer_corpora_heavy",
+   "test_priya_reviewer_corpora.py::test_C5_Z1_rv18_p1_ci",
+   "test_priya_reviewer_corpora.py::test_C5_Z1_rv18_p1_heavy",
+   "test_priya_reviewer_corpora.py::test_C5_Z1_rv18_bnd_ci",
+   "test_priya_reviewer_corpora.py::test_C5_Z1_rv18_bnd_heavy",
+   "test_priya_reviewer_corpora.py::test_C5_Z1_rv19_m1_ci",
+   "test_priya_reviewer_corpora.py::test_C5_Z1_rv19_m1_heavy",
+   "test_priya_reviewer_corpora.py::test_C5_Z1_rv19_b19_ci",
+   "test_priya_reviewer_corpora.py::test_C5_Z1_rv19_b19_heavy",
+   "test_priya_reviewer_corpora.py::test_C5_OQ_rv18_ord_ci",
+   "test_priya_reviewer_corpora.py::test_C5_OQ_rv18_ord_heavy",
+   "test_priya_reviewer_corpora.py::test_C5_OQ_rv19_oq19_ci",
+   "test_priya_reviewer_corpora.py::test_C5_OQ_rv19_oq19_heavy",
+   "test_priya_reviewer_corpora.py::test_C5_Z1_rv20_m20_ci",
+   "test_priya_reviewer_corpora.py::test_C5_Z1_rv20_m20_heavy",
+   "test_priya_reviewer_corpora.py::test_C5_Z1_rv20_b20_ci",
+   "test_priya_reviewer_corpora.py::test_C5_Z1_rv20_b20_heavy",
+   "test_priya_reviewer_corpora.py::test_C5_Z1_rv20_vg_ci",
+   "test_priya_reviewer_corpora.py::test_C5_Z1_rv20_vg_heavy",
+   "test_priya_reviewer_corpora.py::test_C5_OQ_rv20_oq20_ci",
+   "test_priya_reviewer_corpora.py::test_C5_OQ_rv20_oq20_heavy"
+  ]
+ }
+}

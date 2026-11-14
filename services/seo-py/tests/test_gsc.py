@@ -782,6 +782,187 @@ def test_drift_rules_for_search_performance():
     assert c({}, {}) is None
 
 
+# Osei's query classes use the same address rule (search_performance 2026-11-08.3). The table is the round-3
+# reviewer's probe set: ordinary service queries with numbers are KEPT in their class, address forms are
+# pii_suspect, and the GAP rows are known misses, disclosed in ADR 0047 and ADR 0017 GSC-12 (an English-word state
+# code; a bare named street with no suffix). A GAP row that starts being caught is fine; the test then says so.
+ADDRESS_KEEP = (
+    "#1 rug cleaner", "ac unit 12000 btu", "24 hour emergency plumber near dr", "2 bedroom flat close to station",
+    "10 best hiking trail", "2 lane road", "cars under 30000 in 50000 miles", "or 50000 btu", "ohio 45000 jobs",
+    "rug cleaner near me", "4 way stop", "top 10 rug cleaners", "rug cleaner 90210", "apt 12 carpet cleaning",
+    "3days in st louis", "3 days in st louis", "10 things to do in st louis", "plumber 24 7", "best hvac 2024",
+    "2 car garage door repair", "1 hour heating and air", "3 tab shingle roof cost", "5 star plumbing",
+    "100 amp panel upgrade cost", "2x4 lumber price", "40 gallon water heater", "50 gallon water heater installed",
+    "3 ton ac unit price", "dentist open saturday", "emergency dentist 24 hours", "1st street dental",
+    "roof repair 2 story house", "5th avenue salon", "2 stroke oil", "24 hr locksmith", "7 eleven near me",
+    "car wash on main st", "pizza delivery 77002", "dentist 10001", "window tint 35 percent",
+    "1 bedroom apartment for rent", "15 minute oil change", "6 inch gutters", "3 season room cost", "20 amp outlet",
+    "200 sq ft deck cost", "4 dr sedan", "2 ct diamond ring", "10 ft christmas tree", "12 pl tile saw",
+    "3 st patricks day ideas", "5 dr hook songs", "2 rd round draft", "9 ln of code", "plumber in springfield il",
+    "best roofer in austin tx", "hvac tulsa ok", "texas 2024 tax", "ca 90210 zip code", "10 best st louis bbq",
+    "top 5 pizza places 5th ave", "route 66 diner", "i 95 traffic", "highway 101 closure", "1040 form",
+    "covid 19 test near me", "suite 200 dental", "flat 4b rug", "interstate 10 accident", "area code 512",
+    "zip code 78701", "call 911")
+ADDRESS_DROP = (
+    "123 main st springfield", "45 oak avenue apt 3", "po box 1234", "springfield il 62701", "90210-1234",
+    "123 main road", "42 wallaby way sydney", "123 main rd", "123 oak blvd", "500 sunset blvd los angeles ca 90028",
+    "77 maple lane", "12 elm ln", "1600 pennsylvania avenue nw washington dc", "1600 pennsylvania ave nw",
+    "350 5th ave new york ny 10118", "100 n main st", "100 main st n", "2200 sw 1st ave portland",
+    "123 main st suite 400", "123 main st #4", "123 main st apt 2b", "123 main st, austin, tx 78701",
+    "123 main street", "9 n elm blvd.", "123 main st springfield il 62701 hours", "plumber at 123 main st",
+    "rug cleaning 123 main st austin tx", "123 main st 2nd floor", "123 main st springfield il", "456 oak dr",
+    "456 oak drive", "10 downing st london", "742 evergreen terrace", "742 evergreen ter",
+    "1 infinite loop cupertino", "4059 mt lee dr hollywood", "233 s wacker dr chicago il 60606",
+    "123 main st near me", "123 e 45th st new york ny", "po box 77 austin tx", "boise id 83702", "honolulu hi 96813",
+    "columbus oh 43215", "austin tx 78701", "boston ma 02108", "12 kings road chelsea", "15 high street",
+    "8 oak court", "3 park place", "1 apple park way", "22 baker st apt 3 dentist", "123 main st unit 5",
+    "123 main st ste 100", "123 main st, apt 4, springfield, il 62701", "123 main st springfield missouri",
+    "55 water st 12th floor", "1 main st pmb 123", "po box 1234 springfield il 62701", "rr 2 box 15", "hc 1 box 9",
+    "123 main st springfield oregon 97477 phone")
+ADDRESS_GAP = (
+    "portland or 97201", "1200 broadway", "1200 broadway new york")
+ADDRESS_TABLE = [(q, "KEEP") for q in ADDRESS_KEEP] + [(q, "DROP") for q in ADDRESS_DROP]
+
+
+@pytest.mark.parametrize("q,want", ADDRESS_TABLE)
+def test_osei_address_rule_keeps_service_queries_and_drops_addresses(q, want):
+    assert (sp.classify_query(q, ["acme"]) == "pii_suspect") == (want == "DROP"), q
+
+
+@pytest.mark.parametrize("q", ADDRESS_GAP)
+def test_osei_address_rule_known_gaps_are_the_disclosed_ones(q):
+    assert sp.classify_query(q, ["acme"]) != "pii_suspect", f"{q!r} is now caught: drop it from the disclosed gaps"
+
+
+def test_osei_query_classes_count_addresses_as_pii_and_keep_the_rest():
+    from collections import Counter
+    got = Counter(sp.classify_query(q, ["acme"]) for q, _ in ADDRESS_TABLE)
+    assert got["pii_suspect"] == len(ADDRESS_DROP) and sum(got.values()) == len(ADDRESS_TABLE)
+    assert sp.classify_query("24 hour emergency plumber near dr", ["acme"]) == "other"
+    assert sp.classify_query("ac unit 12000 btu", ["acme"]) == "other"
+
+
+def test_overlong_queries_are_not_examined_and_count_as_personal_data():
+    cap = sp.MAX_QUERY_CHARS
+    ok = ("rug " * cap)[:cap]
+    assert len(ok) == cap and sp.classify_query(ok, ["acme"]) != "pii_suspect"
+    assert sp.classify_query(ok + "s", ["acme"]) == "pii_suspect"
+    assert sp.classify_query(" " * 50_000 + "1", ["acme"]) == "pii_suspect"     # the reviewer's slow input, now capped
+    assert sp.looks_like_address("a " * 300) is True
+
+
+# Round-4 reviewer's probe set (search_performance 2026-11-08.4): service-business queries by trade, and US, UK,
+# Canadian and French address forms. "123 n main" (a bare named street, no suffix) is a disclosed gap.
+ROUND4_KEEP = (
+    "plumber near me open now", "water heater 50 gal gas", "tankless water heater 199k btu",
+    "leaky faucet repair cost", "sump pump 1/2 hp", "drain cleaning 24/7", "1 1/2 inch pvc pipe",
+    "toilet flange 4 inch", "plumber on oak lane", "plumbing supply on harbor drive",
+    "emergency plumber court street", "hvac repair near me", "2.5 ton heat pump", "16 seer ac unit price",
+    "furnace 80000 btu", "mini split 12k", "ac not cooling 85 degrees", "carrier 24acc636a003 manual",
+    "trane xr14 4 ton", "hvac tune up 89 special", "goodman 3 ton 14 seer", "duct cleaning 3 bedroom house",
+    "house cleaning 3 bed 2 bath price", "move out cleaning 2 bedroom apartment", "carpet cleaning 3 rooms for 99",
+    "maid service 2 hours", "deep clean 1500 sq ft", "office cleaning 5 days a week", "window washing 2 story",
+    "pizza near me", "best tacos on 6th street", "sushi on main street", "brunch on king street",
+    "thai food 2 for 1", "restaurants open till 2am", "diner on route 9", "bbq 3 meat plate",
+    "wings 50 cent tuesday", "food court mall hours", "cafe on sunset boulevard", "steakhouse on park avenue",
+    "hair salon near me", "nail salon open sunday", "balayage 2 hours", "kids haircut 10 dollars",
+    "barber shop on water street", "salon on the way", "lash extensions 3 week fill", "oil change 5w-30",
+    "tires 225/65r17", "brake pads 2015 honda civic", "transmission repair 4l60e", "auto body shop drive thru",
+    "car wash 5 dollar tuesday", "battery group 24f", "2012 ford f150 3.5 ecoboost", "tow truck 10 miles cost",
+    "mechanic on 5th street", "alignment 4 wheel cost", "dui lawyer near me",
+    "divorce attorney 30 minute free consultation", "chapter 7 bankruptcy lawyer",
+    "personal injury lawyer 33 percent", "will and trust 500 flat fee", "lawyer on court street",
+    "law office on main way", "court date lookup", "small claims court 10000 limit",
+    "dentist near me accepting medicaid", "teeth cleaning 99 special", "dental implant 3000", "invisalign 6 months",
+    "emergency dentist open 24 hours", "wisdom teeth removal 4 teeth cost", "dentist on 3rd avenue",
+    "roof replacement 2000 sq ft", "30 year shingles", "gutter cleaning 1 story", "fence 6 ft cedar",
+    "concrete driveway 20x20", "pressure washing 2 car driveway", "garage door 16x7", "lane closures i 35",
+    "4 lane highway construction", "3 way switch wiring", "2 way radio repair", "dead end drive in theater",
+    "16 drive in movie", "cul de sac lot", "10 court cases", "3 court reporters near me", "2 drive shaft repair",
+    "the 5 love languages", "best 2 way mirror", "1 way street ticket",
+)
+ROUND4_DROP = (
+    "742 maple st", "1010 n oak ave", "88 w broad st apt 12", "2301 e camelback rd phoenix az 85016",
+    "15 cedar lane", "4 birch court", "900 river road", "77 sunset way", "12 harbor drive", "600 elm place",
+    "300 pine terrace", "1 market plaza", "5 elm loop", "20 grove st, boston, ma 02114", "1400 n state pkwy chicago",
+    "45 park ave suite 2100 new york ny 10016", "3001 s congress ave austin tx 78704", "250 w 57th st",
+    "17 old mill road", "102 spruce ln unit 4", "8 main st #3", "plumber 742 maple st", "dentist at 45 park ave",
+    "450 oak dr springfield", "9 lakeview cir", "1800 n highland ave los angeles ca 90028", "po box 55",
+    "p.o. box 9921 denver co 80201", "denver co 80202", "miami fl 33101", "seattle, wa 98101",
+    "atlanta ga 30303-1234", "10 elm st apt 5 new haven ct 06510", "5500 n western ave", "16 wedgewood dr",
+    "1225 chestnut street philadelphia pa", "61 bay st san francisco", "321 maple avenue", "100 old country rd",
+    "221b baker street london", "10 downing street", "14 high st oxford ox1 4ag", "sw1a 1aa",
+    "flat 3 22 queens road", "100 queen st w toronto on m5h 2n2", "m5v 3l9", "1 yonge st toronto",
+    "350 rue sherbrooke montreal", "4 privet drive little whinging",
+    "12 new street", "40 good hope rd", "88 old post road", "300 OLD MILL RD",
+)
+WORD_KEEP = ("2.5 ton heat pump", "tires 225/65r17", "2012 ford f150 3.5 ecoboost", "carrier 24acc636a003 manual",
+             "trane xr14 4 ton", "oil change 5w-30", "transmission repair 4l60e", "battery group 24f", "u.s flag",
+             "16 seer ac unit price", "goodman gsx140361 specs")
+# the UUID below is a sample value, built from parts
+WORD_DROP = ("a1b2c3d4e5f6g7", "token abcd1234efgh5678", "-".join(("f47ac10b", "58cc", "4372", "a567", "0e02b2c3d479")),  # noqa: FLY002
+             "deadbeefdeadbeef00", "abcdefgh.ijklmnop.qrstuvwx", "x" * 41, "jane_cv.pdf", "q9w8e7r6t5", "order 1234567",
+             "acct ab12345678")
+
+
+@pytest.mark.parametrize("q,want", [(q, "KEEP") for q in ROUND4_KEEP + WORD_KEEP]
+                         + [(q, "DROP") for q in ROUND4_DROP + WORD_DROP])
+def test_osei_round4_keep_drop_table(q, want):
+    assert (sp.classify_query(q, ["acme"]) == "pii_suspect") == (want == "DROP"), q
+
+
+# Round-5 regressions: ordinals and storage units are not UK inward codes, French place / route need an article,
+# old / new / good alone as a street name only at the end, and base64 / AWS-style secrets holding "/" drop again.
+# The secret-shaped values are built from parts so that no scanner sees a literal.
+ROUND5_KEEP = ("ps5 2tb ssd upgrade", "ipad pro m4 1tb", "bmw x5 3rd row", "audi q7 3rd row seating",
+               "galaxy s9 2nd hand", "m3 2nd gen", "6 place setting dinnerware", "bus 12 route map", "5 route options",
+               "3 new dr pepper flavors", "2 old court cases", "10 good place to eat", "5 good drive thru",
+               "tires 225/65r17", "5/8 inch plywood", "24/7 plumber", "1/2 hp sump pump")
+# round 8 (fail safe): URL-like queries are dropped whole; the round-5/6/7 URL KEEP rows moved here
+URL_LIKE_DROP = ("example.com/blog/how-to-clean-rugs", "acme.com/services/rug-cleaning tips",
+                 "docs.example.com/v2/api/reference", "api.stripe.com/v1/charges docs", "acme.com/blog/5-ways-to-save",
+                 "example.org/docs/v3/getting-started", "mysite.com/page2/contact", "moz.com/learn/seo/http2",
+                 "example.com/?page=2", "shop.com/search?q=rugs", "example.com/blog/2024-11-08-rug-care",
+                 "shop.com/products/sku12345678", "example.com/blog/internationalization-guide",
+                 "web2print-shop.com/catalogue/flyers")
+ROUND5_DROP = ("sw1a 1aa", "14 high st oxford ox1 4ag", "m1 1ae manchester", "12 new street", "6 place de la concorde",
+               "12 chemin du lac", "12 avenue des champs", "/".join(("wJalrXUtnFEMI", "K7MDENG", "bPxRfiCYEXAMPLEKEY")),  # noqa: FLY002
+               "/".join(("dGhpcy9pcy9h", "c2VjcmV0IGtleQ==")), "+".join(("YWJj/ZGVm", "Z2hp")))  # noqa: FLY002
+
+
+@pytest.mark.parametrize("q,want", [(q, "KEEP") for q in ROUND5_KEEP] + [(q, "DROP") for q in ROUND5_DROP])
+def test_osei_round5_keep_drop_table(q, want):
+    assert (sp.classify_query(q, ["acme"]) == "pii_suspect") == (want == "DROP"), q
+
+
+# Round 7 (fail safe): secrets smuggled into URL paths and query strings drop; only plain slugs and short version
+# tokens are exempt, so the round-6 URLs stay KEEP. Every secret shape is built from parts (no literal for scanners).
+_AKIA = "".join(("AKIA", "IOSFODNN7", "EXAMPLE"))  # noqa: FLY002
+ROUND7_DROP = (
+    "evil.com/" + _AKIA, "e.com/v1/" + _AKIA + "/docs", "host.com/" + "".join(("dGhpcyBp", "cyBhIHNl", "Y3JldA")),  # noqa: FLY002
+    "s.com/" + "".join(("AIza", "SyD-9tSrke72", "PouQMnMX-a7eZSW0jkFMBWY")),  # noqa: FLY002
+    "a.io/" + "".join(("x9k2m4", "p7q1w3", "e5r8t6y0")),  # noqa: FLY002
+    "evil.com/" + "".join(("a1b2c3d4", "e5f6g7h8")), "c.co/" + "/".join(("abc123def456", "ghi789jkl012")),  # noqa: FLY002
+    "e.com/" + "-".join(("p4ss", "w0rd", "1x9z", "k2m7", "q8r3")), "e.com/" + "".join(("s3cr3t", "p4ssw0rd", "1234")),  # noqa: FLY002
+    "evil.com/" + "".join(("k7mdeng2", "bpxrficy")), "evil.com/" + "".join(("abcdefghijklm", "nopqrstuvwxyz")),  # noqa: FLY002
+    "example.com/?token=" + "".join(("abcdefghij", "0123456789")), "example.com/x?key=" + "".join(("q8w7", "e6r5")),  # noqa: FLY002
+    "site.com/a?b=1&api_key=" + "".join(("zzzz", "zz9")), "example.com/?t=" + "".join(("a1b2c3d4e5", "f6g7h8i9")),  # noqa: FLY002
+    "reset ?password=" + "".join(("hunt", "er22")), _AKIA,  # noqa: FLY002
+)
+@pytest.mark.parametrize("q", ROUND7_DROP + URL_LIKE_DROP)
+def test_osei_round7_url_secrets_and_round8_url_like_queries_drop(q):
+    assert sp.classify_query(q, ["acme"]) == "pii_suspect", q
+
+
+def test_osei_round4_disclosed_gap():
+    assert sp.classify_query("123 n main", ["acme"]) != "pii_suspect"     # bare named street: disclosed, not caught
+
+
+def test_nfkc_expansion_past_the_cap_is_personal_data():
+    q = "\ufdfa" * 40                                                    # 40 characters, 720 after NFKC
+    assert len(q) <= sp.MAX_QUERY_CHARS and sp.classify_query(q, ["acme"]) == "pii_suspect"
+
+
 def test_query_classifier_pii_first_and_closed():
     b = ["acme"]
     for q in ("jane.doe@example.com", "jane (at) example dot com", "acme 5550100199", "call 555-010-0199",
