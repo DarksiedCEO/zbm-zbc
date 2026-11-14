@@ -243,6 +243,35 @@ def test_B_SE_12_noindex_per_engine_equals_the_oracle(seed):
     check_ran("B-SE-12", ran * 2)
 
 
+@pytest.mark.parametrize("seed", [5, 7, 11])
+def test_B_SE_12_same_name_meta_tags_are_combined(seed):
+    """rv-wave1v2 #1 (reviewer probe noix.py, ported): several meta robots tags of the same name (any case) all
+    count; a noindex in an earlier tag is never lost to a later one. Per engine equal to the oracle (O-NOIX)."""
+    import httpx
+    r = rng(seed, "se12-same")
+    names = ("robots", "ROBOTS", "googlebot", "GoogleBot", "bingbot", "oai-searchbot", "perplexitybot")
+    dirs = ("noindex", "NoIndex", "none", "nofollow", "noarchive", "max-snippet:-1", "index", "all")
+    ran = lost = 0
+    for i in range(200):
+        n = r.choice(names[:4] if r.random() < 0.7 else names)
+        metas = [(n, ", ".join(r.choice(dirs) for _ in range(r.randint(1, 2)))) for _ in range(r.randint(2, 4))]
+        if r.random() < 0.5:          # the shape that was lost: noindex first, an index tag of the same name after
+            metas = [(n, "noindex")] + [(n.upper(), "index, follow")] + metas[2:]
+        web = site(Web())
+        head = "".join(f"<meta name='{a}' content='{b}'>" for a, b in metas)
+        body = page(head=head, ld=ORG_LD).encode()
+        web.routes[("site.test", "/")] = (lambda req, b=body: httpx.Response(
+            200, headers=[("content-type", "text/html")], stream=httpx.ByteStream(b)))
+        _, s, _, _, _, _ = run3(web)
+        want = sorted(e for e, tok in bots.ENGINE_SEARCH_BOT.items() if onoix.noindex(tok, [], metas))
+        got = by_code(s, "NOINDEX")
+        assert (sorted(got[0]["detail"]["engines"]) if got else []) == want, (metas, got)
+        lost += bool(want) and any(b.strip().lower() == "index, follow" for _, b in metas[1:2])
+        ran += 1
+    assert lost >= 50, lost
+    check_ran("B-SE-12", ran * 3)                    # three seeds of 200
+
+
 CANON_CASES = [
     ("<link rel='canonical' href='javascript:x'>", {"CANONICAL_INVALID"}),
     ("<link rel='canonical' href='http://site.test/'><link rel='canonical' href='http://site.test/b'>",

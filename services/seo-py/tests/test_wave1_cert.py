@@ -582,12 +582,15 @@ def test_sitemap_too_large_quarantine_records_bytes_read(monkeypatch):
     whole = b"".join(chunks)
     assert q["reason"] == "XML_MALFORMED" and q["bytes"] == len(whole) and q["size_basis"] == "decoded"
     assert q["sha256"] == hashlib.sha256(whole).hexdigest()
-    # a declared length over the wire cap: stopped before reading, the declared size recorded (B-OS-01)
+    # a declared length over the wire cap: a streamed read is no longer refused unread (rv-wave1v2 #3 / #5): the
+    # octets within the cap are read, and their size and SHA-256 are recorded beside the declared size (B-OS-01)
     monkeypatch.setattr(delia, "WIRE_MAX", 256 * 1024)
     web.route("/sitemap.xml", b"x" * (300 * 1024), ctype="application/xml", content_length=str(300 * 1024))
     c, _, d, _, _ = run3(web)
     q = [x for x in c.osei.quarantined if x["kind"] == "sitemap"][0]
-    assert q["bytes"] == 0 and q["declared_bytes"] == 300 * 1024 and q["sha256"] == hashlib.sha256(b"").hexdigest()
+    assert q["reason"] == "TOO_LARGE" and q["size_basis"] == "read_before_stop"
+    assert q["bytes"] == 256 * 1024 and q["declared_bytes"] == 300 * 1024
+    assert q["sha256"] == hashlib.sha256(b"x" * (256 * 1024)).hexdigest()
 
 
 def test_sample_digests_match_the_log_task():

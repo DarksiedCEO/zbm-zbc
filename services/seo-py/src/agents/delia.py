@@ -201,7 +201,11 @@ def _xml(ctx, kind: str, url: str, body: bytes):
 # decoded bytes go through an incremental expat parser and only the locs / lastmods are kept (bounded), so memory stays
 # within the request bound whatever the file size.
 PROTOCOL_MAX_BYTES = 52_428_800
-WIRE_MAX = PROTOCOL_MAX_BYTES                 # a gzip body on the wire is never larger than what it decodes to here
+# B-DE-03 (rv-wave1v2 #3): the wire cap sits above the protocol limit, so a plain body over the limit is measured by
+# the reader (decoded size > limit -> SITEMAP_TOO_LARGE ACT), never cut by the fetch first (-> UNREADABLE IE); gzip
+# adds at most a few octets per 64 KiB, so a gzip body over this on the wire decodes over the limit too
+WIRE_MAX = PROTOCOL_MAX_BYTES + 1024 * 1024
+DECODE_STEP = fetch_mod.DECODE_STEP          # A-11 (rv-wave1v2 #4): the most one zlib call returns
 _TAIL = 16
 
 
@@ -257,16 +261,20 @@ class _SitemapReader:
             return
         buf = chunk
         try:
-            while buf:
-                out = self.z.decompress(buf, PROTOCOL_MAX_BYTES - self.n + 1)
+            while True:
+                # bounded output per call (max_length), streamed on to the parser; zlib's held output is drained
+                out = self.z.decompress(buf, min(DECODE_STEP, PROTOCOL_MAX_BYTES - self.n + 1))
                 self._decoded(out)
                 buf = self.z.unconsumed_tail
-                if self.z.eof:
-                    rest = self.z.unused_data
-                    if not rest:
+                if not self.z.eof:
+                    if not buf and len(out) < DECODE_STEP:
                         break
-                    self.z = zlib.decompressobj(16 + zlib.MAX_WBITS)
-                    buf = rest
+                    continue
+                rest = self.z.unused_data
+                if not rest:
+                    break
+                self.z = zlib.decompressobj(16 + zlib.MAX_WBITS)
+                buf = rest
         except zlib.error:
             self.state = "DECOMPRESS_FAILED"
             raise _Stop() from None
@@ -296,10 +304,10 @@ class _SitemapReader:
         if not b:
             return
         self.n += len(b)
+        self.decoded.update(b)                      # B-OS-01: the hash is of every byte counted in ``n``
         if self.n > PROTOCOL_MAX_BYTES:
             self.state = "TOO_LARGE"
             raise _Stop()
-        self.decoded.update(b)
         if self.p is None:
             self.head += b
             if len(self.head) < 256:
@@ -477,6 +485,11 @@ def _sitemaps(ctx, facts: dict) -> list:
             continue
         reader.finish()
         if reader.state == "TOO_LARGE":
+            # B-OS-01 (rv-wave1v2 #5): the decoded bytes read before the stop, their real size and SHA-256
+            cl = f.headers.get("content-length") or ""
+            ctx.osei.quarantine("sitemap", "TOO_LARGE", sm, None, partial={
+                "bytes_read": reader.n, "sha256": reader.decoded.hexdigest(),
+                "declared": int(cl) if cl.isdigit() and len(cl) < 19 else None})
             out.append(finding("SITEMAP_TOO_LARGE", "medium", "measured", "ACT", url=su.safe_url(sm), capability="P3",
                                detail={"limit": PROTOCOL_MAX_BYTES, "note": "the sitemaps.org protocol limits a "
                                        "sitemap to 52,428,800 bytes uncompressed; this one is larger"}))
@@ -554,7 +567,8 @@ def _url_checks(ctx, urls: list, facts: Optional[dict] = None) -> list:
     parsed = ctx.robots.get("parsed") if ctx.robots else None
     work = robots_mod.Work(URL_CHECK_WORK)
     checked = 0
-    for i, (u, sm) in enumerate(urls):
+    sampled = 0     # B-DE-11 (rv-wave1v2 #2): the sample is the first BLOCK_SAMPLE same-site, valid URLs
+    for u, sm in urls:
         p = split_url(u)
         if p is None or p.scheme not in ("http", "https") or not p.hostname:
             bad_abs.append(u)
@@ -562,7 +576,8 @@ def _url_checks(ctx, urls: list, facts: Optional[dict] = None) -> list:
         if not ctx.same_site(p.hostname):
             other_host.append(u)
             continue
-        if parsed is not None and i < BLOCK_SAMPLE:
+        if parsed is not None and sampled < BLOCK_SAMPLE:
+            sampled += 1
             path = (p.path or "/") + (f"?{p.query}" if p.query else "")
             verdict = parsed.allowed("Googlebot", path, work)
             if verdict is not None:

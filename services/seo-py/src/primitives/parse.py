@@ -23,6 +23,7 @@ MAX_HEADINGS = 300
 MAX_JSONLD_BLOCKS = 30
 MAX_JSONLD_BYTES = 256 * 1024
 MAX_TEXT = 200_000
+ROBOTS_META_MAX_DIRECTIVES = 100   # B-SE-12: distinct directives kept per meta robots name (all same-name tags combined)
 STR_MAX = 500
 SCHEMA_RULES_VERSION = "2026-10-09.1"
 # type -> (required properties, recommended properties). Source note: drawn from schema.org type definitions and
@@ -159,7 +160,12 @@ def parse_html(html: str, base_url: str) -> dict:
     for mt in metas:
         name = (mt.get("name") or "").lower()
         if (name in ROBOTS_META_NAMES or name in _family_names()) and mt.get("content"):
-            robots_meta[name] = [x.strip().lower() for x in mt["content"].split(",") if x.strip()][:20]
+            # B-SE-12 (rv-wave1v2 #1): every same-name tag counts; the directives of all of them are combined
+            # (distinct, in order of appearance, bounded) so a noindex in an earlier tag is never overwritten
+            have = robots_meta.setdefault(name, [])
+            for x in [x.strip().lower() for x in mt["content"].split(",") if x.strip()][:20]:
+                if x not in have and len(have) < ROBOTS_META_MAX_DIRECTIVES:
+                    have.append(x)
         elif name == "description" and description is None:
             description = mt.get("content")
     canonicals = [lk["href"] for lk in p.links_rel if "canonical" in lk["rel"].split() and lk["href"]]

@@ -75,6 +75,7 @@ URL_MAX = 16_384
 # B-RB-08 / B-SE-03: robots.txt is read to its parse limit of DECODED octets; the bytes on the wire are bounded only
 # by this (and the deadline), so a body that decodes small (gzip of empty members) is read, never refused
 ROBOTS_WIRE_MAX = 64 * 1024 * 1024
+DECODE_STEP = 1024 * 1024        # A-11: the most one zlib call returns (output is streamed in steps of this size)
 # Only the web's standard ports are fetched (AEGIS L2): a URL or redirect naming any other port (an admin console, a
 # database, a service on a non-web port of a public host) is refused REFUSED_PORT.
 DEFAULT_PORTS = (80, 443)
@@ -320,6 +321,9 @@ class _Decoder:
         self.enc, self.limit, self.n, self.parts, self.d = encoding, limit, 0, [], None
         self.keep_prefix = keep_prefix
         self.sink = sink                        # streamed: decoded bytes go to the sink, nothing is kept here
+        # B-OS-01 (rv-wave1v2 #5): a streamed read keeps no bytes, so the size and SHA-256 of what was decoded and
+        # handed on are counted here, for the quarantine record of a stop (never an empty-body hash)
+        self.sunk, self.sunk_n = hashlib.sha256(), 0
 
     def _add(self, b: bytes) -> None:
         self.n += len(b)
@@ -329,6 +333,8 @@ class _Decoder:
             raise _Refused("TOO_LARGE", f"body larger than {self.limit} bytes (decoded)")
         if self.sink is not None:
             if b:
+                self.sunk.update(b)
+                self.sunk_n += len(b)
                 self.sink(b)
             return
         self.parts.append(b)
@@ -348,16 +354,23 @@ class _Decoder:
             self.d = zlib.decompressobj(wbits)
         buf = data
         try:
-            while buf:
-                self._add(self.d.decompress(buf, self.limit - self.n + 1))
+            while True:
+                # A-11 (rv-wave1v2 #4): each zlib call returns at most DECODE_STEP bytes (and never more than the
+                # budget + 1), so one call never holds the whole remaining budget in memory; output zlib still holds
+                # (a full step with all input consumed) is drained before the next chunk
+                out = self.d.decompress(buf, min(DECODE_STEP, self.limit - self.n + 1))
+                self._add(out)
                 buf = self.d.unconsumed_tail
-                if self.d.eof:
-                    # AEGIS N2: a gzip body may hold several members; each is decoded, all within the same budget
-                    rest = self.d.unused_data
-                    if not rest or self.enc not in ("gzip", "x-gzip"):
+                if not self.d.eof:
+                    if not buf and len(out) < DECODE_STEP:
                         break
-                    self.d = zlib.decompressobj(16 + zlib.MAX_WBITS)
-                    buf = rest
+                    continue
+                # AEGIS N2: a gzip body may hold several members; each is decoded, all within the same budget
+                rest = self.d.unused_data
+                if not rest or self.enc not in ("gzip", "x-gzip"):
+                    break
+                self.d = zlib.decompressobj(16 + zlib.MAX_WBITS)
+                buf = rest
         except zlib.error:
             raise _Refused("PROTOCOL_ERROR", "the body could not be decoded") from None
 
@@ -369,6 +382,13 @@ class _Decoder:
 
     def body(self) -> bytes:
         return b"".join(self.parts)
+
+    def read_so_far(self) -> dict:
+        """The ``partial`` of a stop (B-OS-01 ``read_before_stop``): size and SHA-256 of the decoded bytes read."""
+        if self.sink is not None:
+            return {"bytes_read": self.sunk_n, "sha256": self.sunk.hexdigest(), "declared": None}
+        got = self.body()
+        return {"bytes_read": len(got), "sha256": hashlib.sha256(got).hexdigest(), "declared": None}
 
 
 class Fetcher:
@@ -513,7 +533,10 @@ class Fetcher:
                         return resp.status_code, kept, None, url
                     declared = resp.headers.get("content-length")
                     cut = _BUDGET.truncate_at
-                    if cut is None and declared and declared.isdigit() and \
+                    # a streamed read (sink) is bounded by its own wire and decoded caps and measures the body
+                    # itself, so a declared length does not refuse it unread (B-DE-03: a plain over-limit sitemap
+                    # is measured TOO_LARGE, never refused before a byte is read)
+                    if cut is None and _BUDGET.sink is None and declared and declared.isdigit() and \
                             int(declared) > (_BUDGET.max_bytes or self.max_bytes):
                         raise _Refused("TOO_LARGE", f"declared body larger than {self.max_bytes} bytes",
                                        {"bytes_read": 0, "sha256": hashlib.sha256(b"").hexdigest(),
@@ -533,6 +556,11 @@ class Fetcher:
                             wire_max = max(self.max_bytes, ROBOTS_WIRE_MAX) if cut is not None else \
                                 (_BUDGET.max_bytes or self.max_bytes)
                             if raw > wire_max:
+                                if sink is not None:
+                                    # B-DE-03 (rv-wave1v2 #3): a streamed read measures up to its wire cap, whatever
+                                    # the chunking: the octets within the cap go to the sink first (which may stop
+                                    # the read itself, e.g. a plain sitemap over the protocol limit)
+                                    dec.feed(chunk[:len(chunk) - (raw - wire_max)])
                                 raise _Refused("TOO_LARGE", "body larger than this service reads (on the wire)")
                             if time.monotonic() > deadline:
                                 raise _Refused("TIMEOUT", "the response did not complete within the deadline")
@@ -545,9 +573,9 @@ class Fetcher:
                             _BUDGET.truncated = True            # the first ``cut`` bytes are the body (RFC 9309 2.5)
                             return resp.status_code, kept, dec.body(), url
                         if r.state == "TOO_LARGE" and r.partial is None:
-                            got = dec.body()                    # what was read before the stop (bounded)
-                            r.partial = {"bytes_read": len(got), "sha256": hashlib.sha256(got).hexdigest(),
-                                         "declared": None}
+                            r.partial = dec.read_so_far()       # what was read before the stop (bounded)
+                            if declared and declared.isdigit() and len(declared) < 19:
+                                r.partial["declared"] = int(declared)
                         raise
                     return resp.status_code, kept, dec.body(), url
         except _Refused:

@@ -2,7 +2,9 @@
 Build src/primitives/cldr_validity.txt from the CLDR validity data (common/validity/{language,script,region}.xml of
 Unicode CLDR, Unicode License v3 / SPDX Unicode-3.0). Usage: python cldr_extract.py <dir with the three XML files>
 <CLDR release name> <commit>. The output lists, per kind, every code whose idStatus is one of ACCEPTED (ranges such
-as ``Brah~i`` expanded); ``reserved`` codes are left out (they are not assigned).
+as ``Brah~i`` expanded). ``reserved`` is accepted (rv-wave1v2 #6): CLDR splits the BCP 47 private-use ranges
+(languages qaa~qtz, scripts Qaaa~Qabx, regions AA QM~QZ XA~XZ ZZ) between ``reserved`` and ``private_use``, and
+RFC 5646 makes every one of them valid.
 """
 
 from __future__ import annotations
@@ -11,7 +13,7 @@ import re
 import sys
 from pathlib import Path
 
-ACCEPTED = ("regular", "special", "macrolanguage", "macroregion", "deprecated", "private_use", "unknown")
+ACCEPTED = ("regular", "special", "macrolanguage", "macroregion", "deprecated", "private_use", "reserved", "unknown")
 ID = re.compile(r"<id type='(\w+)' idStatus='(\w+)'>([^<]*)</id>")
 
 

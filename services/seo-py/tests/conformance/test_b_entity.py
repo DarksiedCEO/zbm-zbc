@@ -72,15 +72,19 @@ def test_B_EN_01_comparisons_equal_the_reference_and_store_no_value(seed):
 
 
 def test_B_EN_02_missing_fields_named_only():
-    ent = record(name="Z Best Media", telephone="+1 555 010 0199", street_address="1 Main St")
-    web = site(Web())
-    web.route("/", page(ld=_ld("Organization", name="Z Best Media")))
-    _, _, _, _, pages, _ = run3(web)
+    # rv-wave1v2 #7 e03: street, locality AND region are asked of a LocalBusiness-like node only
+    ent = record(name="Z Best Media", telephone="+1 555 010 0199", street_address="1 Main St",
+                 locality="Los Angeles", region="California")
     from cert_web import ctx
-    e = entity_check.run(ctx(web), pages, ent)
-    miss = by_code(e, "ENTITY_FIELD_MISSING_IN_MARKUP")
-    assert [m["detail"]["field"] for m in miss] == ["telephone"]          # an Organization need not carry an address
-    assert all(set(m["detail"]) == {"field"} for m in miss) and sev(miss[0]) == ("medium", "measured", "ACT")
+    for typ, want in (("Organization", ["telephone"]),
+                      ("LocalBusiness", ["telephone", "street_address", "locality", "region"])):
+        web = site(Web())
+        web.route("/", page(ld=_ld(typ, name="Z Best Media")))
+        _, _, _, _, pages, _ = run3(web)
+        e = entity_check.run(ctx(web), pages, ent)
+        miss = by_code(e, "ENTITY_FIELD_MISSING_IN_MARKUP")
+        assert [m["detail"]["field"] for m in miss] == want, (typ, miss)    # an Organization need not carry an address
+        assert all(set(m["detail"]) == {"field"} for m in miss) and sev(miss[0]) == ("medium", "measured", "ACT")
 
 
 def test_B_EN_03_no_node():

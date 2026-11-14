@@ -68,6 +68,33 @@ LIMITS = ["Heuristic checklist, uncalibrated: passing every check does not mean 
 _BCP47 = re.compile(r"(?P<lang>[A-Za-z]{2,3})(?:-[A-Za-z]{3}){0,3}(?P<script>-[A-Za-z]{4})?"
                     r"(?P<region>-(?:[A-Za-z]{2}|[0-9]{3}))?(?:-(?:[A-Za-z0-9]{5,8}|[0-9][A-Za-z0-9]{3}))*"
                     r"(?:-[0-9A-WY-Za-wy-z](?:-[A-Za-z0-9]{2,8})+)*(?:-[Xx](?:-[A-Za-z0-9]{1,8})+)?")
+# RFC 5646 2.1: a private-use tag (``x-default``) and the grandfathered tags (section 2.2.8: the irregular ones and
+# the regular ones, valid only as whole tags) are valid tags with no language[-script][-region] to keep: each is
+# stored as its code (D-01: not on the allowlist), never as LANG_INVALID (rv-wave1v2 #6)
+_PRIVATE_USE = re.compile(r"[Xx](?:-[A-Za-z0-9]{1,8})+")
+GRANDFATHERED = frozenset(x.lower() for x in (
+    "en-GB-oed", "i-ami", "i-bnn", "i-default", "i-enochian", "i-hak", "i-klingon", "i-lux", "i-mingo", "i-navajo",
+    "i-pwn", "i-tao", "i-tay", "i-tsu", "sgn-BE-FR", "sgn-BE-NL", "sgn-CH-DE",
+    "art-lojban", "cel-gaulish", "no-bok", "no-nyn", "zh-guoyu", "zh-hakka", "zh-min", "zh-min-nan", "zh-xiang"))
+
+
+def _repeats(low: str) -> bool:
+    """RFC 5646 2.2.5 / 2.2.6: the same variant twice, or the same extension singleton twice, makes a tag invalid
+    (``de-1996-1996``, ``en-a-bbb-a-ccc``); nothing after the private-use ``x`` is compared."""
+    variants, singletons, in_ext = set(), set(), False
+    for sub in low.split("-")[1:]:
+        if len(sub) == 1:
+            if sub == "x":
+                break
+            if sub in singletons:
+                return True
+            singletons.add(sub)
+            in_ext = True
+        elif not in_ext and (len(sub) >= 5 or (len(sub) == 4 and sub[0].isdigit())):
+            if sub in variants:
+                return True
+            variants.add(sub)
+    return False
 
 
 # Subtag validity (spec B-RO-05 / D-01 L, Q-05): the CLDR validity data (Unicode-3.0), bundled as
@@ -96,11 +123,16 @@ def script_ok(code: str) -> bool:
 def safe_lang(v):
     """A page's ``lang`` as stored (B-RO-05): None when absent (or only white space), ``invalid`` when it is not a
     BCP 47 tag or its language subtag is not valid in CLDR, else language[-Script][-REGION] normalised (``en-US``,
-    ``zh-Hant-TW``), a script or region subtag that is not valid in CLDR left out."""
+    ``zh-Hant-TW``), a script or region subtag that is not valid in CLDR left out; a private-use or grandfathered
+    tag (valid, nothing of it on the allowlist) is its ``{c:lang:..}`` code."""
     if not v or not v.strip():
         return None
-    m = _BCP47.fullmatch(v.strip())
-    if not m:
+    t = v.strip()
+    low = t.lower()
+    if low in GRANDFATHERED or _PRIVATE_USE.fullmatch(t):
+        return codes.code("lang", low)
+    m = _BCP47.fullmatch(t)
+    if not m or _repeats(low):
         return "invalid"
     lang = m.group("lang").lower()
     if lang not in cldr("language"):

@@ -422,6 +422,105 @@
    "spec_item": "B-EN-01",
    "status": "live",
    "test": "test_b_entity.py::test_B_EN_01_mismatch_comparison_flags_equal_the_reference"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (ported reviewer probe)",
+   "id": "rv2-meta-same-name",
+   "source": "rv-wave1v2 review of c9caac1d (work/probe): noix.py: second same-name meta robots tag overwrote the first (6/600)",
+   "spec_item": "B-SE-12",
+   "status": "live",
+   "test": "test_b_selene.py::test_B_SE_12_same_name_meta_tags_are_combined"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (ported reviewer probe)",
+   "id": "rv2-sample-same-site",
+   "source": "rv-wave1v2 review of c9caac1d (work/probe): delia_probe sample_first_500_same_site: 450 other-host ahead of 100 blocked gave 50",
+   "spec_item": "B-DE-11",
+   "status": "live",
+   "test": "test_b_delia.py::test_B_DE_11_the_sample_is_the_first_500_same_site_valid_urls"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (ported reviewer probe)",
+   "id": "rv2-plain-too-large",
+   "source": "rv-wave1v2 review of c9caac1d (work/probe): big53.py / plain_over_protocol: plain 57 MB sitemap UNREADABLE IE, wire cap first",
+   "spec_item": "B-DE-03",
+   "status": "live",
+   "test": "test_b_delia.py::test_B_DE_03_a_plain_sitemap_over_the_protocol_limit_is_too_large"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (ported reviewer probe)",
+   "id": "rv2-gzip-peak",
+   "source": "rv-wave1v2 review of c9caac1d (work/probe): gzpeak.py: 51.7 MB gzip at 448:1 peaked 115.3 MiB (one zlib call up to 50 MiB)",
+   "spec_item": "A-11",
+   "status": "live",
+   "test": "test_a_xml.py::test_A_11_a_valid_50_mib_gzip_at_448_to_1_stays_within_96_mib"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (ported reviewer probe)",
+   "id": "rv2-partial-bytes",
+   "source": "rv-wave1v2 review of c9caac1d (work/probe): plain over-limit quarantine said 0 bytes + SHA of empty, read_before_stop",
+   "spec_item": "B-OS-01",
+   "status": "live",
+   "test": "test_b_delia.py::test_B_DE_03_a_plain_sitemap_over_the_protocol_limit_is_too_large"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (ported reviewer probe)",
+   "id": "rv2-partial-bytes-gz",
+   "source": "rv-wave1v2 review of c9caac1d (work/probe): over-limit gzip quarantine record of the decoded bytes read",
+   "spec_item": "B-OS-01",
+   "status": "live",
+   "test": "test_b_delia.py::test_B_OS_01_a_gzip_sitemap_over_the_limit_records_the_decoded_bytes_read"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (ported reviewer probe)",
+   "id": "rv2-lang-private-grandfathered",
+   "source": "rv-wave1v2 review of c9caac1d (work/probe): private-use, grandfathered and qaa~qtz tags were LANG_INVALID; repeated variants/singletons accepted",
+   "spec_item": "B-RO-05",
+   "status": "live",
+   "test": "test_b_roman.py::test_B_RO_05_private_use_grandfathered_and_repeats"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (ported reviewer probe)",
+   "id": "rv2-mut-f03",
+   "source": "rv-wave1v2 review of c9caac1d (work/probe): mutant f03 wire cap x64 survived",
+   "spec_item": "B-FT-05",
+   "status": "live",
+   "test": "test_b_fetch.py::test_B_FT_05_the_wire_cap_bounds_a_body_that_decodes_small"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (ported reviewer probe)",
+   "id": "rv2-mut-c05",
+   "source": "rv-wave1v2 review of c9caac1d (work/probe): mutant c05 text/ application/ media types readable survived (content_type plant)",
+   "spec_item": "D-05",
+   "status": "live",
+   "test": "test_d_plants.py::test_D_05_A_18_planted_values_readable_nowhere"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (ported reviewer probe)",
+   "id": "rv2-mut-o01",
+   "source": "rv-wave1v2 review of c9caac1d (work/probe): mutant o01 white-space lang survived",
+   "spec_item": "B-RO-05",
+   "status": "live",
+   "test": "test_b_roman.py::test_B_RO_05_white_space_lang_in_the_extract_is_missing"
+  },
+  {
+   "added": "2026-11-14",
+   "generator": "seeded / fixed (ported reviewer probe)",
+   "id": "rv2-mut-e03",
+   "source": "rv-wave1v2 review of c9caac1d (work/probe): mutant e03 region demanded of a plain Organization survived",
+   "spec_item": "B-EN-02",
+   "status": "live",
+   "test": "test_b_entity.py::test_B_EN_02_missing_fields_named_only"
   }
  ],
  "spec": "wave1-spec/1",

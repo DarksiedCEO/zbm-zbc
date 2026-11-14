@@ -114,7 +114,7 @@ def test_D_08_every_a18_surface_was_planted(planted):
             "x_robots_bot", "meta_robots_name", "homepage_phone_text", "redirect_host", "redirect_path",
             "redirect_query", "sitemap_loc_path", "sitemap_loc_query", "sitemap_loc_host", "sitemap_lastmod",
             "index_child", "namespace", "root_name", "llms_text", "llms_link", "log_ip", "log_path", "log_query",
-            "log_user_agent", "log_referer"}
+            "log_user_agent", "log_referer", "content_type"}
     assert want <= surfaces, want - surfaces
     assert len(want) >= 32
 

@@ -120,6 +120,38 @@ def test_B_FT_05_decoded_cap_and_codings():
     assert f.fetch("http://site.test/trail").state == "PROTOCOL_ERROR"
 
 
+def test_B_FT_05_the_wire_cap_bounds_a_body_that_decodes_small():
+    """rv-wave1v2 #7 f03: the bytes on the wire are bounded by themselves, not only by what they decode to: a
+    page of empty gzip members (300 KB on the wire, 0 bytes decoded) is refused TOO_LARGE at a 256 KiB cap, and
+    one just under the cap is read (decoded empty)."""
+    web = Web()
+    member = gzip.compress(b"")
+    web.route("/empty-members", member * (300_000 // len(member)), ctype="text/html", content_encoding="gzip")
+    web.route("/few-members", member * (200_000 // len(member)), ctype="text/html", content_encoding="gzip")
+    f = web.fetcher(max_bytes=256 * 1024)
+    r = f.fetch("http://site.test/empty-members")
+    assert r.state == "TOO_LARGE" and r.partial["bytes_read"] == 0, (r.state, r.partial)
+    ok = f.fetch("http://site.test/few-members")
+    assert ok.state == "OK" and ok.body == b"", (ok.state, len(ok.body or b""))
+
+
+@pytest.mark.parametrize("declared", [False, True])
+def test_B_FT_05_a_streamed_read_stopped_at_its_wire_cap_records_what_it_read(declared):
+    """rv-wave1v2 #3 / #5: a streamed (sink) read over its wire cap is measured, not refused unread on a declared
+    length; the octets within the cap reach the sink, and the TOO_LARGE partial is their size and SHA-256 (never 0
+    bytes and the SHA-256 of an empty body), the declared length beside it."""
+    import hashlib
+    body = bytes(range(256)) * 40                       # 10,240 octets, served as ONE chunk
+    hdr = [("content-type", "application/xml")] + ([("content-length", str(len(body)))] if declared else [])
+    web = Web()
+    web.routes[("site.test", "/s.xml")] = lambda req: httpx.Response(200, headers=hdr, stream=httpx.ByteStream(body))
+    got = []
+    r = web.fetcher().fetch("http://site.test/s.xml", sink=got.append, max_bytes=4096)
+    assert r.state == "TOO_LARGE" and b"".join(got) == body[:4096], (r.state, len(b"".join(got)))
+    assert r.partial["bytes_read"] == 4096 and r.partial["sha256"] == hashlib.sha256(body[:4096]).hexdigest()
+    assert r.partial["declared"] == (len(body) if declared else None)
+
+
 def test_B_FT_06_one_deadline_over_a_trickling_body():
     web = Web()
 

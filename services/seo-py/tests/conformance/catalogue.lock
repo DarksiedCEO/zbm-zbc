@@ -1,4 +1,4 @@
-47
+58
 r1-M-S1
 r1-S24-S26
 r1-health-stall
@@ -46,3 +46,14 @@ v2-subdomains
 v2-canonical-cut
 v2-gzip-media-type
 v2-entity-comparison-flags
+rv2-meta-same-name
+rv2-sample-same-site
+rv2-plain-too-large
+rv2-gzip-peak
+rv2-partial-bytes
+rv2-partial-bytes-gz
+rv2-lang-private-grandfathered
+rv2-mut-f03
+rv2-mut-c05
+rv2-mut-o01
+rv2-mut-e03

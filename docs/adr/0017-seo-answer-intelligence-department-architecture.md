@@ -1532,7 +1532,9 @@ V2. **Evidence map and owner displays** (spec 0.1, D-02f-h, D-06). Each audit's 
    same append as the report). `GET .../audits/{aid}?resolve=evidence` answers only the hub caller authenticated as
    the tenant (any other caller: 403 `EVIDENCE_OWNER_ONLY`) with every code resolved and cleaned (controls removed,
    160 characters); the client report (Markdown / HTML) resolves the same way before its own cleaning. A lost map
-   shows `[not available]` and `evidence_available: false`, never an error.
+   shows `[not available]` and `evidence_available: false`, never an error. Measured by the independent review of
+   c9caac1d (rv-wave1v2): the owner display resolved 4,520 of 4,520 planted codes (D-06), and 0 of 12,285 planted
+   values were readable in any stored or returned form (D-05).
 V3. **Robots and fetch** (spec sections 1-2). A sitemap or an ignored line no longer ends a run of user-agent lines
    (only a rule does; Google's parser; found by the conformance suite's RFC 9309 oracle); lines end at CR, LF or CRLF
    only; the parse limit is 512,000 OCTETS of the decoded body; robots.txt answering 429 is unreachable (Q-06); a body
@@ -1542,26 +1544,41 @@ V3. **Robots and fetch** (spec sections 1-2). A sitemap or an ignored line no lo
    a canonical / link URL is kept whole (parse no longer cuts hrefs at 2,000 characters: a cut canonical target was
    being fetched, found by the new war-room scenario); an explicit port 0 is refused; a kill switch engaged during
    the nested robots.txt fetch is `KILLED`; a truncated gzip / deflate body is `PROTOCOL_ERROR`. Robots matching
-   charges `len(path) x len(searched pieces) / 1024` units a rule tried (`FIND_COST_DIVISOR`): measured, a whole
-   step (2,000,000 units) of the costliest shapes costs at most 0.299 s CPU (needle of 50 octets x 4,348 rules,
-   2,047-octet paths; the same harness on 91db0abb: 3.57-8.09 s), and units per CPU millisecond range 1,856 (24,908
-   distinct prefixes) to 10,505 (27,530 rules all tried): 5.7x. Patterns and paths are compared as octet UNITS (one
+   charges `len(path) x len(searched pieces) / 1024` units a rule tried (`FIND_COST_DIVISOR`). Measured on this
+   loaded 2-vCPU box, a whole step (2,000,000 units) of the costliest shapes cost 0.299 s CPU in the builder's
+   harness (needle of 50 octets x 4,348 rules, 2,047-octet paths; the same harness on 91db0abb: 3.57-8.09 s) and
+   0.45 s in the independent review's harness (rv-wave1v2); both within the spec's 2.0 s a step (B-RB-09), and the
+   machine's speed is the factor (R-13). Units per CPU millisecond ranged 1,856 (24,908 distinct prefixes) to
+   10,505 (27,530 rules all tried): 5.7x. The review's RFC 9309 differential found 0 disagreements in 288,000
+   decisions. Patterns and paths are compared as octet UNITS (one
    character per escaped octet): before, a literal piece could match the hex digit inside an escape (`Disallow:
    /*%41` decided `//%7e*`, the `A` of the `%2A` of a raw `*`; also at 91db0abb), found by the lead-gate RFC 9309
    differential.
 V4. **Agents.** Selene: same site includes subdomains of the registered domain (B-CD-06); a meta robots tag named
    for any bot family token is read (B-SE-12); X-Robots-Tag header lines are read one by one (a bot prefix in one
    never reaches into the next). Delia: sitemaps are streamed through an incremental expat reader up to the
-   sitemaps.org limit (52,428,800 bytes uncompressed, `SITEMAP_TOO_LARGE` past it, Q-07); a valid 45,000-URL
+   sitemaps.org limit (52,428,800 bytes uncompressed, Q-07). `SITEMAP_TOO_LARGE` (medium, ACT) applies to a plain
+   sitemap past the limit as to a gzip one (round 2: the sitemap fetch's wire cap sits 1 MiB above the limit, a
+   streamed read is not refused on its declared length, and the octets within the cap reach the reader whatever
+   the chunking, so a plain 57 MB file is measured, no longer `SITEMAP_UNREADABLE` IE); both are quarantined
+   `TOO_LARGE`, `read_before_stop`, with the size and SHA-256 of the decoded bytes really read (was: 0 bytes and the
+   SHA-256 of an empty body). Each zlib call returns at most 1 MiB (`DECODE_STEP`, in the reader and in the
+   fetcher's content decoding), streamed on: a valid 51.7 MB gzip sitemap at about 449:1 peaked at 57.9 MiB traced
+   (the review measured 115.3 MiB before; bound 96 MiB, A-11). The listed-URL robots check samples the first 500
+   same-site, valid URLs (round 2: other-host and invalid URLs no longer use up the sample). A valid 45,000-URL
    sitemap of 6 MiB plain or 12 MiB gzip is read; a corrupt or truncated gzip is quarantined with its wire size and
    SHA-256 (`size_basis: wire`); a gzip body is known by a `.gz` name or its first two octets (one served as
    `application/gzip` at `/sitemap.xml` is read; the streamed reader had lost the media-type rule of 91db0abb, found
    by the old suite); UTF-16 and UTF-32 are decoded here (expat refuses `utf-16-le` spellings); a measured 404 / 410
    is `SITEMAP_MISSING` and counts in `sitemap_fetch_failures` (outcome PARTIAL, as at 91db0abb); the log sample is
-   the codes of whole paths. Roman: `lang` is validated
-   against the CLDR validity data (`primitives/cldr_validity.txt`, Unicode-3.0, CLDR 48); `LANG_INVALID` (low,
-   ACT) and readiness `lang_declared: fail` for a tag that is not BCP 47 or whose language CLDR does not know; types
-   readable only from the rule table. Entity check: no canonical value in any finding, the on-site value as
+   the codes of whole paths. Selene (round 2): the directives of every same-name meta robots tag are combined (a
+   noindex in a first tag was lost to a second). Roman: `lang` is validated
+   against the CLDR validity data (`primitives/cldr_validity.txt`, Unicode-3.0, CLDR 48, the BCP 47 private-use
+   ranges qaa~qtz / Qaaa~Qabx / AA QM~QZ XA~XZ ZZ included: CLDR files them `reserved` and `private_use`);
+   `LANG_INVALID` (low, ACT) and readiness `lang_declared: fail` for a tag that is not BCP 47 (a repeated variant or
+   extension singleton included) or whose language CLDR does not know; a private-use tag (`x-default`) or a
+   grandfathered one (`i-klingon`, `en-GB-oed`, the RFC 5646 list) is valid and stored as its `{c:lang:..}` code;
+   types readable only from the rule table. Entity check: no canonical value in any finding, the on-site value as
    `{c:entity:..}`. Osei: quarantine records have one closed shape and `size_basis` from a closed list. Log task:
    request targets up to 8,192 bytes are parsed.
 V5. **Suite and war room.** The conformance suite (one test or family per spec item, named by item id; catalogue
@@ -1569,6 +1586,12 @@ V5. **Suite and war room.** The conformance suite (one test or family per spec i
    llmstxt.org proposal, Google's robots meta documentation, RFC 5646 with the CLDR XML) and seven new war-room
    scenarios (`store-codes-planted`, `robots-wire-and-length`, `robots-cost-charging`, `host-labels`,
    `large-sitemaps`, `codes-and-drift`, `vault-unavailable-audit`). Mutants: `devtools/conformance/mutants.py`.
+V6. **Owner items (open).** (a) B-UL-02 against B-SE-01: B-SE-01 names `ROBOTS_UNREACHABLE` critical / ACT for an
+   unreachable robots.txt; B-UL-02, read literally, would make the network-failure case (this service's own failed
+   observation) INSUFFICIENT_EVIDENCE / info. The build follows B-SE-01, the item that names the code; the
+   independent review accepted that; the spec text is the owner's to reconcile. (b) A-32: the base's
+   `agents/public_suffix_list.dat` is MPL-2.0, not on the approved licence list; unchanged here, the owner's
+   decision.
 
 ## Unlock list
 

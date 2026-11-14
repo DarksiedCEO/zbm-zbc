@@ -122,3 +122,40 @@ def test_A_11_index_200_children_loops_cross_host_and_counts():
     assert len(xml_fetches) <= 1 + 10 and len(set(xml_fetches)) == len(xml_fetches)
     assert d["facts"]["sitemap_children_cross_host"] >= 1
     check_ran("A-11", 10)
+
+
+@pytest.mark.parametrize("served", ["gz_file", "content_encoding"])
+def test_A_11_a_valid_50_mib_gzip_at_448_to_1_stays_within_96_mib(served):
+    """rv-wave1v2 #4 (reviewer probe gzpeak.py, ported): a valid sitemap of 51.7 MB decoded, gzip at ~448:1, is read
+    whole with traced memory <= 96 MiB (A-11): each zlib call returns a bounded step, streamed to the parser, never
+    the whole remaining 50 MiB at once. Both as a .gz file and as Content-Encoding: gzip."""
+    import gzip
+    import tracemalloc
+
+    from agents import delia, selene
+    from agents_run import coding
+    from cert_web import ctx
+    n = 49_200
+    body = sitemap(["http://site.test/p/" + "a" * 1000] * n, lastmod=None).encode()
+    assert 51_000_000 < len(body) <= 52_428_800
+    data = gzip.compress(body, 9)
+    assert len(body) / len(data) > 400
+    del body
+    if served == "gz_file":
+        web = site(Web(), robots="User-agent: *\nAllow: /\nSitemap: http://site.test/s.xml.gz\n")
+        web.route("/s.xml.gz", data, ctype="application/gzip")
+    else:
+        web = site(Web(), robots="User-agent: *\nAllow: /\nSitemap: http://site.test/s.xml\n")
+        web.route("/s.xml", data, ctype="application/xml", content_encoding="gzip")
+    c = ctx(web)
+    with coding():
+        selene.run(c)
+        tracemalloc.start()
+        try:
+            d = delia.run(c)
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+    assert d["facts"]["sitemap_urls"] == n and not codes(d) & {"SITEMAP_TOO_LARGE", "SITEMAP_UNREADABLE",
+                                                               "SITEMAP_DECOMPRESS_FAILED"}, codes(d)
+    assert peak <= 96 * 2 ** 20, f"peak {peak / 2 ** 20:.1f} MiB"

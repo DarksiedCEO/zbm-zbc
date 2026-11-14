@@ -541,9 +541,11 @@ def test_empty_lang_is_missing(lang):
 
 
 @pytest.mark.parametrize("tag,stored", [("zh-Hant-TW", "zh-Hant-TW"), ("sr-Latn", "sr-Latn"), ("en-Abcd-US", "en-US"),
-                                        ("de-Zzzz", "de-Zzzz"), ("x-Qaab", "invalid")])
+                                        ("de-Zzzz", "de-Zzzz"), ("x-Qaab", "coded")])
 def test_script_subtag_is_validated_against_iso15924(tag, stored):
-    assert roman.safe_lang(tag) == stored
+    # rv-wave1v2 #6 (wave1-spec/1 B-RO-05): ``x-Qaab`` is a private-use tag, valid, stored as its code
+    got = roman.safe_lang(tag)
+    assert got.startswith("{c:lang:") if stored == "coded" else got == stored
 
 
 # ============================================================================================ entity check

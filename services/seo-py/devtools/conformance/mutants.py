@@ -59,6 +59,13 @@ MUTANTS = [
     m("rb-17", R, "key = key.strip().lower().replace(\"_\", \"-\")", "key = key.strip().replace(\"_\", \"-\")", TR),
     m("rb-22", R, "        p = _units(p)\n", "        p = canon(p)\n", TR),
     m("rb-23", R, "    return len(u) + 2 * sum(1 for ch in u if ord(ch) >= _UNIT_BASE)", "    return len(u)", TR),
+    # rv-wave1v2 r01: equivalent (the reviewer's proof, checked here)
+    m("rb-24", R, "out.append(ch if ch in _UNRESERVED else \"%\" + h.upper())",
+      "out.append(ch if ch in _UNRESERVED else \"%\" + h)", TR, status="equivalent",
+      proof="hex case inside canon: canon's output is read only by _units (robots.py), which turns every %XX escape "
+            "into ONE unit by int(hex, 16), case-insensitive; a decision, a specificity (_octets counts units) and "
+            "nothing stored ever sees the escape's hex case, so a lower-case escape decides exactly as an upper-case "
+            "one"),
     m("rb-18", R, 'return text.replace("\\r\\n", "\\n").replace("\\r", "\\n").split("\\n")',
       'return text.split("\\n")', TR),
     m("rb-19", R, "(len(p) * r.find_len) // FIND_COST_DIVISOR", "0", ["test_a_robots_cost.py"]),
@@ -99,6 +106,16 @@ MUTANTS = [
     m("ft-19", F, "            if time.monotonic() > deadline:", "            if False:", TF),
     m("ft-20", F, "        out[\"text\"] = r.body[:ROBOTS_MAX_BYTES]", "        out[\"text\"] = r.body[:1000]",
       ["test_b_selene.py", "test_a_robots_input.py"], status="behavioural"),
+    # rv-wave1v2 f03: the wire cap, as distinct from the decoded cap (a body of empty gzip members)
+    m("ft-21", F, "if raw > wire_max:", "if raw > wire_max * 64:", TF),
+    # rv-wave1v2 round 2: the changed fetch code (streamed partial, bounded decode step, declared length)
+    m("ft-22", F, "out = self.d.decompress(buf, min(DECODE_STEP, self.limit - self.n + 1))",
+      "out = self.d.decompress(buf, self.limit - self.n + 1)", ["test_a_xml.py"]),
+    m("ft-23", F, "                self.sunk.update(b)\n", "                pass\n", TF),
+    m("ft-24", F, "                                    dec.feed(chunk[:len(chunk) - (raw - wire_max)])",
+      "                                    pass", TF),
+    m("ft-25", F, "if cut is None and _BUDGET.sink is None and declared and declared.isdigit() and",
+      "if cut is None and declared and declared.isdigit() and", TF),
     # ------------------------------------------------------------------ codes / stored forms
     m("cd-01", C, "return h == d or h == \"www.\" + d for d in own)" if False else "    return any(h == d or h == \"www.\" + d for d in own)",
       "    return any(h.endswith(d) for d in own)", TC + ["test_a_ssrf.py"]),
@@ -132,6 +149,10 @@ MUTANTS = [
       ["test_b_selene.py"]),
     m("cd-21", U, "        if j - i >= 2 and sum(_digits(segs[k]) for k in range(i, j)) >= 7:",
       "        if j - i >= 2 and sum(_digits(segs[k]) for k in range(i, j)) >= 70:", TC),
+    # rv-wave1v2 c05: a media type is readable only on the closed list (D-05 content_type plant)
+    m("cd-22", U, "    return ctype if ctype in MEDIA_TYPES else codes.code(\"ctype\", ctype)",
+      "    return ctype if ctype.startswith((\"text/\", \"application/\")) else codes.code(\"ctype\", ctype)",
+      TC + ["test_d_plants.py"]),
     # ------------------------------------------------------------------ Selene
     m("se-01", S, "\"critical\" if per_path[\"/\"][\"allowed\"] is False", "\"high\" if per_path[\"/\"][\"allowed\"] is False",
       ["test_b_selene.py"]),
@@ -167,6 +188,9 @@ MUTANTS = [
       "    return f\"{kind}: {pat}\"", ["test_b_selene.py"]),
     m("se-20", S, "    if parsed is not None and parsed.lines_ignored:", "    if parsed is not None and parsed.lines_ignored > 1:",
       ["test_b_selene.py"]),
+    # rv-wave1v2 #1: every same-name meta robots tag counts (primitives/parse.py, Selene's extract)
+    m("se-21", "primitives/parse.py", "            have = robots_meta.setdefault(name, [])",
+      "            have = robots_meta[name] = []", ["test_b_selene.py"]),
     # ------------------------------------------------------------------ Delia
     m("de-01", D, "MAX_CHILDREN = 10", "MAX_CHILDREN = 11", ["test_b_delia.py"]),
     m("de-02", D, "                if not ctx.same_site(host_of(u)):\n                    children_cross_host += 1",
@@ -194,7 +218,7 @@ MUTANTS = [
       "            ctx.osei.quarantine(\"sitemap\", \"DECOMPRESS_FAILED\", sm, None, size=0,", ["test_b_osei.py"]),
     m("de-16", D, "        if p is not None and p.scheme in (\"http\", \"https\") and ctx.same_site(p.hostname):",
       "        if p is not None and p.scheme in (\"http\", \"https\"):", ["test_b_logs.py"]),
-    m("de-17", D, "        if parsed is not None and i < BLOCK_SAMPLE:", "        if parsed is not None:", ["test_b_delia.py"]),
+    m("de-17", D, "        if parsed is not None and sampled < BLOCK_SAMPLE:", "        if parsed is not None:", ["test_b_delia.py"]),
     m("de-18", D, "            if verdict is False:\n                blocked.append(u)", "            if verdict is not True:\n                blocked.append(u)",
       ["test_b_delia.py"]),
     m("de-19", D, "    if f.content_type not in (\"text/plain\", \"text/markdown\"):", "    if False:", ["test_b_delia.py"]),
@@ -203,6 +227,16 @@ MUTANTS = [
     m("de-22", D, "            if chunk[:2] == b\"\\x1f\\x8b\":", "            if False:", ["test_b_delia.py"]),
     m("de-21", D, "    complete = not facts.get(\"sitemap_fetch_failures\") and not facts.get(\"robots_unchecked\")",
       "    complete = True", ["test_b_delia.py"]),
+    # rv-wave1v2 round 2: the changed Delia code
+    m("de-23", D, "            sampled += 1\n", "            pass\n", ["test_b_delia.py"]),
+    m("de-24", D, "WIRE_MAX = PROTOCOL_MAX_BYTES + 1024 * 1024", "WIRE_MAX = PROTOCOL_MAX_BYTES", ["test_b_delia.py"]),
+    m("de-25", D, "out = self.z.decompress(buf, min(DECODE_STEP, PROTOCOL_MAX_BYTES - self.n + 1))",
+      "out = self.z.decompress(buf, PROTOCOL_MAX_BYTES - self.n + 1)", ["test_a_xml.py"]),
+    m("de-26", D, "            ctx.osei.quarantine(\"sitemap\", \"TOO_LARGE\", sm, None, partial={",
+      "            (lambda *a, **k: None)(\"sitemap\", \"TOO_LARGE\", sm, None, partial={", ["test_b_delia.py"]),
+    m("de-27", D, "        self.decoded.update(b)                      # B-OS-01",
+      "        self.decoded.update(b[:max(0, len(b) - (self.n - PROTOCOL_MAX_BYTES))])  # B-OS-01",
+      ["test_b_delia.py"]),
     # ------------------------------------------------------------------ Roman
     m("ro-01", RO, "TITLE_MAX, TITLE_MIN = 60, 10", "TITLE_MAX, TITLE_MIN = 61, 10", ["test_b_roman.py"]),
     m("ro-02", RO, "TITLE_MAX, TITLE_MIN = 60, 10", "TITLE_MAX, TITLE_MIN = 60, 9", ["test_b_roman.py"]),
@@ -238,6 +272,17 @@ MUTANTS = [
     m("ro-19", RO, "        if not title:\n            findings.append(finding(\"TITLE_MISSING\"", "        if False:\n            findings.append(finding(\"TITLE_MISSING\"",
       ["test_b_roman.py"]),
     m("ro-20", RO, "        if not x[\"description\"]:", "        if False:", ["test_b_roman.py"]),
+    # rv-wave1v2 o01: a white-space-only lang in the extract is missing whatever the parser did to it
+    m("ro-21", RO, "        if not (x[\"lang\"] or \"\").strip():", "        if not x[\"lang\"]:", ["test_b_roman.py"]),
+    # rv-wave1v2 round 2: the changed lang code
+    m("ro-22", RO, "            if sub in variants:\n                return True", "            if False:\n                return True",
+      ["test_b_roman.py"]),
+    m("ro-23", RO, "            if sub in singletons:\n                return True",
+      "            if False:\n                return True", ["test_b_roman.py"]),
+    m("ro-24", RO, "    if low in GRANDFATHERED or _PRIVATE_USE.fullmatch(t):", "    if _PRIVATE_USE.fullmatch(t):",
+      ["test_b_roman.py"]),
+    m("ro-25", RO, "    if low in GRANDFATHERED or _PRIVATE_USE.fullmatch(t):", "    if low in GRANDFATHERED:",
+      ["test_b_roman.py"]),
     # ------------------------------------------------------------------ entity check
     m("en-01", E, "                    elif norm(field, site) == norm(field, cval):", "                    elif site == cval:",
       ["test_b_entity.py"]),
@@ -273,6 +318,9 @@ MUTANTS = [
       "finding(\"ENTITY_FIELD_MISMATCH\", \"medium\", \"measured\", \"ACT\"", ["test_b_entity.py"]),
     m("en-20", E, "\"canonical_source\": entity[\"fields\"][field][\"source\"],", "\"canonical_source\": None,",
       ["test_b_entity.py"]),
+    # rv-wave1v2 e03: a plain Organization node is not asked for a region
+    m("en-21", E, "if field in (\"street_address\", \"locality\", \"region\") and \"LocalBusiness\" not in",
+      "if field in (\"street_address\", \"locality\") and \"LocalBusiness\" not in", ["test_b_entity.py"]),
     # ------------------------------------------------------------------ log task
     m("lg-01", L, "            if verdict is False:\n                fam[\"robots_blocked\"] += 1",
       "            if verdict is not True:\n                fam[\"robots_blocked\"] += 1", ["test_b_logs.py"]),
@@ -347,7 +395,7 @@ MUTANTS = [
       ["test_b_drift.py"]),
 ]
 
-GROUPS = {"robots": [R], "fetch": [F], "codes": [C, U], "selene": [S], "logs": [L, SL], "delia": [D], "roman": [RO],
+GROUPS = {"robots": [R], "fetch": [F], "codes": [C, U], "selene": [S, "primitives/parse.py"], "logs": [L, SL], "delia": [D], "roman": [RO],
           "entity_check": [E], "osei_drift": [OS, DR]}
 MODULES = list(GROUPS)
 MIN_PER_MODULE = {}                     # every module: at least 20 (brief)

@@ -13,7 +13,10 @@ import os
 import re
 
 DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "cldr")
-ACCEPTED = frozenset({"regular", "special", "macrolanguage", "macroregion", "deprecated", "private_use", "unknown"})
+# ``reserved`` too (rv-wave1v2 #6): CLDR files part of the BCP 47 private-use ranges (qaa~qtz, Qaaa~Qabx, AA, QM~QZ,
+# XA~XZ, ZZ) as reserved and part as private_use; RFC 5646 2.2.1-2.2.4 makes the whole ranges valid
+ACCEPTED = frozenset({"regular", "special", "macrolanguage", "macroregion", "deprecated", "private_use", "reserved",
+                      "unknown"})
 GRANDFATHERED = frozenset(x.lower() for x in (
     "en-GB-oed", "i-ami", "i-bnn", "i-default", "i-enochian", "i-hak", "i-klingon", "i-lux", "i-mingo", "i-navajo",
     "i-pwn", "i-tao", "i-tay", "i-tsu", "sgn-BE-FR", "sgn-BE-NL", "sgn-CH-DE", "art-lojban", "cel-gaulish",
@@ -122,14 +125,17 @@ def well_formed(tag: str) -> bool:
 
 
 def stored(tag):
-    """None (absent / blank), "invalid", or language[-Script][-REGION]."""
+    """None (absent / blank), "invalid", ("coded", tag lower-cased) for a valid tag with nothing to keep (private use
+    only, grandfathered: RFC 5646 2.1 ``privateuse`` / ``grandfathered``), or language[-Script][-REGION]."""
     if tag is None or not str(tag).strip():
         return None
     t = str(tag).strip()
     if not well_formed(t):
         return "invalid"
     parts = t.lower().split("-")
-    if parts[0] == "x" or t.lower() in GRANDFATHERED or len(parts[0]) > 3:
+    if parts[0] == "x" or t.lower() in GRANDFATHERED:
+        return ("coded", t.lower())
+    if len(parts[0]) > 3:
         return "invalid"
     lang = parts[0]
     if lang not in codes("language"):
@@ -154,4 +160,8 @@ def self_test() -> None:
     assert stored("en-Qqqq-US") == "en-US"            # Qqqq: not a CLDR script (Qaaa-Qabx private use only)
     assert stored("xx-US") == "invalid"               # xx: no such language
     assert stored("de-CH-1996") == "de-CH" and stored("sr-Latn") == "sr-Latn"
-    assert well_formed("x-private") and stored("x-private") == "invalid"
+    assert well_formed("x-private") and stored("x-private") == ("coded", "x-private")
+    assert stored("i-klingon") == ("coded", "i-klingon") and stored("en-GB-oed") == ("coded", "en-gb-oed")
+    assert stored("qaa-Qaaa-QM-x-southern") == "qaa-Qaaa-QM" and stored("qtz-Qabx-XZ") == "qtz-Qabx-XZ"
+    assert stored("de-1996-1996") == "invalid" and stored("en-a-bbb-a-ccc") == "invalid"
+    assert stored("en-a-bbb-b-ccc") == "en" and stored("de-1996-1901") == "de"

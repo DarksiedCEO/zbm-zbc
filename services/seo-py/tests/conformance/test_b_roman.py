@@ -71,14 +71,24 @@ def test_B_RO_04_heading_skips_oracle(seed):
 
 
 def _tag(r):
-    langs = ["en", "de", "fr", "zh", "sr", "pt", "es", "ja", "xx", "qq", "abc", "123", "e", "english"]
+    if r.random() < 0.08:
+        # rv-wave1v2 #6: private use only and every grandfathered tag (RFC 5646 2.1), in any case
+        t = r.choice(sorted(bcp47.GRANDFATHERED) + ["x-default", "x-a", "x-12345678-b", "X-Private", "x-toolongxx"])
+        return t.upper() if r.random() < 0.2 else t
+    langs = ["en", "de", "fr", "zh", "sr", "pt", "es", "ja", "xx", "qq", "abc", "123", "e", "english",
+             "qaa", "qfy", "qtz", "qua"]
     t = r.choice(langs)
     if r.random() < 0.5:
-        t += "-" + r.choice(("Latn", "Hant", "Cyrl", "Qqqq", "Zzzz", "Abcd"))
+        t += "-" + r.choice(("Latn", "Hant", "Cyrl", "Qqqq", "Zzzz", "Abcd", "Qaaa", "Qaap", "Qabx", "Qaby"))
     if r.random() < 0.6:
-        t += "-" + r.choice(("US", "GB", "TW", "419", "XK", "QQ", "ZZ", "AA", "BR"))
-    if r.random() < 0.1:
-        t += "-" + r.choice(("1996", "fonipa", "u-ca-gregory"))
+        t += "-" + r.choice(("US", "GB", "TW", "419", "XK", "QQ", "ZZ", "AA", "BR", "QM", "QZ", "XA", "XZ",
+                                   "YY", "JX", "999"))    # the last three: not CLDR regions (dropped, ro-12)
+    if r.random() < 0.2:
+        # variants and extensions, sometimes repeated (RFC 5646 2.2.5 / 2.2.6: a repeat is invalid)
+        t += "-" + r.choice(("1996", "fonipa", "u-ca-gregory", "1996-1996", "fonipa-1996", "a-bbb-a-ccc",
+                             "a-bbb-b-ccc", "fonipa-FONIPA", "u-ca-gregory-x-u-x"))
+    if r.random() < 0.15:
+        t += "-x-" + r.choice(("southern", "a", "1996-1996", "a-a"))
     if r.random() < 0.1:
         t = t.upper()
     if r.random() < 0.05:
@@ -89,11 +99,44 @@ def _tag(r):
 @pytest.mark.parametrize("seed", [7, 11])
 def test_B_RO_05_lang_bcp47_and_cldr(seed):
     bcp47.self_test()
+    from agents_run import coding
+    from primitives import codes as codes_mod
     r = rng(seed, "ro05")
-    for i in range(2000):
-        t = _tag(r)
-        assert roman.safe_lang(t) == bcp47.stored(t), (t, roman.safe_lang(t), bcp47.stored(t))
+    kinds = set()
+    with coding():
+        for i in range(2000):
+            t = _tag(r)
+            want = bcp47.stored(t)
+            if isinstance(want, tuple):
+                want = codes_mod.code("lang", want[1])       # valid, nothing on the allowlist: its code (D-01)
+                kinds.add("coded")
+            else:
+                kinds.add("invalid" if want == "invalid" else "stored" if want else "none")
+            assert roman.safe_lang(t) == want, (t, roman.safe_lang(t), want)
+    assert {"coded", "invalid", "stored"} <= kinds, kinds
     check_ran("B-RO-05", 4000)
+
+
+@pytest.mark.parametrize("tag,want", [
+    ("x-default", "coded"), ("i-klingon", "coded"), ("en-GB-oed", "coded"), ("sgn-BE-FR", "coded"),
+    ("zh-min-nan", "coded"), ("qaa-Qaaa-QM-x-southern", "qaa-Qaaa-QM"), ("de-1996-1996", "invalid"),
+    ("en-a-bbb-a-ccc", "invalid")])
+def test_B_RO_05_private_use_grandfathered_and_repeats(tag, want):
+    """rv-wave1v2 #6: valid private-use / grandfathered / qaa~qtz tags are declared (no LANG_INVALID, readiness
+    pass); a repeated variant or singleton is LANG_INVALID."""
+    web = site(Web())
+    web.route("/", page(lang=tag, ld=ORG_LD))
+    r = _r(web)
+    lang = r["facts"]["pages"]["/"]["lang"]
+    rd = r["facts"]["engine_readiness_heuristic"]["/"]
+    if want == "invalid":
+        assert "LANG_INVALID" in codes(r) and lang == "invalid"
+        assert all(rd[e]["checks"]["lang_declared"] == "fail" for e in rd)
+    else:
+        assert "LANG_INVALID" not in codes(r) and "LANG_MISSING" not in codes(r)
+        assert (lang.startswith("{c:lang:") and tag.lower() not in json.dumps(r).lower()) if want == "coded" \
+            else lang == want
+        assert all(rd[e]["checks"]["lang_declared"] == "pass" for e in rd), rd
 
 
 def test_B_RO_05_lang_invalid_finding_and_readiness_fail():
@@ -111,6 +154,24 @@ def test_B_RO_05_lang_missing(lang):
     web = site(Web())
     web.route("/", page(lang=lang, ld=ORG_LD))
     assert sev(one(_r(web), "LANG_MISSING")) == ("low", "measured", "ACT")
+
+
+@pytest.mark.parametrize("lang", [" ", "\t", " \n\u3000 "])
+def test_B_RO_05_white_space_lang_in_the_extract_is_missing(lang):
+    """rv-wave1v2 #7 o01: Roman decides LANG_MISSING on the extract it is given, whatever the parser did to it: an
+    extract whose lang is only white space (a stored / older extract) is missing, never valid or invalid."""
+    from agents_run import coding
+    from cert_web import ctx
+    from agents import selene
+    web = site(Web())
+    web.route("/", page(ld=ORG_LD))
+    c = ctx(web)
+    with coding():
+        _, pages = selene.run(c)
+        pages["/"]["extract"]["lang"] = lang
+        r = roman.run(c, pages)
+    assert sev(one(r, "LANG_MISSING")) == ("low", "measured", "ACT") and "LANG_INVALID" not in codes(r)
+    assert r["facts"]["pages"]["/"]["lang"] is None
 
 
 JSONLD = [

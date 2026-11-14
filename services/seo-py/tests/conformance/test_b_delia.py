@@ -5,6 +5,7 @@ from __future__ import annotations
 import gzip
 from datetime import datetime, timedelta, timezone
 
+import httpx
 import pytest
 
 from agents import delia
@@ -344,3 +345,79 @@ def test_B_DE_11_only_the_first_500_listed_urls_are_checked():
     d = _d(web)
     # /p5 and /p50-/p59 within the first 500; /p500-/p599 are past the sample (R-14: counted, not checked)
     assert one(d, "SITEMAP_LISTS_ROBOTS_BLOCKED_URL")["detail"]["count"] == 11
+
+
+def test_B_DE_11_the_sample_is_the_first_500_same_site_valid_urls():
+    """rv-wave1v2 #2 (reviewer probe delia_probe.py sample_first_500_same_site, ported): other-host and invalid
+    URLs ahead of the same-site ones do not use up the 500 sample."""
+    locs = ([f"http://other.test/x{i}" for i in range(450)] + [f"ftp://site.test/f{i}" for i in range(60)]
+            + [f"http://site.test/blocked/{i}" for i in range(100)] + [f"http://site.test/ok/{i}" for i in range(450)])
+    web = site(Web(), robots="User-agent: *\nAllow: /\nDisallow: /blocked/\nSitemap: http://site.test/sitemap.xml\n")
+    web.route("/sitemap.xml", sitemap(locs), ctype="application/xml")
+    d = _d(web)
+    assert one(d, "SITEMAP_LISTS_ROBOTS_BLOCKED_URL")["detail"]["count"] == 100
+    assert d["facts"]["robots_checked"] == 500             # 100 blocked + the first 400 of /ok/ (R-14)
+
+
+class _Chunks(httpx.SyncByteStream):
+    """A body served in chunks of ``n`` octets (``n`` None: one chunk), as a server streams it."""
+
+    def __init__(self, b: bytes, n):
+        self.b, self.n = b, n
+
+    def __iter__(self):
+        if self.n is None:
+            yield self.b
+            return
+        for k in range(0, len(self.b), self.n):
+            yield self.b[k:k + self.n]
+
+    def close(self):
+        pass
+
+
+_OVER: dict = {}
+
+
+def _over_limit_body() -> bytes:
+    if "b" not in _OVER:
+        _OVER["b"] = _big_sitemap(52_000, pad=1060).encode()
+    return _OVER["b"]
+
+
+@pytest.mark.parametrize("chunk,declared", [(65_536, False), (None, False), (65_536, True), (None, True)])
+def test_B_DE_03_a_plain_sitemap_over_the_protocol_limit_is_too_large(chunk, declared):
+    """rv-wave1v2 #3 / #5 (reviewer probes big53.py, delia_probe plain_over_protocol, ported): a PLAIN sitemap over
+    52,428,800 bytes is SITEMAP_TOO_LARGE medium/measured/ACT (never UNREADABLE IE, whatever the chunking, with or
+    without a Content-Length), and its quarantine record holds the bytes really read and their SHA-256."""
+    import hashlib
+    body = _over_limit_body()
+    assert len(body) > 52_428_800 + 2 ** 20 * 3
+    hdr = [("content-type", "application/xml")] + ([("content-length", str(len(body)))] if declared else [])
+    web = site(Web())
+    web.routes[("site.test", "/sitemap.xml")] = lambda req: httpx.Response(200, headers=hdr,
+                                                                           stream=_Chunks(body, chunk))
+    c, _, d, _, _, _ = run3(web)
+    f = one(d, "SITEMAP_TOO_LARGE")
+    assert sev(f) == ("medium", "measured", "ACT") and f["detail"]["limit"] == 52_428_800
+    assert "SITEMAP_UNREADABLE" not in codes(d)
+    q = [x for x in c.osei.summary()["quarantined"] if x["reason"] == "TOO_LARGE"]
+    assert len(q) == 1 and q[0]["size_basis"] == "read_before_stop" and q[0]["truncated"] is True
+    n = q[0]["bytes"]
+    assert 52_428_800 < n <= delia.WIRE_MAX and q[0]["sha256"] == hashlib.sha256(body[:n]).hexdigest()
+    assert q[0]["sha256"] != hashlib.sha256(b"").hexdigest()
+    assert q[0]["declared_bytes"] == (len(body) if declared else None)
+
+
+def test_B_OS_01_a_gzip_sitemap_over_the_limit_records_the_decoded_bytes_read():
+    """rv-wave1v2 #5: the over-limit gzip case is quarantined TOO_LARGE too, read_before_stop, with the size and
+    SHA-256 of the decoded bytes read before the stop (a prefix of the document)."""
+    import hashlib
+    body = _over_limit_body()
+    web = site(Web(), robots="User-agent: *\nSitemap: http://site.test/s.xml.gz\n")
+    web.route("/s.xml.gz", gzip.compress(body, 1), ctype="application/gzip")
+    c, _, d, _, _, _ = run3(web)
+    assert sev(one(d, "SITEMAP_TOO_LARGE")) == ("medium", "measured", "ACT")
+    q = [x for x in c.osei.summary()["quarantined"] if x["reason"] == "TOO_LARGE"]
+    assert len(q) == 1 and q[0]["size_basis"] == "read_before_stop" and q[0]["bytes"] > 52_428_800
+    assert q[0]["sha256"] == hashlib.sha256(body[:q[0]["bytes"]]).hexdigest()

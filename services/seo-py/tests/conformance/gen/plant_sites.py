@@ -83,6 +83,11 @@ def build(r: random.Random, n: int) -> dict:
               location=f"http://{rhost}.test/" + _slug(plant("selene", "redirect_path", True)) + "?q=" +
               _slug(plant("selene", "redirect_query", False)))
     paths.append("/go")
+    # a non-HTML page whose Content-Type names a planted media type (rv-wave1v2 #7 c05: a media type off the closed
+    # list is stored coded, never because it starts text/ or application/)
+    for top in ("application", "text"):
+        web.route("/doc-" + top, "x", ctype=f"{top}/x-" + _label(plant("selene", "content_type", False, "given_name")))
+        paths.append("/doc-" + top)
     # sitemaps: locs (own host paths, other host labels, queries), lastmod, index child, namespace, root
     locs, lms = [], []
     for _ in range(n):
