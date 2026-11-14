@@ -76,6 +76,10 @@ _AAD_TAG = b"seo-citation-vault/v1"
 FIELD_HASH_INFO = b"seo-citation-vault/v1/log-field-hmac"
 FIELD_HASH_TAG = b"seo-log-field/v1"
 FIELD_HASH_NAME = re.compile(r"[a-z][a-z0-9_]{0,31}")
+# Wave-1 spec wave1-spec/1 section 0.1 (store codes): every value that came from outside the service and is not on
+# the closed allowlist is stored as ``{c:<kind>:<16 hex>}``, the first 64 bits of HMAC-SHA256 under this HKDF sub-key
+# of the vault key (its own info label), bound to the tenant (``Coder``). The key never leaves this module.
+CODES_INFO = b"seo-codes/v1"
 _FIELDS = frozenset(("v", "id", "t", "k", "n", "c"))
 
 
@@ -114,13 +118,18 @@ class _Material:
     """One vault key, held as its three derived sub-keys (AES-256-GCM, the tenant-tag HMAC and the log-field HMAC,
     each from HKDF-SHA256 with its own info label). The raw key is not kept. Never printed, pickled or copied."""
 
-    __slots__ = ("key_id", "_aead", "_mac", "_field_mac")
+    __slots__ = ("key_id", "_aead", "_mac", "_field_mac", "_codes")
 
     def __init__(self, key_id: str, raw: bytes):
         self.key_id = key_id
         self._aead = AESGCM(_derive(raw, b"seo-citation-vault/v1/aes-256-gcm"))
         self._mac = _derive(raw, b"seo-citation-vault/v1/tenant-tag")
         self._field_mac = _derive(raw, FIELD_HASH_INFO)
+        self._codes = _derive(raw, CODES_INFO)
+
+    def codes_key(self, tenant_id: str) -> bytes:
+        """The tenant's codes key: HMAC of the tenant id under the codes sub-key (read only by ``Coder``)."""
+        return hmac.new(self._codes, b"seo-codes-tenant\x00" + tenant_id.encode("ascii"), hashlib.sha256).digest()
 
     def tenant_tag(self, tenant_id: str) -> bytes:
         return hmac.new(self._mac, tenant_id.encode("ascii"), hashlib.sha256).digest()
@@ -187,6 +196,45 @@ class VaultKey:
 
     def __deepcopy__(self, memo):
         raise TypeError("a vault key is never copied")
+
+
+class Coder:
+    """Codes for one tenant under the CURRENT vault key (spec 0.1, B-CD-01): ``code(kind, canonical)`` is 16 lower
+    hex, the first 64 bits of HMAC-SHA256(K_code(tenant, key id), kind NUL value). ``key_id`` is recorded beside
+    every report (``codes_key_id``). The derived key stays in this object (slots; never printed, pickled or
+    copied)."""
+
+    __slots__ = ("key_id", "tenant_id", "_k")
+
+    def __init__(self, key: "VaultKey", tenant_id: str):
+        if not isinstance(key, VaultKey):
+            raise VaultUnavailable("no vault key is configured")
+        if not isinstance(tenant_id, str) or not TENANT_ID.fullmatch(tenant_id):
+            raise VaultRecordInvalid("the tenant id cannot be coded")
+        self.key_id = key.key_id
+        self.tenant_id = tenant_id
+        self._k = key._cur.codes_key(tenant_id)
+
+    def code(self, kind: str, value: str) -> str:
+        msg = kind.encode("ascii") + b"\x00" + value.encode("utf-8", "surrogatepass")
+        return hmac.new(self._k, msg, hashlib.sha256).hexdigest()[:16]
+
+    def __repr__(self) -> str:
+        return f"Coder(tenant={self.tenant_id!r}, key_id={self.key_id!r}, key=<redacted>)"
+
+    __str__ = __repr__
+
+    def __reduce__(self):
+        raise TypeError("a codes key is never pickled")
+
+    def __reduce_ex__(self, protocol):
+        raise TypeError("a codes key is never pickled")
+
+    def __copy__(self):
+        raise TypeError("a codes key is never copied")
+
+    def __deepcopy__(self, memo):
+        raise TypeError("a codes key is never copied")
 
 
 def _derive(raw: bytes, info: bytes) -> bytes:
@@ -501,6 +549,13 @@ class CitationVault:
 
     def __deepcopy__(self, memo):
         raise TypeError("the citation vault is never copied")
+
+    def coder(self, tenant_id: str) -> Coder:
+        """The tenant's codes (spec 0.1) under the CURRENT key. No key: ``VaultUnavailable`` (nothing is coded and
+        an audit or ingest is refused before any fetch, B-CD-01)."""
+        if self._key is None:
+            raise VaultUnavailable("no vault key is configured")
+        return Coder(self._key, tenant_id)
 
     @property
     def key_configured(self) -> bool:

@@ -5,6 +5,8 @@ fixture server, as the rest of the suite."""
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from agents import logs as logs_mod
@@ -96,20 +98,21 @@ def test_a_run_that_crashes_is_closed_interrupted_run_failed_not_left_running(tm
 
 # ---------------------------------------------------------------------------------------------- log templating
 
+# wave1-spec/1 0.1: the words are codes (``C``); the folding still finds every shape
 @pytest.mark.parametrize("path,template", [
-    ("/u/jan‌e%EF%B​C%A0exa‌mple.com", "/u/{email}"),        # zero-width inside a percent escape
-    ("/img/ja﻿ne.s​m‍ith.j‌p‌g", "/img/{file}.jpg"),  # invisible characters in a file name
-    ("/u/ja­ne%20a­t%20example%20d­ot%20com", "/u/{email}"),    # soft hyphens in "at ... dot"
-    ("/files/јαne-dοe-rеsumе.pԁf", "/files/{file}.pdf"),   # lookalikes, even in the ext
-    ("/u/јane[αT]εхaмple.сoм", "/u/{email}"),         # Greek alpha in [at]
-    ("/call/５５５-１２３-４５６７", "/call/{number}"),
-    ("/blog/how-to-rank", "/blog/how-to-rank"),
-    ("/о-нас/контакты",       # a real Russian path
-     "/о-нас/контакты"),     # is kept as written
-    ("/café/menu", "/café/menu"),
+    ("/u/jan\u200ce%EF%B\u200bC%A0exa\u200cmple.com", "/C/{email}"),        # zero-width inside a percent escape
+    ("/img/ja\ufeffne.s\u200bm\u200dith.j\u200cp\u200cg", "/C/{file}.jpg"),  # invisible characters in a file name
+    ("/u/ja\u00adne%20a\u00adt%20example%20d\u00adot%20com", "/C/{email}"),    # soft hyphens in "at ... dot"
+    ("/files/\u0458\u03b1ne-d\u03bfe-r\u0435sum\u0435.p\u0501f", "/C/{file}.pdf"),   # lookalikes, even in the ext
+    ("/u/\u0458ane[\u03b1T]\u03b5\u0445a\u043cple.\u0441o\u043c", "/C/{email}"),         # Greek alpha in [at]
+    ("/call/\uff15\uff15\uff15-\uff11\uff12\uff13-\uff14\uff15\uff16\uff17", "/C/{number}"),
+    ("/blog/how-to-rank", "/C/C"),
+    ("/\u043e-\u043d\u0430\u0441/\u043a\u043e\u043d\u0442\u0430\u043a\u0442\u044b",       # a real Russian path
+     "/C/C"),     # wave1-spec/1: coded (was: kept as written)
+    ("/caf\u00e9/menu", "/C/C"),
 ])
 def test_templating_sees_through_invisible_characters_and_lookalikes(path, template):
-    assert logs_mod.template_path(path) == template
+    assert re.sub(r"\{c:seg:[0-9a-f]{16}\}", "C", logs_mod.template_path(path)) == template
 
 
 def test_the_shared_fold_is_the_one_every_service_carries():

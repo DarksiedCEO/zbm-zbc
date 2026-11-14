@@ -176,7 +176,8 @@ def test_l2_run_failed_names_the_step_and_a_safe_location(tmp_path, srv, monkeyp
     a = h.ok(audit(h), 201)
     assert a["status"] == "interrupted" and a["interrupted_reason"] == "RUN_FAILED"
     assert a["failure"]["agent"] == "delia" and a["failure"]["error_type"] == "ValueError"
-    assert a["failure"]["where"].startswith("agents.delia:run:")      # innermost frame in src/
+    # innermost frame in src/ (wave1-spec/1: ``run`` sets the codes context and calls ``_run``)
+    assert a["failure"]["where"].startswith("agents.delia:_run:")
     ev = h.ledger.of_type("audit_interrupted")[0]["_payload"]
     assert ev["agent"] == "delia" and ev["where"] == a["failure"]["where"]
     assert "evil.test" not in str(h.ledger.events) and "evil.test" not in str(a)

@@ -30,6 +30,7 @@ by exact host or subdomain, IDNA-aware; a lookalike host is counted as such and 
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import re
 from typing import Optional
@@ -123,6 +124,31 @@ def _valid_answer(a) -> bool:
         and isinstance(a.text, str) and isinstance(a.citations, list)
 
 
+def _quarantine_error(osei, e) -> None:
+    """ENGINE_PROTOCOL_ERROR -> a quarantine record with the size and SHA-256 of the response body the adapter had
+    in hand (AEGIS Wave-1 M-O4); none when the failure came before a body (the record says so)."""
+    n, h = getattr(e, "body_bytes", None), getattr(e, "body_sha256", None)
+    if isinstance(n, int) and isinstance(h, str):
+        if getattr(e, "body_partial", False):
+            osei.quarantine("ai_answer", "PROVIDER_ANSWER_MALFORMED", None, None,
+                            partial={"bytes_read": n, "sha256": h, "declared": None})
+        else:
+            osei.quarantine("ai_answer", "PROVIDER_ANSWER_MALFORMED", None, None, size=n, digest=h, basis="wire")
+    else:
+        osei.quarantine("ai_answer", "PROVIDER_ANSWER_MALFORMED", None, None)
+
+
+def _quarantine_malformed(osei, a) -> None:
+    """An answer object of the wrong shape: size and SHA-256 of its serialisation here (no raw body is in hand)."""
+    try:
+        blob = json.dumps({"type": type(a).__name__, "value": getattr(a, "__dict__", None) or repr(a)},
+                          sort_keys=True, default=repr).encode("utf-8", "surrogatepass")
+    except (TypeError, ValueError, RecursionError):
+        blob = repr(type(a)).encode("utf-8", "surrogatepass")
+    osei.quarantine("ai_answer", "PROVIDER_ANSWER_MALFORMED", None, None, size=len(blob),
+                    digest=hashlib.sha256(blob).hexdigest(), basis="serialised_answer")
+
+
 def _answer_hash(a: ProviderAnswer) -> str:
     if isinstance(a.answer_sha256, str) and re.fullmatch(r"[0-9a-f]{64}", a.answer_sha256):
         return a.answer_sha256
@@ -199,7 +225,7 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
                         stop, stop_detail = "ENGINE_BUDGET_EXHAUSTED", "COST_ABOVE_RESERVE"
                         break
                     if e.code == "ENGINE_PROTOCOL_ERROR":
-                        osei.quarantine("ai_answer", "PROVIDER_ANSWER_MALFORMED", None, None)
+                        _quarantine_error(osei, e)
                         protocol_run += 1
                         if protocol_run >= PROTOCOL_ERROR_STOP_AFTER:   # an unreadable shape: stop spending
                             stop, stop_detail = e.code, "REPEATED_PROTOCOL_ERRORS"
@@ -213,7 +239,7 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
                     continue
                 if not _valid_answer(a):
                     tally["malformed"] += 1
-                    osei.quarantine("ai_answer", "PROVIDER_ANSWER_MALFORMED", None, None)
+                    _quarantine_malformed(osei, a)
                     continue
                 if a.status == NOT_CONNECTED:
                     return {"engine": engine, "outcome": NOT_CONNECTED, "prompts": []}

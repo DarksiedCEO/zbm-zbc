@@ -213,9 +213,14 @@ def test_roman_structure_and_heuristic_labels(srv):
     by_url = {}
     for f in env["findings"]:
         by_url.setdefault(f["url"], set()).add(f["code"])
+    # wave1-spec/1 0.1: a path segment off the allowlist is stored as a code (the same process coder as the run)
+    from primitives import codes as codes_mod, safe_url as su
+    with codes_mod.within("site.test"):
+        bad_url = su.safe_url("http://site.test/bad")
+    assert bad_url.startswith("http://site.test/{c:seg:")
     assert {"H1_COUNT", "HEADING_LEVEL_SKIP", "LANG_MISSING", "STRUCTURED_DATA_INVALID_JSON",
             "STRUCTURED_DATA_ERRORS", "LITTLE_TEXT_IN_RAW_HTML", "TITLE_LENGTH", "META_DESCRIPTION_MISSING"} <= \
-        by_url["http://site.test/bad"]
+        by_url[bad_url]
     assert not {"H1_COUNT", "STRUCTURED_DATA_ERRORS"} & by_url.get("http://site.test/", set())
     rd = env["facts"]["engine_readiness_heuristic"]["/"]
     assert set(rd) == {"google", "bing", "openai", "anthropic", "perplexity"}

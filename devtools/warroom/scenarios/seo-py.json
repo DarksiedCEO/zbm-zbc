@@ -2406,12 +2406,12 @@
      "literal": [
       "evilsite.test",
       "site.test.evil.test",
-      "sіte.test",
+      "s\u0456te.test",
       "xn--ste-jhd.test",
       "site.tes",
       "site-test.example",
       "www-site.test",
-      "ѕite.test",
+      "\u0455ite.test",
       "site.test@evil.test",
       "evil.test%2esite.test",
       "s1te.test"
@@ -2981,6 +2981,837 @@
      }
     }
    ]
+  },
+  {
+   "id": "robots-matching-cost",
+   "persona": "a site whose robots.txt is built to make the matcher slow (backtracking wildcards, tens of thousands of rules, many named groups, a long sitemap)",
+   "basis": "ADR 0017 decision 11 and the AEGIS Wave-1 certification M-S1: robots.txt matching is linear (no regular expression), rules are compiled once per file, and (round 2) every step's matching is bounded by counted work, not a clock or rule caps; the reviewer measured 3.0 s per URL, 63 s per request and 268.7 s at a4af277 for these shapes; round 2: each case also requires that the ordinary pages the hostile file ALLOWS are read (a cost bound or a rule cap must never turn into refusing allowed pages: M2 / M3)",
+   "seeds": [
+    {
+     "literal": [
+      "wildcards_6x60",
+      "rules_20000",
+      "wildcard_rules_named_groups",
+      "rules_2000_sitemap_500"
+     ],
+     "basis": "the reviewer's measured shapes (M-S1)"
+    }
+   ],
+   "input_field": "kind",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "site"
+    },
+    {
+     "action": "snapshot"
+    },
+    {
+     "action": "robots_cost",
+     "args": {
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "audit_completes",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "audit_status_completed",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_request_reached_a_non_public_address",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "internal_requests",
+      "value": []
+     }
+    },
+    {
+     "id": "no_internal_content_anywhere",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "secret_leaked",
+      "value": false
+     }
+    },
+    {
+     "id": "within_the_stated_time_bound",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "robots_cost_within_bound",
+      "value": true
+     }
+    },
+    {
+     "id": "no_interpreter_stall",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "no_interpreter_stall",
+      "value": true
+     }
+    },
+    {
+     "id": "ingest_accepted",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "ingest_ok",
+      "value": true
+     }
+    },
+    {
+     "id": "crawled_content_changes_no_state",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "state_unchanged",
+      "value": true
+     }
+    },
+    {
+     "id": "allowed_pages_are_read",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "page_states",
+      "value": [
+       "OK"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "drift-classification",
+   "persona": "a site that changes, or fails to answer, between two audits (and an answer engine whose citations vary by chance)",
+   "basis": "ADR 0017 decision 11 (a failed fetch is TOOL_FAILURE, never a change) and the drift rules R1..R8 (agents/drift.py; AEGIS Wave-1 M-O1: R1 per fact, either side); round 2 (re-review of 89fae32b): every case also plants a letters-only value in crawled URLs (M5: readable nowhere) and, where pages are read in both runs, moves a page's canonical to a target that refuses connections in the newer run (Osei M1: classified TOOL_FAILURE, never REAL_CHANGE)",
+   "seeds": [
+    {
+     "literal": [
+      "real_change",
+      "sampling_noise",
+      "tool_failure_after_sitemap",
+      "tool_failure_after_llms",
+      "tool_failure_before_llms",
+      "tool_failure_after_robots"
+     ],
+     "basis": "one per drift class the rules must assign: a real change, sampling noise, a tool failure on the newer and on the older side"
+    }
+   ],
+   "input_field": "kind",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "site"
+    },
+    {
+     "action": "snapshot"
+    },
+    {
+     "action": "drift_case",
+     "args": {
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "audit_completes",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "audit_status_completed",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_request_reached_a_non_public_address",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "internal_requests",
+      "value": []
+     }
+    },
+    {
+     "id": "no_internal_content_anywhere",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "secret_leaked",
+      "value": false
+     }
+    },
+    {
+     "id": "drift_view_answers",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "drift_http",
+      "value": 200
+     }
+    },
+    {
+     "id": "expected_class_assigned",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "drift_expected_class_seen",
+      "value": true
+     }
+    },
+    {
+     "id": "a_failed_fetch_is_never_a_change",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "drift_failure_called_real",
+      "value": false
+     }
+    },
+    {
+     "id": "canonical_target_failure_is_tool_failure",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "drift_canonical_failure_tool_failure",
+      "value": true
+     }
+    },
+    {
+     "id": "planted_letters_only_value_readable_nowhere",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "planted_readable",
+      "value": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "robots-and-safety-round-2",
+   "persona": "a site whose robots.txt uses reserved and invalid percent-encodings, very long or very many rules, or answers slowly; crawled URLs and markup that carry name-shaped values",
+   "basis": "AEGIS Wave-1 certification round 2 (re-review of 89fae32b): M1 RFC 9309 2.2.2 octet comparison, M2 counted work not a clock, M3 a bound never yields a measured finding, M4 the log robots check on path and query decoded once, M5 letters-only values stored as keyed digests, the entity check storing the comparison, Osei M2 an oversized JSON-LD block recorded truncated with its whole size",
+   "seeds": [
+    {
+     "literal": [
+      "reserved_allow",
+      "reserved_disallow",
+      "invalid_utf8",
+      "slow_site",
+      "filler_then_disallow",
+      "long_allow",
+      "log_query",
+      "planted_names",
+      "entity_name",
+      "jsonld_too_large"
+     ],
+     "basis": "one per round 2 finding (M1 x3, M2, M3 x2, M4, M5, entity check, Osei M2)"
+    }
+   ],
+   "input_field": "kind",
+   "variants_per_seed": 0,
+   "steps": [
+    {
+     "action": "site"
+    },
+    {
+     "action": "snapshot"
+    },
+    {
+     "action": "round2",
+     "args": {
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "id": "audit_completes",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_http",
+      "value": 201
+     }
+    },
+    {
+     "id": "audit_status_completed",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "audit_status",
+      "value": "completed"
+     }
+    },
+    {
+     "id": "no_request_reached_a_non_public_address",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "internal_requests",
+      "value": []
+     }
+    },
+    {
+     "id": "no_internal_content_anywhere",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "secret_leaked",
+      "value": false
+     }
+    },
+    {
+     "id": "round_2_behaviour",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "r2_expect_met",
+      "value": true
+     }
+    },
+    {
+     "id": "planted_values_readable_nowhere",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "r2_leaks",
+      "value": []
+     }
+    },
+    {
+     "id": "crawled_content_changes_no_state",
+     "severity": "MUST",
+     "check": "state_equals",
+     "args": {
+      "key": "state_unchanged",
+      "value": true
+     }
+    }
+   ]
+  },
+  {
+   "id": "store-codes-planted",
+   "basis": "spec wave1-spec/1 0.1 / D-05 / D-06 (owner decision 3, store codes)",
+   "persona": "a site whose every crawled surface carries name- and secret-shaped values",
+   "input_field": "kind",
+   "seeds": [
+    {
+     "basis": "one per A-18 surface group x 3 shapes",
+     "literal": [
+      "robots:letters",
+      "robots:hex",
+      "robots:glued",
+      "page_markup:letters",
+      "page_markup:hex",
+      "page_markup:glued",
+      "urls_same_host:letters",
+      "urls_same_host:hex",
+      "urls_same_host:glued",
+      "urls_other_host:letters",
+      "urls_other_host:hex",
+      "urls_other_host:glued",
+      "sitemaps:letters",
+      "sitemaps:hex",
+      "sitemaps:glued",
+      "llms:letters",
+      "llms:hex",
+      "llms:glued",
+      "log_ingest:letters",
+      "log_ingest:hex",
+      "log_ingest:glued",
+      "entity:letters",
+      "entity:hex",
+      "entity:glued"
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "action": "site"
+    },
+    {
+     "action": "snapshot"
+    },
+    {
+     "action": "spec1",
+     "args": {
+      "scenario": "store-codes-planted",
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "args": {
+      "key": "internal_requests",
+      "value": []
+     },
+     "check": "state_equals",
+     "id": "no_request_reached_a_non_public_address",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "s1_readable",
+      "value": []
+     },
+     "check": "state_equals",
+     "id": "planted_values_readable_nowhere",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "s1_owner_resolves",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "owner_display_resolves_own_evidence",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "s1_non_owner_codes_only",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "non_owner_sees_codes_only",
+     "severity": "MUST"
+    }
+   ],
+   "variants_per_seed": 0
+  },
+  {
+   "id": "robots-wire-and-length",
+   "basis": "spec B-RB-08, B-SE-03, B-FT-04, Q-06, B-UL-02 (r3 MUST-2, MUST-3)",
+   "persona": "a robots.txt or redirect shaped to make a bound look like a site failure",
+   "input_field": "kind",
+   "seeds": [
+    {
+     "basis": "one per r3 finding",
+     "literal": [
+      "gzip_empty_members",
+      "utf8_multibyte_over_limit",
+      "long_location_2011",
+      "long_location_8193",
+      "robots_429"
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "action": "site"
+    },
+    {
+     "action": "snapshot"
+    },
+    {
+     "action": "spec1",
+     "args": {
+      "scenario": "robots-wire-and-length",
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "args": {
+      "key": "internal_requests",
+      "value": []
+     },
+     "check": "state_equals",
+     "id": "no_request_reached_a_non_public_address",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "s1_no_false_unreachable",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "no_false_unreachable",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "s1_no_truncated_location_followed",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "no_truncated_location_followed",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "s1_own_failures_ie",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "findings_from_own_failure_are_ie",
+     "severity": "MUST"
+    }
+   ],
+   "variants_per_seed": 0
+  },
+  {
+   "id": "robots-cost-charging",
+   "basis": "spec B-RB-09 (b, c), A-03 (r3 MUST-4)",
+   "persona": "a robots.txt built for the costliest matching per charged unit",
+   "input_field": "kind",
+   "seeds": [
+    {
+     "basis": "the rv-wave1c cost1 shapes",
+     "literal": [
+      "needle_99_x_4348",
+      "paths_29000",
+      "distinct_prefix_24908"
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "action": "site"
+    },
+    {
+     "action": "snapshot"
+    },
+    {
+     "action": "spec1",
+     "args": {
+      "scenario": "robots-cost-charging",
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "args": {
+      "key": "internal_requests",
+      "value": []
+     },
+     "check": "state_equals",
+     "id": "no_request_reached_a_non_public_address",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "s1_step_cpu_within_2s",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "step_cpu_within_2s",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "s1_within_time_bound",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "within_the_stated_time_bound",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "s1_no_interpreter_stall",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "no_interpreter_stall",
+     "severity": "MUST"
+    }
+   ],
+   "variants_per_seed": 0
+  },
+  {
+   "id": "host-labels",
+   "basis": "spec B-CD-03, B-CD-06, A-21 (r3 MUST-1)",
+   "persona": "other-host canonicals, Sitemap lines and sitemap locs with name-shaped and hex labels; own-domain lookalikes",
+   "input_field": "kind",
+   "seeds": [
+    {
+     "basis": "label shapes",
+     "literal": [
+      "name_labels",
+      "hex_labels",
+      "lookalikes"
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "action": "site"
+    },
+    {
+     "action": "snapshot"
+    },
+    {
+     "action": "spec1",
+     "args": {
+      "scenario": "host-labels",
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "args": {
+      "key": "internal_requests",
+      "value": []
+     },
+     "check": "state_equals",
+     "id": "no_request_reached_a_non_public_address",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "s1_other_hosts_coded",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "other_hosts_coded",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "s1_lookalike_never_own",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "lookalike_never_own",
+     "severity": "MUST"
+    }
+   ],
+   "variants_per_seed": 0
+  },
+  {
+   "id": "large-sitemaps",
+   "basis": "spec B-DE-03, Q-07 (gap n2)",
+   "persona": "sitemaps within and over the sitemaps.org protocol limits",
+   "input_field": "kind",
+   "seeds": [
+    {
+     "basis": "protocol sizes",
+     "literal": [
+      "plain_6mib_45000",
+      "gzip_12mib",
+      "over_50mib"
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "action": "site"
+    },
+    {
+     "action": "snapshot"
+    },
+    {
+     "action": "spec1",
+     "args": {
+      "scenario": "large-sitemaps",
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "args": {
+      "key": "internal_requests",
+      "value": []
+     },
+     "check": "state_equals",
+     "id": "no_request_reached_a_non_public_address",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "s1_valid_sitemap_read",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "valid_sitemap_read",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "s1_no_false_decompress_failed",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "no_false_decompress_failed",
+     "severity": "MUST"
+    }
+   ],
+   "variants_per_seed": 0
+  },
+  {
+   "id": "codes-and-drift",
+   "basis": "spec B-CD-01, B-CD-02, B-DR-05, O-03",
+   "persona": "the same site audited twice, across a codes-key rotation, and under two tenants",
+   "input_field": "kind",
+   "seeds": [
+    {
+     "basis": "stability and isolation",
+     "literal": [
+      "same_site_twice",
+      "key_rotation",
+      "two_tenants"
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "action": "site"
+    },
+    {
+     "action": "snapshot"
+    },
+    {
+     "action": "spec1",
+     "args": {
+      "scenario": "codes-and-drift",
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "args": {
+      "key": "internal_requests",
+      "value": []
+     },
+     "check": "state_equals",
+     "id": "no_request_reached_a_non_public_address",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "s1_codes_stable",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "codes_stable",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "s1_rotation_r2",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "rotation_is_r2_not_change",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "s1_tenants_never_share",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "tenants_never_share_codes",
+     "severity": "MUST"
+    }
+   ],
+   "variants_per_seed": 0
+  },
+  {
+   "id": "vault-unavailable-audit",
+   "basis": "spec B-CD-01, A-23, ADR 0051 decision 9",
+   "persona": "no vault key, or the evidence blob lost",
+   "input_field": "kind",
+   "seeds": [
+    {
+     "basis": "vault states",
+     "literal": [
+      "no_key",
+      "evidence_blob_lost"
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "action": "site"
+    },
+    {
+     "action": "snapshot"
+    },
+    {
+     "action": "spec1",
+     "args": {
+      "scenario": "vault-unavailable-audit",
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "args": {
+      "key": "internal_requests",
+      "value": []
+     },
+     "check": "state_equals",
+     "id": "no_request_reached_a_non_public_address",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "s1_refused_before_fetch",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "refused_before_fetch",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "s1_owner_not_available",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "owner_display_not_available",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "s1_no_raw_value",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "nothing_raw_written",
+     "severity": "MUST"
+    }
+   ],
+   "variants_per_seed": 0
   }
  ]
 }

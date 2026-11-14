@@ -18,9 +18,12 @@ Rules:
 
 from __future__ import annotations
 
+import urllib.parse
+
 import client_report
 from errors import Conflict
 from ledger import derived_id
+from primitives import codes as codes_mod
 from reasons import R
 
 
@@ -43,7 +46,7 @@ class ReportsMixin:
             self._report_checks(tid, aid, client)
         # sink job B: the audit report is read from the tenant's vault and the document rendered OUTSIDE the lock; a
         # report that cannot be read refuses VAULT_UNAVAILABLE (nothing is rendered from anything else)
-        view = self._audit_recorded(tid, aid)
+        view = self.client_report_view(tid, aid)
         try:
             data, model = client_report.render(view, tid, fmt, self.settings.report_branding)
         except client_report.ReportInputError:
@@ -93,6 +96,35 @@ class ReportsMixin:
     @staticmethod
     def _report_answer(rec: dict, data: bytes) -> dict:
         return {**rec, "media_type": client_report.FORMATS[rec["format"]], "content": data.decode("utf-8")}
+
+    def client_report_view(self, tid: str, aid: str) -> dict:
+        """OUTSIDE the lock: the audit view a client report is rendered from (spec D-02g): the recorded view with
+        every code resolved through the run's evidence map, the request paths in their URL form."""
+        view = self._audit_recorded(tid, aid)
+        # spec D-02g: the owner's client report shows the codes RESOLVED through the run's evidence map (this
+        # tenant's only), cleaned as every crawled value is (client_report CR-5); a code without a value is shown
+        # "[not available]"
+        resolved = codes_mod.resolve(view["report"], self._evidence_values(tid, aid))
+        with self.lock:
+            rec = self.audits.get(aid) or {}
+            raw_paths = [p for p in rec.get("paths") or [] if isinstance(p, str)]
+        # the operator's own request paths come back resolved: a flagged one is shown in the strict lane's kept form,
+        # exactly as before codes (review c0c09bd1, ``_report_paths_kept``)
+        resolved = self._report_paths_kept(resolved, {"scheme": resolved.get("scheme"),
+                                                      "domain": resolved.get("domain"), "paths": raw_paths})
+        # a request path is a URL path: a resolved one is shown percent-encoded (a space as %20), and one that does
+        # not resolve to a URL path keeps its stored (coded) form
+        stored = view["report"].get("paths") or []
+        shown = []
+        for i, p in enumerate(resolved.get("paths") or []):
+            q = urllib.parse.quote(p, safe="".join(chr(c) for c in range(0x21, 0x7f) if chr(c) != "%")) \
+                if isinstance(p, str) else p
+            ok = isinstance(q, str) and q.startswith("/") and len(q) <= 501 and codes_mod.NOT_AVAILABLE not in p
+            shown.append(q if ok else (stored[i] if i < len(stored) else q))
+        if "paths" in resolved:
+            resolved["paths"] = shown
+        view["report"] = resolved
+        return view
 
     def client_reports_view(self, tid: str, aid: str) -> list:
         """The recorded renders of one audit (ids and hashes only; never the document)."""

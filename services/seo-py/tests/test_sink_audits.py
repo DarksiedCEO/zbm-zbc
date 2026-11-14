@@ -247,7 +247,9 @@ def test_audit_completed_keeps_ids_codes_counts_a_ref_and_a_keyed_hash(tmp_path,
     a = h.ok(audit(h), 201)
     (rec,) = records(h, "audit_completed")
     d = rec["data"]
-    assert set(d) == {"audit_id", "report_ref", "report_hmac", "facts", "actor", "evidence"}
+    # wave1-spec/1 D-02f: the run's evidence map is a second vault blob of the owner (a ref and a keyed hash)
+    assert set(d) == {"audit_id", "report_ref", "report_hmac", "facts", "actor", "evidence", "evidence_ref",
+                      "evidence_hmac"}
     assert sg.violations("audit_completed", d) == []                 # machine values only, no legacy entry needed
     assert vault_mod.parse_blob_ref(d["report_ref"]) is not None
     facts = d["facts"]
@@ -310,16 +312,19 @@ def test_a_real_audit_with_an_entity_and_a_prompt_set_keeps_nothing_raw(tmp_path
     report = h.svc._audit_recorded("acme", aid)["report"]
     agents = {(e["agent"], e["task"]): e for e in report["agents"]}
     ent = agents[("entity_check", "on_site_entity_consistency")]
-    canonicals = [f["detail"]["canonical"] for f in ent["findings"] if "canonical" in (f.get("detail") or {})]
-    assert any(v["entity_card"] in c for c in canonicals) and any(v["entity_phone"] in c for c in canonicals)
+    # wave1-spec/1 B-EN-01: the comparison only (no canonical, no on-site value in the finding)
+    compared = [f for f in ent["findings"] if f["code"].startswith("ENTITY_FIELD")]
+    assert compared and all("canonical" not in (f.get("detail") or {}) for f in compared)
     cal = agents[("callum", "citation_sources")]
     asked = [p["prompt"]["text"] for p in cal["facts"]["engines"]["openai"]["prompts"] if p.get("prompt")]
     assert any(v["prompt_label_value"] in t for t in asked) and len(asked) == 5
     everything = json.dumps(report)
     in_report = found(everything, v)
-    assert {"entity_card", "entity_phone", "entity_ssn", "entity_email", "prompt_label_value", "prompt_ssn_words",
-            "prompt_phone_words", "title_email", "title_label_value", "canonical_card", "redirect_email",
-            "redirect_digits"} <= set(in_report)                     # the vaulted report holds them (it is the client's)
+    # the vaulted report holds the operator's own prompt text (it is the client's); crawled values are codes or
+    # measured attributes (wave1-spec/1 0.1, B-CD-05) and entity values are in the entity blob only (B-EN-01)
+    assert {"prompt_label_value", "prompt_ssn_words", "prompt_phone_words"} <= set(in_report)
+    assert not {"entity_card", "entity_phone", "entity_ssn", "entity_email", "title_email", "title_label_value",
+                "canonical_card", "redirect_email", "redirect_digits"} & set(in_report), in_report
     # a drift report over two such audits, and a client report, are recorded too
     b = h.ok(audit(h, "acme", paths=("/", "/about", "/moved"), invoice_id=invoice_id(2),
                    prompt_set_id=ps["prompt_set_id"]), 201)
@@ -487,9 +492,11 @@ def test_the_blob_is_encrypted_outside_the_service_lock_and_appended_once_under_
     h.ok(tl.ingest(h), 201)                                  # reads the latest audit's sitemap sample
     assert held["seal"] and not any(held["seal"])            # encryption: never under the service lock
     assert held["open"] and not any(held["open"])            # every read of a blob: never under the service lock
-    assert held["append"] and all(held["append"])            # the one append per document: under it, with the commit
-    assert len(held["append"]) == len(held["seal"]) == len(records(h, "audit_completed")) + len(
+    assert held["append"] and all(held["append"])            # the one append per commit: under it, with the commit
+    assert len(held["append"]) == len(records(h, "audit_completed")) + len(
         records(h, "drift_recorded")) + len(records(h, "log_ingest_created"))     # (sink job D: the ingest's inputs)
+    # wave1-spec/1 D-02f: an audit seals its report and its evidence map; both go in the commit's one append
+    assert len(held["seal"]) == len(held["append"]) + len(records(h, "audit_completed"))
 
 
 # ================================================================================================ readers fail closed
@@ -564,7 +571,10 @@ def test_a_log_ingest_reads_the_sitemap_sample_from_the_vault_or_refuses(tmp_pat
     a = h.ok(audit(h), 201)
     g = h.ok(tl.ingest(h), 201)
     # sink job D: the sample is in the ingest's inputs blob (memory keeps its count)
-    assert h.svc._ingest_inputs("zbm", g["ingest_id"])["sitemap_sample"] == ["/", "/about"]
+    # wave1-spec/1 B-LG-05: the sample is the stored forms and the codes of the whole paths, never raw paths
+    smp = h.svc._ingest_inputs("zbm", g["ingest_id"])["sitemap_sample"]
+    assert set(smp) == {"templates", "codes", "codes_key_id"} and smp["templates"][0] == "/"
+    assert len(smp["codes"]) == 2 and "/about" not in json.dumps(smp)
     assert h.svc.log_ingests[g["ingest_id"]]["sitemap_sample_count"] == 2
     _lose(h, h.svc.audits[a["audit_id"]]["report_ref"])
     before = len(h.svc.log)
@@ -843,8 +853,10 @@ def test_mutation_no_owner_masking_is_caught(tmp_path, srv, monkeypatch):
             ps = plant_tenant(h, v)
             a = h.ok(audit(h, "acme", invoice_id=invoice_id(), prompt_set_id=ps["prompt_set_id"]), 201)
             return json.dumps(a)
-    assert v["entity_card"] not in shown(False) and v["title_email"] not in shown(False)
-    assert v["entity_card"] in shown(True) and v["title_email"] in shown(True)
+    # wave1-spec/1: crawled and entity values never reach the report (codes); the operator's prompt text does,
+    # and the owner masker is what hides it
+    assert v["prompt_label_value"] not in shown(False)
+    assert v["prompt_label_value"] in shown(True)
 
 
 # ================================================================================================ size

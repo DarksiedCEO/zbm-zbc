@@ -1,0 +1,1039 @@
+{
+ "entries": [
+  {
+   "added": "2026-11-13",
+   "generator": "gen/robots_gen.k_star",
+   "id": "r1-M-S1",
+   "source": "rv-wave1 redos.py redos2.py redos_svc.py rules_cost.py r2b.py: M-S1 backtracking, rule floods",
+   "spec_item": "A-01",
+   "status": "live",
+   "test": "test_a_robots_cost.py::test_A_01_k_star_near_match_is_linear_and_never_wrong"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "gen/robots_gen.flood",
+   "id": "r1-S24-S26",
+   "source": "rv-wave1 rule floods (S24-S26)",
+   "spec_item": "A-02",
+   "status": "live",
+   "test": "test_a_robots_cost.py::test_A_02_rule_floods_every_rule_used_and_step_bounded"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "gen/robots_gen.k_star",
+   "id": "r1-health-stall",
+   "source": "rv-wave1 /health stall 12.9 s under hostile robots",
+   "spec_item": "A-01",
+   "status": "live",
+   "test": "test_a_robots_cost.py::test_A_01_k_star_near_match_is_linear_and_never_wrong"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "r1-S-S1",
+   "source": "rv-wave1 r1_selene.py: UTF-8 BOM before the first group",
+   "spec_item": "B-RB-05",
+   "status": "live",
+   "test": "test_b_robots.py::test_B_RB_05_bom_is_stripped_and_blocks_everything"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "test_b_selene._noix_case",
+   "id": "r1-S-S2",
+   "source": "rv-wave1 r1_selene.py: NOINDEX for every engine on a bot-scoped directive",
+   "spec_item": "B-SE-12",
+   "status": "live",
+   "test": "test_b_selene.py::test_B_SE_12_noindex_per_engine_equals_the_oracle"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "test_a_xml._cases",
+   "id": "r1-M-D1",
+   "source": "rv-wave1 r1_delia.py xml_probe.py: UTF-16 DOCTYPE bypass",
+   "spec_item": "A-08",
+   "status": "live",
+   "test": "test_a_xml.py::test_A_08_doctype_entity_refused_in_every_encoding_no_expansion"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "test_b_delia._lastmod",
+   "id": "r1-NIT-fullwidth",
+   "source": "rv-wave1 r1_delia.py: fullwidth digits in lastmod",
+   "spec_item": "B-DE-12",
+   "status": "live",
+   "test": "test_b_delia.py::test_B_DE_12_lastmod_w3c_oracle"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "test_b_delia._llms_doc",
+   "id": "r1-NIT-llms-h2",
+   "source": "rv-wave1 r1_delia.py: H2-first llms.txt",
+   "spec_item": "B-DE-14",
+   "status": "live",
+   "test": "test_b_delia.py::test_B_DE_14_llms_shape_oracle"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "r1-roman-headings",
+   "source": "rv-wave1 r1_roman.py: heading skips",
+   "spec_item": "B-RO-04",
+   "status": "live",
+   "test": "test_b_roman.py::test_B_RO_04_heading_skips_oracle"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "r1-roman-readiness",
+   "source": "rv-wave1 r1_roman.py: readiness labels",
+   "spec_item": "B-RO-10",
+   "status": "live",
+   "test": "test_b_roman.py::test_B_RO_10_readiness_labels_and_no_score"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "test_b_drift._pair",
+   "id": "r1-M-O1",
+   "source": "rv-wave1 r1_osei.py: drift sitemap 503 / llms drop REAL_CHANGE",
+   "spec_item": "B-DR-03",
+   "status": "live",
+   "test": "test_b_drift.py::test_B_DR_03_A_28_no_real_change_on_an_own_failed_observation"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "r1-S-O1",
+   "source": "rv-wave1 r1_osei.py: silent caps",
+   "spec_item": "B-OS-04",
+   "status": "live",
+   "test": "test_b_osei.py::test_B_OS_04_caps_counted"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "gen/plant_sites.build",
+   "id": "r1-M-S2-M-O3",
+   "source": "rv-wave1 r3_audit.py r3_logs.py plants.py find_leak.py: leaks",
+   "spec_item": "D-05",
+   "status": "live",
+   "test": "test_d_plants.py::test_D_05_A_18_planted_values_readable_nowhere"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "r1-M-S3",
+   "source": "rv-wave1 r3_logs.py: robots text in the log ingest record",
+   "spec_item": "B-LG-09",
+   "status": "live",
+   "test": "test_b_logs.py::test_B_LG_09_inputs_only_in_the_vault"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "test_b_codes._gen_path",
+   "id": "r1-M-S5",
+   "source": "rv-wave1: ';' matrix key in log templates",
+   "spec_item": "B-CD-04",
+   "status": "live",
+   "test": "test_b_codes.py::test_B_CD_04_path_shapes_equal_the_reference_O_TPL"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "test_a_ssrf.TARGETS",
+   "id": "r1-R2",
+   "source": "rv-wave1 r2.py: SSRF-shaped redirects / canonicals / Sitemap / index children",
+   "spec_item": "A-12",
+   "status": "live",
+   "test": "test_a_ssrf.py::test_A_12_no_connection_to_a_non_public_address"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "test_a_isolation.ROUTES",
+   "id": "r1-R4",
+   "source": "rv-wave1 r4.py / rv-wave1b t_tenant.py / rv-wave1c tenants.py: isolation",
+   "spec_item": "A-25",
+   "status": "live",
+   "test": "test_a_isolation.py::test_A_25_cross_tenant_every_route_and_the_evidence_display"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "gen/robots_gen.regime_case",
+   "id": "r1b-M1",
+   "source": "rv-wave1b rfc_ref.py robots_diff.py, rv-wave1c rdiff.py: reserved / invalid UTF-8 encodings",
+   "spec_item": "B-RB-04",
+   "status": "live",
+   "test": "test_b_robots.py::test_B_RB_04_A_04_reserved_and_invalid_utf8_encodings_never_fail_open"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "gen/robots_gen.regime_case",
+   "id": "r1b-M3-quoted",
+   "source": "rv-wave1b t_robots_truth.py: quoted rule not in the file",
+   "spec_item": "B-RB-11",
+   "status": "live",
+   "test": "test_b_robots.py::test_B_RB_11_a_quoted_rule_is_a_rule_of_the_file"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "r1b-M2-slow",
+   "source": "rv-wave1b t_slow.py t_slow2.py t_bigsite.py: wall-clock false blocked / unreadable",
+   "spec_item": "A-14",
+   "status": "live",
+   "test": "test_a_logs.py::test_A_14_slow_ordinary_site_read_whole"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "r1b-M4-logq",
+   "source": "rv-wave1b t_logq.py: log query undercount",
+   "spec_item": "B-LG-03",
+   "status": "live",
+   "test": "test_b_logs.py::test_B_LG_03_robots_matched_once_on_path_and_query"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "test_b_drift._pair",
+   "id": "r1b-osei-M1",
+   "source": "rv-wave1b t_drift_canon.py: canonical-target failure REAL_CHANGE",
+   "spec_item": "B-DR-03",
+   "status": "live",
+   "test": "test_b_drift.py::test_B_DR_03_A_28_no_real_change_on_an_own_failed_observation"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "r1b-step18",
+   "source": "rv-wave1b t_osei_caps.py step 18: oversized JSON-LD record",
+   "spec_item": "B-OS-01",
+   "status": "live",
+   "test": "test_b_roman.py::test_B_RO_06_oversized_block_and_absent_severity"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "r1b-restart",
+   "source": "rv-wave1b t_restart.py: restart residual",
+   "spec_item": "A-30",
+   "status": "live",
+   "test": "test_a_logs.py::test_A_30_restart_never_gives_a_wrong_count"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "gen/plant_sites.build",
+   "id": "r1b-M5-letters",
+   "source": "rv-wave1b t_plant.py locate.py, rv-wave1c plant.py: letters-only names",
+   "spec_item": "D-05",
+   "status": "live",
+   "test": "test_d_plants.py::test_D_05_A_18_planted_values_readable_nowhere"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "gen/sites.build",
+   "id": "r1b-corpus",
+   "source": "rv-wave1b corpus.py run_corpus.py cmp_corpus.py: differential, over-templating",
+   "spec_item": "O-01",
+   "status": "live",
+   "test": "test_o_corpus.py::test_O_01_ordinary_sites_findings_equal_the_ground_truth"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "r1c-MUST-1",
+   "source": "rv-wave1c hostleak.py hostleak2.py: host labels readable",
+   "spec_item": "B-CD-03",
+   "status": "live",
+   "test": "test_b_codes.py::test_B_CD_03_stored_url_form"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "r1c-MUST-2",
+   "source": "rv-wave1c gzbig.py: gzip of empty members -> false ROBOTS_UNREACHABLE",
+   "spec_item": "B-SE-03",
+   "status": "live",
+   "test": "test_b_selene.py::test_B_SE_03_gzip_of_empty_members_is_read_never_unreachable"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "r1c-MUST-3",
+   "source": "rv-wave1c dbg.py unread.py: Location cut at 2,000 and followed",
+   "spec_item": "B-FT-04",
+   "status": "live",
+   "test": "test_b_fetch.py::test_B_FT_04_a_long_location_is_followed_whole"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "gen/robots_gen.needle",
+   "id": "r1c-MUST-4",
+   "source": "rv-wave1c cost1.py health.py: cost charging",
+   "spec_item": "A-03",
+   "status": "live",
+   "test": "test_a_robots_cost.py::test_A_03_B_RB_09_costliest_needle_within_the_step_cpu"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "gen/robots_gen.needle",
+   "id": "r1c-MUST-4c",
+   "source": "rv-wave1c cost1.py: units track CPU",
+   "spec_item": "B-RB-09",
+   "status": "live",
+   "test": "test_a_robots_cost.py::test_A_03_B_RB_09_units_track_cpu_within_10x"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "r1c-MUST-5",
+   "source": "rv-wave1c licence notes: CC BY-SA / NLTK data",
+   "spec_item": "A-32",
+   "status": "live",
+   "test": "test_a_records.py::test_A_32_no_forbidden_data_in_the_build_and_every_source_noticed"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "r1c-SHOULD-names",
+   "source": "rv-wave1c delia_names.py: well-known names digested",
+   "spec_item": "B-CD-04",
+   "status": "live",
+   "test": "test_b_codes.py::test_B_CD_04_every_well_known_name_readable_in_every_position"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "r1c-SHOULD-gz12",
+   "source": "rv-wave1c: 12-byte gzip recorded bytes 0 + SHA of empty",
+   "spec_item": "B-OS-01",
+   "status": "live",
+   "test": "test_b_osei.py::test_B_OS_01_truncated_gzip_is_recorded_on_the_wire"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "r3-NIT-lang",
+   "source": "rv-wave1c lang.py: lang=123",
+   "spec_item": "B-RO-05",
+   "status": "live",
+   "test": "test_b_roman.py::test_B_RO_05_lang_invalid_finding_and_readiness_fail"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "v2-n1-octets",
+   "source": "spec n1: robots.parse counted characters",
+   "spec_item": "B-RB-07",
+   "status": "live",
+   "test": "test_b_robots.py::test_B_RB_07_parse_limit_counts_octets_not_characters"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "v2-n2-50mib",
+   "source": "spec n2: valid large sitemaps UNREADABLE / DECOMPRESS_FAILED",
+   "spec_item": "B-DE-03",
+   "status": "live",
+   "test": "test_b_delia.py::test_B_DE_03_a_valid_12_mib_gzip_is_read"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "v2-n3-canonical",
+   "source": "spec n3: canonical value in ENTITY_FIELD_MISMATCH detail",
+   "spec_item": "B-EN-01",
+   "status": "live",
+   "test": "test_b_entity.py::test_B_EN_01_comparisons_equal_the_reference_and_store_no_value"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "gen/robots_gen.regime_case",
+   "id": "v2-grouping",
+   "source": "wave1v2 suite: sitemap / unknown line ended a user-agent run",
+   "spec_item": "B-RB-01",
+   "status": "live",
+   "test": "test_b_robots.py::test_B_RB_01_B_RB_02_B_RB_03_group_selection_specificity_wildcards_agree_with_rfc9309"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "v2-port0",
+   "source": "wave1v2 suite: explicit port 0 read as the default port",
+   "spec_item": "B-FT-01",
+   "status": "live",
+   "test": "test_b_fetch.py::test_B_FT_01_refused_shapes_make_no_connection"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "v2-killed-robots",
+   "source": "wave1v2 suite: switch during the nested robots fetch -> BLOCKED_BY_ROBOTS",
+   "spec_item": "B-FT-08",
+   "status": "live",
+   "test": "test_b_fetch.py::test_B_FT_08_no_request_after_the_switch"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "v2-truncated-coding",
+   "source": "wave1v2 suite: truncated gzip page accepted as an empty body",
+   "spec_item": "B-FT-05",
+   "status": "live",
+   "test": "test_b_selene.py::test_B_SE_14_our_failed_target_fetch_is_unchecked"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "test_b_selene._noix_case",
+   "id": "v2-meta-families",
+   "source": "wave1v2 suite: meta robots named for a family token not read",
+   "spec_item": "B-SE-12",
+   "status": "live",
+   "test": "test_b_selene.py::test_B_SE_12_noindex_per_engine_equals_the_oracle"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "v2-subdomains",
+   "source": "wave1v2 suite: same_site refused real subdomains",
+   "spec_item": "B-CD-06",
+   "status": "live",
+   "test": "test_b_codes.py::test_B_CD_06_same_site_and_lookalikes"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "literal",
+   "id": "v2-canonical-cut",
+   "source": "wave1v2 war room robots-wire-and-length long_location_2011: a 2,011-character canonical was cut at 2,000 by parse and the cut URL fetched",
+   "spec_item": "B-FT-04",
+   "status": "live",
+   "test": "test_b_selene.py::test_B_SE_14_a_long_canonical_target_is_fetched_whole_never_cut"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "cert_web.sitemap + gzip",
+   "id": "v2-gzip-media-type",
+   "source": "Wave-1 v2 build: the streamed sitemap reader read a gzip body served as application/gzip at /sitemap.xml as XML (found by test_wave1_cert test_urls_per_file_limit)",
+   "spec_item": "B-DE-04",
+   "status": "live",
+   "test": "test_b_delia.py::test_B_DE_04_gzip_media_type_without_gz_name_is_decompressed"
+  },
+  {
+   "added": "2026-11-13",
+   "generator": "plants.uniq",
+   "id": "v2-entity-comparison-flags",
+   "source": "Wave-1 v2 build: entity_check mutants en-11..en-20 (comparison flags, telephone digits, outcome)",
+   "spec_item": "B-EN-01",
+   "status": "live",
+   "test": "test_b_entity.py::test_B_EN_01_mismatch_comparison_flags_equal_the_reference"
+  }
+ ],
+ "spec": "wave1-spec/1",
+ "spec_file": "docs/spec/wave1-spec-1.md",
+ "spec_n": {
+  "A-01": [
+   200,
+   2000
+  ],
+  "A-02": [
+   20,
+   200
+  ],
+  "A-03": [
+   6,
+   60
+  ],
+  "A-04": [
+   4000,
+   40000
+  ],
+  "A-05": [
+   60,
+   600
+  ],
+  "A-06": [
+   12,
+   60
+  ],
+  "A-07": [
+   24,
+   120
+  ],
+  "A-08": [
+   264,
+   2640
+  ],
+  "A-09": [
+   26,
+   260
+  ],
+  "A-10": [
+   12,
+   60
+  ],
+  "A-11": [
+   10,
+   40
+  ],
+  "A-12": [
+   91,
+   455
+  ],
+  "A-13": [
+   20,
+   100
+  ],
+  "A-14": [
+   3,
+   12
+  ],
+  "A-15": [
+   10,
+   40
+  ],
+  "A-16": [
+   60,
+   600
+  ],
+  "A-17": [
+   4,
+   20
+  ],
+  "A-18": [
+   1000,
+   3000
+  ],
+  "A-19": [
+   12,
+   60
+  ],
+  "A-20": [
+   50,
+   500
+  ],
+  "A-21": [
+   40,
+   200
+  ],
+  "A-22": [
+   3,
+   3
+  ],
+  "A-23": [
+   4,
+   4
+  ],
+  "A-24": [
+   8,
+   40
+  ],
+  "A-25": [
+   41,
+   41
+  ],
+  "A-26": [
+   6,
+   30
+  ],
+  "A-27": [
+   100,
+   500
+  ],
+  "A-28": [
+   256,
+   1556
+  ],
+  "A-29": [
+   20,
+   100
+  ],
+  "A-30": [
+   3,
+   3
+  ],
+  "A-31": [
+   1,
+   1
+  ],
+  "A-32": [
+   1,
+   1
+  ],
+  "A-33": [
+   10,
+   50
+  ],
+  "B-CD-01": [
+   1,
+   1
+  ],
+  "B-CD-02": [
+   1,
+   1
+  ],
+  "B-CD-03": [
+   1,
+   1
+  ],
+  "B-CD-04": [
+   3000,
+   3000
+  ],
+  "B-CD-05": [
+   1000,
+   1000
+  ],
+  "B-CD-06": [
+   200,
+   200
+  ],
+  "B-DE-01": [
+   40,
+   40
+  ],
+  "B-DE-02": [
+   30,
+   30
+  ],
+  "B-DE-03": [
+   1,
+   1
+  ],
+  "B-DE-04": [
+   20,
+   20
+  ],
+  "B-DE-05": [
+   1,
+   1
+  ],
+  "B-DE-06": [
+   10,
+   10
+  ],
+  "B-DE-07": [
+   1,
+   1
+  ],
+  "B-DE-08": [
+   10,
+   10
+  ],
+  "B-DE-09": [
+   1,
+   1
+  ],
+  "B-DE-10": [
+   40,
+   40
+  ],
+  "B-DE-11": [
+   1,
+   1
+  ],
+  "B-DE-12": [
+   2000,
+   2000
+  ],
+  "B-DE-13": [
+   20,
+   20
+  ],
+  "B-DE-14": [
+   500,
+   500
+  ],
+  "B-DE-15": [
+   1,
+   1
+  ],
+  "B-DE-16": [
+   3,
+   3
+  ],
+  "B-DR-01": [
+   50,
+   50
+  ],
+  "B-DR-02": [
+   1,
+   1
+  ],
+  "B-DR-03": [
+   256,
+   1556
+  ],
+  "B-DR-04": [
+   20,
+   20
+  ],
+  "B-DR-05": [
+   1,
+   1
+  ],
+  "B-DR-06": [
+   40,
+   40
+  ],
+  "B-DR-07": [
+   100,
+   100
+  ],
+  "B-DR-08": [
+   1,
+   1
+  ],
+  "B-EN-01": [
+   200,
+   200
+  ],
+  "B-EN-02": [
+   30,
+   30
+  ],
+  "B-EN-03": [
+   5,
+   5
+  ],
+  "B-EN-04": [
+   20,
+   20
+  ],
+  "B-EN-05": [
+   1,
+   1
+  ],
+  "B-EN-06": [
+   4,
+   4
+  ],
+  "B-FT-01": [
+   60,
+   60
+  ],
+  "B-FT-02": [
+   1,
+   1
+  ],
+  "B-FT-03": [
+   1,
+   1
+  ],
+  "B-FT-04": [
+   100,
+   100
+  ],
+  "B-FT-05": [
+   1,
+   1
+  ],
+  "B-FT-06": [
+   20,
+   20
+  ],
+  "B-FT-07": [
+   20,
+   20
+  ],
+  "B-FT-08": [
+   8,
+   8
+  ],
+  "B-FT-09": [
+   1,
+   1
+  ],
+  "B-FT-10": [
+   50,
+   50
+  ],
+  "B-LG-01": [
+   1000,
+   1000
+  ],
+  "B-LG-02": [
+   200,
+   200
+  ],
+  "B-LG-03": [
+   2000,
+   2000
+  ],
+  "B-LG-04": [
+   1,
+   1
+  ],
+  "B-LG-05": [
+   20,
+   20
+  ],
+  "B-LG-06": [
+   5,
+   5
+  ],
+  "B-LG-07": [
+   1,
+   1
+  ],
+  "B-LG-08": [
+   3,
+   3
+  ],
+  "B-LG-09": [
+   1,
+   1
+  ],
+  "B-OS-01": [
+   10,
+   10
+  ],
+  "B-OS-02": [
+   1,
+   1
+  ],
+  "B-OS-03": [
+   50,
+   50
+  ],
+  "B-OS-04": [
+   1,
+   1
+  ],
+  "B-OS-05": [
+   1,
+   1
+  ],
+  "B-RB-01": [
+   4000,
+   40000
+  ],
+  "B-RB-02": [
+   1,
+   1
+  ],
+  "B-RB-03": [
+   1,
+   1
+  ],
+  "B-RB-04": [
+   4000,
+   40000
+  ],
+  "B-RB-05": [
+   1,
+   1
+  ],
+  "B-RB-06": [
+   500,
+   500
+  ],
+  "B-RB-07": [
+   1,
+   1
+  ],
+  "B-RB-08": [
+   20,
+   20
+  ],
+  "B-RB-09": [
+   1,
+   1
+  ],
+  "B-RB-10": [
+   1,
+   1
+  ],
+  "B-RB-11": [
+   1,
+   1
+  ],
+  "B-RO-01": [
+   1,
+   1
+  ],
+  "B-RO-02": [
+   10,
+   10
+  ],
+  "B-RO-03": [
+   1,
+   1
+  ],
+  "B-RO-04": [
+   1000,
+   1000
+  ],
+  "B-RO-05": [
+   4000,
+   4000
+  ],
+  "B-RO-06": [
+   100,
+   100
+  ],
+  "B-RO-07": [
+   1,
+   1
+  ],
+  "B-RO-08": [
+   20,
+   20
+  ],
+  "B-RO-09": [
+   1,
+   1
+  ],
+  "B-RO-10": [
+   200,
+   200
+  ],
+  "B-RO-11": [
+   3,
+   3
+  ],
+  "B-SE-01": [
+   20,
+   20
+  ],
+  "B-SE-02": [
+   10,
+   10
+  ],
+  "B-SE-03": [
+   1,
+   1
+  ],
+  "B-SE-04": [
+   400,
+   400
+  ],
+  "B-SE-05": [
+   10,
+   10
+  ],
+  "B-SE-06": [
+   5,
+   5
+  ],
+  "B-SE-07": [
+   1,
+   1
+  ],
+  "B-SE-08": [
+   30,
+   30
+  ],
+  "B-SE-09": [
+   20,
+   20
+  ],
+  "B-SE-10": [
+   20,
+   20
+  ],
+  "B-SE-11": [
+   10,
+   10
+  ],
+  "B-SE-12": [
+   500,
+   500
+  ],
+  "B-SE-13": [
+   60,
+   60
+  ],
+  "B-SE-14": [
+   20,
+   20
+  ],
+  "B-SE-15": [
+   10,
+   10
+  ],
+  "B-SE-16": [
+   5,
+   5
+  ],
+  "B-SE-17": [
+   3,
+   3
+  ],
+  "B-SE-18": [
+   1,
+   1
+  ],
+  "B-UL-01": [
+   1,
+   1
+  ],
+  "B-UL-02": [
+   1,
+   1
+  ],
+  "B-UL-03": [
+   1,
+   1
+  ],
+  "B-UL-04": [
+   1,
+   1
+  ],
+  "D-01": [
+   1,
+   1
+  ],
+  "D-02": [
+   1,
+   1
+  ],
+  "D-03": [
+   1,
+   1
+  ],
+  "D-04": [
+   1,
+   1
+  ],
+  "D-05": [
+   1,
+   1
+  ],
+  "D-06": [
+   1,
+   1
+  ],
+  "D-07": [
+   1,
+   1
+  ],
+  "D-08": [
+   1,
+   1
+  ],
+  "O-01": [
+   1,
+   1
+  ],
+  "O-02": [
+   1,
+   1
+  ],
+  "O-03": [
+   1,
+   1
+  ],
+  "O-04": [
+   1,
+   1
+  ],
+  "O-05": [
+   1,
+   1
+  ],
+  "O-06": [
+   1,
+   1
+  ],
+  "O-07": [
+   1,
+   1
+  ]
+ }
+}

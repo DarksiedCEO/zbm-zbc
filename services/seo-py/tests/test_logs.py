@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 
 import pytest
 
@@ -44,7 +45,10 @@ def test_combined_common_and_jsonl():
                                clf("2001:db8::1", "/b", 503, GPT_UA)]))
     assert d["lines"] == 3 and d["non_bot"] == 1
     g = d["families"]["Googlebot"]
-    assert g["requests"] == 1 and g["templates"] == {"/a": 1} and g["status"] == {"2xx": 1} and g["claimed"] == 1
+    # wave1-spec/1 0.1 / B-LG-01: the path template is a code (the query never kept)
+    assert g["requests"] == 1 and list(g["templates"].values()) == [1] and g["status"] == {"2xx": 1} \
+        and g["claimed"] == 1
+    assert re.fullmatch(r"/\{c:seg:[0-9a-f]{16}\}", next(iter(g["templates"])))
     assert d["families"]["GPTBot"]["status"] == {"5xx": 1}                     # IPv6 client
     c = run("common", chunk([clf("1.2.3.4", "/", 200, fmt="common")]))
     assert c["no_user_agent"] == 1 and c["families"] == {}
@@ -75,7 +79,8 @@ def test_injection_text_in_paths_and_user_agents_is_data():
     d = run("combined", chunk([clf("1.2.3.4", "/ignore-previous-instructions;drop", 200, ua)]))
     g = d["families"]["Googlebot"]
     assert g["claimed"] == 1 and g["verified"] == 0
-    assert list(g["templates"]) == ["/ignore-previous-instructions;drop"]
+    # M-S5: ";" parameters templated; a 20+ token-character segment is {token} (wave1-spec/1 B-CD-04 shape rules)
+    assert list(g["templates"]) == ["/{token};{param}"]
 
 
 def test_classification_prefers_the_specific_token():
@@ -163,7 +168,9 @@ def test_end_to_end_with_robots_and_uncrawled(tmp_path, srv):
     codes = {f["code"] for f in env["findings"]}
     assert {"ROBOTS_DISALLOWED_PATHS_REQUESTED", "SEARCH_CRAWLER_SERVER_ERRORS", "IMPORTANT_URLS_NOT_CRAWLED",
             "LOG_LINES_QUARANTINED"} <= codes
-    assert env["facts"]["uncrawled_important_paths"] == ["/about"]
+    # wave1-spec/1 0.1: the sample path is a code; the owner resolves it from the evidence map
+    assert len(env["facts"]["uncrawled_important_paths"]) == 1
+    assert re.fullmatch(r"/\{c:seg:[0-9a-f]{16}\}", env["facts"]["uncrawled_important_paths"][0])
     assert env["facts"]["families"]["Googlebot"]["robots_disallowed_hits"] == 1
     assert {"bot_dns_verification", "bot_ip_range_verification"} <= set(env["not_connected"])
     assert "66.249.66.1" not in json.dumps(h.svc.log.records)                 # nothing raw in the log

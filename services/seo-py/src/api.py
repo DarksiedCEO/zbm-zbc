@@ -541,8 +541,14 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
         return svc.client_reports_view(scope[1], _id(aid))
 
     @app.get(P + "/tenants/{tid}/audits/{aid}", dependencies=auth)
-    def audit(aid: str, scope: tuple = Depends(scoped("dashboard", "seo_agent", "hub", "finance_31",
-                                                      "compliance_38"))) -> dict:
+    def audit(aid: str, resolve: Optional[str] = Query(None, pattern=r"^evidence$"),
+              scope: tuple = Depends(scoped("dashboard", "seo_agent", "hub", "finance_31", "compliance_38"))) -> dict:
+        if resolve is not None:
+            # spec D-02h: codes resolved through the evidence map only for the owner caller authenticated as the
+            # tenant (hub with the tenant's token); every other caller is refused (never resolved)
+            if scope[0] != "hub":
+                raise Forbidden(R("EVIDENCE_OWNER_ONLY"))
+            return svc.audit_view_resolved(scope[1], _id(aid))
         if scope[0] == "finance_31":
             return _billing_view(svc.audit_view(scope[1], _id(aid), full=False))
         return svc.audit_view(scope[1], _id(aid))
@@ -590,7 +596,13 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
         return svc.log_ingests_view(scope[1])
 
     @app.get(P + "/tenants/{tid}/log-ingests/{iid}", dependencies=auth)
-    def log_ingest(iid: str, scope: tuple = Depends(scoped(*LOG_CALLERS, "compliance_38"))) -> dict:
+    def log_ingest(iid: str, resolve: Optional[str] = Query(None, pattern=r"^evidence$"),
+                   scope: tuple = Depends(scoped(*LOG_CALLERS, "compliance_38"))) -> dict:
+        if resolve is not None:
+            # spec D-02h: as for an audit, only the hub caller authenticated as the tenant
+            if scope[0] != "hub":
+                raise Forbidden(R("EVIDENCE_OWNER_ONLY"))
+            return svc.log_ingest_view_resolved(scope[1], _id(iid))
         return svc.log_ingest_view(scope[1], _id(iid))
 
     # ------------------------------------------------------------------ scheduled re-audits (Wave 2)

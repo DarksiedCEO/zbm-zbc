@@ -192,7 +192,7 @@ def page_template(url: str, hosts: set) -> str:
         return "{offsite}"
     if p.scheme not in ("http", "https") or host not in hosts:
         return "{offsite}"
-    t = logs_mod.template_path(p.path or "/")
+    t = logs_mod.shape_template_path(p.path or "/")
     if t is None:
         return "{unreadable}"
     # one page, one template: literal words lower-cased (after the CamelCase check) and no trailing slash, the same

@@ -8,6 +8,7 @@ import base64
 import copy
 import json
 import os
+import re
 import threading
 import time
 
@@ -46,19 +47,28 @@ def send(h, iid, seq, data, last=False):
 
 # ---------------------------------------------------------------------------------------------- H1
 
+# wave1-spec/1 0.1 / B-CD-04: a stored template keeps the shape placeholders; every other segment is a code
+# (written ``C`` here: ``{c:seg:<16 hex>}``). Before codes the plain words (reset-password, users, blog...) were kept.
+_CODE = re.compile(r"\{c:seg:[0-9a-f]{16}\}")
+
+
+def _shape(t: str) -> str:
+    return _CODE.sub("C", t)
+
+
 @pytest.mark.parametrize("path,template", [
-    ("/reset-password/SECRETTOKEN123", "/reset-password/{token}"),
-    ("/users/jane.doe%40example.com/profile", "/users/{email}/profile"),
-    ("/a/550e8400-e29b-41d4-a716-446655440000", "/a/{uuid}"),
-    ("/orders/4111111111111111", "/orders/{number}"),
-    ("/login?user=jane.doe@example.com&pw=hunter2pass", "/login"),
-    ("/s/abcdefghijklmnopqrstuvwx", "/s/{token}"),
-    ("/blog/how-to-rank", "/blog/how-to-rank"),
+    ("/reset-password/SECRETTOKEN123", "/C/{token}"),
+    ("/users/jane.doe%40example.com/profile", "/C/{email}/C"),
+    ("/a/550e8400-e29b-41d4-a716-446655440000", "/C/{uuid}"),
+    ("/orders/4111111111111111", "/C/{number}"),
+    ("/login?user=jane.doe@example.com&pw=hunter2pass", "/C"),
+    ("/s/abcdefghijklmnopqrstuvwx", "/C/{token}"),
+    ("/blog/how-to-rank", "/C/C"),
     ("/item-12345-blue", "/{token}"),                          # letters with digits: treated as an identifier
-    ("/catalog/v2", "/catalog/v2"),
+    ("/catalog/v2", "/C/C"),
 ])
 def test_h1_path_templates(path, template):
-    assert logs_mod.template_path(path) == template
+    assert _shape(logs_mod.template_path(path)) == template
 
 
 def test_h1_reviewer_pii_paths_appear_nowhere(tmp_path, srv):
@@ -88,8 +98,8 @@ def test_h1_reviewer_pii_paths_appear_nowhere(tmp_path, srv):
     for s in PII:
         assert not any(s in b for b in blobs), s
     fam = done["report"]["envelope"]["facts"]["families"]["Googlebot"]
-    assert {t["template"] for t in fam["top_path_templates"]} >= {"/reset-password/{token}", "/users/{email}/profile",
-                                                                   "/orders/{number}", "/about"}
+    assert {_shape(t["template"]) for t in fam["top_path_templates"]} >= {"/C/{token}", "/C/{email}/C",
+                                                                          "/C/{number}", "/C"}
     assert fam["distinct_client_ips_estimate"] == 2
     assert done["report"]["envelope"]["facts"]["uncrawled_important_paths"] == ["/"]   # /about matched exactly
 
@@ -281,22 +291,23 @@ def test_l2_due_slot_is_computed_after_earlier_audits(tmp_path, srv):
 
 # ---------------------------------------------------------------------------------------------- AEGIS 4c0a805 T1, T4
 
+# wave1-spec/1 0.1: the leading words are codes (``C``); the shape placeholders as before
 @pytest.mark.parametrize("path,template", [
-    ("/call/555-123-4567", "/call/{number}"),
-    ("/call/(555)%20123%204567", "/call/{number}"),
-    ("/ssn/123-45-6789", "/ssn/{number}"),
-    ("/ssn/123.45.6789", "/ssn/{number}"),
-    ("/x/123/45/6789", "/x/{number}/{number}/{number}"),
-    ("/p/%EF%BC%95%EF%BC%95%EF%BC%95%EF%BC%91%EF%BC%92%EF%BC%93%EF%BC%94", "/p/{number}"),   # fullwidth digits
-    ("/u/jane%EF%BC%A0example.com", "/u/{email}"),                                              # fullwidth at
-    ("/u/jane%EF%B9%ABexample.com", "/u/{email}"),                                              # small at
-    ("/u/jane(at)example.com", "/u/{email}"), ("/u/jane[AT]example.com", "/u/{email}"),
-    ("/u/jane%2540example.com", "/u/{email}"), ("/u/jane%20at%20example%20dot%20com", "/u/{email}"),
-    ("/files/jane-doe-resume.pdf", "/files/{file}.pdf"), ("/img/jane.smith.jpg", "/img/{file}.jpg"),
-    ("/assets/site.css", "/assets/site.css"), ("/sitemap.xml", "/sitemap.xml"), ("/order/123456", "/order/{id}"),
+    ("/call/555-123-4567", "/C/{number}"),
+    ("/call/(555)%20123%204567", "/C/{number}"),
+    ("/ssn/123-45-6789", "/C/{number}"),
+    ("/ssn/123.45.6789", "/C/{number}"),
+    ("/x/123/45/6789", "/C/{number}/{number}/{number}"),
+    ("/p/%EF%BC%95%EF%BC%95%EF%BC%95%EF%BC%91%EF%BC%92%EF%BC%93%EF%BC%94", "/C/{number}"),   # fullwidth digits
+    ("/u/jane%EF%BC%A0example.com", "/C/{email}"),                                              # fullwidth at
+    ("/u/jane%EF%B9%ABexample.com", "/C/{email}"),                                              # small at
+    ("/u/jane(at)example.com", "/C/{email}"), ("/u/jane[AT]example.com", "/C/{email}"),
+    ("/u/jane%2540example.com", "/C/{email}"), ("/u/jane%20at%20example%20dot%20com", "/C/{email}"),
+    ("/files/jane-doe-resume.pdf", "/C/{file}.pdf"), ("/img/jane.smith.jpg", "/C/{file}.jpg"),
+    ("/assets/site.css", "/C/{file}.css"), ("/sitemap.xml", "/sitemap.xml"), ("/order/123456", "/C/{id}"),
 ])
 def test_t1_pii_variants_are_templated(path, template):
-    assert logs_mod.template_path(path) == template
+    assert _shape(logs_mod.template_path(path)) == template
 
 
 T1_PII = ("555-123-4567", "123-45-6789", "jane", "resume", "smith")   # no bare digit runs: hashes contain them

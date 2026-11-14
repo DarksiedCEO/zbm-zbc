@@ -51,6 +51,7 @@ class RunContext:
     paths: list = field(default_factory=lambda: ["/"])
     robots_cache: dict = field(default_factory=dict)
     robots: Optional[dict] = None          # filled by Selene, read by Delia and Roman
+    path_key: Optional[bytes] = None       # the log hash key: Delia's sitemap sample digests (agents/logs.path_digest)
 
     @property
     def origin(self) -> str:
@@ -60,6 +61,18 @@ class RunContext:
         return self.origin + path
 
     def same_site(self, host: Optional[str]) -> bool:
-        h = (host or "").lower().split(":")[0].rstrip(".")
-        d = self.domain.split(":")[0]
-        return h == d or h == "www." + d or d == "www." + h
+        """Spec B-CD-06: the audited (registered) domain, its ``www.`` twin, or a subdomain of either; lower-cased
+        IDNA hosts compared with the trailing dot removed. A lookalike (``site.test.evil.test``, ``evilsite.test``,
+        a Cyrillic letter) is another host."""
+        def norm(x: str) -> str:
+            x = (x or "").strip().lower().rstrip(".")
+            try:
+                return x.encode("idna").decode("ascii").lower()
+            except UnicodeError:
+                return ""
+        h = norm((host or "").split(":")[0] if not (host or "").startswith("[") else "")
+        d = norm(self.domain.split(":")[0])
+        if not h or not d:
+            return False
+        bases = {d, d[4:] if d.startswith("www.") else "www." + d}
+        return any(h == b or h.endswith("." + b) for b in bases)

@@ -74,6 +74,7 @@ HOSTILE_DNS = {"localhost": ["127.0.0.1"], "metadata.google.internal": ["169.254
 REBIND = "rebind.attacker.test"
 SECRET = "WARROOM-INTERNAL-SECRET-7f3a"
 MAX_BYTES = 256 * 1024
+ROBOTS_CUT = 500 * 1024          # RFC 9309 parse limit: robots.txt is read up to here (primitives/fetch.py)
 LOG_IP, LOG_UA = "66.249.66.1", "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
 PD_VALUE = "203.0.113.9|123-45-6789|4111111111111111"
 FIN_SERVICE, FIN_CALLER = "warroom-finance-service-token-" + "s" * 16, "warroom-finance-caller-token-" + "c" * 16
@@ -285,7 +286,7 @@ def setup(tmp):
     return SimpleNamespace(h=h, web=web, fin=fin, steps=[], snap=None, audit=None, needles=[], expected_code=None,
                            probe=None, kill_at=None, ledger_before=0, log_before=0, foreign=[], hostile=None,
                            switch=None, expect_quarantine=None, ingest_view=None, pd=False, gsc=None, pplx=None,
-                           pplx_ps=None, pplx_kill_at=None)
+                           pplx_ps=None, pplx_kill_at=None, cost=None, drift=None, r2=None, spec1=None)
 
 
 def teardown(ctx) -> None:
@@ -1153,12 +1154,639 @@ def _pplx_state(ctx, state, outs) -> None:
     state["good_variant_unanswered"] = f.mode == "documented_variant" and answers == 0
 
 
+# ---------------------------------------------------------------------------------------------- robots.txt matching cost
+
+ROBOTS_COST_BOUND_S = 30.0       # an audit or a log chunk under a hostile robots.txt finishes within this (stated)
+STALL_BOUND_MS = 1000.0          # the longest the interpreter was held by one step (a GIL stall), measured
+
+
+class _StallMeter:
+    """A thread that wakes every 10 ms and records the longest gap: a matcher holding the GIL in one C call (a
+    backtracking regex) shows as a long gap; pure-Python loops yield every switch interval."""
+
+    def __init__(self):
+        import threading
+        self.max_gap = 0.0
+        self._stop = threading.Event()
+        self._t = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self):
+        last = time.perf_counter()
+        while not self._stop.is_set():
+            time.sleep(0.01)
+            now = time.perf_counter()
+            self.max_gap = max(self.max_gap, now - last - 0.01)
+            last = now
+
+    def __enter__(self):
+        self._t.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._stop.set()
+        self._t.join(5)
+
+
+def _hostile_robots(kind: str) -> tuple[str, list]:
+    """(robots.txt, audit paths) for one matching-cost case (AEGIS Wave-1 M-S1: the reviewer's measured shapes)."""
+    wild6 = "/*a*a*a*a*a*a*b"
+    long_paths = ["/" + "a" * 60 + f"{i}" for i in range(9)]        # with "/": SEO_AUDIT_MAX_PAGES (10)
+    if kind == "wildcards_6x60":          # 3.0 s per URL at a4af277 (10 URLs here: the audit page cap)
+        return f"User-agent: *\nDisallow: {wild6}\nAllow: /\n", ["/"] + long_paths
+    if kind == "rules_20000":             # 0.873 s per call at a4af277
+        return "User-agent: *\n" + "".join(f"Disallow: /r{i}/*x\n" for i in range(20_000)), ["/"] + long_paths[:4]
+    if kind == "wildcard_rules_named_groups":
+        groups = "".join(f"User-agent: {t}\n" + "".join(f"Disallow: /*a*a*a*a*a*a*a*a*b{t[:2]}{i}\n"
+                                                         for i in range(600)) + "\n"
+                         for t in ("Googlebot", "Bingbot", "GPTBot", "ClaudeBot", "PerplexityBot"))
+        return groups + "User-agent: *\nAllow: /\n", ["/"] + long_paths
+    if kind == "rules_2000_sitemap_500":  # 268.7 s at a4af277
+        return ("User-agent: *\n" + "".join(f"Disallow: /*a*a*a*a*a*a*q{i}\n" for i in range(2000))
+                + "Sitemap: http://site.test/sitemap.xml\n"), ["/"]
+    raise ValueError(f"unknown robots cost kind {kind}")
+
+
+def robots_cost(ctx, kind):
+    """A hostile robots.txt built to make a backtracking or per-rule-regex matcher slow, then an audit (and, for the
+    log case, an ingest) timed end to end with the GIL-stall meter running."""
+    text, paths = _hostile_robots(kind)
+    _route(ctx, "/robots.txt", 200, text, "text/plain")
+    if kind == "rules_2000_sitemap_500":
+        _route(ctx, "/sitemap.xml", 200, _sitemap(f"http://site.test/{'a' * 60}{i}" for i in range(500)),
+               "application/xml")
+    for p in paths:
+        if (SITE, p) not in ctx.web.routes:
+            _route(ctx, p, 200, FIXTURE.home_html(canonical=f"http://site.test{p}"))
+    t0 = time.perf_counter()
+    with _StallMeter() as m:
+        r = audit(ctx, paths=tuple(paths))
+        ctx.cost = {"audit_s": time.perf_counter() - t0}
+        t1 = time.perf_counter()
+        lines = "".join(clf("/" + "a" * 60 + f"{i}") + "\n" for i in range(400)).encode()
+        ctx.steps.append({"action": "robots_cost_ingest", **_ingest(ctx, lines)})
+        ctx.cost["ingest_s"] = time.perf_counter() - t1
+    ctx.cost["stall_ms"] = m.max_gap * 1000
+    return r
+
+
+# ---------------------------------------------------------------------------------------------- drift classification
+
+def _cite_pattern(f, pattern):
+    """Make the fake Perplexity cite the site in the answers marked True, in order (then not)."""
+    seq = list(pattern)
+    orig = f.handle
+
+    def handle(request):
+        hit = seq.pop(0) if seq else False
+        f.cites = (["https://site.test/page"] if hit else []) + ["https://competitor.test/a"]
+        return orig(request)
+    f.handle = handle
+    return handle
+
+
+def drift_case(ctx, kind):
+    """Two audits of site.test with one change between them, then the drift view (Osei's search-truth drift). The
+    case states which class the changed findings must get, and which they must never get."""
+    h = ctx.h
+    ps = None
+    if kind == "sampling_noise":
+        perplexity(ctx, host="site.test")
+        f = ctx.pplx
+        handle = _cite_pattern(f, [True, True, False])
+        h.ports.engines["perplexity"] = PX.PerplexityEngine(PX.ApiKey(PPLX_KEY, "env"),
+                                                            transport=httpx.MockTransport(handle), monotonic=f.clock,
+                                                            sleep=f.clock.sleep, rand=lambda: 0.0)
+        ps = ctx.pplx_ps
+    if kind == "tool_failure_before_llms":
+        ctx.web.routes[(SITE, "/llms.txt")] = lambda req: (_ for _ in ()).throw(httpx.ConnectError("dropped"))
+    # round 2: every case also plants a letters-only value (M5) and, where pages are read in both runs, a page whose
+    # canonical moves to a target that refuses connections in the newer run (Osei M1: a failed fetch of the
+    # finding's own target is TOOL_FAILURE, never REAL_CHANGE)
+    _plant_letters(ctx)
+    canon_case = kind != "tool_failure_after_robots"
+    _route(ctx, "/c", 200, FIXTURE.home_html(title="Contact Z Best Media", canonical="http://site.test/c"))
+    body = {"request_id": H.rid(), "domain": SITE, "scheme": "http",
+            "paths": ["/", "/about"] + (["/c"] if canon_case else [])}
+    if ps:
+        body.update(paths=["/", "/c"], prompt_set_id=ps)
+    a = h.post("/tenants/zbm/audits", body)
+    if kind == "real_change":
+        _route(ctx, "/about", 200, FIXTURE.home_html(title="About Z Best Media", canonical="http://site.test/about",
+                                                     extra_head="<meta name='robots' content='noindex'>"))
+    elif kind == "tool_failure_after_sitemap":
+        _route(ctx, "/sitemap.xml", 503, "down", "text/plain")
+    elif kind == "tool_failure_after_llms":
+        ctx.web.routes[(SITE, "/llms.txt")] = lambda req: (_ for _ in ()).throw(httpx.ConnectError("dropped"))
+    elif kind == "tool_failure_before_llms":
+        _route(ctx, "/llms.txt", 200, "## no title\n", "text/plain")
+    elif kind == "tool_failure_after_robots":
+        _route(ctx, "/robots.txt", 503, "down", "text/plain")
+    elif kind == "sampling_noise":
+        handle = _cite_pattern(ctx.pplx, [True, False, False])
+        h.ports.engines["perplexity"] = PX.PerplexityEngine(PX.ApiKey(PPLX_KEY, "env"),
+                                                            transport=httpx.MockTransport(handle),
+                                                            monotonic=ctx.pplx.clock, sleep=ctx.pplx.clock.sleep,
+                                                            rand=lambda: 0.0)
+    if canon_case:
+        _route(ctx, "/c", 200, FIXTURE.home_html(title="Contact Z Best Media", canonical="http://site.test/c-new"))
+        ctx.web.routes[(SITE, "/c-new")] = _connect_fails
+    body["request_id"] = H.rid()
+    b = h.post("/tenants/zbm/audits", body)
+    ctx.audit = b
+    ids = [x.json().get("audit_id") for x in (a, b)]
+    d = h.get(f"/tenants/zbm/audits/{ids[1]}/drift?against={ids[0]}")
+    ctx.drift = {"kind": kind, "http": d.status_code, "body": d.json() if d.status_code == 200 else None,
+                 "reports": [x.json().get("report") for x in (a, b)], "canon_case": canon_case}
+    ctx.steps.append({"action": "drift_view", "status": d.status_code, "body": ctx.drift["body"]})
+    return d
+
+
+def _letters_marker() -> str:
+    """A letters-only synthetic value (a name slug's or a secret word's shape), made in the worker per case."""
+    import secrets as _secrets
+    return "zq" + "".join(_secrets.choice("bcdfghjklmnpqrstvwxz") for _ in range(12))
+
+
+def _plant_letters(ctx) -> str:
+    """AEGIS Wave-1 round 2 M5: a letters-only value in crawled / declared URLs (robots Sitemap line, sitemap entry,
+    sitemap path): it must be readable nowhere (needles)."""
+    m = _letters_marker()
+    ctx.needles.append(m)
+    robots = ctx.web.routes.get((SITE, "/robots.txt"))
+    text = robots[1] if isinstance(robots, tuple) and isinstance(robots[1], str) else ROBOTS
+    _route(ctx, "/robots.txt", 200, text + f"Sitemap: http://site.test/sitemaps/{m}.xml\n", "text/plain")
+    _route(ctx, f"/sitemaps/{m}.xml", 200, _sitemap([f"http://site.test/team/{m}", "http://site.test/about"]),
+           "application/xml")
+    return m
+
+
+def _connect_fails(request):
+    raise httpx.ConnectError("refused (war room)")
+
+
+DRIFT_EXPECT = {"real_change": ("selene", "REAL_CHANGE"), "sampling_noise": ("callum", "SAMPLING_NOISE"),
+                "tool_failure_after_sitemap": ("delia", "TOOL_FAILURE"),
+                "tool_failure_after_llms": ("delia", "TOOL_FAILURE"),
+                "tool_failure_before_llms": ("delia", "TOOL_FAILURE"),
+                "tool_failure_after_robots": ("selene", "TOOL_FAILURE")}
+
+
+_FAILED_FETCH_CODES = re.compile(r".*_(UNREADABLE|UNREACHABLE|INCOMPLETE|UNCHECKED)$|PAGE_BLOCKED_FOR_OUR_CRAWLER")
+
+
+def _finding_index(reports) -> dict:
+    """drift key -> [finding in the older report or None, in the newer or None] (agents/drift.py ``key``)."""
+    from agents import drift as drift_mod
+    out: dict = {}
+    for i, rep in enumerate(reports):
+        for e in (rep or {}).get("agents", []):
+            for f in e.get("findings", []):
+                out.setdefault(drift_mod.key(e["agent"], f), [None, None])[i] = f
+    return out
+
+
+def _drift_observe(ctx, state: dict) -> None:
+    d = ctx.drift
+    state["drift_http"] = d["http"]
+    changes = (d["body"] or {}).get("changes") or []
+    agent, want = DRIFT_EXPECT[d["kind"]]
+    mine = [c for c in changes if c["agent"] == agent]
+    state["drift_classes"] = sorted({c["class"] for c in mine})
+    state["drift_expected_class_seen"] = want in state["drift_classes"]
+    # a failed fetch on either side is never a change about the site (ADR 0017 decision 11; AEGIS Wave-1 M-O1 and
+    # round 2 Osei M1): no change classed REAL_CHANGE whose finding, in either run, records a fetch that did not
+    # succeed (its own detail.fetch_state) or is itself a failed / incomplete observation
+    idx = _finding_index(d["reports"])
+    bad = []
+    for c in changes:
+        if c["class"] != "REAL_CHANGE":
+            continue
+        pair = idx.get(c["key"], [None, None])
+        states = [((f or {}).get("detail") or {}).get("fetch_state") for f in pair]
+        if any(s not in (None, "OK") for s in states) or _FAILED_FETCH_CODES.fullmatch(c["code"] or ""):
+            bad.append(c["code"])
+    if d["kind"].startswith("tool_failure") and d["kind"] != "tool_failure_after_robots":
+        bad += [c["code"] for c in mine if c["class"] == "REAL_CHANGE"]
+    if d["kind"] == "tool_failure_after_robots":
+        bad += [c["code"] for c in mine if c["class"] == "REAL_CHANGE"]
+    state["drift_failure_called_real"] = bool(bad)
+    if bad:
+        state["drift_failed_fetch_real_codes"] = sorted(set(bad))
+    # the canonical target that refused connections in the newer run was classified (a change), as TOOL_FAILURE;
+    # not applicable (True) where pages are not read in the newer run (robots.txt unreachable)
+    # (spec wave1-spec/1 store codes: the page URL is stored as http://site.test/{c:seg:..}, so the change is found
+    # by its code and class on this site)
+    state["drift_canonical_failure_tool_failure"] = not d["canon_case"] or any(
+        (c["url"] or "").startswith("http://site.test/") and c["code"].startswith("CANONICAL_TARGET")
+        and c["class"] == "TOOL_FAILURE" for c in changes)
+
+
+# ---------------------------------------------------------------------------------------------- round 2 cases
+
+R2_CHECKED_CODES = ("PAGE_BLOCKED_FOR_OUR_CRAWLER", "CANONICAL_TARGET_NOT_200", "SITEMAP_UNREADABLE",
+                    "LLMS_TXT_UNREADABLE", "ROBOTS_CHECK_INCOMPLETE", "PAGE_NOT_READ_ROBOTS_CHECK_INCOMPLETE",
+                    "CANONICAL_TARGET_UNCHECKED", "SITEMAP_ROBOTS_CHECK_INCOMPLETE")
+
+
+def _slow_routes(ctx, seconds: float) -> None:
+    for k, v in list(ctx.web.routes.items()):
+        if isinstance(v, tuple):
+            def later(request, v=v):
+                time.sleep(seconds)
+                return respond(*v)
+            ctx.web.routes[k] = later
+
+
+def round2(ctx, kind):
+    """AEGIS Wave-1 certification round 2 findings, one case each (M1-M5, the entity check, Osei M2)."""
+    ctx.r2 = {"kind": kind}
+    paths = ("/", "/about")
+    if kind == "reserved_allow":            # M1: "/%2A" is a literal *, so this allows nothing we audit
+        _route(ctx, "/robots.txt", 200, "User-agent: *\nDisallow: /\nAllow: /%2A\n", "text/plain")
+    elif kind == "reserved_disallow":       # M1: never a critical finding quoting "/*"
+        _route(ctx, "/robots.txt", 200, ROBOTS + "Disallow: /%2A\n", "text/plain")
+    elif kind == "invalid_utf8":            # M1: two different invalid octets never collide
+        _route(ctx, "/robots.txt", 200, "User-agent: *\nDisallow: /\nAllow: /x%FE\n", "text/plain")
+        _route(ctx, "/x%FF", 200, FIXTURE.home_html(canonical="http://site.test/x%FF"))
+        paths = ("/x%FF",)
+    elif kind == "slow_site":               # M2: an ordinary slow site is never blocked or unreadable
+        extra = [f"/p{i}" for i in range(4)]
+        for p in extra:
+            _route(ctx, p, 200, FIXTURE.home_html(canonical=f"http://site.test{p}-c"))
+            _route(ctx, f"{p}-c", 200, FIXTURE.home_html(canonical=f"http://site.test{p}-c"))
+        paths = ("/", "/about") + tuple(extra)
+        _slow_routes(ctx, 0.7)
+    elif kind == "filler_then_disallow":    # M3: a rule past 4,000 others is used
+        _route(ctx, "/robots.txt", 200, "User-agent: Googlebot\n" +
+               "".join(f"Disallow: /filler{i}/\n" for i in range(4000)) + "Disallow: /about\n\nUser-agent: *\n"
+               "Allow: /\nSitemap: http://site.test/sitemap.xml\n", "text/plain")
+    elif kind == "long_allow":              # M3: an allow of any length is used; nothing is refused
+        _route(ctx, "/robots.txt", 200, "User-agent: *\nAllow: /" + "a" * 2500 + "\nDisallow: /nothing\n",
+               "text/plain")
+    elif kind == "log_query":               # M4: path AND query, decoded once
+        _route(ctx, "/robots.txt", 200, ROBOTS + "Disallow: /*?sort=\nDisallow: /search?\nDisallow: /%2541\n",
+               "text/plain")
+    elif kind == "planted_names":           # M5: letters-only values in every crawled-URL surface
+        m = _plant_letters(ctx)
+        n = _letters_marker()
+        ctx.needles.append(n)
+        _route(ctx, "/", 301, "", "text/plain", location=f"/landing/{n}")
+        _route(ctx, f"/landing/{n}", 200, FIXTURE.home_html(canonical=f"http://site.test/author/{m}-{n}"))
+    elif kind == "entity_name":             # entity check: the page's business name is never stored
+        n = _letters_marker()
+        ctx.needles.append(n)
+        ld = ('{"@context":"https://schema.org","@type":"Organization","name":"' + n.title() +
+              '","url":"http://site.test/"}')
+        _route(ctx, "/", 200, FIXTURE.home_html(canonical="http://site.test/", ld=ld))
+    elif kind == "jsonld_too_large":        # Osei M2: truncated, its whole size, its own reason
+        big = '{"@context":"https://schema.org","@type":"Organization","name":"' + "n" * 400_000 + '"}'
+        _route(ctx, "/", 200, FIXTURE.home_html(canonical="http://site.test/", ld=big))
+        ctx.h.ports.fetcher = FETCH.Fetcher(timeout_s=1, max_bytes=2 * 1024 * 1024, max_redirects=3,
+                                            resolver=ctx.web.resolve, transport=httpx.MockTransport(ctx.web.handle))
+        ctx.r2["total_bytes"] = len(big.encode())
+    else:
+        raise ValueError(f"unknown round 2 kind {kind}")
+    r = audit(ctx, paths=paths)
+    if kind == "log_query":
+        lines = "".join(clf(p) + "\n" for p in ("/shop?sort=price", "/search?q=x", "/search?", "/%2541", "/A"))
+        ctx.steps.append({"action": "r2_ingest", **_ingest(ctx, lines.encode())})
+    if kind == "planted_names":
+        lines = "".join(clf(p) + "\n" for p in (f"/u/{ctx.needles[0]}", f"/blog/{ctx.needles[1]}"))
+        ctx.steps.append({"action": "r2_ingest", **_ingest(ctx, lines.encode())})
+    return r
+
+
+def _r2_observe(ctx, state: dict) -> None:
+    kind = ctx.r2["kind"]
+    body = ctx.audit.json() if ctx.audit.headers.get("content-type", "").startswith("application/json") else {}
+    rep = (body or {}).get("report") or {}
+    findings = [f for e in rep.get("agents", []) for f in e.get("findings", [])]
+    codes = {f["code"] for f in findings}
+    audited = {p for p in (rep.get("paths") or [])}
+    fetched = {r.split(" ", 2)[2] for r in ctx.web.requests}
+    ok = False
+    if kind in ("reserved_allow", "invalid_utf8"):
+        ok = not (audited & fetched) and state.get("page_states") == ["BLOCKED_BY_ROBOTS"]
+    elif kind == "reserved_disallow":
+        ok = not any(c.startswith("ROBOTS_BLOCKS") for c in codes) and state.get("page_states") == ["OK"]
+    elif kind == "slow_site":
+        ok = state.get("page_states") == ["OK"] and not codes & set(R2_CHECKED_CODES) and \
+            (state.get("agent_outcomes") or {}).get("delia") == "OK"
+    elif kind == "filler_then_disallow":
+        got = [f["detail"].get("blocked_paths") for f in findings if f["code"] == "ROBOTS_BLOCKS_SEARCH_CRAWLER"
+               and f["detail"].get("token") == "Googlebot"]
+        # spec store codes: "/about" is stored as "/{c:seg:..}" (one blocked path, coded)
+        ok = len(got) == 1 and len(got[0]) == 1 and _CODE.fullmatch(got[0][0][1:] or "") is not None and \
+            "ROBOTS_LIMITS_EXCEEDED" not in codes
+    elif kind == "long_allow":
+        ok = state.get("page_states") == ["OK"] and "ROBOTS_LIMITS_EXCEEDED" not in codes
+    elif kind == "log_query":
+        fam = (((ctx.ingest_view or {}).get("report") or {}).get("envelope") or {}).get("facts", {}) \
+            .get("families", {}).get("Googlebot", {})
+        state["r2_robots_hits"] = fam.get("robots_disallowed_hits")
+        ok = fam.get("robots_disallowed_hits") == 4
+    elif kind in ("planted_names", "entity_name"):
+        ok = True if kind == "planted_names" else "ENTITY_FIELD_MISMATCH" in codes
+    elif kind == "jsonld_too_large":
+        osei_facts = next((e["facts"] for e in rep.get("agents", []) if e["agent"] == "osei"
+                           and e.get("task") == "data_hygiene"), {})
+        q = [x for x in osei_facts.get("quarantined", []) if x.get("kind") == "structured_data"]
+        ok = bool(q) and q[0].get("reason") == "JSONLD_TOO_LARGE" and q[0].get("truncated") is True and \
+            q[0].get("total_bytes") == ctx.r2["total_bytes"]
+    state["r2_expect_met"] = bool(ok)
+    outs = _outputs(ctx) + [json.dumps(rep)]
+    hay = [_fold(unquote(unquote(b))) for b in outs]
+    state["r2_leaks"] = sorted(n for n in ctx.needles if any(_fold(n) in x for x in hay))
+
+
+# ---------------------------------------------------------------------------------------------- spec wave1-spec/1
+# The seven war-room scenarios of SUITE_PLAN 7 (store codes, robots wire / length, cost charging, host labels, large
+# sitemaps, codes and drift, vault unavailable). Each case fails on 91db0abb (round 2) and passes at the certified
+# head; ``_spec1_observe`` sets the scenario's invariant keys.
+_CODE = re.compile(r"\{c:[a-z]+:[0-9a-f]{16}\}")
+_HEX_LABEL = "0123456789abcdef"
+
+
+def _plants(ctx, n=3, shape="letters"):
+    """``n`` planted values of one A-18 shape, made in the worker per case: ``letters`` (a name slug's or a secret
+    word's shape), ``hex`` (the second value a 32-hex secret, the others letters), ``glued`` (two letter runs glued
+    in camel case)."""
+    import secrets as _secrets
+    out = []
+    for i in range(n):
+        if shape == "hex" and i == 1:
+            v = _secrets.token_hex(16)
+        elif shape == "glued":                 # two words glued in camel case, under the 20-character token shape
+            v = _letters_marker()[:8].title() + _letters_marker()[2:10].title()
+        else:
+            v = _letters_marker() + (_HEX_LABEL[i] * 2 if i == 1 else "")
+        ctx.needles.append(v)
+        out.append(v)
+    return out
+
+
+def spec1(ctx, scenario, kind):
+    ctx.spec1 = {"scenario": scenario, "kind": kind}
+    paths = ("/",)
+    if scenario == "store-codes-planted":
+        group, shape = kind.split(":")
+        vals = _plants(ctx, shape=shape)
+        a, b, c = vals
+        if group == "robots":
+            # the planted rule blocks a crawled page (a link), never the operator's own request path: the request
+            # is the client's own input echoed to the client (open question Q-D05-1), not an A-18 surface
+            _route(ctx, "/robots.txt", 200, f"# {a}\nUser-agent: *\nDisallow: /{b}\nDisallow: /x\nAllow: /\n"
+                   f"Sitemap: http://{c}.test/sm.xml\n", "text/plain")
+            _route(ctx, "/", 200, FIXTURE.home_html(canonical="http://site.test/").replace(
+                "</body>", f"<a href='/{b}'>x</a></body>"))
+            paths = ("/", "/x")
+        elif group == "page_markup":
+            ld = ('{"@context":"https://schema.org","@type":"' + a.title() + '","name":"' + b + '"}')
+            # html lang (an A-18 surface): a three-letter primary subtag CLDR does not know (91db0abb kept it)
+            lang = ("q" + "".join(ch for ch in c.lower() if ch not in "q")[:2])
+            ctx.needles.append(lang)
+            ctx.spec1["lang"] = lang
+            _route(ctx, "/", 200, FIXTURE.home_html(canonical="http://site.test/", ld=ld).replace(
+                "<title>", f"<title>{c} ").replace("<html", f"<html lang='{lang}'", 1).replace(
+                "lang='en'", "", 1))
+        elif group == "urls_same_host":
+            _route(ctx, "/", 301, "", "text/plain", location=f"/{a}/{b}?q={c}")
+            _route(ctx, f"/{a}/{b}", 200, FIXTURE.home_html(canonical=f"http://site.test/{a}/{b}"))
+        elif group == "urls_other_host":
+            _route(ctx, "/", 200, FIXTURE.home_html(canonical=f"http://{a}.test/{b}?{c}=1"))
+        elif group == "sitemaps":
+            _route(ctx, "/sitemap.xml", 200, _sitemap([f"http://site.test/{a}", f"http://{b}.test/x",
+                                                       f"http://site.test/p?{c}"]), "application/xml")
+        elif group == "llms":
+            _route(ctx, "/llms.txt", 200, f"# {a}\n\n## {b}\n- [x](http://{c}.test/)\n", "text/plain")
+        elif group == "log_ingest":
+            pass
+        elif group == "entity":
+            ld = ('{"@context":"https://schema.org","@type":"Organization","name":"' + a.title() + '",'
+                  '"address":{"@type":"PostalAddress","streetAddress":"' + b + '"},"sameAs":["https://' + c + '.test/"]}')
+            _route(ctx, "/", 200, FIXTURE.home_html(canonical="http://site.test/", ld=ld))
+        r = audit(ctx, paths=paths)
+        if group == "log_ingest":
+            lines = "".join(clf(p) + "\n" for p in (f"/{a}", f"/x?{b}=1", f"/{c}/y"))
+            ctx.steps.append({"action": "spec1_ingest", **_ingest(ctx, lines.encode())})
+            ctx.spec1["ingest_id"] = (ctx.ingest_view or {}).get("ingest_id")
+        return r
+    if scenario == "robots-wire-and-length":
+        if kind == "gzip_empty_members":
+            body = gzip.compress(b"") * 110_000 + gzip.compress(b"User-agent: *\nAllow: /\n")
+            ctx.web.routes[(SITE, "/robots.txt")] = (200, body, {"content-type": "text/plain",
+                                                                 "content-encoding": "gzip"})
+        elif kind == "utf8_multibyte_over_limit":
+            text = "User-agent: *\nAllow: /\n#" + "\u30c4" * 300_000 + "\nDisallow: /\n"
+            _route(ctx, "/robots.txt", 200, text.encode("utf-8"), "text/plain")
+        elif kind in ("long_location_2011", "long_location_8193"):
+            n = 2011 if kind.endswith("2011") else 8193
+            target = "/l/" + "q" * (n - 3)
+            _route(ctx, "/", 302, "", "text/plain", location=target)
+            _route(ctx, target, 200, FIXTURE.home_html(canonical="http://site.test" + target))
+            ctx.spec1["target"] = target
+        elif kind == "robots_429":
+            _route(ctx, "/robots.txt", 429, "slow down", "text/plain")
+        return audit(ctx, paths=paths)
+    if scenario == "robots-cost-charging":
+        if kind == "needle_99_x_4348":
+            needle = "a" * 97 + "ba"
+            text = "User-agent: *\n" + "".join(f"Disallow: /*{needle}*{i}\n" for i in range(4348))
+            plen = 2047
+        elif kind == "paths_29000":
+            needle = "a" * 48 + "ba"
+            text = "User-agent: *\n" + "".join(f"Disallow: /*{needle}*{i}\n" for i in range(4348))
+            plen = 29000
+        else:
+            text = "User-agent: *\n" + "".join(f"Disallow: /p{i:06d}\n" for i in range(24908))
+            plen = 60
+        _route(ctx, "/robots.txt", 200, text, "text/plain")
+        ps = tuple("/" + "a" * plen + str(i) for i in range(3))
+        for p in ps:
+            _route(ctx, p, 200, FIXTURE.home_html(canonical="http://site.test" + p))
+        # the stall meter measures this audit's matching: the garbage earlier cases of the worker left (a 50 MiB
+        # sitemap's objects) is collected first, so a full collection inside the meter is not charged to it
+        import gc
+        gc.collect()
+        t0, c0 = time.perf_counter(), time.thread_time()
+        with _StallMeter() as m:
+            r = audit(ctx, paths=ps)
+        ctx.spec1.update(wall=time.perf_counter() - t0, cpu=time.thread_time() - c0, stall_ms=m.max_gap * 1000)
+        # B-RB-09 (b): ONE step of the service's own matcher on this file (decisions until the step's work is
+        # spent: undecided), its CPU measured; the audit above only shows the bound holds end to end
+        rb_mod = sys.modules.get("primitives.robots")
+        parsed = rb_mod.parse(text)
+        parsed.decide("Googlebot", "/warm")
+        w = rb_mod.Work(rb_mod.STEP_WORK_UNITS)
+        many = ["/" + "a" * plen + str(i) for i in range(400)] if kind != "distinct_prefix_24908" else \
+            ["/p%06d/x" % i for i in range(0, 24908, 10)]
+        c1 = time.thread_time()
+        for x in many:
+            if parsed.decide("Googlebot", x, w)["allowed"] is None:
+                break
+        ctx.spec1["step_cpu"] = time.thread_time() - c1
+        return r
+    if scenario == "host-labels":
+        a, b, c = _plants(ctx)
+        if kind == "lookalikes":
+            _route(ctx, "/", 200, FIXTURE.home_html(canonical=f"http://site.test.{a}.test/x"))
+            _route(ctx, "/robots.txt", 200, f"User-agent: *\nAllow: /\nSitemap: http://{b}site.test/s.xml\n",
+                   "text/plain")
+        else:
+            lab = (a if kind == "name_labels" else _HEX_LABEL * 2)
+            if kind == "hex_labels":
+                ctx.needles.append(lab)
+            _route(ctx, "/", 200, FIXTURE.home_html(canonical=f"http://{lab}.test/y"))
+            _route(ctx, "/robots.txt", 200, f"User-agent: *\nAllow: /\nSitemap: http://{b}.test/s.xml\n"
+                   "Sitemap: http://site.test/sitemap.xml\n", "text/plain")
+            _route(ctx, "/sitemap.xml", 200, _sitemap([f"http://{c}.test/z", "http://site.test/"]), "application/xml")
+        return audit(ctx, paths=paths)
+    if scenario == "large-sitemaps":
+        ns = "http://www.sitemaps.org/schemas/sitemap/0.9"
+        if kind == "plain_6mib_45000":
+            body = "<?xml version='1.0'?><urlset xmlns='%s'>%s</urlset>" % (ns, "".join(
+                f"<url><loc>http://site.test/p/{i}/{'x' * 80}</loc></url>" for i in range(45000)))
+            _route(ctx, "/sitemap.xml", 200, body, "application/xml")
+            ctx.spec1["urls"] = 45000
+        elif kind == "gzip_12mib":
+            body = "<?xml version='1.0'?><urlset xmlns='%s'>%s</urlset>" % (ns, "".join(
+                f"<url><loc>http://site.test/p/{i}/{'y' * 240}</loc></url>" for i in range(45000)))
+            _route(ctx, "/robots.txt", 200, "User-agent: *\nAllow: /\nSitemap: http://site.test/s.xml.gz\n",
+                   "text/plain")
+            ctx.web.routes[(SITE, "/s.xml.gz")] = (200, gzip.compress(body.encode()), {"content-type": "application/gzip"})
+            ctx.spec1["urls"] = 45000
+        else:
+            body = "<?xml version='1.0'?><urlset xmlns='%s'>%s</urlset>" % (ns, "".join(
+                f"<url><loc>http://site.test/p/{i}/{'z' * 1100}</loc></url>" for i in range(48000)))
+            _route(ctx, "/robots.txt", 200, "User-agent: *\nAllow: /\nSitemap: http://site.test/s.xml.gz\n",
+                   "text/plain")
+            ctx.web.routes[(SITE, "/s.xml.gz")] = (200, gzip.compress(body.encode()), {"content-type": "application/gzip"})
+            ctx.spec1["urls"] = None
+        return audit(ctx, paths=paths)
+    if scenario == "codes-and-drift":
+        a, _, _ = _plants(ctx, 1) + [None, None]
+        _route(ctx, "/", 200, FIXTURE.home_html(canonical=f"http://{a}.test/x"))
+        r1 = audit(ctx, paths=paths)
+        if kind == "key_rotation":
+            import os as _os
+            import vault as _vault
+            old = ctx.h.svc.vault._key          # rotation: a new current key, the old one kept to read old blobs
+            ctx.h.svc.vault._key = _vault.VaultKey(old._cur.__class__("rotated", _os.urandom(32)), old._cur)
+        if kind == "two_tenants":
+            ctx.h.ok(ctx.h.post("/tenants", {"request_id": H.rid(), "tenant_id": "acme", "kind": "own"}, andre=True),
+                     201)
+            ctx.h.ok(ctx.h.post("/tenants/acme/domains", {"request_id": H.rid(), "domains": [OTHER_SITE]}, andre=True))
+            _route(ctx, "/robots.txt", 200, ROBOTS, "text/plain", host=OTHER_SITE)
+            _route(ctx, "/", 200, FIXTURE.home_html(canonical=f"http://{a}.test/x"), host=OTHER_SITE)
+            r2 = ctx.h.post("/tenants/acme/audits", {"request_id": H.rid(), "domain": OTHER_SITE, "scheme": "http",
+                                                      "paths": ["/"]})
+        else:
+            r2 = audit(ctx, paths=paths)
+        ctx.spec1["pair"] = (r1, r2)
+        return r2
+    if scenario == "vault-unavailable-audit":
+        if kind == "no_key":
+            ctx.h.svc.vault._key = None
+            n = len(ctx.web.requests)
+            r = audit(ctx, paths=paths)
+            ctx.spec1["requests_during"] = len(ctx.web.requests) - n
+            return r
+        r = audit(ctx, paths=paths)
+        aid = r.json().get("audit_id")
+        with ctx.h.svc.lock:
+            ctx.h.svc.audits[aid]["evidence_ref"] = "seo-vlt-" + "0" * 40
+        ctx.spec1["resolved"] = ctx.h.get(f"/tenants/zbm/audits/{aid}?resolve=evidence", caller="hub", tenant="zbm")
+        return r
+    raise ValueError(f"unknown spec1 scenario {scenario}")
+
+
+def _spec1_observe(ctx, state: dict) -> None:
+    sc, kind = ctx.spec1["scenario"], ctx.spec1["kind"]
+    body = ctx.audit.json() if ctx.audit is not None and ctx.audit.headers.get("content-type", "").startswith(
+        "application/json") else {}
+    rep = (body or {}).get("report") or {}
+    findings = [f for e in rep.get("agents", []) for f in e.get("findings", [])]
+    codes_seen = {f["code"] for f in findings}
+    outs = _outputs(ctx) + [json.dumps(rep)]
+    hay = [_fold(unquote(unquote(b))) for b in outs]
+    state["s1_readable"] = sorted(n for n in ctx.needles if any(_fold(n) in x for x in hay))
+    if sc == "store-codes-planted":
+        aid = body.get("audit_id")
+        group = kind.split(":")[0]
+        iid = ctx.spec1.get("ingest_id")
+        where = f"log-ingests/{iid}" if group == "log_ingest" and iid else f"audits/{aid}"
+        own = ctx.h.get(f"/tenants/zbm/{where}?resolve=evidence", caller="hub", tenant="zbm") if aid else None
+        comp = ctx.h.get(f"/tenants/zbm/{where}?resolve=evidence", caller="compliance_38") if aid else None
+        # D-06 positive control: every group whose planted values are kept as codes (owner evidence); page markup
+        # and llms.txt text are measured only (B-CD-05), except the html lang code planted above
+        coded_groups = {"urls_same_host", "urls_other_host", "sitemaps", "robots", "entity", "log_ingest",
+                        "page_markup"}
+        # the owner display shows the value as observed (an entity value after the stated normalisation, which
+        # folds case): compared case-folded
+        shown = _fold(own.text) if own is not None and own.status_code == 200 else ""
+        found = any(_fold(n) in shown for n in ctx.needles)
+        state["s1_owner_found_count"] = sum(1 for n in ctx.needles if _fold(n) in shown)
+        state["s1_owner_resolves"] = found if group in coded_groups else True
+        state["s1_non_owner_codes_only"] = comp is None or not any(n in comp.text for n in ctx.needles)
+    if sc == "robots-wire-and-length":
+        state["s1_no_false_unreachable"] = "ROBOTS_UNREACHABLE" not in codes_seen or kind == "robots_429"
+        if kind == "robots_429":
+            state["s1_no_false_unreachable"] = "ROBOTS_UNREACHABLE" in codes_seen     # Q-06: 429 is unreachable
+        tgt = ctx.spec1.get("target")
+        reqs = [r.split(" ", 2)[2] for r in ctx.web.requests]
+        cut = [q for q in reqs if q.startswith("/l/") and q != tgt]
+        state["s1_location_lengths"] = sorted({len(q) for q in reqs if q.startswith("/l/")})
+        state["s1_no_truncated_location_followed"] = not cut and (kind != "long_location_8193" or tgt not in reqs)
+        bad = [f["code"] for f in findings if f["decision"] in ("ACT", "TEST") and
+               ((f.get("detail") or {}).get("fetch_state") not in (None, "OK") or "cap" in (f.get("detail") or {}))]
+        state["s1_own_failures_ie"] = not bad and "PAGE_HTTP_ERROR" not in codes_seen
+    if sc == "robots-cost-charging":
+        state["s1_step_cpu"] = round(ctx.spec1["step_cpu"], 3)
+        state["s1_step_cpu_within_2s"] = ctx.spec1["step_cpu"] <= 2.0 and ctx.spec1["cpu"] <= 2.0 * 3 + 1.0
+        state["s1_within_time_bound"] = ctx.spec1["wall"] <= 30.0
+        state["s1_max_stall_ms"] = round(ctx.spec1["stall_ms"], 1)
+        state["s1_no_interpreter_stall"] = ctx.spec1["stall_ms"] <= STALL_BOUND_MS
+    if sc == "host-labels":
+        txt = json.dumps(rep)
+        state["s1_other_hosts_coded"] = not state["s1_readable"] and "{c:host:" in txt
+        state["s1_lookalike_never_own"] = "CANONICAL_OTHER_HOST" in codes_seen if kind == "lookalikes" else True
+    if sc == "large-sitemaps":
+        d = next((e["facts"] for e in rep.get("agents", []) if e["agent"] == "delia"), {}) or {}
+        want = ctx.spec1["urls"]
+        state["s1_valid_sitemap_read"] = (d.get("sitemap_urls") == want) if want else \
+            "SITEMAP_TOO_LARGE" in codes_seen
+        state["s1_no_false_decompress_failed"] = "SITEMAP_DECOMPRESS_FAILED" not in codes_seen
+    if sc == "codes-and-drift":
+        r1, r2 = ctx.spec1["pair"]
+        c1 = set(_CODE.findall(json.dumps(r1.json().get("report") or {})))
+        c2 = set(_CODE.findall(json.dumps(r2.json().get("report") or {})))
+        state["s1_codes_stable"] = bool(c1) and (c1 == c2 if kind == "same_site_twice" else True)
+        state["s1_tenants_never_share"] = not (c1 & c2) if kind == "two_tenants" else True
+        if kind in ("same_site_twice", "key_rotation"):
+            d = ctx.h.get(f"/tenants/zbm/audits/{r2.json()['audit_id']}/drift?against={r1.json()['audit_id']}")
+            ch = (d.json() or {}).get("changes", []) if d.status_code == 200 else None
+            state["s1_rotation_r2"] = ch is not None and all(c["class"] != "REAL_CHANGE" for c in ch)
+        else:
+            state["s1_rotation_r2"] = True
+    if sc == "vault-unavailable-audit":
+        if kind == "no_key":
+            state["s1_refused_before_fetch"] = ctx.audit.status_code in (409, 503) and \
+                ctx.spec1["requests_during"] == 0
+            state["s1_owner_not_available"] = True
+        else:
+            rr = ctx.spec1["resolved"]
+            state["s1_refused_before_fetch"] = True
+            state["s1_owner_not_available"] = rr.status_code == 200 and rr.json().get("evidence_available") is False
+        state["s1_no_raw_value"] = not state["s1_readable"]
+
+
 ACTIONS = {"gsc": gsc, "gsc_kill": gsc_kill, "site": site, "plant": plant, "snapshot": snapshot, "audit": audit, "bomb": bomb, "slow": slow,
            "giant": giant, "inject": inject, "log_pii": log_pii, "log_hostile": log_hostile,
            "two_clients": two_clients, "probe": probe, "personal_data_key": personal_data_key, "kill": kill,
            "release_without_andre": release_without_andre, "kill_mid_run": kill_mid_run, "paid_run": paid_run,
            "perplexity": perplexity, "answer_audit": answer_audit, "pplx_kill_mid_run": pplx_kill_mid_run,
-           "pplx_ledger_down": pplx_ledger_down}
+           "pplx_ledger_down": pplx_ledger_down, "robots_cost": robots_cost, "drift_case": drift_case,
+           "round2": round2, "spec1": spec1}
 
 
 # ============================================================================================ observation
@@ -1204,6 +1832,17 @@ def _contained(hostile, state) -> bool:
         res = {"home": None, "robots": "robots", "sitemap": "sitemap", "llms": "llms_txt"}[b]
         if res is None:
             return "OK" not in pages and state.get("bodies_within_cap", False)
+        if res == "sitemap" and rs.get(res) in ("OK", "ok"):
+            # spec Q-07 (owner decision): a sitemap is read up to the sitemaps.org limit of 52,428,800 bytes
+            # uncompressed, streamed; a bomb within it is read as the garbage it is: nothing is taken from it
+            return (state.get("delia") or {}).get("sitemap_urls") in (0, None)
+        if res == "robots":
+            # round 2 (ADR 0017 R3): robots.txt is read up to the RFC 9309 parse limit and the rest is not decoded,
+            # so a bomb is contained either by a refusal or by that cut: what was kept is at most 500 KiB (a body that
+            # only DECLARES a huge length is read as far as it really goes, never past the cut)
+            rf = state.get("robots_fetch") or {}
+            if rs.get(res) in ("OK", "ok") and isinstance(rf.get("bytes"), int) and rf["bytes"] <= ROBOTS_CUT:
+                return True
         return rs.get(res) not in ("OK", "ok", "present")
     if kind == "slow":
         if a == "home":
@@ -1242,6 +1881,9 @@ def observe(ctx) -> dict:
             for o in obs.get("observations", []):
                 seen.setdefault(o["kind"], o["state"])
             state["resource_states"] = seen
+            sel = next((e["facts"] for e in rep["agents"] if e["agent"] == "selene"), {}) or {}
+            rf = (sel.get("robots") or {}).get("fetch") or {}
+            state["robots_fetch"] = {"bytes": rf.get("bytes"), "truncated": rf.get("truncated")}
             state["quarantined"] = sorted({q.get("reason") for q in obs.get("quarantined", [])})
             state["page_bytes_max"] = max([p["fetch"].get("bytes") or 0 for p in rep["pages"].values()] or [0])
             state["page_states"] = sorted({p["fetch"]["state"] for p in rep["pages"].values()})
@@ -1289,6 +1931,22 @@ def observe(ctx) -> dict:
     state["finance_calls"] = ctx.fin.calls
     if ctx.gsc is not None:
         _gsc_observe(ctx, state, outs)
-    if ctx.pplx is not None:
+    if ctx.pplx is not None and ctx.drift is None:
         _pplx_state(ctx, state, outs)
+    if ctx.cost is not None:
+        state["audit_seconds"] = round(ctx.cost["audit_s"], 3)
+        state["ingest_seconds"] = round(ctx.cost["ingest_s"], 3)
+        state["max_stall_ms"] = round(ctx.cost["stall_ms"], 1)
+        state["robots_cost_within_bound"] = ctx.cost["audit_s"] <= ROBOTS_COST_BOUND_S and \
+            ctx.cost["ingest_s"] <= ROBOTS_COST_BOUND_S
+        state["no_interpreter_stall"] = ctx.cost["stall_ms"] <= STALL_BOUND_MS
+    if ctx.drift is not None:
+        _drift_observe(ctx, state)
+        outs2 = _outputs(ctx) + [json.dumps(ctx.drift["reports"])]
+        hay = [_fold(unquote(unquote(b))) for b in outs2]
+        state["planted_readable"] = sorted(n for n in ctx.needles if any(_fold(n) in x for x in hay))
+    if ctx.r2 is not None:
+        _r2_observe(ctx, state)
+    if ctx.spec1 is not None:
+        _spec1_observe(ctx, state)
     return state

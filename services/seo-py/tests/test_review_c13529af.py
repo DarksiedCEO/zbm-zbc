@@ -951,11 +951,15 @@ def test_a_log_ingest_path_template_segment_failing_the_strict_check_is_a_placeh
     segs = ["xo" + "xb-" + _r(rng, LOW, 12), "gl" + "pat-" + _r(rng, string.ascii_letters, 22), r6._mail(rng)[0] + "-at-" + r6._mail(rng)[1]
             + "-dot-com"]
     assert all(logs._kind(logs._LOOKALIKE.fold_cased(s)) is None for s in segs[:1])    # the template rules keep it
-    outs = [logs.template_path("/a/" + s + "/b") for s in segs]
+    # wave1-spec/1: the stored template codes every segment off the allowlist (a, b, and the value)
+    stored = [logs.template_path("/a/" + s + "/b") for s in segs]
+    assert all(not any(x in o for x in segs) for o in stored)
+    # the display shape (shape_template_path, Search Console / client report) keeps the strict check
+    outs = [logs.shape_template_path("/a/" + s + "/b") for s in segs]
     assert all(o in ("/a/{token}/b", "/a/{email}/b") for o in outs), sum(1 for o in outs if "{" not in o)
-    assert logs.template_path("/shop/blue-widget/reviews") == "/shop/blue-widget/reviews"
+    assert logs.shape_template_path("/shop/blue-widget/reviews") == "/shop/blue-widget/reviews"
     monkeypatch.setattr(logs.secret_guard, "check", lambda t, waive=frozenset(): None)   # mutation
-    assert logs.template_path("/a/" + segs[0] + "/b") != "/a/{token}/b"
+    assert logs.shape_template_path("/a/" + segs[0] + "/b") != "/a/{token}/b"
 
 
 def test_each_operator_text_check_is_load_bearing(monkeypatch):

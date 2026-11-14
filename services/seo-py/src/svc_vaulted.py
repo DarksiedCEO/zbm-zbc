@@ -30,6 +30,7 @@ from typing import Optional
 import sink_guard
 import vault as vault_mod
 from errors import Unavailable
+from primitives import codes as codes_mod
 from reasons import R
 from svc_optext import text_view, url_view
 
@@ -42,6 +43,7 @@ PROMPT_SET_FIELD = "prompt_set_content"      # one blob per prompt-set version (
 INGEST_INPUTS_FIELD = "log_ingest_inputs"    # robots.txt and the sitemap sample fixed when an ingest is created
 LOG_DELTA_FIELD = "log_chunk_delta"          # one chunk's aggregate delta (path templates are its keys)
 LOG_REPORT_FIELD = "log_report"              # the finished ingest's report
+EVIDENCE_FIELD = "evidence_map"              # spec 0.1: {code: raw value} of one audit, read only for owner displays
 REQUEST_FIELD = "request_text"               # a non-machine string of a request body, in its idempotency hash
 REQUEST_TENANT = "seo"                       # the binding of ``REQUEST_FIELD`` (the request key scopes the request)
 # machine classes a secret or personal data cannot hide in (the strict check already passed, or the shape is closed)
@@ -60,15 +62,33 @@ def normalised(obj):
     return json.loads(json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str, allow_nan=False))
 
 
+_CODE_SLOT = "{c}"          # stands for one store code while the rest of a text goes through the masker
+
+
+def _masked(text: str) -> str:
+    if sink_guard.classify(text) in _PLAIN_CLASSES:
+        return text
+    if text.startswith(("http://", "https://")) and len(text.split()) == 1:
+        return url_view(text)[0]
+    return text_view(text)[0]
+
+
 def _shown(text: str, memo: dict) -> str:
+    """One string of an owner view through the client-view masker. A store code (wave1-spec/1 0.1) is a machine
+    value: its 16 hex digits are never judged (a digit-heavy code looked like a phone number to the masker and was
+    hidden, about 2 in 10,000); the text around the codes is masked as before."""
     got = memo.get(text)
     if got is None:
-        if sink_guard.classify(text) in _PLAIN_CLASSES:
-            got = text
-        elif text.startswith(("http://", "https://")) and len(text.split()) == 1:
-            got = url_view(text)[0]
+        codes = [m.group(0) for m in codes_mod.CODE_RX.finditer(text)]
+        if codes and _CODE_SLOT not in text:
+            got = _masked(codes_mod.CODE_RX.sub(_CODE_SLOT, text))
+            if got.count(_CODE_SLOT) == len(codes):
+                parts = got.split(_CODE_SLOT)
+                got = parts[0] + "".join(c + rest for c, rest in zip(codes, parts[1:]))
+            else:
+                got = _masked(text)                  # the masker changed the text around the codes: as before
         else:
-            got = text_view(text)[0]
+            got = _masked(text)
         memo[text] = got
     return got
 
@@ -113,6 +133,23 @@ class VaultedMixin:
         """No vault key: refused up front, nothing written (there is never a plaintext fallback)."""
         if not self.vault.key_configured:
             raise Unavailable(R("VAULT_UNAVAILABLE"))
+
+    # ------------------------------------------------------------------ store codes (spec 0.1, B-CD-01)
+
+    def _codes_coder(self, tid: str):
+        """The tenant's coder under the current vault key. No key: VAULT_UNAVAILABLE (before any fetch)."""
+        try:
+            return self.vault.coder(tid)
+        except vault_mod.VaultError:
+            raise Unavailable(R("VAULT_UNAVAILABLE")) from None
+
+    def _codes_key_id(self):
+        return self.vault._key.key_id if self.vault.key_configured else None
+
+    def _codes_own(self, tid: str) -> tuple:
+        """D-01 H: the tenant's registered domains (readable with their www. twin)."""
+        t = self.tenants.get(tid) or {}
+        return tuple(t.get("domains") or ())
 
     def _vaulted_hmac(self, tid: str, field: str, obj, vault=None) -> str:
         """The keyed HMAC of ``obj``'s canonical JSON. Raises ``vault.VaultError`` (no key, a bad value)."""

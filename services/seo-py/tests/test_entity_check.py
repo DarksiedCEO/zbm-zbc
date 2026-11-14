@@ -43,7 +43,9 @@ def test_mismatch_and_missing_fields(srv, h):
     env = run(srv, h)
     mm = [f for f in env["findings"] if f["code"] == "ENTITY_FIELD_MISMATCH"]
     assert [f["detail"]["field"] for f in mm] == ["street_address"]
-    assert mm[0]["detail"]["canonical"] == "5318 East 2nd Street" and mm[0]["detail"]["on_site"]["untrusted"] is True
+    # wave1-spec/1 B-EN-01: neither the canonical nor the on-site value is in the finding (comparison only)
+    assert "canonical" not in mm[0]["detail"] and "on_site" not in mm[0]["detail"] \
+        and mm[0]["detail"]["comparison"]["result"] == "mismatch"
     assert mm[0]["detail"]["canonical_source"] == "founder_statement" and mm[0]["decision"] == "ACT"
     assert any(f["code"] == "ENTITY_FIELD_MISSING_IN_MARKUP" and f["detail"]["field"] == "telephone"
                for f in env["findings"])

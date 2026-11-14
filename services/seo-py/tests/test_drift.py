@@ -49,7 +49,10 @@ def test_page_content_change_is_real_change(tmp_path, srv):
 def test_fetch_failure_is_tool_failure(tmp_path, srv):
     h, a, b = two_runs(tmp_path, srv, lambda s: s.redirect("site.test", "/about", "http://127.0.0.1/"))
     d = drift.compare(a["report"], b["report"])
-    gone = [c for c in d["changes"] if c["url"] == "http://site.test/about"]
+    # wave1-spec/1 0.1: the report holds the request path as a code (``report.paths`` in request order)
+    about = "http://site.test" + a["report"]["paths"][1]
+    assert "{c:seg:" in about
+    gone = [c for c in d["changes"] if c["url"] == about]
     assert gone and all(c["class"] == "TOOL_FAILURE" for c in gone)
     assert d["overturned_by_agent"] == {}            # appeared/changed only: nothing vanished as non-real
 

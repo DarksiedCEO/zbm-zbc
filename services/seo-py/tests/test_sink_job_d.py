@@ -303,11 +303,11 @@ def log_lines(v: dict, n=30) -> list:
             for i in range(n)] + [tl.clf("1.1.1.1", "/private/x", 200, tl.GPT_UA), "not a log line " + v["term"]]
 
 
-def ingest_world(tmp_path, srv, v):
+def ingest_world(tmp_path, srv, v, **env):
     tmp_path.mkdir(parents=True, exist_ok=True)
     tl.install_site(srv, robots=f"User-agent: *\nDisallow: /private\n# {v['prose']}\n"
                     "Sitemap: http://site.test/sitemap.xml\n")
-    h = tl.harness(tmp_path, srv, data_dir=str(tmp_path / "data"))
+    h = tl.harness(tmp_path, srv, data_dir=str(tmp_path / "data"), **env)
     tl.own(h)
     h.ok(tl.audit(h), 201)
     return h
@@ -326,7 +326,10 @@ def test_a_log_ingest_keeps_refs_keyed_hashes_counts_and_codes_only(tmp_path, sr
     assert "robots_text" not in c and "sitemap_sample" not in c and c["robots_present"] is True
     assert c["sitemap_sample_count"] == 2
     inputs = h.svc.vault.get_blob("zbm", c["inputs_ref"])
-    assert v["prose"] in inputs["robots_text"] and inputs["sitemap_sample"] == ["/", "/about"]
+    # wave1-spec/1 B-LG-05: the sample is stored forms + codes of the whole paths, never the raw paths
+    smp = inputs["sitemap_sample"]
+    assert v["prose"] in inputs["robots_text"] and set(smp) == {"templates", "codes", "codes_key_id"}
+    assert len(smp["codes"]) == 2 and "/about" not in json.dumps(smp)
     chunks = [r["data"] for r in records(h, "log_chunk")]
     assert len(chunks) == 2
     for d in chunks:
@@ -368,12 +371,15 @@ def test_a_log_ingest_keeps_refs_keyed_hashes_counts_and_codes_only(tmp_path, sr
 def test_a_restart_between_chunks_rebuilds_the_totals_from_the_blobs(tmp_path, srv):
     v = planted(8)
     reports = []
+    # wave1-spec/1 0.1: path templates are codes under the vault key, so both worlds share one vault key
+    from helpers import write_vault_key
+    shared = {"SEO_VAULT_KEY_FILE": write_vault_key(tmp_path / "vault.key"), "SEO_VAULT_KEY_ID": "k-test"}
     for restart in (False, True):
-        h = ingest_world(tmp_path / str(restart), srv, v)
+        h = ingest_world(tmp_path / str(restart), srv, v, **shared)
         iid = h.ok(tl.ingest(h), 201)["ingest_id"]
         h.ok(tl.send(h, iid, 1, tl.b64(log_lines(v))))
         if restart:
-            h = h.restart()
+            h = h.restart(**shared)
             assert iid not in h.svc._log_full and iid not in h.svc._log_inputs
             assert set(h.svc.log_ingests[iid]["totals"]["families"]["Googlebot"]) == {"requests", "verified",
                                                                                      "spoofed", "claimed"}
@@ -706,6 +712,7 @@ HASH_FIELDS = {
     "section_hmac": "keyed", "inputs_hmac": "keyed", "delta_hmac": "keyed", "model_hmac": "keyed",
     "property_hmac": "keyed", "facts_hmac": "keyed", "hmac": "keyed", "audit_report_hmac": "keyed",
     "ruling_id_hmac": "keyed",                              # review 2b26d980: a ruling id of an unissued shape
+    "evidence_hmac": "keyed",                               # wave1-spec/1 D-02f: the audit's evidence-map blob
     # plain, over machine values that are themselves logged
     "request_sha": "plain: the body with every non-machine string replaced by its keyed HMAC",
     "sha256": "plain or keyed: a prompt-set version's fingerprint as recorded (keyed HMAC since job D)",

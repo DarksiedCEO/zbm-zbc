@@ -937,6 +937,7 @@ def _pydantic_echo(mp):
 
 MIGRATED = ("entity_created", "entity_field_set", "prompt_set_version", "log_ingest_created", "log_chunk",
             "log_ingest_finished")
+CODED_DOCS = ("log_chunk", "log_ingest_finished")   # wave1-spec/1 0.1: the delta and report hold coded templates
 MUTATIONS = {
     "sink_guard_disabled": _guard_off,
     "logging_filter_removed": _no_log_filter,
@@ -998,4 +999,9 @@ def test_re_inlining_a_migrated_kind_is_refused_by_the_guard_and_found_by_the_sc
         _guard_off(mp)
     # without the guard: the flows run, and the scan finds the canaries in the log
     how, stray = _mutated(kind, both, tmp_path / "unguarded", srv, caplog, monkeypatch, probe_guard=False)
+    if kind in CODED_DOCS:
+        # wave1-spec/1 0.1: this kind's document holds store codes, never the raw path: re-inlined without the guard
+        # it carries no canary to find (the guard still refuses it, above)
+        assert how == "ran" and not any("file:seo_log.jsonl" in sinks for sinks in stray.values()), (kind, how)
+        return
     assert how == "ran" and any("file:seo_log.jsonl" in sinks for sinks in stray.values()), (kind, how)

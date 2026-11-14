@@ -114,27 +114,36 @@ def _label_value_segments(rng) -> dict:
 def test_a_log_segment_holding_a_label_and_its_value_is_never_kept():
     rng = random.Random(SEED + 1)
     cases = _label_value_segments(rng)
+    # wave1-spec/1 0.1: the STORED template is codes / placeholders: no value, and no label word, is readable
     leaked = [n for n, (seg, v) in cases.items() if v in (logs.template_path(f"/a/{seg}") or "")]
     assert leaked == []
-    # a label word alone is kept (its value, if any, is another segment)
     for p in ("/reset-password", "/account/api-keys", "/forgot-password/confirm", "/mot-de-passe"):
-        assert logs.template_path(p) == p, p
+        assert re.fullmatch(r"(/(\{c:seg:[0-9a-f]{16}\}|\{[a-z]+\}))+", logs.template_path(p)), p
+    # the DISPLAY shape (Search Console / client report, shape_template_path) keeps the review's rules: no value,
+    # and a label word alone is kept (its value, if any, is another segment)
+    leaked = [n for n, (seg, v) in cases.items() if v in (logs.shape_template_path(f"/a/{seg}") or "")]
+    assert leaked == []
+    for p in ("/reset-password", "/account/api-keys", "/forgot-password/confirm", "/mot-de-passe"):
+        assert logs.shape_template_path(p) == p, p
 
 
 def test_the_label_alone_rule_is_load_bearing(monkeypatch):
     rng = random.Random(SEED + 2)
     cases = _label_value_segments(rng)
     monkeypatch.setattr(sg, "label_only", lambda seg, *a: True)             # mutation: every label segment kept
-    leaked = [n for n, (seg, v) in cases.items() if v in (logs.template_path(f"/a/{seg}") or "")]
+    # wave1-spec/1: the display shape depends on the rule; the stored (coded) template does not
+    leaked = [n for n, (seg, v) in cases.items() if v in (logs.shape_template_path(f"/a/{seg}") or "")]
     assert len(leaked) > 0
+    assert [n for n, (seg, v) in cases.items() if v in (logs.template_path(f"/a/{seg}") or "")] == []
 
 
 def test_the_after_label_rule_is_load_bearing_in_log_templates(monkeypatch):
     rng = random.Random(SEED + 3)
     vals = [_r(rng, LOW, 9) for _ in range(10)]
-    assert all(v not in logs.template_path(f"/token/{v}") for v in vals)
+    assert all(v not in logs.shape_template_path(f"/token/{v}") for v in vals)
     monkeypatch.setattr(sg, "after_label", lambda segs, i: False)       # mutation
-    assert all(v in logs.template_path(f"/token/{v}") for v in vals)
+    assert all(v in logs.shape_template_path(f"/token/{v}") for v in vals)
+    assert all(v not in logs.template_path(f"/token/{v}") for v in vals)   # wave1-spec/1: stored form is coded
 
 
 # ================================================================================================ MUST 3: spellings

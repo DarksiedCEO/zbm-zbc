@@ -7,8 +7,12 @@ request's SHA-256 only).
 What is retained (AEGIS 1472041 H1): counts, status mixes, PATH TEMPLATES (identifiers replaced by {email}, {uuid},
 {id}, {token}), robots-disallowed hit counts, the indices of the public sitemap sample that were crawled, and a
 HyperLogLog sketch per family for distinct client IPs. Never retained anywhere — log, ledger, report, error: raw
-lines, raw paths, IPs, IP hashes, User-Agent strings. robots.txt (public) and the sitemap sample (public paths from
-the tenant's latest audit) are fixed when the ingest is created, so exact paths are compared in memory and dropped.
+lines, raw paths, IPs, IP hashes, User-Agent strings. robots.txt and the sitemap sample (from the tenant's latest
+audit) are fixed when the ingest is created, so exact paths are compared in memory and dropped. AEGIS Wave-1 M-S3 /
+M-S4: the robots.txt TEXT is held in memory only (parsed) and only its SHA-256 is recorded; the sitemap sample is
+recorded as path TEMPLATES (shown in the report) and keyed digests (agents/logs.path_digest, matched against a log
+path's digest in memory), never as raw paths. After a restart the robots.txt of an open ingest is no longer in
+memory: its later bot requests are counted ``robots_unchecked`` and the report is PARTIAL.
 Retention: nothing identifying is kept, so expiry (SEO_LOG_RETENTION_DAYS) hides the per-ingest report and keeps
 totals; the append-only log holds no personal data that would need shredding.
 
@@ -43,12 +47,15 @@ from errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from ledger import derived_id
 from primitives import Killed
 from primitives import robots as robots_mod
+from primitives import codes as codes_mod
 from reasons import R
 import sink_guard
-from svc_vaulted import INGEST_INPUTS_FIELD, LOG_DELTA_FIELD, LOG_REPORT_FIELD, normalised, owner_view
+from svc_vaulted import EVIDENCE_FIELD, INGEST_INPUTS_FIELD, LOG_DELTA_FIELD, LOG_REPORT_FIELD, normalised, owner_view
 
 CHUNK_MAX = 90_000
 SEARCH_TOKENS = ("Googlebot", "Bingbot")
+SERVER_ERROR_MIN_REQUESTS = 20      # SEARCH_CRAWLER_SERVER_ERRORS: at least this many requests, and
+SERVER_ERROR_SHARE = 0.05           # more than this share of them answered 5xx
 METHODOLOGY = ("The uploaded access log was parsed line by line ({fmt}); each request was attributed to a bot family "
                "by its User-Agent token (bot list {v}) and the client IP checked with the bot-verification port "
                "(reverse DNS plus forward-confirm against the operator's documented host names) where one is "
@@ -141,8 +148,10 @@ class LogsMixin:
         # sink job B: the latest audit's report is read from the tenant's vault, outside the lock; one that cannot be
         # read refuses VAULT_UNAVAILABLE (the ingest is never created against a sample that could not be read)
         sample = self._sitemap_sample(tid, latest)
+        sample_ev = self._sample_evidence(tid, latest, sample)
         guard = self.guard(tid, run="logs")
-        robots_text, robots_status = None, "not_fetched"
+        robots_text, robots_status = None, "not_fetched"      # robots_text: memory only (M-S3)
+        robots_truncated = False
         try:
             guard(capability="logs", agent="selene")
             if self.ports.fetcher is not None:
@@ -151,13 +160,15 @@ class LogsMixin:
                     raise Killed(rb["fetch"]["detail"] or "KILLED_GLOBAL")
                 robots_status = rb["status_class"]
                 robots_text = rb.get("text")
+                robots_truncated = bool(rb.get("truncated"))
         except Killed as k:
             raise _refusal(k) from None
         if sink_guard.classify(robots_status) is None:     # a fetcher's status class is a code, or it is not kept
             robots_status = "unknown"
         # sink job D: robots.txt (crawled text) and the sitemap sample (paths) are the ingest's inputs blob,
         # encrypted outside the lock; the line keeps its ref, its keyed HMAC and two facts
-        inputs = normalised({"v": 1, "robots_text": robots_text, "sitemap_sample": sample})
+        inputs = normalised({"v": 1, "robots_text": robots_text, "robots_truncated": robots_truncated,
+                             "sitemap_sample": sample, "sample_evidence": sample_ev})
         sealed = self._doc_seal(tid, INGEST_INPUTS_FIELD, inputs)
         try:
             with self.lock:
@@ -174,7 +185,7 @@ class LogsMixin:
                         "key_fp": hashlib.sha256(self.settings.log_hash_key).hexdigest()[:16],
                         "robots_status": robots_status, "inputs_ref": sealed.ref, "inputs_hmac": sealed.hmac,
                         "robots_present": robots_text is not None,
-                        "sitemap_sample_count": None if sample is None else len(sample)}
+                        "sitemap_sample_count": None if sample is None else len(_sample_templates(sample))}
                 self._log_inputs[iid] = inputs
                 try:
                     self._doc_commit(sealed, inputs, lambda: self._commit(
@@ -286,20 +297,33 @@ class LogsMixin:
             cache = self._log_verify_cache.setdefault(iid, {})
             budget = self._log_budget.setdefault(iid, {"left": self.settings.bot_verify_max})
         inputs = self._ingest_inputs(tid, iid)             # outside the lock (a vault read after a restart)
-        robots = self._robots_parsed(iid, inputs.get("robots_text"))
-        sample = {p: i for i, p in enumerate(inputs.get("sitemap_sample") or [])}
+        robots = self._robots_parsed(iid, inputs.get("robots_text"), bool(inputs.get("robots_truncated")))
+        robots_expected = inputs.get("robots_text") is not None
+        sample = _sample_index(inputs.get("sitemap_sample"), self._codes_coder(tid).key_id)
         try:
             self.guard(tid, run="logs")(capability="logs", agent="selene")
         except Killed as k:
             raise _refusal(k) from None
-        delta = logs_mod.process_chunk(fmt, data, log_hash_key, self.ports.bot_verifier.verify, cache,
-                                       budget, robots, sample)
+        # spec 0.1: path templates are coded with the tenant's codes key (the sample's codes were made with it too)
+        with codes_mod.coding(self._codes_coder(tid), own=self._codes_own(tid)) as evidence:
+            delta = logs_mod.process_chunk(fmt, data, log_hash_key, self.ports.bot_verifier.verify, cache,
+                                           budget, robots, sample, robots_expected=robots_expected)
         del data
         # sink job D: the delta (path templates are its keys) is this chunk's blob, encrypted outside the lock; the
         # line keeps its ref, its keyed HMAC and the counts ``_apply`` and the views need
         delta = normalised(delta)
         counts = _compact(delta)
         sealed = self._doc_seal(tid, LOG_DELTA_FIELD, delta)
+        # spec 0.1: the chunk's evidence map (code -> raw path / query as observed) is its own blob of the owning
+        # tenant, written in the same append as the delta
+        try:
+            ev_sealed = self._doc_seal(tid, EVIDENCE_FIELD, normalised(evidence.as_blob()))
+        except Exception:
+            sealed.discard()
+            raise
+        sealed.pending.lines.extend(ev_sealed.pending.lines)
+        ev_sealed.pending.lines = []
+        evidence = None
         try:
             with self.lock:
                 self._gate()
@@ -312,7 +336,8 @@ class LogsMixin:
                 held = self._log_full.get(iid)
                 payload = {"ingest_id": iid, "seq": body["seq"], "lines": delta["lines"], "delta_hmac": sealed.hmac}
                 line = {"ingest_id": iid, "seq": body["seq"], "last": body["last"], "bytes": nbytes,
-                        "delta_ref": sealed.ref, "delta_hmac": sealed.hmac, "counts": counts}
+                        "delta_ref": sealed.ref, "delta_hmac": sealed.hmac, "counts": counts,
+                        "evidence_ref": ev_sealed.ref, "evidence_hmac": ev_sealed.hmac}
                 self._doc_commit(sealed, delta, lambda: self._commit(
                     "log_chunk", self._req(line, actor, rk, body, iid), actor,
                     evidence=("log_chunk_ingested", f"ingest:{iid}", payload, (actor, rk))))
@@ -327,12 +352,12 @@ class LogsMixin:
             sealed.discard()
         return self.log_ingest_view(tid, iid)
 
-    def _robots_parsed(self, iid: str, robots_text):
+    def _robots_parsed(self, iid: str, robots_text, truncated: bool = False):
         if robots_text is None:
             return None
         rb = self._log_robots.get(iid)
         if rb is None:
-            rb = self._log_robots[iid] = robots_mod.parse(robots_text)
+            rb = self._log_robots[iid] = robots_mod.parse(robots_text, truncated=truncated)
         return rb
 
     def _check_log_key(self, g: dict, key: bytes) -> None:
@@ -376,6 +401,8 @@ class LogsMixin:
                     tf[k] += f[k]
         if "delta_ref" in d and not g.get("evicted") and not g["legacy"]:
             g["deltas"].append((d["delta_ref"], d["delta_hmac"]))
+        if "evidence_ref" in d and not g.get("evicted"):
+            g.setdefault("evidence", []).append((d["evidence_ref"], d["evidence_hmac"]))
         g["next_seq"] = d["seq"] + 1
         g["bytes"] += d["bytes"]
         g["last_seen"] = bool(d["last"])
@@ -455,12 +482,13 @@ class LogsMixin:
             return None
         for e in self._audit_recorded(tid, latest)["report"]["agents"]:
             if e["agent"] == "delia":
-                return list(e["facts"].get("sitemap_paths_sample") or [])
+                return _sample_of(e["facts"], self._audit_recorded(tid, latest)["report"].get("codes_key_id"))
         return None
 
     def _log_report(self, iid: str, g: dict, totals: dict, inputs: dict) -> dict:
-        sample, fmt = inputs.get("sitemap_sample"), g["format"]
+        sample, fmt = _sample_templates(inputs.get("sitemap_sample")), g["format"]
         robots_ok = inputs.get("robots_text") is not None
+        unchecked = totals.get("robots_unchecked", 0)
         findings, fams = [], {}
         for tok, f in sorted(totals["families"].items()):
             fam = bots.by_token(tok)
@@ -482,9 +510,9 @@ class LogsMixin:
                                                                  "verified": f["verified"], "claimed": f["claimed"],
                                                                  "note": "robots.txt disallows these paths; the "
                                                                          "requests may predate it or be spoofed"}))
-            if tok in SEARCH_TOKENS and f["requests"] >= 20:
+            if tok in SEARCH_TOKENS and f["requests"] >= SERVER_ERROR_MIN_REQUESTS:
                 err = f["status"].get("5xx", 0)
-                if err / f["requests"] > 0.05:
+                if err / f["requests"] > SERVER_ERROR_SHARE:
                     findings.append(finding("SEARCH_CRAWLER_SERVER_ERRORS", "high", "measured", "ACT",
                                             capability="P1", detail={"token": tok, "requests": f["requests"],
                                                                      "5xx": err}))
@@ -502,11 +530,18 @@ class LogsMixin:
         if totals["quarantined"]:
             findings.append(finding("LOG_LINES_QUARANTINED", "low", "measured", "WATCH", capability="P5",
                                     detail={"by_reason": dict(totals["quarantined"])}))
+        if robots_ok and unchecked:
+            findings.append(finding("LOG_ROBOTS_CHECK_INCOMPLETE", "info", "measured", "INSUFFICIENT_EVIDENCE",
+                                    capability="P2", detail={"requests": unchecked,
+                                                             "note": "bot requests not checked against robots.txt "
+                                                                     "(time budget, or robots.txt no longer in "
+                                                                     "memory after a restart): the disallowed-hit "
+                                                                     "counts are a lower bound"}))
         nc = {"bot_ip_range_verification"}
         if not getattr(self.ports.bot_verifier, "connected", False):
             nc.add("bot_dns_verification")
         usable = totals["lines"] - sum(totals["quarantined"].values())
-        outcome = "OK" if usable > 0 and robots_ok and sample is not None else \
+        outcome = "OK" if usable > 0 and robots_ok and sample is not None and not unchecked else \
             ("PARTIAL" if usable > 0 else "INSUFFICIENT_EVIDENCE")
         env = envelope("selene", "log_access", outcome, findings,
                        methodology=METHODOLOGY.format(fmt=fmt, v=bots.VERSION, rules=logs_mod.TEMPLATE_RULES),
@@ -514,10 +549,11 @@ class LogsMixin:
                        facts={"lines": totals["lines"], "usable_lines": usable, "non_bot": totals["non_bot"],
                               "no_user_agent": totals["no_user_agent"], "quarantined": dict(totals["quarantined"]),
                               "families": fams, "robots_status": g.get("robots_status"),
+                              "robots_unchecked_requests": unchecked if robots_ok else None,
                               "uncrawled_important_paths": uncrawled[:50] if uncrawled is not None else None,
                               "sitemap_sample": "latest audit" if sample is not None else
                               "none: run an audit of this domain first", "bot_families_version": bots.VERSION})
-        return {"ingest_id": iid, "outcome": outcome, "envelope": env}
+        return {"ingest_id": iid, "outcome": outcome, "envelope": env, "codes_key_id": self._codes_key_id()}
 
     # ------------------------------------------------------------------ views
 
@@ -553,7 +589,69 @@ class LogsMixin:
         out["report"] = report if full else None
         return out
 
+    def _sample_evidence(self, tid: str, latest: Optional[str], sample) -> dict:
+        """Outside the lock: {code: cleaned raw value} of the codes in the sitemap sample's stored forms, from the
+        latest audit's evidence map (the owner display of the ingest resolves them; spec 0.1)."""
+        templates = _sample_templates(sample) or []
+        wanted = {m.group(0) for t in templates if isinstance(t, str) for m in codes_mod.CODE_RX.finditer(t)}
+        if not wanted or latest is None:
+            return {}
+        values = self._evidence_values(tid, latest) or {}
+        return {c: values[c] for c in sorted(wanted) if c in values}
+
+    def log_ingest_view_resolved(self, tid: str, iid: str) -> dict:
+        """D-02h for a log ingest (the API route allows it only to the tenant-authenticated owner caller): the
+        report with every code resolved through the ingest's evidence maps (each chunk's, and the sample's from the
+        latest audit), cleaned as the client report cleans a value. A map that cannot be read leaves its codes
+        ``[not available]`` (``evidence_available: false``), never an error."""
+        from svc_audits import _clean_resolved
+        out = self.log_ingest_view(tid, iid)
+        if out.get("report") is None:
+            out["evidence_available"] = False
+            return out
+        with self.lock:
+            g = self._ingest(tid, iid)
+            refs = list(g.get("evidence") or [])
+        values, ok = {}, True
+        try:
+            values.update(self._ingest_inputs(tid, iid).get("sample_evidence") or {})
+        except Unavailable:
+            ok = False
+        for ref, mac in refs:
+            blob = self._vaulted_open(tid, EVIDENCE_FIELD, ref, mac)
+            if not isinstance(blob, dict) or not isinstance(blob.get("values"), dict):
+                ok = False
+                continue
+            values.update({k: _clean_resolved(v) for k, v in blob["values"].items() if isinstance(v, str)})
+        out["evidence_available"] = ok
+        out["report"] = codes_mod.resolve(out["report"], values)
+        return out
+
     def log_ingests_view(self, tid: str) -> list:
         with self.lock:
             return [self.log_ingest_view(tid, i, full=False)
                     for i, g in self.log_ingests.items() if g["tenant_id"] == tid][:1000]
+
+
+def _sample_of(delia_facts: dict, key_id: Optional[str]) -> Optional[dict]:
+    """The sitemap sample an ingest keeps (B-LG-05): the stored forms to show and the codes of the whole paths to
+    match, with the codes key id they were made under; never raw paths. A report without codes (older) has no
+    usable sample."""
+    templates = delia_facts.get("sitemap_paths_sample")
+    cs = delia_facts.get("sitemap_paths_sample_codes")
+    if not isinstance(templates, list) or not isinstance(cs, list) or len(cs) != len(templates) or not key_id:
+        return None
+    return {"templates": list(templates), "codes": list(cs), "codes_key_id": key_id}
+
+
+def _sample_index(sample, key_id: Optional[str]) -> dict:
+    """{path code: index} for process_chunk; a sample coded under another codes key cannot be matched (empty)."""
+    if isinstance(sample, dict) and sample.get("codes_key_id") == key_id:
+        return {c: i for i, c in enumerate(sample.get("codes") or [])}
+    return {}
+
+
+def _sample_templates(sample) -> Optional[list]:
+    if isinstance(sample, dict):
+        return list(sample.get("templates") or [])
+    return None

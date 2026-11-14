@@ -396,9 +396,10 @@ def test_route_renders_a_real_audit_recorded_first_with_its_hash(tmp_path, srv):
     assert "content" not in json.dumps(p) and "site.test" not in json.dumps(p)
     st = {(e["event_type"], e["status"]) for e in h.ok(h.get("/audit/evidence", caller="compliance_38"))["evidence"]}
     assert ("client_report_rendered", "committed") in st
-    # the service's document is exactly the deterministic render of the stored audit view
-    view = h.ok(h.get(f"/tenants/zbm/audits/{a['audit_id']}"))
-    assert cr.render(view, "zbm", "html")[0] == data
+    # the service's document is exactly the deterministic render of the stored audit view with its codes resolved
+    # through the run's evidence map (wave1-spec/1 D-02g; was: the coded GET view)
+    view = h.svc.client_report_view("zbm", a["audit_id"])
+    assert cr.render(view, "zbm", "html")[0] == data and b"{c:" not in data
     md = h.ok(_report(h, "zbm", a["audit_id"], fmt="markdown"))
     assert md["content"].startswith("# SEO technical audit: ` site.test `")
     listed = h.ok(h.get(f"/tenants/zbm/audits/{a['audit_id']}/client-reports"))

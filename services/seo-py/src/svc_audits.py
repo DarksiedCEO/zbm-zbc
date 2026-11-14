@@ -36,12 +36,14 @@ from ledger import derived_id
 from primitives import Killed
 from primitives import diff as diff_mod
 from primitives.parse import SCHEMA_RULES_VERSION
+from primitives import codes as codes_mod
+from primitives.safe_url import safe_path
 from reasons import R
 import sink_guard
 import vault as vault_mod
 from svc_entity import unreadable as entity_unreadable
 from svc_optext import path_view, text_view, url_flag
-from svc_vaulted import PROMPT_SET_FIELD, REPORT_FIELD, SECTION_FIELD, canonical, normalised, owner_view
+from svc_vaulted import EVIDENCE_FIELD, PROMPT_SET_FIELD, REPORT_FIELD, SECTION_FIELD, canonical, normalised, owner_view
 
 log = logging.getLogger("seo.audits")
 REPORT_VERSION = "seo-audit-report/1"
@@ -444,10 +446,17 @@ class AuditsMixin:
                     try:
                         # review c0c09bd1: a flagged path is never kept. Then the report as it reads back from the
                         # vault, its machine facts, its keyed HMAC and its encrypted lines (pending, unwritten)
+                        evidence = report.pop(EVIDENCE_KEY, None)
                         report = normalised(self._report_paths_kept(report, body))
                         facts = report_facts(report)
                         gsc_ev = self.gsc_evidence(aid, report, lambda sec: self._vaulted_hmac(tid, SECTION_FIELD, sec))
                         sealed = self._vaulted_seal(tid, REPORT_FIELD, report)
+                        # spec 0.1: the evidence map is its own blob of the owning tenant, written with the report
+                        ev_sealed = self._vaulted_seal(tid, EVIDENCE_FIELD, normalised(
+                            (evidence or codes_mod.EvidenceMap()).as_blob()))
+                        sealed.pending.lines.extend(ev_sealed.pending.lines)
+                        ev_sealed.pending.lines = []
+                        evidence = None
                     except Exception as exc:  # noqa: BLE001 - the report cannot be stored: closed, nothing raw kept
                         log.error("audit report not stored: %s", type(exc).__name__)
                         failure = _vault_failure(exc)
@@ -461,7 +470,8 @@ class AuditsMixin:
                         ev = [("audit_report_recorded", f"audit:{aid}",
                                {"audit_id": aid, "report_hmac": sealed.hmac, "outcome": facts["outcome"],
                                 "findings": facts["findings"]}, ("report", aid))] + gsc_ev
-                        data = {"audit_id": aid, "report_ref": sealed.ref, "report_hmac": sealed.hmac, "facts": facts}
+                        data = {"audit_id": aid, "report_ref": sealed.ref, "report_hmac": sealed.hmac, "facts": facts,
+                                "evidence_ref": ev_sealed.ref, "evidence_hmac": ev_sealed.hmac}
                         try:
                             self._vaulted_commit(sealed, lambda: self._commit("audit_completed", data, "seo",
                                                                               evidence=ev))
@@ -513,7 +523,7 @@ class AuditsMixin:
                      facts=report_facts(d["report"]))
         else:
             a.update(status="completed", completed_at=at, report_ref=d["report_ref"], report_hmac=d["report_hmac"],
-                     facts=d["facts"])
+                     facts=d["facts"], evidence_ref=d.get("evidence_ref"), evidence_hmac=d.get("evidence_hmac"))
 
     def _a_audit_interrupted(self, d, at):
         self.audits[d["audit_id"]].update(status="interrupted", completed_at=at,
@@ -522,12 +532,22 @@ class AuditsMixin:
             self.audits[d["audit_id"]]["failure"] = dict(d["failure"])
 
     def _run_audit(self, aid: str, tid: str, body: dict, ps: Optional[dict]) -> dict:
-        """The run, outside the service lock: Selene, Delia, Roman, the entity check, Callum, Naomi."""
+        """The run, outside the service lock, inside the tenant's coding context (spec 0.1): every value from
+        outside that is not on the allowlist is stored as a code; the run's evidence map ({code: raw}) is returned
+        beside the report (``EVIDENCE_KEY``) and kept as its own vault blob for the owner's displays."""
+        with codes_mod.coding(self._codes_coder(tid), own=self._codes_own(tid)) as ev:
+            report = self._run_audit_keyed(aid, tid, body, ps)
+            report["codes_key_id"] = codes_mod.key_id()
+        report[EVIDENCE_KEY] = ev
+        return report
+
+    def _run_audit_keyed(self, aid: str, tid: str, body: dict, ps: Optional[dict]) -> dict:
+        """The run: Selene, Delia, Roman, the entity check, Callum, Naomi."""
         o = osei.Osei(self.clock)
         started = iso(self.now())
         ctx = RunContext(fetcher=self.ports.fetcher, renderer=self.ports.renderer, guard=self.guard(tid),
                          clock=self.clock, osei=o, domain=body["domain"], scheme=body["scheme"],
-                         paths=list(body["paths"]))
+                         paths=list(body["paths"]), path_key=getattr(self.settings, "log_hash_key", None))
         envs, pages = [], {}
         if self.ports.fetcher is None:
             envs.append(envelope("selene", "crawlability", "NOT_CONNECTED", [], methodology="no fetcher is wired",
@@ -577,12 +597,12 @@ class AuditsMixin:
         nc = sorted(set(self.ports.not_connected()) | {x for e in envs for x in e["not_connected"]})
         return {
             "report_version": REPORT_VERSION, "audit_id": aid, "tenant_id": tid, "domain": body["domain"],
-            "scheme": body["scheme"], "paths": list(body["paths"]), "started_at": started,
+            "scheme": body["scheme"], "paths": [safe_path(p) for p in body["paths"]], "started_at": started,
             "finished_at": iso(self.now()), "outcome": overall_outcome(envs),
             "outcome_rule": OUTCOME_RULE,
             "agents": envs,
             "summary": {"findings": len(all_findings), **by, "agent_outcomes": {e["agent"]: e["outcome"] for e in envs}},
-            "pages": {p: {"fetch": v["fetch"].summary(), "render_state": v["render"]["state"],
+            "pages": {safe_path(p): {"fetch": v["fetch"].summary(), "render_state": v["render"]["state"],
                           "access_diff": (v.get("access_diff") or {}).get("state"),
                           "fingerprint": diff_mod.fingerprint(v["extract"]) if v.get("extract") else None}
                       for p, v in pages.items()},
@@ -599,6 +619,33 @@ class AuditsMixin:
             "untrusted_content_rule": "every string quoted from a crawled page or an answer engine is data marked "
                                       "untrusted; none of it was acted on",
         }
+
+    def audit_view_resolved(self, tid: str, aid: str) -> dict:
+        """D-02h, the owning tenant's display (the API route allows it only to the tenant-authenticated owner
+        caller): the report with every code resolved through the run's evidence map, each value cleaned as the
+        client report cleans it (controls removed, at most RESOLVED_MAX characters). An evidence map that cannot
+        be read shows every code ``[not available]`` (``evidence_available: false``), never an error."""
+        out = self.audit_view(tid, aid, masked=False)
+        values = self._evidence_values(tid, aid) if out.get("report") is not None else None
+        out["evidence_available"] = values is not None
+        if out.get("report") is not None:
+            out["report"] = codes_mod.resolve(out["report"], values)
+        return out
+
+    def _evidence_values(self, tid: str, aid: str):
+        """OUTSIDE the lock: the audit's evidence map {code: cleaned raw value} for its OWNING tenant, or None (no
+        map recorded, the blob lost, another tenant)."""
+        with self.lock:
+            a = self.audits.get(aid)
+            if a is None or a["tenant_id"] != tid:
+                return None
+            ref, mac = a.get("evidence_ref"), a.get("evidence_hmac")
+        if ref is None:
+            return None
+        blob = self._vaulted_open(tid, EVIDENCE_FIELD, ref, mac)
+        if not isinstance(blob, dict) or not isinstance(blob.get("values"), dict):
+            return None
+        return {k: _clean_resolved(v) for k, v in blob["values"].items() if isinstance(v, str)}
 
     def audit_view(self, tid: str, aid: str, full: bool = True, masked: bool = True) -> dict:
         """The owner's view. ``full``: with the report, read from the tenant's vault OUTSIDE the lock (sink job B); a
@@ -677,6 +724,17 @@ class AuditsMixin:
 OUTSIDE_OVERALL = frozenset({("osei", "search_performance")})
 OUTCOME_RULE = ("the worst outcome over every agent's envelope except Osei's search_performance (Search Console), "
                 "whose outcome stays inside its own section")
+
+
+EVIDENCE_KEY = "__evidence_map__"
+RESOLVED_MAX = 160
+
+
+def _clean_resolved(v: str) -> str:
+    """CR-5 cleaning of a resolved value: control and format characters removed, at most RESOLVED_MAX characters."""
+    import unicodedata
+    s = "".join(c for c in v if unicodedata.category(c)[0] != "C")
+    return s[:RESOLVED_MAX]
 
 
 def overall_outcome(envs: list) -> str:

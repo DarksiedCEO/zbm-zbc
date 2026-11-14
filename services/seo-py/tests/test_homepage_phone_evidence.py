@@ -164,7 +164,11 @@ def test_real_fetch_chain_keeps_final_provenance_and_entity_check_fetches_nothin
     obs = out['facts'][FIELD]
     assert obs['state'] == ('unknown' if redirect else 'not_found_in_sample')
     assert obs['requested_url'] == 'http://site.test/'
-    assert obs['final_url'] == 'http://site.test/contact' if redirect else obs['final_url'] == 'http://site.test/'
+    # wave1-spec/1 0.1: a path segment off the allowlist is stored as a code (the run's process coder)
+    from primitives import codes as codes_mod, safe_url as su
+    with codes_mod.within('site.test'):
+        contact = su.safe_url('http://site.test/contact')
+    assert obs['final_url'] == (contact if redirect else 'http://site.test/')
     assert srv.seen == seen
 
 

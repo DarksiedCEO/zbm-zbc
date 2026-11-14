@@ -68,7 +68,8 @@ own properties, then sold as an audit.
     non-gzip bytes a `PROTOCOL_ERROR`; stacked or other codings `UNSUPPORTED_ENCODING`; a MemoryError is `RESOURCE_LIMIT`,
     never an exception); one hard overall deadline over connect, TLS, headers and body for every hop, enforced on
     every socket operation by a network backend that also checks the kill switches; robots.txt (RFC 9309) honoured
-    for the `ZBM-SEO-Audit` token; always identified. The browser-identity fetch used by access-diff is made only
+    for the `ZBM-SEO-Audit` token, matched in linear time on RFC 9309 octets, bounded by counted work and the 500 KiB
+    parse limit (see "Wave-1 certification round 2", R1-R3; round 1 C1 is superseded there); always identified. The browser-identity fetch used by access-diff is made only
     where robots.txt allows this service's own crawler, and honours robots.txt for that crawler (AEGIS 00cc66b H1,
     M1, L1-L3). render: a separate port with explicit states (`RAW_OK_RENDER_NOT_CONNECTED`,
     `RAW_OK_RENDER_FAILED`, `JS_DEPENDENT`, …). parse: tolerant stdlib HTML extract plus JSON-LD validation against a
@@ -85,9 +86,14 @@ own properties, then sold as an audit.
     client audit needs a Finance (31) invoice id as an input (`fin-inv-…`, never looked up) and Andre's approval. A
     run lost to a ledger failure or a dead process is recorded `interrupted` by a job, never completed.
 14. **Bot families** are versioned data (`agents/bots.py`) with a source note and an explicit "not complete".
-15. **Osei-lite:** malformed inputs (XML with DOCTYPE / ENTITY, malformed XML, oversized bodies, invalid JSON-LD,
-    malformed provider answers) are quarantined with reason, size and SHA-256, never parsed further; every observation
-    carries an `observed_at` and a refresh-due time from the refresh tiers.
+15. **Osei-lite:** malformed inputs (XML with DOCTYPE / ENTITY in any encoding, malformed XML, oversized bodies,
+    invalid JSON-LD, malformed provider answers) are quarantined with reason, size and SHA-256, never parsed further;
+    every observation carries an `observed_at` and a refresh-due time from the refresh tiers. (Round 1, C2 and C6: for
+    an oversized body the size and hash are of the bytes read before the stop, and the record says so; past the caps
+    of 200 quarantine and 500 observation records the rest are counted, `quarantined_dropped` /
+    `observations_dropped`; URLs in the records are in their safe form, C3. Round 2, R7: a JSON-LD block over the
+    size bound is `JSONLD_TOO_LARGE`, `truncated: true`, with the whole block's `total_bytes` and the size and hash of
+    the prefix read, labelled as such.)
 16. **AI-answer reliability** (probe framework): N samples per prompt (at least 3), refusals and errors counted and
     excluded from rates, 95% Wilson intervals and variance, prompt sets versioned and hashed, model versions recorded
     and mixed versions flagged; Callum classes Strength / Opportunity / Mentioned-Not-Cited (plus Absent and
@@ -176,10 +182,12 @@ W2-1. **Crawler access from first-party logs** (P2, Selene's `log_access` task; 
 W2-2. **Log retention rule** (amended for AEGIS 1472041 H1). Nothing identifying is retained, so the append-only log
    holds nothing that would need shredding: raw lines, raw URL paths, query strings, IPs, IP hashes and User-Agent
    strings never reach the log, the ledger, a report or an error. A path is reduced to a TEMPLATE before anything is
-   counted (`agents/logs.template_path`: decoded once; e-mail addresses, UUIDs, numeric ids, long hex / base64 /
-   token-like segments and letter-digit mixes replaced by `{email}`, `{uuid}`, `{id}`, `{token}`). Exact paths are
-   compared only in memory: against robots.txt and the public sitemap sample, both fixed when the ingest is created
-   (counts and sample indices are kept). Distinct client IPs are a HyperLogLog estimate (256 registers of keyed hashes
+   counted (`agents/logs.template_path`, now `primitives/safe_url.template_path`: decoded once; e-mail addresses,
+   UUIDs, numeric ids, long hex / base64 / token-like segments and letter-digit mixes replaced by `{email}`, `{uuid}`,
+   `{id}`, `{token}`; round 1: `;` matrix parameters, `,` and `=` segments by `{param}`). Exact paths are compared
+   only in memory: against robots.txt and the public sitemap sample, both fixed when the ingest is created (counts and
+   sample indices are kept). Round 1 (C4): the robots.txt TEXT is held in memory only and only its SHA-256 is
+   recorded; the sample is recorded as templates and keyed digests, never as raw paths. Distinct client IPs are a HyperLogLog estimate (256 registers of keyed hashes
    under `SEO_LOG_HASH_KEY_FILE`; no hash is kept). An ingest older than `SEO_LOG_RETENTION_DAYS` (default 90) is
    served as totals only (`expired`); from then on only its counts stay in memory — report, templates, sketches,
    robots.txt and sitemap sample are evicted, and replay at start-up compacts expired ingests as it goes instead of
@@ -200,7 +208,9 @@ W2-3. **Search-truth drift** (`agents/drift.py`, Osei). Two completed audits of 
    R1 TOOL_FAILURE, R2 MEASUREMENT_ERROR (the ruler moved — bot list, rule table, entity record version, or the prompt
    set — and the thing measured did not), R3 UNKNOWN (the ruler AND the thing changed: a confound, never REAL_CHANGE),
    R4 MODEL_DRIFT, R5 SAMPLING_NOISE, R6 SURFACE_DRIFT, R7 REAL_CHANGE, R8 UNKNOWN (rules version `2026-10-10.2`,
-   amended for AEGIS 1472041 M4; the evidence of each rule is in the module docstring). Reports
+   amended for AEGIS 1472041 M4; the evidence of each rule is in the module docstring; R1 per fact since rules
+   `2026-11-13.1`, round 1 C5; a finding's own `detail.fetch_state` not OK in either run is R1 since rules
+   `2026-11-13.2`, round 2 R6). Reports
    now carry per-page content fingerprints, rule versions and the robots.txt hash so the rules have evidence.
 W2-4. **Scheduled re-audits.** One audit per schedule per slot, the audit id derived from (schedule, slot): duplicate,
    replayed and post-restart ticks are no-ops and a slot is never run twice; missed slots are not back-filled; each
@@ -1298,6 +1308,267 @@ CR-11. **Integration with the Agent API migration (golive-wave2, Oct 25 2026).**
    the check (removal only; the hash stays in the audit record). Tests: a real audit on the Agent API fake (an
    annotation-only and an `ftp:` tenant URL are not cited; the report shows "Mentioned but not cited", the competitor
    cited instead, and the definition twice), and the hash case, each mutation-checked.
+
+## Wave-1 certification round 1 (2026-11-13): Selene, Delia, Roman, Osei-lite
+
+The hostile review of a4af277 rejected the four agents. What changed, with what was measured (harnesses outside the
+repo; corpora generated at run time; nothing real crawled):
+
+C1. **robots.txt matching** (`primitives/robots.py`, M-S1, S-S1). No regular expression: each rule is compiled once
+   per file into its literal pieces between `*` and matched by greedy leftmost search (linear per piece; RFC 9309
+   longest match, allow on ties, `$` anchors unchanged; 3,000 random rule sets agree with the old matcher). The rules
+   for a product token are merged once per file. Bounds, each counted and reported (`ROBOTS_LIMITS_EXCEEDED`), never
+   silently dropped: 130,000 lines; 2,000 characters a pattern and 10 wildcards (a disallow over either is shortened
+   to a prefix that matches at least what it matched; an allow over either is not used); 4,000 distinct rules a group
+   and per token (repeats read once); 4,096 characters a path (longer: undecided). An allow decided from an
+   incomplete rule set is not trusted by this service's own crawler (`BLOCKED_BY_ROBOTS`, fail closed). Time budgets
+   per step: Selene's bot x path matrix 3 s (`ROBOTS_CHECK_INCOMPLETE`, outcome PARTIAL), the fetcher's own checks 5 s
+   per run, Delia's listed-URL check 2 s (`SITEMAP_ROBOTS_CHECK_INCOMPLETE`, PARTIAL), a log chunk 1 s
+   (`robots_unchecked`, `LOG_ROBOTS_CHECK_INCOMPLETE`, PARTIAL). A UTF-8 byte order mark before the first line is
+   stripped. Measured a4af277 -> now: 6 wildcards x 60-character path 2.276 s -> 0.000024 s per URL; 20,000 rules
+   1.054 s -> 0.000271 s per call; Selene on 20 such URLs > 300 s (stopped) -> 0.035 s; 2,000 hostile rules x 500
+   sitemap URLs > 300 s -> 1.378 s; a 600-line log chunk > 300 s -> 1.036 s (268 requests unchecked); an audit with
+   one hostile path 42.999 s with `/health` at most 8,233.3 ms -> 0.018 s with `/health` at most 16.8 ms.
+C2. **XML** (`agents/delia.py`, M-D1). The encoding is detected (BOM, UTF-16 / UTF-32 byte pattern, the XML
+   declaration) and DOCTYPE / ENTITY is looked for in the DECODED text; the parse is then preceded by one expat pass
+   whose DOCTYPE and entity-declaration handlers refuse (DTDs forbidden), so no entity can expand in any encoding.
+   Measured: a billion-laughs sitemap in UTF-16 LE / BE with and without BOM expanded to 3,000,000 characters at
+   a4af277; now all 11 encoding variants (UTF-8 +/- BOM, UTF-16 LE/BE +/- BOM, UTF-32 LE/BE +/- BOM, ISO-8859-1) are
+   quarantined `XML_DOCTYPE_REFUSED` with size and SHA-256, 0 characters expanded. Delia is the only XML parser here.
+C3. **One URL rule** (`primitives/safe_url.py`; M-S2, M-S4, M-D3, M-O3). Every crawled or declared URL or path that
+   enters a finding, a fact, a quarantine / observation record, a log line or an API answer is stored as scheme +
+   host (punycode, lower case, no userinfo, port only when not the default) + TEMPLATED path, never a query or a
+   fragment; comparisons run on the raw values in memory. X-Robots-Tag and meta robots are stored as known directives
+   and known bot names only; content types as a list of common media types; robots.txt rules as templated patterns;
+   lastmod examples as dates or character shapes. A plain word or a slug of plain words stays readable. [Corrected in round 2,
+   R5: the claim made here, "on 23,747 distinct ordinary corpus paths 4,545 were templated, every one for a segment
+   of digits only", held only for that round's ASCII English corpus. Measured on the round-2 corpus (27,887 paths,
+   60,305 segments: English blog, dated, category, product-with-brand, and slugs in 11 other languages), this
+   release (89fae32b) templated 7,857 segments: 5,700 digits-only `{id}` (dates, page numbers) and 2,157 `{token}`
+   (2,138 of them multilingual slugs: a slug with a non-ASCII letter was not slug-shaped, so one over 40 characters,
+   or with an accent and a digit, became `{token}`; 19 English). Limitation then: a token of letters only, shaped
+   like a word, cannot be told from one - round 2 R5 replaces this with the word rule.] Measured through the real service path (two audits, drift, both client report formats, a log
+   ingest, the audit export; every API answer, every file of the data directory, the ledger and every log record at
+   DEBUG): 9,200 planted synthetic values (Selene 1,500, Delia 1,900, Osei 2,100, Roman 1,300, log task 2,400), 0
+   found; at a4af277 the same plant (without the UTF-16 / UTF-32 inputs, which made a4af277's audit fail) left Selene
+   1,500, Delia 1,000, Osei 1,400, Roman 500 of them in its output. No HTTP 5xx in either. httpx / httpcore loggers
+   stay at WARNING.
+C4. **Log task** (`svc_logs.py`, M-S3, M-S4, M-S5). The robots.txt text of an ingest stays in memory only (its
+   SHA-256 is recorded); after a restart its later bot requests count as `robots_unchecked` and the report is PARTIAL.
+   The sitemap sample is recorded as templates (shown) and keyed digests (`agents/logs.path_digest` under the log hash
+   key, matched in memory), never as raw paths; examples and `uncrawled_important_paths` are templates. A segment
+   with `;` (matrix parameters), `,` or `=` is `{param}`.
+C5. **Drift** (`agents/drift.py`, M-O1; rules `2026-11-13.1`). R1 is decided per fact: a finding that is itself a
+   failed or incomplete observation, robots.txt unreachable or too large, llms.txt unreadable, a sitemap URL unreadable
+   (or, for a finding over all sitemaps, any sitemap fetch failure) in EITHER run is TOOL_FAILURE, never a change.
+   Fingerprint fields present in either report count.
+C6. **Roman and Osei** (M-R1, M-O4, S-O1, S-S2). Page TITLE TEXT IS WITHHELD: only its length, empty, same as the H1,
+   over / under the heuristic bounds are stored, because the shared redaction core is not on this base; `lang` is
+   stored only as a valid BCP 47 language[-script][-region] (else `invalid`, counted); an `@type` only when it is in
+   the bundled schema.org list (`agents/schema_types.py`, 792 names; else counted `unknown_type`). noindex is per
+   engine: an X-Robots-Tag directive after a `<bot>:` prefix, or a meta robots tag named for one crawler, applies to
+   that crawler only (Selene's NOINDEX lists the engines; Roman's readiness `indexable` per engine). Quarantine
+   records carry size and SHA-256 for TOO_LARGE (of the bytes read before the stop, said so), invalid JSON-LD (of the
+   block) and malformed provider answers (of the body the adapter held); records past the caps are counted
+   (`quarantined_dropped`, `observations_dropped`); canonical-target and browser-identity fetches are observed too.
+
+Differential on 300 ordinary synthetic sites (a4af277 -> now): 45 findings fewer, none added, no outcome changed: 35
+`ROBOTS_LINES_IGNORED` (a BOM before the first group, C1) and 9 `NOINDEX` + 1 `NOINDEX_CANONICAL_CONFLICT`
+(`otherbot: noindex` aimed at another crawler, C6).
+
+## Wave-1 certification round 2 (2026-11-13): the re-review of 89fae32b
+
+An independent re-review of 89fae32b found that round 1's bounds themselves produced false measured findings, that
+percent-encoding was decoded beyond RFC 9309, and that letters-only names stayed readable in stored URLs. What
+changed, with what was measured (harnesses outside the repo; corpora generated at run time; nothing real crawled;
+"before" = a4af277 and 89fae32b, "after" = this release):
+
+R1. **RFC 9309 octet comparison** (`primitives/robots.py` `canon`; M1). A rule and a URL path (with its query) are
+   compared as octets in one canonical form: `%XX` of an unreserved character (A-Z a-z 0-9 `-._~`) is decoded,
+   every other `%XX` is kept with upper-case hex (`%2F` is never `/`, `%3F` never `?`); a non-ASCII character is the
+   `%XX` of its UTF-8 octets; an octet that is not valid UTF-8 in the file is kept as itself (the fetcher decodes
+   robots.txt with `surrogateescape`), so two different invalid octets never collide; a rule's `*` and final `$` are
+   split off BEFORE normalising (`%2A` / `%24` are literal), and a raw `*` / `$` in a path compares as `%2A` / `%24`
+   (section 2.2.3); a stray `%` is `%25`. Specificity ("most octets") is the length of the canonical pattern, `*`
+   and `$` one octet each: a rule written with a non-ASCII letter and the same rule percent-encoded are equally
+   specific. Measured against an independent RFC 9309 matcher written for this round (bytes in, dynamic
+   programming, not the greedy matcher): 40,000 random rule sets, 240,000 decisions (224,133 involving a reserved
+   encoding, 188,904 an invalid UTF-8 encoding): 0 disagreements now; 4,365 at both 89fae32b and a4af277 (4,319 with
+   a reserved encoding, 3,623 with invalid UTF-8; 827 allowed what the file disallows). `Disallow: /%2A` no longer
+   yields a critical finding quoting `/*`; `Disallow: /` + `Allow: /%2A` no longer lets this crawler fetch `/about`.
+R2. **Counted work, not a clock** (M2). Every robots.txt decision is charged deterministic work units
+   (`robots.Work`: `1 + len(path)/64` to normalise, one per index probe, `1 + pieces + len(path)/256` per rule
+   tried; rules are indexed by their first literal piece, so only rules whose first piece is a prefix of the path
+   are tried). Each step has `STEP_WORK_UNITS` = 2,000,000: the fetcher's own checks per run and origin, Selene's
+   matrix, Delia's listed-URL check, Roman's readiness, one log chunk. A decision whose charge would pass it is not
+   made: the fetcher's state is `ROBOTS_CHECK_INCOMPLETE` (its own state, never `BLOCKED_BY_ROBOTS`), Selene reports
+   `PAGE_NOT_READ_ROBOTS_CHECK_INCOMPLETE` / `ROBOTS_CHECK_INCOMPLETE` and Delia `SITEMAP_ROBOTS_CHECK_INCOMPLETE`,
+   all `INSUFFICIENT_EVIDENCE`; Roman's readiness check is `undecided`, neither pass nor fail. The same input always
+   gets the same answer however slow the network: the wall-clock budgets of round 1 are gone. Calibration (this
+   machine, under load from parallel measurement jobs): the costliest file within the parse limit (27,530 rules all
+   tried for every path) spends 2,000,000 units in 0.597 s (24 decisions); 13,412 rules of ten wildcards in 0.291 s;
+   the cheapest-per-unit shape (24,908 distinct-prefix rules, 7 units a decision) in 1.590 s; so one step costs at
+   most about 1.6 s here. Slow ordinary site (Allow: /, every response 0.7 s, 6 pages with canonicals, sitemap,
+   llms.txt): 89fae32b refused its own fetches and reported `CANONICAL_TARGET_NOT_200`, `SITEMAP_UNREADABLE`,
+   `LLMS_TXT_UNREADABLE`, Delia FAILED; now every page and file is read, no such finding, Delia OK (a4af277 also
+   read it: it had no budget). Large site (8 sitemaps x 3,000 URLs, every response 0.7 s): all 8 read, 24,000 URLs
+   counted, 500 checked against robots.txt, OK (tests/test_wave1_cert_r2.py).
+R3. **No rule caps; the parse limit is the only approximation** (M3). The caps of round 1 (rules per group,
+   pattern length, wildcards, path length, lines) are removed: with the linear matcher and the counted work they
+   bound nothing the 500 KiB parse limit (RFC 9309 2.5; Google's documented limit) does not. Every rule is used
+   exactly as written and a quoted rule is always one in the file (stored in its safe form). A longer file is read up
+   to 500 KiB (the fetcher keeps that prefix, `truncate_at`; the cut last line is not read), reported
+   `ROBOTS_LIMITS_EXCEEDED` (`truncated`, bytes read, the cap), and every block decision from it is
+   `ROBOTS_BLOCK_APPROXIMATE` (INSUFFICIENT_EVIDENCE, cap named), never `ROBOTS_BLOCKS_*`; this crawler honours the
+   prefix as RFC 9309 2.5 allows. Measured: 4,000 filler rules then `Disallow: /about` for Googlebot -> the block is
+   found (89fae32b: none); one 2,500-character allow -> every page read, OK (89fae32b: every page refused, FAILED);
+   a 2,500-character anchored disallow -> exact (89fae32b: shortened, `$` dropped, a longer path also disallowed).
+   What large real files need: a 119,906-byte file of 1,500 distinct-prefix rules and 500 query / wildcard rules in
+   two groups costs 1,506 units a decision (2,000,000 cover 1,328 decisions a step; Selene's matrix needs at most 140,
+   Delia 500, a log chunk its bot lines): Selene and Delia OK, a 450-line log chunk 0 unchecked, nothing
+   approximate. Hostile shapes do reach the bound and say so: 2,000 seven-wildcard rules with a 500-URL sitemap ->
+   Delia PARTIAL, 389 URLs unchecked (0.633 s); a 600-line log chunk against them -> 489 unchecked (0.748 s); the
+   costliest 500 KiB file: an audit of 10 paths 1.311 s, a 450-line chunk 2.895 s with 426 unchecked, `/health` at
+   most 48.6 ms during the audit (a4af277: the same audit 284.987 s, `/health` at most 236.4 ms).
+R4. **Log task robots check** (`agents/logs.request_target`; M4). The request target as written (path and query,
+   percent-encoding untouched) is matched; `robots.canon` decodes once. `Disallow: /*?sort=`, `/search?` and
+   `/%2541` against six logged requests: 4 of 4 disallowed hits counted (89fae32b and a4af277: 0).
+R5. [Retired by Wave-1 v2, V1 below: store codes, no dictionary.] **The word rule for stored paths** (`primitives/safe_url.py`, `path_words.txt`; M5; decision 2026-11-09 "split
+   storage from display"). In every stored crawled URL and log path template a segment the shape rules would keep
+   readable is kept only when every word of it (split on `- _ . ~ + ; , =`, case changes and letter / digit
+   boundaries; 1-4 digit numbers and single ASCII letters count as words) is in the bundled ordinary-word list, and
+   the segment does not follow a person or secret context segment (`/user/`, `/team/`, `/author/`, `/token/`,
+   `/reset/`, ... `CONTEXT_NAME`, `CONTEXT_SECRET`). Anything else is stored as `{seg:xxxxxxxx}`, 8 hex of
+   HMAC-SHA-256 under a per-tenant key (HMAC of the log hash key with the tenant id, set for the run by
+   `safe_url.keyed`), so reports can still count and group; `{seg}` without a key. The list (generated data,
+   4,860,038 bytes, ASCII with `\u` escapes; its header states the recipe): wordfreq 3.1.1 top 60,000 English, 20,000
+   each of de fr es pt it pl tr, 10,000 each of ja hi ar fa ru uk el he ko zh, Thai 10,000 (pythainlp 5.1.2 TNC),
+   plus accent-folded forms: 274,774 words after removing 13,831 that are given names or surnames (faker 40.54.0,
+   every person locale, and the US census lists in zxcvbn 4.5.0: 73,692 names) or common secret words (zxcvbn top
+   2,000 passwords, 1,648), except 1,715 EXEMPT words that are also common words (in faker's lower-case lorem / color
+   lists of these languages, or used in lower case mid-sentence at least 20 times and in at least 25% of uses in
+   NLTK's Brown, Gutenberg, Reuters and webtext corpora; a secret word also when in wordfreq's English top 10,000).
+   Measured on an ordinary corpus of 27,887 paths (60,305 segments: English blog slugs from two sources, dated,
+   category, product slugs with 120 brands, plain products, slugs in 11 other languages, static files 0 of 2,120, pagination):
+   14,338 segments templated, of them 8,593 digests; by class: digits-only `{id}` 5,700 (unchanged); English blog
+   slugs 1,743 digests (+12 `{token}`) of 22,000 (proper nouns, technical words outside the list); dated slugs 400 digests of 7,500 segments; product slugs
+   with a brand 1,472 of 6,000 (brands outside the list or that are surnames: max, prada, salomon, ford, ...);
+   plain products 94 of 3,000; category paths 0 of 4,811; multilingual slugs 4,884 digests (+26 `{token}`) of 12,774 (inflected forms and
+   UI vocabulary outside a 10,000 / 20,000-word list; Korean and unsegmented Japanese / Chinese phrases almost always).
+   On the 400-site differential corpus: 1,485 segments, all the word "yoga" (a name in the list). Planted values
+   (made at run time, never printed): faker names 2 of 1,516 readable, a name source NOT used to build the list
+   (NLTK names x census surnames) 28 of 1,200, random-letter secrets 0 of 541, pronounceable 0 of 350, glued words 0
+   of 310, common passwords 74 of 299 readable. Disclosed residual: those readable values are names or secret words
+   that are also common words (the exempt list) or names absent from the name lists that are ordinary words; a
+   segment after a person or secret context is a digest whatever it is. M3 below counts the same classes through
+   the service path. Correction to C3: see the bracketed note there.
+R6. **Drift** (`agents/drift.py`, rules `2026-11-13.2`; Osei M1). A finding whose own `detail.fetch_state` is
+   present and not OK in either run's copy of it (a canonical target that refused connections, a robots check left
+   incomplete) is R1 TOOL_FAILURE. A canonical-target fetch that did not succeed is now
+   `CANONICAL_TARGET_UNCHECKED` (info, INSUFFICIENT_EVIDENCE); `CANONICAL_TARGET_NOT_200` (high, ACT) only for a
+   measured status or redirect. Tests pin R1 for robots too large, a missing llms.txt state, sitemap-wide changes
+   with `robots_unchecked`, the R3 confound, and the bot token in the drift key.
+R7. **Oversized JSON-LD** (Osei M2). A block over 262,144 characters is not parsed: quarantined
+   `JSONLD_TOO_LARGE`, `truncated: true`, `bytes` / `sha256` of the prefix read (`size_basis` says so),
+   `total_bytes` of the whole block; Roman reports `STRUCTURED_DATA_BLOCK_TOO_LARGE` (not invalid JSON). Measured on
+   a 400,066-byte block: 262,144 bytes read, total 400,066 (89fae32b: `JSONLD_INVALID`, 262,145 bytes, no total).
+R8. **Other agents.** Selene: `NOINDEX_FOR_BOT` (info, WATCH) for a noindex aimed only at crawlers that are no
+   engine's search crawler (a `GPTBot` meta), with the bots named; a page refused because robots.txt is unreachable
+   says so, not "disallows". Delia: llms.txt answering exactly 500 is unreadable, not absent; a UTF-32 sitemap is
+   decoded here and read (expat cannot read UTF-32; a DOCTYPE in it is still refused); facts disclose sitemaps
+   attempted vs read, URLs listed vs examined, URLs checked against robots.txt. Roman: a script subtag must be an
+   ISO 15924 code (else left out of the stored tag); `lang=""` or white space is missing; readiness counts an
+   undecided crawler check as `undecided`. Entity check: `ENTITY_FIELD_MISMATCH` stores the comparison (result,
+   case- / whitespace- / normalised-equal flags, lengths, keyed digest of the normalised on-site value), never the
+   page's text; the homepage phone observation stores the requested and final URL in their safe form.
+R9. **War room** (ADR 0018). `robots-matching-cost` also requires that the pages the hostile file allows are read;
+   `drift-classification` plants a letters-only value in crawled URLs and moves a page's canonical to a target that
+   refuses connections in the newer run; new `robots-and-safety-round-2` (10 cases: reserved allow, reserved
+   disallow, invalid UTF-8, slow site, filler rules, long allow, log query, planted names, entity name, oversized
+   JSON-LD). Replayed one by one: at this release every case of the three scenarios passes (robots-matching-cost 4, drift-classification 6, robots-and-safety-round-2 10); at a4af277 every robots-matching-cost case fails (#001 refuses the pages its file allows; #000, #002, #003 did not finish within 900 s) and every drift-classification case fails; at 89fae32b every drift-classification and robots-and-safety-round-2 case fails (a4af277: 7 of the 10, the slow site, filler-rule and long-allow cases pass there because it had no budget or caps). The decompression-bomb judge for robots.txt now accepts the parse-limit cut as containment (at most 500 KiB kept). Seeds 1-5 with the replay library: 575 / 590 / 581 / 587 / 589 cases, all PASS
+
+M3 through the service path (100 sites, two audits, drift, both client report formats, a log ingest, the audit
+export; every API answer, every data-directory file, the ledger, every log record at DEBUG): 9,600 planted values across
+Selene 1,500, Delia 1,900, Osei 2,100, Roman 1,300, the log task 2,400 and the entity check 400, rotating seven
+shapes per surface: hex 1,204, letters only 1,299, upper case 2,382, given name + surname slugs from the lists 1,182,
+name slugs from a source not used for the lists 1,180, random-letter secrets 1,178 - 0 found anywhere; common
+passwords 1,175 - 69 found, every one a common word in the ordinary list (the disclosed residual; several, such as
+`access`, `connect`, `server`, also occur in this service's own field names and texts, so the count is an upper
+bound). No HTTP 5xx; 1,300 log records at DEBUG searched.
+
+M4 mutants (94: Selene 26, Delia 22, Roman 22, Osei 22, entity check 2, every survivor the re-review listed): 94 of 94 killed
+after this round's tests (the first run left 9 survivors - S23 surrogateescape, S26 single CJK character, D9 child
+cap, D12 the 50,000 boundary, D21 sitemaps attempted, R14 approximate readiness, R15 white-space folding in Roman's
+own comparison, R21 white-space lang, O11 a FAILED outcome - each then got a test and was re-run: killed).
+
+Differential on 400 ordinary synthetic sites: against a4af277 59 findings fewer, none added, no outcome changed (46
+`ROBOTS_LINES_IGNORED`, BOM, C1; 12 `NOINDEX` + 1 `NOINDEX_CANONICAL_CONFLICT`, another bot's noindex, C6);
+against 89fae32b no finding changed. No ordinary page is reported blocked or unreadable.
+
+## Wave-1 v2 (2026-11-13): built to the frozen spec `wave1-spec/1`
+
+The finish line is `services/seo-py/docs/spec/wave1-spec-1.md` (frozen, owner-approved with all twelve proposed
+defaults) and its permanent conformance suite `services/seo-py/tests/conformance/` (SUITE_PLAN:
+`docs/spec/wave1-suite-plan-1.md`). Certification is pass / fail against the numbered spec items; what follows
+describes what is built and the numbers measured on this machine (a shared 2-vCPU container; not the reference box,
+R-13).
+
+V1. **Store codes replace the word rule** (spec 0.1, section 3, owner decision 3; supersedes R5 above). There is no
+   bundled dictionary any more: `primitives/path_words.txt` (wordfreq, CC BY-SA 4.0, with NLTK-derived exempt words)
+   and `agents/schema_types.py` (schema.org, CC BY-SA 3.0) are removed. Every value from outside the service that is
+   not on the closed allowlist (spec D-01: the tenant's registered domains and their `www.` twin, well-known file
+   names, structural machine values, closed vocabularies, CLDR-valid language tags, the rule table's schema types,
+   structural robots patterns) is stored as `{c:<kind>:<16 hex>}`: the first 64 bits of HMAC-SHA256 under an HKDF
+   sub-key of the vault key (info `seo-codes/v1`, `vault.Coder`, bound to the tenant; the key never leaves
+   `vault.py`), or as a value-destroying placeholder (`{id}`, `{number}`, `{uuid}`, `{email}`, `{token}`,
+   `{param}`, `{file}.<ext>`). `primitives/codes.py` holds the context, the allowlist grammars and the evidence map;
+   `primitives/safe_url.py` keeps its entry points (`safe_url`, `safe_path`, `safe_ctype`, `safe_x_robots`) on the
+   new rules. Each report records `codes_key_id`; drift classes every change of a pair under different codes keys
+   R2 MEASUREMENT_ERROR (`ruler: codes_key`, rules version `2026-11-13.3`). Findings are computed on the raw values
+   in memory first: the O-02 differential of the 40-site fast corpus against 91db0abb and a4af277 changed 0 finding
+   counts.
+V2. **Evidence map and owner displays** (spec 0.1, D-02f-h, D-06). Each audit's {code: raw value} map (at most 1,024
+   characters a value, 20,000 entries) is its own vault blob of the owning tenant (`evidence_map`, written in the
+   same append as the report). `GET .../audits/{aid}?resolve=evidence` answers only the hub caller authenticated as
+   the tenant (any other caller: 403 `EVIDENCE_OWNER_ONLY`) with every code resolved and cleaned (controls removed,
+   160 characters); the client report (Markdown / HTML) resolves the same way before its own cleaning. A lost map
+   shows `[not available]` and `evidence_available: false`, never an error.
+V3. **Robots and fetch** (spec sections 1-2). A sitemap or an ignored line no longer ends a run of user-agent lines
+   (only a rule does; Google's parser; found by the conformance suite's RFC 9309 oracle); lines end at CR, LF or CRLF
+   only; the parse limit is 512,000 OCTETS of the decoded body; robots.txt answering 429 is unreachable (Q-06); a body
+   the server sent that cannot be decoded within the bounds (more than 64 MiB on the wire, a broken coding) is
+   `incomplete`: `ROBOTS_CHECK_INCOMPLETE` (info, INSUFFICIENT_EVIDENCE), never `ROBOTS_UNREACHABLE` (gzip of
+   110,000 empty members: read, `ok`). A Location is used whole up to 8,192 octets, longer is `REDIRECT_TOO_LONG`;
+   a canonical / link URL is kept whole (parse no longer cuts hrefs at 2,000 characters: a cut canonical target was
+   being fetched, found by the new war-room scenario); an explicit port 0 is refused; a kill switch engaged during
+   the nested robots.txt fetch is `KILLED`; a truncated gzip / deflate body is `PROTOCOL_ERROR`. Robots matching
+   charges `len(path) x len(searched pieces) / 1024` units a rule tried (`FIND_COST_DIVISOR`): measured, a whole
+   step (2,000,000 units) of the costliest shapes costs at most 0.299 s CPU (needle of 50 octets x 4,348 rules,
+   2,047-octet paths; the same harness on 91db0abb: 3.57-8.09 s), and units per CPU millisecond range 1,856 (24,908
+   distinct prefixes) to 10,505 (27,530 rules all tried): 5.7x. Patterns and paths are compared as octet UNITS (one
+   character per escaped octet): before, a literal piece could match the hex digit inside an escape (`Disallow:
+   /*%41` decided `//%7e*`, the `A` of the `%2A` of a raw `*`; also at 91db0abb), found by the lead-gate RFC 9309
+   differential.
+V4. **Agents.** Selene: same site includes subdomains of the registered domain (B-CD-06); a meta robots tag named
+   for any bot family token is read (B-SE-12); X-Robots-Tag header lines are read one by one (a bot prefix in one
+   never reaches into the next). Delia: sitemaps are streamed through an incremental expat reader up to the
+   sitemaps.org limit (52,428,800 bytes uncompressed, `SITEMAP_TOO_LARGE` past it, Q-07); a valid 45,000-URL
+   sitemap of 6 MiB plain or 12 MiB gzip is read; a corrupt or truncated gzip is quarantined with its wire size and
+   SHA-256 (`size_basis: wire`); a gzip body is known by a `.gz` name or its first two octets (one served as
+   `application/gzip` at `/sitemap.xml` is read; the streamed reader had lost the media-type rule of 91db0abb, found
+   by the old suite); UTF-16 and UTF-32 are decoded here (expat refuses `utf-16-le` spellings); a measured 404 / 410
+   is `SITEMAP_MISSING` and counts in `sitemap_fetch_failures` (outcome PARTIAL, as at 91db0abb); the log sample is
+   the codes of whole paths. Roman: `lang` is validated
+   against the CLDR validity data (`primitives/cldr_validity.txt`, Unicode-3.0, CLDR 48); `LANG_INVALID` (low,
+   ACT) and readiness `lang_declared: fail` for a tag that is not BCP 47 or whose language CLDR does not know; types
+   readable only from the rule table. Entity check: no canonical value in any finding, the on-site value as
+   `{c:entity:..}`. Osei: quarantine records have one closed shape and `size_basis` from a closed list. Log task:
+   request targets up to 8,192 bytes are parsed.
+V5. **Suite and war room.** The conformance suite (one test or family per spec item, named by item id; catalogue
+   and lock; seeded generators; oracles written from RFC 9309, the sitemaps.org protocol, the W3C-DTF note, the
+   llmstxt.org proposal, Google's robots meta documentation, RFC 5646 with the CLDR XML) and seven new war-room
+   scenarios (`store-codes-planted`, `robots-wire-and-length`, `robots-cost-charging`, `host-labels`,
+   `large-sitemaps`, `codes-and-drift`, `vault-unavailable-audit`). Mutants: `devtools/conformance/mutants.py`.
 
 ## Unlock list
 
