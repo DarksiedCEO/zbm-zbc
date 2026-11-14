@@ -52,7 +52,8 @@ def _none_lost(names, heavy: bool) -> None:
     assert all(v == {} for v in lost.values()), {n: v for n, v in lost.items() if v}      # case ids and counts only
 
 
-REVIEWER = ("rv18_p1", "rv18_bnd", "rv18_p2v2", "rv19_m1", "rv19_b19", "rv19_cp19", "rv19_cpx19")
+REVIEWER = ("rv18_p1", "rv18_bnd", "rv18_p2v2", "rv19_m1", "rv19_b19", "rv19_cp19", "rv19_cpx19", "rv20_m20",
+            "rv20_b20", "rv20_cp20", "rv20_vg")
 
 
 @pytest.mark.conformance
@@ -68,6 +69,12 @@ def test_LP1_LP2_boundary_set():
 @pytest.mark.conformance
 def test_LP1_LP2_composed_ci_and_attack_corpus():
     _none_lost(["composed4000", "attack676"], False)
+
+
+@pytest.mark.conformance
+def test_LP1_LP2_full_glue_set_and_glued_vanity():
+    """Round 21 (priya-spec/1.1 C-2, C-4): the builder's full glue-set and glued-vanity corpora, every case."""
+    _none_lost(["c2glue", "vanity_glued"], False)
 
 
 @pytest.mark.conformance
@@ -89,7 +96,7 @@ def test_LP1_LP2_reviewer_corpora_heavy():
 @pytest.mark.conformance
 def test_LP1_every_personal_corpus_has_frozen_bits():
     assert set(REVIEWER) | {"matrix5", "boundary", "composed4000", "attack676", "matrix200", "composed42000",
-                            "attack40672"} == set(corpora.PERSONAL)
+                            "attack40672", "c2glue", "vanity_glued"} == set(corpora.PERSONAL)
     for n in corpora.PERSONAL:
         for r in corpora.REVISIONS:
             assert (DATA / "baseline" / f"{n}.{r}.bits.gz").is_file(), (n, r)

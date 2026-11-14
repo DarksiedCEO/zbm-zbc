@@ -49,7 +49,11 @@ import lookalikes
 from agents import logs as logs_mod
 
 AGENT, TASK = "osei", "search_performance"
-VERSION = "2026-11-08.20"                     # query classes, templating and the aggregation rules below
+VERSION = "2026-11-08.21"                     # query classes, templating and the aggregation rules below
+# 2026-11-08.21 (review round 21, priya-spec/1.1): the FULL C-2 glue set (all 24 fullwidth / ideographic glue
+#    characters read as word separators by every detector, besides their NFKC forms); a spelled code digit glued to
+#    the seven keypad characters (C-4 with D11 / D12 / D14); one at-word read as '@' when the local part holds
+#    another; a decoded text under eight characters holds an e-mail only with its '.' and two TLD letters
 # 2026-11-08.20 (review round 20, priya-spec/1.1): the closed at-word / dot-word lists (C-1, any case); e-mails and
 #    addresses glued to fullwidth / ideographic punctuation and CJK context (C-2); composed gaps counted one
 #    character for one (``script_view``); a number word inside an ordinary word read only as a gap between two
@@ -303,6 +307,12 @@ MAX_QUERY_CHARS = 512        # longer text is not classified (it is pii_suspect)
 
 _ADDR_TOKEN_EDGE = re.compile(r"^[^a-z0-9#]+|[^a-z0-9]+$")
 _ADDR_GLUE = re.compile(r"[:;!?\"()\[\]{}<>|]|\.(?=[a-z])")
+# round 21 (priya-spec/1.1 C-2): the glue punctuation of the list, ALL of it - fullwidth U+FF01-U+FF0F and
+# U+FF1A-U+FF20, the ideographic comma and full stop - each read as a word separator (a space): NFKC makes most of
+# them ASCII characters that a value's own alphabet holds ("\uff0d" -> '-' of url-safe base64, "\uff05" -> '%',
+# "\uff0b" -> '+' of a mailbox, "\uff04" -> '$' glued to a street word), so the views above can read them as part
+# of the value or of a word; the text with every one of them made a space is judged by the same detectors
+_C2_GLUE = {c: " " for c in [*range(0xFF01, 0xFF01 + 15), *range(0xFF1A, 0xFF1A + 7), 0x3001, 0x3002]}
 
 
 def script_view(q: str) -> str:
@@ -1250,11 +1260,44 @@ def spelled_views(folded: str) -> list:
     if not found or (len(found) < 3 and not any(c.isdigit() for c in folded)):
         return []
     kept = _number_words_read(folded)
-    if kept == folded:
+    whole = _ALNUM_RUN.sub(lambda m: _vanity_word(m.group()), folded)
+    if kept == folded and whole == folded:
         return []
     joined = "".join(c for c in kept if c == "+" or unicodedata.category(c)[0] not in "PSZC")
-    whole = _ALNUM_RUN.sub(lambda m: _NUMBER_WORDS.get(m.group(), m.group()), folded)
     return [kept, joined, whole]
+
+
+def _units_only(s: str) -> str | None:
+    """Round 21: ``s`` read wholly as UNITS with no gap (digits and number words other than "oh"), made digits, or
+    None when it does not read so ("80zero" -> "800", "eightzero" -> "80")."""
+    ok = [None] * (len(s) + 1)            # ok[i]: the digits of s[i:] when it reads as units
+    ok[len(s)] = ""
+    for i in range(len(s) - 1, -1, -1):
+        if s[i].isdigit() and ok[i + 1] is not None:
+            ok[i] = s[i] + ok[i + 1]
+            continue
+        for w in _IN_WORD_UNITS:
+            if s.startswith(w, i) and ok[i + len(w)] is not None:
+                ok[i] = _NUMBER_WORDS[w] + ok[i + len(w)]
+                break
+    return ok[0]
+
+
+def _vanity_word(tok: str) -> str:
+    """A word for the vanity view: a whole number word made its digit; round 21 (priya-spec/1.1 C-4, D11 / D12 /
+    D14 glued to the keypad part, the usual vanity form): a word that is units (digits and number words, one number
+    word at least) followed by SEVEN keypad characters made its digits and those seven ("zeroflowers" -> "0flowers",
+    "80zeroflowers" -> "800flowers"): with a whole code before it, what follows completes a keypad word of the
+    right length, so the glued number word is a code digit (a disguise of "1 800 flowers"), not part of an ordinary
+    word; the vanity rule still needs the toll-free code and the seven, so "zeroflowers" alone stays a word."""
+    d = _NUMBER_WORDS.get(tok)
+    if d is not None:
+        return d
+    if len(tok) > 7 and not tok[:-7].isdigit():
+        u = _units_only(tok[:-7])
+        if u is not None:
+            return u + tok[-7:]
+    return tok
 
 
 # vanity toll-free numbers (round 18): 1 (optional), an 8xx toll-free code, then seven keypad characters with at least
@@ -1307,6 +1350,7 @@ _LABEL = r"(?:[a-z0-9\-]\|?){1,63}"
 _MAILBOX = re.compile(r"[a-z0-9_+\-]\|?@\|?" + _LABEL + r"(?:\.\|?" + _LABEL + r"){0,4}?\.\|?" + _TLD_ANY
                       + r"(?=\.?(?:\||$))")
 _EMAIL_CORE = re.compile(r"[a-z0-9_.+\-]@[a-z0-9\-]")
+_SHORT_MAILBOX = re.compile(r"[a-z0-9_.+\-]@[a-z0-9\-]+\.[a-z]{2}")
 # a whole mailbox at the start of a decoded prefix (the plain-word base32 check: the bytes after it are context's)
 _MAILBOX_AT_START = re.compile(r"[a-z0-9._%+\-]{1,64}@[a-z0-9\-]{1,63}(?:\.[a-z0-9\-]{1,63}){0,4}\.[a-z]{2,24}")
 _ASCII_MARKS = re.compile(r"[\s\[\](){}<>!\"#$&'*,/:;=?\\^`|~]+")
@@ -1339,13 +1383,19 @@ def _marker_string(t: str) -> str:
     return "".join(out)
 
 
-def _despelled(m: str) -> str:
+def _despelled(m: str, only: int | None = None) -> str:
     """The marker string with spelled keywords made '@' and '.' (markers kept). Round 20: a keyword right after a
-    spelled dot-word is the top-level domain's letters ("... dot at": Austria's TLD is an at-word), not a keyword."""
-    out, pos, after_dot = [], 0, -1
+    spelled dot-word is the top-level domain's letters ("... dot at": Austria's TLD is an at-word), not a keyword.
+    Round 21: ``only`` = k reads the k-th at-word alone as '@' and every other at-word as letters of the mailbox (a
+    local part holding an at-word: "...-werud-at" + "_AT_" + domain, priya-spec/1 D18)."""
+    out, pos, after_dot, k = [], 0, -1, -1
     for x in _KW_EITHER.finditer(m):
         if x.start() == after_dot + 1:
             continue
+        if x.group("at"):
+            k += 1
+            if only is not None and k != only:
+                continue
         out += (m[pos:x.start()], "@" if x.group("at") else ".")
         pos = x.end()
         after_dot = x.end() if not x.group("at") else -1
@@ -1389,6 +1439,10 @@ def _email_views(folded: str) -> bool:
     for base in (m, rot13(m), words, rot13(words)):
         for v in (base, base[::-1]):
             if ("@" in v or _KW_AT.search(v)) and _mailbox_any(_despelled(v)):
+                return True
+            # round 21: two at-words or more ("...-at_AT_..."): each in turn the one '@', the others letters
+            n_at = len(_KW_AT.findall(v))
+            if n_at >= 2 and any(_mailbox_any(_despelled(v, k)) for k in range(min(n_at, 4))):
                 return True
     return False
 
@@ -1457,11 +1511,20 @@ def _decodings(s: str):
             yield u
 
 
-def _decoded_email(u: str, depth: int) -> bool:
+def _decoded_email(u: str, depth: int, cut: bool = True) -> bool:
     low = _LOOKALIKE.fold_cased(u)
     if "%" in low:
         low = unquote(low)
-    if _EMAIL_CORE.search(low) or _EMAIL_CORE.search(rot13(low)) or email_views_hit(low):
+    # round 21: when the window is a WHOLE run of encoding words (not ``cut`` by the span limits, so nothing of the
+    # value lies beyond it), a decoded text of under eight characters holds an e-mail only with its domain's '.' and
+    # two TLD letters ("a@b.cc", the shortest mailbox); ordinary words decode to such short texts by chance ("tent
+    # 442mm" -> "4@ns..." in rot13 base64, the reversed "upc 0513..." -> "b@1%1P": eight of ADR 0047's ordinary-
+    # corpus drops of round 20). A cut window keeps the bare 'x@y' shape: the value runs on past its end (an e-mail
+    # base32-encoded and chunked one character a word decodes 12 words at a time, "xu@nort")
+    if (_EMAIL_CORE.search(low) or _EMAIL_CORE.search(rot13(low))) and (cut or len(low) >= 8 or _SHORT_MAILBOX.search(
+            low) or _SHORT_MAILBOX.search(rot13(low))):
+        return True
+    if email_views_hit(low):
         return True
     return depth == 0 and encoded_email(u, 1)
 
@@ -1469,6 +1532,13 @@ def _decoded_email(u: str, depth: int) -> bool:
 def _enc_windows(toks: list, ok: list, plain: list):
     """For each word made only of encoding characters: the longest run from it (at most ``ENC_SPAN_TOKENS`` words,
     ``ENC_SPAN_CHARS`` characters) joined, when it is 8+ characters and holds a word that is not plain lower case."""
+    for s, _cut in _enc_windows_cut(toks, ok, plain):
+        yield s
+
+
+def _enc_windows_cut(toks: list, ok: list, plain: list):
+    """``_enc_windows`` with, for each window, whether the span limits cut it (more encoding words, or characters,
+    follow in the same run)."""
     n = len(toks)
     for i in range(n):
         if not ok[i]:
@@ -1479,7 +1549,7 @@ def _enc_windows(toks: list, ok: list, plain: list):
             special = special or not plain[j]
             j += 1
         if len(s) >= 8 and special:
-            yield s[:ENC_SPAN_CHARS]
+            yield s[:ENC_SPAN_CHARS], (j < n and ok[j]) or len(s) > ENC_SPAN_CHARS
 
 
 def encoded_email(cased: str, depth: int = 0) -> bool:
@@ -1500,17 +1570,40 @@ def encoded_email(cased: str, depth: int = 0) -> bool:
     # forms NFKC makes of fullwidth / ideographic punctuation glued to a chunk ("call\uff1aamFy..." -> "call:amFy...",
     # "nummer\u3002c2Fy..." -> "nummer.c2Fy...") never hide it; round 19 trimmed such characters at word ends only
     toks = _ENC_TOKEN.findall(cased)
+    if _encoded_in(toks, depth):
+        return True
+    # round 21: an encoding written one or two characters a word ("n f x g k 4 2 7 ...", D21 chunks) is longer than
+    # the twelve words a window joins; each run of four or more such words set apart only by white space is read
+    # again as ONE word (one window per run: linear)
+    merged = _short_chunks_merged(cased)
+    return merged is not None and _encoded_in(merged, depth)
+
+
+_SHORT_CHUNKS = re.compile(r"(?<![A-Za-z0-9+/=_\-%])[A-Za-z0-9+/=_\-%]{1,2}(?:\s+[A-Za-z0-9+/=_\-%]{1,2}){3,}"
+                           r"(?![A-Za-z0-9+/=_\-%])")
+
+
+def _short_chunks_merged(cased: str) -> list | None:
+    """The encoding words of the text with every run of 4+ words of one or two characters, set apart only by white
+    space, joined into one word; None when there is no such run."""
+    if not _SHORT_CHUNKS.search(cased):
+        return None
+    return _ENC_TOKEN.findall(_SHORT_CHUNKS.sub(lambda m: "".join(m.group().split()), cased))
+
+
+def _encoded_in(toks: list, depth: int) -> bool:
+    """``encoded_email``'s windows over one list of encoding words (as written, rot13'd; reversed)."""
     n = len(toks)
     ok = [_ENC_TOKEN.fullmatch(t) is not None for t in toks]
     plain = [ok[i] and _PLAIN_TOKEN.fullmatch(toks[i]) is not None for i in range(n)]
-    for s in _enc_windows(toks, ok, plain):
+    for s, cut in _enc_windows_cut(toks, ok, plain):
         for v in (s, rot13(s)):
             for u in _decodings(v):
-                if _decoded_email(u, depth):
+                if _decoded_email(u, depth, cut):
                     return True
-    for s in _enc_windows([t[::-1] for t in reversed(toks)], ok[::-1], plain[::-1]):
+    for s, cut in _enc_windows_cut([t[::-1] for t in reversed(toks)], ok[::-1], plain[::-1]):
         for u in _decodings(s):
-            if _decoded_email(u, depth):
+            if _decoded_email(u, depth, cut):
                 return True
     return _plain_base32(toks, plain)
 
@@ -1726,9 +1819,9 @@ def _spelled_hit(folded: str) -> bool:
         or (kept != whole and _vanity_any(kept))
 
 
-def _classify_core(q: str, brands: list, _depth: int = 0) -> str:
+def _classify_core(q: str, brands: list, _depth: int = 0, _detect_only: bool = False) -> str:
     """The classifier on one text (judged on the lookalike fold, after invisible characters are removed, like the
-    log templater)."""
+    log templater). ``_detect_only``: the detectors only (THE RULE), "other" when none fires (round 21)."""
     if len(q or "") > MAX_QUERY_CHARS:          # too long to classify cheaply: dropped as personal data, counted
         return "pii_suspect"
     raw_form = strip_marks(q or "")              # the detection form before percent-decoding
@@ -1760,6 +1853,15 @@ def _classify_core(q: str, brands: list, _depth: int = 0) -> str:
     if xs and (digit_stream_hit(xs) or _vanity_any(xs) or _spelled_hit(xs) or email_views_hit(xs)
                or looks_like_address(_address_core(xs.replace("#", " ")))):
         return "pii_suspect"
+    # round 21 (priya-spec/1.1 C-2): every glue character of the list read as a space (``_C2_GLUE``), all the
+    # detectors above on that text ("thanks\uff0482558 ...", "...\uff0dbmlA...", "..._dot_xe\uff0b\u8c22")
+    if not _detect_only and q and not q.isascii():
+        g = q.translate(_C2_GLUE)
+        if g != q and _classify_core(g, brands, _depth, _detect_only=True) == "pii_suspect":
+            return "pii_suspect"
+    if _detect_only:            # and the list's plain e-mail and address rules, which stand among the generic rules
+        return "pii_suspect" if looks_like_address(folded) or logs_mod._EMAIL.search(folded) \
+            or _AT_EMAIL.search(folded) else "other"
     # exemptions below this line touch ONLY the generic digit-run / token rules (and the IP check)
     versioned = _RFC_NUMBER.sub(lambda m: m.group(1) + " #", _VERSION.sub(lambda m: m.group(1) + " #", folded))
     undated = generic_exempt(isolated_dates_removed(versioned))       # round 19: product / travel codes

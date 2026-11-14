@@ -15,7 +15,9 @@ import unicodedata
 
 import attack_corpus as ac
 import priya_gen as g
-from rvgen import rv18_bnd, rv18_ord, rv18_p1p2, rv19_g4, rv19_g5, rv19_g6, rv19_g7
+import priya_gen_c2 as g21
+from rvgen import (rv18_bnd, rv18_ord, rv18_p1p2, rv19_g4, rv19_g5, rv19_g6, rv19_g7, rv20_g20bnd,
+                   rv20_g20cp, rv20_g20m, rv20_g20oq, rv20_g20vg)
 
 # rv-priya19's "cpx" construction: the ten digit / vanity pairs it measured with more cases (its own file's seed is not
 # recorded in the generator; the suite draws them with the review's composed-pair driver, seed 19, 400 per pair)
@@ -54,18 +56,29 @@ PERSONAL = {
     "rv19_b19": lambda: ((r["c"] + "|" + r["d"], r["q"]) for r in rv19_g5.cases()),
     "rv19_cp19": lambda: ((r["c"] + "|" + r["a"] + ">" + r["b"], r["q"]) for r in rv19_g6.cases(70, 19)),
     "rv19_cpx19": lambda: ((r["c"] + "|" + r["a"] + ">" + r["b"], r["q"]) for r in rv19_g6.cases(400, 19, CPX_JOBS)),
+    # round 21 (priya-spec/1.1 C-2, C-4): the builder's full glue set and glued spelled vanity
+    "c2glue": lambda: g21.cases(),
+    "vanity_glued": lambda: g21.glued_vanity(),
+    # rv-priya20 (review of a394a985): M-1 at N = 200, boundary set, composed pairs, glued vanity probe
+    "rv20_m20": lambda: ((m["c"] + "|" + m["d"] + "|" + m["y"] + "|" + m["x"], q) for m, q in rv20_g20m.iter_cases()),
+    "rv20_b20": lambda: ((m["g"] + "|" + m["s"] + ("|" + m["u"] if "u" in m else ""), q)
+                         for m, q in rv20_g20bnd.iter_cases()),
+    "rv20_cp20": lambda: ((m["c"] + "|" + m["a"] + ">" + m["b"], q) for m, q in rv20_g20cp.iter_cases()),
+    "rv20_vg": lambda: ((m["c"] + "|" + m["d"] + "|" + m["y"], q) for m, q in rv20_g20vg.iter_cases()),
 }
 ORDINARY = {
     "oq": lambda: ((c, q) for c, _i, q in g.ordinary()),
     "rv18_ord": lambda: ((r["c"], r["q"]) for r in rv18_ord.cases()),
     "rv19_oq19": lambda: ((r["c"], r["q"]) for r in rv19_g7.cases(19)),
+    "rv20_oq20": lambda: ((m["c"], q) for m, q in rv20_g20oq.iter_cases()),
 }
-COMPOSED = ("composed4000", "composed42000", "rv18_p2v2", "rv19_cp19", "rv19_cpx19")
+COMPOSED = ("composed4000", "composed42000", "rv18_p2v2", "rv19_cp19", "rv19_cpx19", "rv20_cp20")
 HEAVY = ("matrix200", "composed42000", "attack40672", "rv18_p1", "rv18_bnd", "rv18_p2v2", "rv19_m1", "rv19_cp19",
-         "rv19_cpx19")
+         "rv19_cpx19", "rv20_m20", "rv20_b20", "rv20_cp20")
 # the CI lane's draw of each heavy corpus: every k-th case (about 2,000-3,500 cases each)
 CI_STRIDE = {"matrix200": 0, "composed42000": 0, "attack40672": 0, "rv18_p1": 200, "rv18_bnd": 20, "rv18_p2v2": 20,
-             "rv19_m1": 100, "rv19_cp19": 20, "rv19_cpx19": 2, "rv18_ord": 4, "rv19_oq19": 4}
+             "rv19_m1": 100, "rv19_cp19": 20, "rv19_cpx19": 2, "rv18_ord": 4, "rv19_oq19": 4,
+             "rv20_m20": 100, "rv20_b20": 12, "rv20_cp20": 20, "rv20_oq20": 4}
 REVISIONS = {"644b4901": "644b4901725fdd077dac60a0703591d6ce1a4088",
              "65f8b92a": "65f8b92ace21cdce68c38ad6880184a0bee537b9"}
 

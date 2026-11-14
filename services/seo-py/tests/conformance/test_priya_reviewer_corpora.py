@@ -1,5 +1,5 @@
-"""priya-spec/1.1 C-5: the generators of reviews rv-priya18 (of 644b4901) and rv-priya19 (of 5bf0d2a5) are part of
-the permanent suite (``rvgen``, seeded; synthetic values made at run time; each reproduces the review's own corpus,
+"""priya-spec/1.1 C-5: the generators of reviews rv-priya18 (of 644b4901), rv-priya19 (of 5bf0d2a5) and rv-priya20
+(of a394a985) are part of the permanent suite (``rvgen``, seeded; synthetic values made at run time; each reproduces the review's own corpus,
 sha256 pinned in ``data/manifest.json``). Every personal-data case is dropped (Z-1 at the function level, raw and
 stored key), every composed corpus meets CP-4 (<= 1.0% overall, <= 5% for EVERY ordered pair, v1.1 C-3), and every
 reviewer ordinary corpus is labelled by both independent oracles (the suite's ``oracle.priya_list`` and the
@@ -18,12 +18,13 @@ from priya_common import define, dropped
 from rvgen import rv19_oracle as rvo
 from test_priya_ordinary import adr_table
 
-LIST = ("rv18_p1", "rv18_bnd", "rv19_m1", "rv19_b19")
-CP = ("rv18_p2v2", "rv19_cp19", "rv19_cpx19")
-OQ = ("rv18_ord", "rv19_oq19")
-# the kept cases measured on the final code of round 20 (ADR 0047); a residual may only shrink. rv19_cp19: one
-# vanity number whose seven keypad characters hold a number word ("1one..."), residual of priya-spec/1 section 8
-KEPT = {"rv18_p2v2": 0, "rv19_cp19": 1, "rv19_cpx19": 0}
+LIST = ("rv18_p1", "rv18_bnd", "rv19_m1", "rv19_b19", "rv20_m20", "rv20_b20", "rv20_vg")
+CP = ("rv18_p2v2", "rv19_cp19", "rv19_cpx19", "rv20_cp20")
+OQ = ("rv18_ord", "rv19_oq19", "rv20_oq20")
+# the kept cases measured on the final code of round 21 (ADR 0047); a residual may only shrink. rv19_cp19 and
+# rv20_cp20: one vanity number each whose seven keypad characters hold a number word ("1one...", "...oone9"), the
+# residual of priya-spec/1 section 8 (CP-4 bar met)
+KEPT = {"rv18_p2v2": 0, "rv19_cp19": 1, "rv19_cpx19": 0, "rv20_cp20": 1}
 
 
 def _shard():

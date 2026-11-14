@@ -237,23 +237,35 @@ _BRACKET = r"[\[\(\{<]"
 _CLOSE = r"[\]\)\}>]"
 
 
-def _despell(t: str) -> str:
+def _despell(t: str, only: int | None = None) -> str:
     """At-words and dot-words (bare between spaces, or in brackets, or between '_' / '-') read as '@' / '.'; spaces
-    around '@' and '.' removed."""
+    around '@' and '.' removed. ``only`` = k: only the k-th bare at-word is the '@', the others are letters of the
+    mailbox (a local part may hold an at-word: "...-at" + "_at_" + domain)."""
     # dot-words first: an at-word right after a dot-word is the top-level domain's letters ("... dot at")
     for words, sym in ((DOT_WORDS, "."), (AT_WORDS, "@")):
         forms = set(words) | {w.replace("-", " ") for w in words} | {w.replace("-", "") for w in words}
         alt = "|".join(re.escape(w) for w in sorted(forms, key=len, reverse=True))
         t = re.sub(_BRACKET + r"\s*(?:" + alt + r"|" + re.escape(sym) + r")\s*" + _CLOSE, " " + sym + " ", t)
-        t = re.sub(r"(?:(?<=\s)|(?<=^)|(?<=[_\-]))(?:" + alt + r")(?=\s|$|[_\-])",
-                   lambda m, t=t, sym=sym: m.group() if sym == "@" and t[:m.start()].rstrip(" \t_-").endswith(".")
-                   else sym, t)
+        seen = [-1]
+
+        def one(m, t=t, sym=sym, seen=seen):
+            if sym == "@" and t[:m.start()].rstrip(" \t_-").endswith("."):
+                return m.group()
+            if sym == "@" and only is not None:
+                seen[0] += 1
+                if seen[0] != only:
+                    return m.group()
+            return sym
+        t = re.sub(r"(?:(?<=\s)|(?<=^)|(?<=[_\-]))(?:" + alt + r")(?=\s|$|[_\-])", one, t)
     t = re.sub(r"[\s_\-]*([@.])[\s_\-]*", r"\1", t)
     return t
 
 
 def _mail_any(t: str) -> bool:
-    return bool(_MAILBOX.search(t)) or bool(_MAILBOX.search(_despell(t)))
+    if _MAILBOX.search(t) or _MAILBOX.search(_despell(t)):
+        return True
+    n = len(re.findall(r"(?:(?<=\s)|(?<=^)|(?<=[_\-]))(?:" + "|".join(AT_WORDS) + r")(?=\s|$|[_\-])", t))
+    return n >= 2 and any(_MAILBOX.search(_despell(t, k)) for k in range(n))
 
 
 def _decodes(tok: str):
@@ -294,7 +306,9 @@ def email(raw: str, text: str) -> bool:
             if _mail_any("".join(words[i:j])):
                 return True
     toks = [re.sub(r"^[^A-Za-z0-9+/=%_-]+|[^A-Za-z0-9+/=%_-]+$", "", w) for w in raw.split()]
-    joined = ["".join(toks[i:j]) for i in range(len(toks)) for j in range(i + 1, min(len(toks), i + 12) + 1)]
+    # chunks joined: any run of consecutive words (round 21: an encoding written one or two characters a word is
+    # longer than twelve words)
+    joined = ["".join(toks[i:j]) for i in range(len(toks)) for j in range(i + 1, len(toks) + 1)]
     for s in joined + [unquote(raw)]:
         for v in (s, codecs.encode(s, "rot13"), s[::-1]):
             for u in _decodes(v):
@@ -354,8 +368,23 @@ def address(text: str) -> bool:
     return False
 
 
+# priya-spec/1.1 C-2: the glue punctuation of the list (fullwidth U+FF01-U+FF0F, U+FF1A-U+FF20; ideographic comma and
+# full stop). Each is read both ways: as the character NFKC makes of it (a fullwidth '@' or '+' of a value) and as a
+# separator between words (a space), so a value glued to a word by it is read too
+C2_GLUE = "".join(chr(c) for c in range(0xFF01, 0xFF01 + 15)) + "".join(chr(c) for c in range(0xFF1A, 0xFF1A + 7)) \
+    + "\u3001\u3002"
+_C2_SPACE = str.maketrans({c: " " for c in C2_GLUE})
+
+
 def mandated(q: str):
-    """The rule of the closed list a query holds a value of, or None."""
+    """The rule of the closed list a query holds a value of, or None (C-2: the glue characters read either way)."""
+    r = _mandated(q)
+    if r is None and q and any(c in C2_GLUE for c in q):
+        r = _mandated(q.translate(_C2_SPACE))
+    return r
+
+
+def _mandated(q: str):
     text = chars(q)
     if len(q) > 512:
         return "over_long"
@@ -367,7 +396,7 @@ def mandated(q: str):
         r = stream(spelled) or stream("".join(c for c in spelled if c == "+" or c.isalnum()))
         if r:
             return "spelled_" + r
-    if vanity(text) or (n and vanity(units_whole(text))):
+    if vanity(text) or vanity(units_whole(text)):
         return "vanity"
     if email(q, text):
         return "email"
@@ -376,6 +405,24 @@ def mandated(q: str):
     return None
 
 
+_UNITS_RUN = re.compile(r"(?:\d|" + "|".join(sorted(WORDS, key=len, reverse=True)) + r")+")
+
+
+def _whole_or_glued(run: str) -> str:
+    """A whole number word -> its digit; priya-spec/1.1 C-4 (round 21): a run that is units with no gap (digits and
+    number words, a number word among them) and then exactly SEVEN keypad characters -> those digits and the seven
+    (the code's last digit spelled and glued to the keypad word, "...zero" + "flowers")."""
+    d = WORDS.get(run) or WHOLE_ONLY.get(run)
+    if d:
+        return d
+    head, seven = run[:-7], run[-7:]
+    if len(run) > 7 and not head.isdigit() and _UNITS_RUN.fullmatch(head):
+        return "".join(WORDS.get(u, u) for u in re.findall(r"\d|" + "|".join(sorted(WORDS, key=len, reverse=True)),
+                                                          head)) + seven
+    return run
+
+
 def units_whole(text: str) -> str:
-    """Only WHOLE number words read as digits (the vanity code spelled; the seven letters may hold a number word)."""
-    return re.sub(r"[a-z]+", lambda m: WORDS.get(m.group()) or WHOLE_ONLY.get(m.group()) or m.group(), text)
+    """Only WHOLE number words read as digits (the vanity code spelled; the seven letters may hold a number word),
+    and the glued code word before seven keypad characters (``_whole_or_glued``)."""
+    return re.sub(r"[a-z0-9]+", lambda m: _whole_or_glued(m.group()), text)

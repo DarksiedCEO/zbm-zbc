@@ -24,9 +24,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 SP = "services/seo-py/src/agents/search_performance.py"
 PR = "services/seo-py/src/agents/priya.py"
-TESTS = ("tests/test_query_privacy_r20.py", "tests/test_query_privacy_r19.py", "tests/test_query_privacy_r18.py",
-         "tests/test_query_privacy_r13.py", "tests/test_query_privacy_r14.py", "tests/test_query_privacy_r16.py",
-         "tests/conformance/test_priya_mutants_pinned.py", "tests/conformance/test_priya_boundary.py",
+TESTS = ("tests/test_query_privacy_r21.py", "tests/test_query_privacy_r20.py", "tests/test_query_privacy_r19.py",
+         "tests/test_query_privacy_r18.py", "tests/test_query_privacy_r13.py", "tests/test_query_privacy_r14.py",
+         "tests/test_query_privacy_r16.py", "tests/conformance/test_priya_mutants_pinned.py",
+         "tests/conformance/test_priya_boundary.py", "tests/conformance/test_priya_c2_glue.py",
          "tests/conformance/test_priya_owner_items.py", "tests/conformance/test_priya_ordinary.py",
          "tests/conformance/test_priya_reviewer_corpora.py", "tests/conformance/test_priya_matrix.py",
          "tests/conformance/test_priya_composed.py", "tests/conformance/test_priya_lost_protection.py")
@@ -49,7 +50,8 @@ MUTANTS = [
     ("p_diners36_off", 1, SP, "2720|3[46789]|30[0-5]", "2720|3[4789]|30[0-5]"),
     # ---- review rv-priya19's behavioural survivors (round 20 item 7: must be killed)
     ("e_no_reversed_windows", 1, SP,
-     "    for s in _enc_windows([t[::-1] for t in reversed(toks)], ok[::-1], plain[::-1]):", "    for s in []:"),
+     "    for s, cut in _enc_windows_cut([t[::-1] for t in reversed(toks)], ok[::-1], plain[::-1]):",
+     "    for s, cut in []:"),
     ("g_gtin_any", 1, SP, "ok = _gtin_valid(d) and (word", "ok = (word"),
     # ---- review rv-priya19's other mutants, where the code still holds their text
     ("e_tld_max3", 0, SP, '_TLD_ANY = r"(?:[a-z]\\|?){1,23}[a-z]"', '_TLD_ANY = r"(?:[a-z]\\|?){1,2}[a-z]"'),
@@ -119,6 +121,26 @@ MUTANTS = [
      "            for w in _IN_WORD_UNITS:\n                if tok.startswith(w, i):"),
     ("n28_ideographic_space_no_end", 0, SP, '_WORD_END = frozenset(" \\t\\n\\r\\f\\v\\u3000")',
      '_WORD_END = frozenset(" \\t\\n\\r\\f\\v")'),
+    # ---- review rv-priya20's behavioural survivors (round 21 item 3: must be killed)
+    ("r01_addr_glue_no_brackets", 1, SP, '_ADDR_GLUE = re.compile(r"[:;!?\\"()\\[\\]{}<>|]|\\.(?=[a-z])")',
+     '_ADDR_GLUE = re.compile(r"[:;!?\\"()|]|\\.(?=[a-z])")'),
+    ("r08_script_view_no_lower", 1, SP, "            out.append(c.lower())", "            out.append(c)"),
+    # ---- round 21's changed code (the full C-2 glue set, glued spelled vanity, short decoded texts)
+    ("n31_c2_glue_view_off", 0, SP,
+     '        if g != q and _classify_core(g, brands, _depth, _detect_only=True) == "pii_suspect":',
+     "        if False:"),
+    ("n32_c2_glue_partial", 0, SP,
+     "_C2_GLUE = {c: \" \" for c in [*range(0xFF01, 0xFF01 + 15), *range(0xFF1A, 0xFF1A + 7), 0x3001, 0x3002]}",
+     "_C2_GLUE = {c: \" \" for c in [0xFF1A, 0x3001, 0x3002]}"),
+    ("n33_detect_only_no_plain_rules", 0, SP,
+     '        return "pii_suspect" if looks_like_address(folded) or logs_mod._EMAIL.search(folded) \\\n'
+     '            or _AT_EMAIL.search(folded) else "other"', '        return "other"'),
+    ("n34_glued_vanity_off", 0, SP, "    if len(tok) > 7 and not tok[:-7].isdigit():", "    if False:"),
+    ("n35_glued_vanity_any_length", 0, SP, "            return u + tok[-7:]", "            return u + tok[-7:] + \"x\""),
+    ("n36_short_decode_any", 0, SP, "and (cut or len(low) >= 8 or _SHORT_MAILBOX.search(", "and (True or _SHORT_MAILBOX.search("),
+    ("n38_window_never_cut", 0, SP, "yield s[:ENC_SPAN_CHARS], (j < n and ok[j]) or len(s) > ENC_SPAN_CHARS",
+     "yield s[:ENC_SPAN_CHARS], False"),
+    ("n37_one_at_word_reading_off", 0, SP, "            if n_at >= 2 and any(", "            if False and any("),
 ]
 
 

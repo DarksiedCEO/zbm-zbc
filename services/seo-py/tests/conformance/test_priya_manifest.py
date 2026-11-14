@@ -26,6 +26,14 @@ REVIEW_FILES = {
     "rv19_b19": (11532, "ffc0024000e28bd9a59c3b9d2937e94f609249ec3f5454a27169ffee45a0bb25"),
     "rv19_cp19": (43680, "49a5135e1f94c69ff3027bedb29753a11fcb5f040a046cba204f08d763f640fd"),
     "rv19_oq19": (24400, "4e0867837ca0196382318cc0b3b68db9aaa0a5e056e24ddfa7470c9a898b871d"),
+    # rv-priya20 (review of a394a985): the review kept per-case verdict files, not text files; its files' case counts
+    # (m20 260,000, b20 37,663, cp20 43,680, oq20 24,400) and every case it listed as kept (633, 70, 4 and the glued
+    # vanity probe's 556 of 1,680) were reproduced at the same index, text for text, before these sha256 were pinned
+    "rv20_m20": (260000, "47321775f232f9e46fe0b0604e7ad3566fd2f41937d2fb62c6961498432eadf5"),
+    "rv20_b20": (37663, "0cbe05c66ee522ca7ef65cfd8875aa7e29bd33430dc67feb011a4e30cf9196c1"),
+    "rv20_cp20": (43680, "a53fb1884ddc13632101ec2689cff280d7a5bea67c192a0acbaa5562b142ecc7"),
+    "rv20_vg": (1680, "063cf982a07770458b84dc349692e9cf9e5f46988c87f1a68559c926828f22d0"),
+    "rv20_oq20": (24400, "55385527ac7834d22a167b44aed6a23d8f998f10d6822336947b3c07ed727969"),
 }
 
 
