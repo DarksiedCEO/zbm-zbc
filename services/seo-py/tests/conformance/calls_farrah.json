@@ -46,8 +46,8 @@
    "id": "TB-FA-5",
    "call": "the unknown-into-upper-bound rule (B-FA-21)",
    "file": "agents/farrah.py",
-   "old": "            upper = SUM_CTX.add(SUM_CTX.add(lower, r_unknown), widen)\n",
-   "new": "            upper = SUM_CTX.add(lower, widen)\n",
+   "old": "            upper = SUM_CTX.add(SUM_CTX.add(figure, u_pos), widen)\n",
+   "new": "            upper = SUM_CTX.add(figure, widen)\n",
    "tests": [
     "tests/conformance/farrah/test_farrah_band.py::test_B_FA_20_B_FA_21_oracle_recomputation_on_generated_datasets"
    ]
@@ -78,10 +78,32 @@
    "id": "M-FA-unknown",
    "what": "unknown left out of U",
    "file": "agents/farrah.py",
-   "old": "            upper = SUM_CTX.add(SUM_CTX.add(lower, r_unknown), widen)\n",
-   "new": "            upper = SUM_CTX.add(lower, widen)\n",
+   "old": "            upper = SUM_CTX.add(SUM_CTX.add(figure, u_pos), widen)\n",
+   "new": "            upper = SUM_CTX.add(figure, widen)\n",
    "tests": [
     "tests/conformance/farrah/test_farrah_band.py::test_B_FA_25_label_table_boundaries"
+   ]
+  },
+  {
+   "id": "M-FA-unknown-net",
+   "what": "round 3 (OD-2 / GF-7): the pre-fix formula, U adds the NET unknown revenue (refunds lower the ceiling)",
+   "file": "agents/farrah.py",
+   "old": "            upper = SUM_CTX.add(SUM_CTX.add(figure, u_pos), widen)\n",
+   "new": "            upper = SUM_CTX.add(SUM_CTX.add(figure, r_unknown), widen)\n",
+   "tests": [
+    "tests/conformance/farrah/test_farrah_band.py::test_B_FA_21_refund_in_the_unknown_channel_keeps_truth_in_band",
+    "tests/conformance/farrah/test_farrah_band.py::test_B_FA_21_OD_2_upper_adds_the_positive_part_of_each_unknown_row"
+   ]
+  },
+  {
+   "id": "M-FA-unknown-neg",
+   "what": "round 3 (OD-5 / GF-8): the pre-fix floor L = F (unattributed refunds left out of L)",
+   "file": "agents/farrah.py",
+   "old": "            lower = SUM_CTX.add(figure, u_neg)\n",
+   "new": "            lower = figure\n",
+   "tests": [
+    "tests/conformance/farrah/test_farrah_band.py::test_B_FA_21_OD_5_lower_adds_the_negative_part_of_each_unknown_row",
+    "tests/conformance/farrah/test_farrah_band.py::test_B_FA_21_OD_5_refund_of_a_visible_sale_recorded_without_a_channel"
    ]
   },
   {

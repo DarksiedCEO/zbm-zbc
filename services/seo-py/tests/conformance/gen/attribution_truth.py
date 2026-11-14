@@ -6,8 +6,8 @@ dropped at a row cap with the dropped revenue reported - and keeps the truth.
 
 Out of the claim by the spec's own residuals: AI visits that send no referrer at all (R-FA-2: the band cannot see
 them; such a visit is generated as an unknown-channel row, i.e. its referrer is lost, never re-labelled direct), and
-refunds on HIDDEN rows (open question QB-FA-6: the spec's U = F + R_unknown is not an upper bound when the unknown
-revenue holds a refund; refunds here sit on visible rows, and the pinned xfail case shows the other one)."""
+refunds on visible AND hidden rows (QB-FA-6 fixed by OD-2 / GF-7: U adds the positive part of each unknown row; a
+refund is recorded on the same session / deal as its sale, so a hidden sale's refund is hidden too)."""
 
 from __future__ import annotations
 
@@ -57,6 +57,13 @@ def truth_case(seed: int, kind: str, tid: str, unknown_share: float, flags: dict
     for t in rng.sample(txns, k=min(3, len(txns))):
         if not t["hidden"] and rng.random() < 0.5:
             r = -(t["rev"] / 2).quantize(Decimal("0.01"))
+            refunds.append({**t, "rev": r, "i": n + len(refunds)})
+            truth[t["ch"]] += r
+    # round 3 (OD-2): refunds of HIDDEN sales (own rng, so the main stream is unchanged where none is drawn)
+    rr = random.Random(seed ^ 0x5EED)
+    for t in [t for t in txns if t["hidden"]]:
+        if rr.random() < 0.25:
+            r = -(t["rev"] * Decimal(rr.choice(("0.25", "0.5", "1")))).quantize(Decimal("0.01"))
             refunds.append({**t, "rev": r, "i": n + len(refunds)})
             truth[t["ch"]] += r
     pool = list(txns)
@@ -110,6 +117,9 @@ def truth_case(seed: int, kind: str, tid: str, unknown_share: float, flags: dict
     out = {"doc": doc, "truth": truth, "basis": basis, "flags": dict(flags), "seed": seed, "kind": kind,
            "unknown_share": unknown_share, "channel_map": CHANNEL_MAP if basis == "crm" else None, "other": None,
            "visible": visible, "other_row_sum": other_sum, "total": total,
+           "unknown_pos": sum((t["rev"] for t in pool + refunds if t["hidden"] and t["rev"] > 0), Decimal(0)),
+           "unknown_neg": sum((t["rev"] for t in pool + refunds if t["hidden"] and t["rev"] < 0), Decimal(0)),
+           "hidden_refunds": sum(1 for t in refunds if t["hidden"]),
            "dropped_sum": sum((t["rev"] for t in dropped), Decimal(0)), "rc4": None}
     if flags.get("reconcile"):
         other_src = "crm" if basis == "analytics" else "analytics"

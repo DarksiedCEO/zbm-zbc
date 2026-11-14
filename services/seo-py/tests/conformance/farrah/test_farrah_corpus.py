@@ -157,7 +157,7 @@ def _corpus_run(fa, n, seed):
             ch = v["result"]["channels"][c]
             truth = case["truth"][c]
             if ch["label"] == "INSUFFICIENT_EVIDENCE":
-                assert truth == 0 and case["visible"]["unknown"] == 0, (sp["seed"], c)
+                assert truth <= 0 and case["unknown_pos"] == 0, (sp["seed"], c)
                 continue
             lo, hi = Decimal(ch["lower"]), Decimal(ch["upper"])
             assert lo <= truth <= hi, ("O-FA-1", sp["seed"], c)                  # 100%: the bound

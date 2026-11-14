@@ -132,6 +132,24 @@ def test_B_FA_13_crm_basis_counts_won_deals_only(fa):
     assert v["result"]["totals"]["basis_revenue"] == "100"
 
 
+def test_B_FA_13_crm_open_and_lost_deals_with_a_closed_date_in_the_month_are_not_counted(fa):
+    """J-5 (round 3): pins "won deals only" by the stage alone. The rows above have no closed_date, so the month
+    check would drop them even without the stage rule; here open and lost deals carry a closed_date in the month."""
+    set_plan(fa, "acme", "managed_2", "crm")
+    rows = [crow(D, "100.00", utm_medium="organic", ref="w")]
+    for stage, amt in (("open", "500.00"), ("lost", "700.00")):
+        r = crow(D, amt, stage=stage, utm_medium="organic", ref=stage)
+        r["closed_date"] = D.isoformat()
+        rows.append(r)
+    fa.store.add(fa.svc, dataset("acme", "crm", rows))
+    fa.store.tenant("acme")["freshness"] = freshness("acme", {"crm": "FRESH"})
+    v = ok_run(fa)
+    assert v["status"] == "completed" and v["inputs"] != []          # the dataset was used, not refused
+    org = v["result"]["channels"]["organic_search"]
+    assert (org["figure"], org["rows"]) == ("100", 1)
+    assert v["result"]["totals"]["basis_revenue"] == "100"
+
+
 # ------------------------------------------------------------------------------------------------ A-FA-04
 
 CONFUSABLE = {"o": "\u043e", "a": "\u0430", "i": "\u0456", "c": "\u0441"}      # Cyrillic lookalikes

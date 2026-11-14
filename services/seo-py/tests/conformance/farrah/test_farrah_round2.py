@@ -255,3 +255,16 @@ def test_CB_15_mac_ok_reads_both_recorded_forms(fa):
         assert svc_attribution.mac_ok(fa.svc.vault, "acme", "revenue_attribution", obj, recorded)
         assert not svc_attribution.mac_ok(fa.svc.vault, "acme", "revenue_attribution", {"v": 2}, recorded)
         assert not svc_attribution.mac_ok(fa.svc.vault, "globex", "revenue_attribution", obj, recorded)
+
+
+@pytest.mark.parametrize("n", [50, 51, 200])
+def test_AC_11_J_2_no_label_count_cap_the_node_bound_applies(fa, n):
+    """J-2 (round 3): no spec item bounds the label count, so a dataset with 50, 51 or 200 valid labels is USED;
+    only bounded()'s MAX_NODES limits the document as a whole."""
+    labels = [f"note:{i}" for i in range(n)]
+    d = dataset("acme", "analytics", [arow(D, "100.00", landing=f"/l/{i}") for i in range(12)], labels=labels)
+    fa.store.add(fa.svc, d)
+    fa.store.tenant("acme")["freshness"] = freshness("acme")
+    v = ok_run(fa)
+    assert v["status"] == "completed" and v["inputs"] == [d["dataset_id"]], (n, v.get("inputs"))
+    assert v["result"]["channels"]["organic_search"]["figure"] == "1200"

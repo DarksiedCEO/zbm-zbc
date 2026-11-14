@@ -36,8 +36,29 @@ def test_W_FA_1_requested_record_names_tenant_month_basis_inputs(fa):
     v = ok_run(fa)
     ev = fa.ledger.of_type("attribution_run_requested")[-1]["_payload"]
     assert ev["tenant_id"] == "acme" and ev["month_start"] == "2026-09-01" and ev["basis"] == "analytics"
-    import svc_attribution
-    assert ev["input_refs"] == [svc_attribution.dataset_ref(doc["dataset_id"])] and ev["run_id"] == v["run_id"]
+    # J-3 (round 3): the expected reference is computed independently of the service's own helper.
+    from ledger import derived_id
+    assert ev["input_refs"] == [derived_id("att", "dataset", doc["dataset_id"])] and ev["run_id"] == v["run_id"]
+
+
+def test_W_FA_1_two_datasets_give_two_different_refs(fa):
+    """J-3: the reference is keyed on the dataset id: a second basis dataset (a new run that supersedes the first)
+    records a different reference, each equal to derived_id("att", "dataset", its own id)."""
+    import random
+    from ledger import derived_id
+    first = simple(fa)
+    ok_run(fa)
+    rows = [arow(D, "200.00", landing=f"/n/{i}") for i in range(12)]
+    second = fa.store.add(fa.svc, dataset("acme", "analytics", rows, rng=random.Random(99),
+                                          produced_at="2026-10-06T12:00:00Z"))
+    assert first["dataset_id"] != second["dataset_id"]
+    v = ok_run(fa)
+    assert v["supersedes"] is not None
+    reqs = [e["_payload"] for e in fa.ledger.of_type("attribution_run_requested")]
+    refs = [r["input_refs"] for r in reqs]
+    assert refs[0] == [derived_id("att", "dataset", first["dataset_id"])]
+    assert refs[-1] == [derived_id("att", "dataset", second["dataset_id"])]
+    assert refs[0] != refs[-1]
 
 
 def test_W_FA_2_D_FA_01_no_amount_in_the_log_or_the_ledger(fa):

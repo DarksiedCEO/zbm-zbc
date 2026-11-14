@@ -115,6 +115,8 @@ def oracle(case, literal: bool = False) -> dict:
     field, dayf = ("purchaseRevenue", "date") if case.basis == "analytics" else ("amount", "closed_date")
     other_rev = Fraction(0)
     has_other = False
+    unknown_pos = Fraction(0)                    # OD-2 / GF-7: the positive part of each unknown row
+    unknown_neg = Fraction(0)                    # OD-5 / GF-8: the negative part of each unknown row
     for r in doc["rows"]:
         if case.basis == "crm" and r["stage"] != "won":
             continue
@@ -126,6 +128,10 @@ def oracle(case, literal: bool = False) -> dict:
         c = o_analytics_channel(r) if case.basis == "analytics" else o_crm_channel(r, case.cmap)
         v = F(r[field])
         sums[c] += v
+        if c == "unknown" and v > 0:
+            unknown_pos += v
+        if c == "unknown" and v < 0:
+            unknown_neg += v
         if v != 0:
             nrows[c] += 1
         if case.basis == "analytics" and any(r.get(k) == "(other)" for k in
@@ -162,10 +168,11 @@ def oracle(case, literal: bool = False) -> dict:
         else:
             widen += add(F(rev))
     for c in ("organic_search", "ai_referral"):
-        lo = sums[c]
-        up = lo + sums["unknown"] + widen
+        fig = sums[c]
+        lo = fig + unknown_neg
+        up = fig + unknown_pos + widen
         if case.recon_d is not None and total != 0:
-            term = round40(abs(F(case.recon_d)) * lo / total)
+            term = round40(abs(F(case.recon_d)) * fig / total)
             up += add(term)
         if insufficient_state or up == 0:
             out[c] = {"figure": None, "lower": None, "upper": None, "label": "INSUFFICIENT_EVIDENCE"}
@@ -177,7 +184,7 @@ def oracle(case, literal: bool = False) -> dict:
             lab = "MEDIUM"
         else:
             lab = "LOW"
-        out[c] = {"figure": lo, "lower": lo, "upper": up, "label": lab, "rows": nrows[c]}
+        out[c] = {"figure": fig, "lower": lo, "upper": up, "label": lab, "rows": nrows[c]}
     return out
 
 
@@ -308,6 +315,7 @@ def make_case(seed: int, family: str | None = None, tid: str = "acme"):
     n = rng.choice((0, 1, 5, 9, 10, 11, 29, 30, 31, 60, 200)) if fam in ("edge_label", "plain") else rng.randint(0, 120)
     truth = dict.fromkeys(("organic_search", "ai_referral", "other_known"), Fraction(0))
     rows, hidden_neg = [], False
+    hidden_net = dict.fromkeys(truth, Fraction(0))      # per channel: the in-month hidden rows' net revenue
     pad_lo = first - timedelta(days=rng.choice((0, 0, 3)))
     pad_hi = last + timedelta(days=rng.choice((0, 0, 2)))
     for i in range(n):
@@ -340,6 +348,8 @@ def make_case(seed: int, family: str | None = None, tid: str = "acme"):
         rows.append(r)
         if in_month:
             truth[ch] += v
+            if hide:
+                hidden_net[ch] += v
             if hide and v < 0:
                 hidden_neg = True
     comp = {"sampled": False, "thresholded": False, "other_row_share": None, "rows_dropped_cap": 0}
@@ -432,4 +442,4 @@ def make_case(seed: int, family: str | None = None, tid: str = "acme"):
             recon_d = None
     return ns(seed=seed, family=fam, basis=basis, month=month, tz=tz, basis_doc=doc, other_doc=other_doc,
               recon_d=recon_d, state=state, cmap=CHANNEL_MAP if basis == "crm" else {}, truth=truth,
-              hidden_negative=hidden_neg, covers=covers, comp=comp, has_share_total=bool(totals))
+              hidden_negative=hidden_neg, hidden_net=hidden_net, covers=covers, comp=comp, has_share_total=bool(totals))

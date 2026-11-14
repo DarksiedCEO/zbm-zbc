@@ -13,9 +13,12 @@ F = "services/seo-py/src/agents/farrah.py"
 S = "services/seo-py/src/svc_attribution.py"
 MUTANTS = [
     ("float_amount", F, "    return d\n\n\ndef exact_sum", "    return Decimal(float(d))\n\n\ndef exact_sum"),
-    ("band_swapped", F, '"figure": text(lower), "lower": text(lower), "upper": text(upper)',
-     '"figure": text(lower), "lower": text(upper), "upper": text(lower)'),
-    ("unknown_out_of_U", F, "upper = SUM_CTX.add(SUM_CTX.add(lower, r_unknown), widen)", "upper = SUM_CTX.add(lower, widen)"),
+    ("band_swapped", F, '"figure": text(figure), "lower": text(lower), "upper": text(upper)',
+     '"figure": text(figure), "lower": text(upper), "upper": text(lower)'),
+    ("unknown_out_of_U", F, "upper = SUM_CTX.add(SUM_CTX.add(figure, u_pos), widen)", "upper = SUM_CTX.add(figure, widen)"),
+    ("unknown_net_in_U", F, "upper = SUM_CTX.add(SUM_CTX.add(figure, u_pos), widen)",
+     "upper = SUM_CTX.add(SUM_CTX.add(figure, r_unknown), widen)"),                      # round 3: the pre-OD-2 formula
+    ("unknown_neg_out_of_L", F, "lower = SUM_CTX.add(figure, u_neg)", "lower = figure"),  # round 3: the pre-OD-5 floor
     ("high_rows_31", F, "HIGH_ROWS, MEDIUM_ROWS = 30, 10", "HIGH_ROWS, MEDIUM_ROWS = 31, 10"),
     ("medium_rows_9", F, "HIGH_ROWS, MEDIUM_ROWS = 30, 10", "HIGH_ROWS, MEDIUM_ROWS = 30, 9"),
     ("high_width_011", F, 'HIGH_WIDTH, MEDIUM_WIDTH = Decimal("0.10"), Decimal("0.35")',
@@ -37,7 +40,7 @@ MUTANTS = [
     # round 2 (F-1): the exact absolute value is ``copy_abs()``; the mutant removes it (and one puts the built-in back)
     ("recon_no_abs", F, 'd = amount(it["values"]["difference"]).copy_abs()', 'd = amount(it["values"]["difference"])'),
     ("recon_builtin_abs", F, 'd = amount(it["values"]["difference"]).copy_abs()', 'd = abs(amount(it["values"]["difference"]))'),
-    ("recon_no_share", F, "term = CTX.divide(SUM_CTX.multiply(recon, lower), basis_total)", "term = recon"),
+    ("recon_no_share", F, "term = CTX.divide(SUM_CTX.multiply(recon, figure), basis_total)", "term = recon"),
     ("sampled_not_low", F, "            force_low = True\n            applied.append(\"incomplete:sampled\")",
      "            applied.append(\"incomplete:sampled\")"),
     ("dropped_norev_not_low", F, "            if rev is None:\n                force_low = True", "            if rev is None:\n                pass"),

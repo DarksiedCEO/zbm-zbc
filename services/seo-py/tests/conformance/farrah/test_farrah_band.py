@@ -43,7 +43,8 @@ def _oracle(case) -> dict:
     widen += case["dropped_sum"]
     out = {}
     for c in farrah.ATTRIBUTED:
-        out[c] = (v[c], v[c] + v["unknown"] + widen)
+        # OD-5 / GF-8: L = F + negative part of each unknown row; OD-2 / GF-7: U = F + positive part + widenings
+        out[c] = (v[c], v[c] + case["unknown_neg"], v[c] + case["unknown_pos"] + widen)
     return out
 
 
@@ -55,24 +56,76 @@ def test_B_FA_20_B_FA_21_oracle_recomputation_on_generated_datasets():
         want = oracle(case)
         for c in farrah.ATTRIBUTED:
             ch = res["channels"][c]
-            lo, hi = want[c]
+            f, lo, hi = want[c]
             if ch["label"] == "INSUFFICIENT_EVIDENCE":
                 assert hi == 0 and case["truth"][c] == 0, (sp["seed"], c)
                 continue
-            assert Decimal(ch["figure"]) == Decimal(ch["lower"]) == lo, (sp["seed"], c)       # F = L exactly
+            assert Decimal(ch["figure"]) == f and Decimal(ch["lower"]) == lo, (sp["seed"], c)  # F, L exactly
             assert Decimal(ch["upper"]) == hi, (sp["seed"], c)
             assert lo <= case["truth"][c] <= hi, (sp["seed"], c)                            # O-FA-1 property
     assert res["data_class"] == "measured" and res["effect_class"] == "attributed"
 
 
-@pytest.mark.xfail(strict=True, reason="QB-FA-6: U = F + R_unknown is not an upper bound when the unknown revenue "
-                                      "holds a refund (the spec's formula, built as written)")
 def test_B_FA_21_refund_in_the_unknown_channel_keeps_truth_in_band():
+    """QB-FA-6, fixed by OD-2 (spec v1.1 GF-7): U adds only the positive part of each unknown row."""
     rows = [arow(D, "100.00", landing="/a"), arow(D, "40.00", "(not set)", "(not set)", "Unassigned", "(not set)"),
             arow(D, "-30.00", "(not set)", "(not set)", "Unassigned", "(not set)")]
     res, _ = comp(dataset("acme", "analytics", rows))
     truth_if_both_unknown_rows_were_organic_but_the_refund_was_not = Decimal("140.00")
     assert Decimal(res["channels"]["organic_search"]["upper"]) >= truth_if_both_unknown_rows_were_organic_but_the_refund_was_not
+    assert Decimal(res["channels"]["organic_search"]["upper"]) == Decimal("140.00")          # 100 + max(0, 40) + max(0, -30)
+    assert Decimal(res["channels"]["organic_search"]["lower"]) == Decimal("70.00")           # OD-5: 100 + min(0, -30)
+    assert Decimal(res["channels"]["organic_search"]["figure"]) == Decimal("100.00")         # F unchanged
+    assert Decimal(res["totals"]["unknown_revenue"]) == Decimal("10.00")                     # totals stay the net sum
+
+
+UNK = ("(not set)", "(not set)", "Unassigned", "(not set)")
+
+
+UNK_CASES = [
+    (["-30.00"], "100.00", "70.00"),                       # refunds only: U = F, never below it
+    (["40.00", "-30.00", "25.00"], "165.00", "70.00"),     # per row, not netted
+    (["-0.01", "0.01"], "100.01", "99.99"),
+    (["-500.00", "20.00"], "120.00", "-400.00"),           # net unknown negative: U still >= any truth, L may be < 0
+    (["40.00", "25.00"], "165.00", "100.00"),              # no unknown refund: L = F
+]
+
+
+@pytest.mark.parametrize("unk,want_upper,want_lower", UNK_CASES)
+def test_B_FA_21_OD_2_upper_adds_the_positive_part_of_each_unknown_row(unk, want_upper, want_lower):
+    rows = [arow(D, "100.00", landing="/a")] + [arow(D, u, *UNK) for u in unk]
+    ch = comp(dataset("acme", "analytics", rows))[0]["channels"]["organic_search"]
+    assert Decimal(ch["upper"]) == Decimal(want_upper), ch
+
+
+@pytest.mark.parametrize("unk,want_upper,want_lower", UNK_CASES)
+def test_B_FA_21_OD_5_lower_adds_the_negative_part_of_each_unknown_row(unk, want_upper, want_lower):
+    """OD-5 (spec v1.1 GF-8): L = F + sum(min(0, row)) over unknown rows, exact; F stays the visible sum."""
+    rows = [arow(D, "100.00", landing="/a")] + [arow(D, u, *UNK) for u in unk]
+    ch = comp(dataset("acme", "analytics", rows))[0]["channels"]["organic_search"]
+    assert Decimal(ch["lower"]) == Decimal(want_lower) and Decimal(ch["figure"]) == Decimal("100.00"), ch
+    assert Decimal(ch["lower"]) <= Decimal(ch["figure"]) <= Decimal(ch["upper"]), ch
+    assert Decimal(ch["lower"]) == Decimal("100.00") + sum((min(Decimal(0), Decimal(u)) for u in unk), Decimal(0))
+
+
+def test_B_FA_21_OD_5_refund_of_a_visible_sale_recorded_without_a_channel():
+    """The 32 round-3 reviewer failures in miniature: an organic sale (visible) whose refund carries no referrer.
+    The true organic revenue is 100 - 30 = 70 < F = 100; OD-5 makes L = 70, so truth is inside [L, U]."""
+    rows = [arow(D, "100.00", landing="/a"), arow(D, "-30.00", *UNK)]
+    ch = comp(dataset("acme", "analytics", rows))[0]["channels"]["organic_search"]
+    truth = Decimal("70.00")
+    assert Decimal(ch["lower"]) <= truth <= Decimal(ch["upper"]), ch
+    assert Decimal(ch["lower"]) == truth and Decimal(ch["upper"]) == Decimal("100.00"), ch
+    assert type(farrah.exact_sum([Decimal(1)])) is Decimal
+
+
+def test_O_FA_1_B_FA_21_corpus_includes_hidden_refunds():
+    """The 1,000-case oracle corpus is not vacuous for refunds: some cases hold a refund in the unknown channel."""
+    n = 0
+    for sp in corpus(1000, seed=20):
+        case = truth_case(sp["seed"], sp["kind"], "acme", sp["unknown_share"], {**sp["flags"], "reconcile": False})
+        n += case["hidden_refunds"] > 0
+    assert n >= 50, n
 
 
 def _ladder(n, f_per_row, unk):

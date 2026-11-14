@@ -41,21 +41,32 @@ def _run_cases(tmp_path, literal=False):
         stats[case.family] += 1
         if diff:
             bad.append((seed, case.family, diff))
-        # O-FA-1: truth in [L, U] where the spec claims it (no refund hidden in an unknown part; not sampled)
+        # O-FA-1: truth in [L, U]; round 3 (OD-2): refund cases are checked too (only sampled cases are excluded).
+        # OD-5 (GF-8): L = F + negative part of unknown rows, so L holds for every case too; the cases where the
+        # truth is below F (the 32 round-3 failures: the channel's own hidden rows net negative) are counted and
+        # must lie inside [L, U] like every other case.
         for c in ("organic_search", "ai_referral"):
             e = exp[c]
             if e["label"] == "INSUFFICIENT_EVIDENCE" or e["lower"] is None:
                 continue
             stats["truth_checked"] += 1
-            if case.hidden_negative or case.comp["sampled"]:
+            if case.comp["sampled"]:
                 stats["truth_excluded"] += 1
                 continue
             t = case.truth[c]
             from fractions import Fraction
             lo, up = Fraction(res["channels"][c]["lower"]), Fraction(res["channels"][c]["upper"])
-            if not lo <= t <= up:
+            if case.hidden_negative:
+                stats["truth_checked_hidden_refund"] += 1
+            if t > up:
+                outside.append((seed, case.family, c, "above_U"))
+            if t < Fraction(res["channels"][c]["figure"]):
+                stats["truth_below_F_checked"] += 1                  # was outside L = F before OD-5
+                if case.hidden_net[c] < 0:
+                    stats["truth_below_F_hidden_net_refund"] += 1
+            if t < lo:
                 outside.append((seed, case.family, c, "share_nototal" if (case.comp["other_row_share"] is not None
-                                                                          and not case.has_share_total) else ""))
+                                                                          and not case.has_share_total) else "below_L"))
         stats["label:" + exp["organic_search"]["label"]] += 1
         has_recon = "RECONCILE_DIFFERENCE_WIDENED" in res["assumptions"]
         if has_recon and case.recon_d in (None, "0"):
@@ -73,3 +84,6 @@ def test_rv_oracle_service_path(tmp_path):
     assert not bad and not failed and not abad
     # R-2 (outside the spec: share given without Osei totals) is reported, not asserted
     assert not [o for o in outside if o[3] != "share_nototal"]
+    assert stats["truth_checked_hidden_refund"] > 0
+    assert stats["truth_below_F_checked"] > 0                            # OD-5: the pre-fix L failures are pinned
+    assert stats["truth_below_F_hidden_net_refund"] > 0

@@ -413,7 +413,8 @@ def validate_dataset(doc, tid: str, source: str) -> dict:
         _row(r, source)
     _timestamp(d["produced_at"], "DATASET_INVALID")
     _evidence_ref(d["evidence_ref"], "DATASET_INVALID")
-    if d["data_class"] != "measured" or type(d["labels"]) is not list or len(d["labels"]) > 50 or \
+    # No label-count cap (round 3, J-2): the spec sets none and bounded()'s MAX_NODES already bounds the document.
+    if d["data_class"] != "measured" or type(d["labels"]) is not list or \
             not all(type(x) is str and _SHORT.fullmatch(x) for x in d["labels"]):
         raise InputRefused("DATASET_INVALID")
     _short(d["grain"], "DATASET_INVALID")
@@ -765,6 +766,12 @@ def compute(tid: str, run_id: str, month: str, sel: dict, channel_map: Optional[
         other_rows = exact_sum(others)
         basis_total = exact_sum(sums[c] for c in CHANNELS)
         r_unknown = sums["unknown"]
+        # OD-2 / spec v1.1 GF-7 (QB-FA-6): U adds only the positive part of each unknown row, so a refund in the
+        # unknown channel never lowers the ceiling. Exact: a sum of Decimals, no rounding. totals keep the net sum.
+        u_pos = exact_sum(v for v in parts["unknown"] if v > 0)
+        # OD-5 / spec v1.1 GF-8: L adds the negative part of each unknown row (L = F + the total of min(0, row)),
+        # so a refund recorded without a channel can lower the floor of any channel: L is a true floor. Exact Decimal.
+        u_neg = exact_sum(v for v in parts["unknown"] if v < 0)
         totals = {"basis_revenue": text(basis_total), "unknown_revenue": text(r_unknown)}
         comp = doc["completeness"]
         widen = Decimal(0)
@@ -801,11 +808,12 @@ def compute(tid: str, run_id: str, month: str, sel: dict, channel_map: Optional[
         recon = sel["reconcile_difference"]
         recon_used = False
         for c in ATTRIBUTED:
-            lower = sums[c]
-            upper = SUM_CTX.add(SUM_CTX.add(lower, r_unknown), widen)
+            figure = sums[c]
+            lower = SUM_CTX.add(figure, u_neg)
+            upper = SUM_CTX.add(SUM_CTX.add(figure, u_pos), widen)
             if recon is not None and not recon.is_zero() and not basis_total.is_zero():
                 # B-FA-24: U += |D| x (F(c) / total basis revenue): the one division, precision 40, half-even
-                term = CTX.divide(SUM_CTX.multiply(recon, lower), basis_total)
+                term = CTX.divide(SUM_CTX.multiply(recon, figure), basis_total)
                 if term > 0:
                     upper = SUM_CTX.add(upper, term)
                     recon_used = True
@@ -814,7 +822,7 @@ def compute(tid: str, run_id: str, month: str, sel: dict, channel_map: Optional[
                 channels[c] = {"figure": None, "lower": None, "upper": None, "label": label, "rows": rows[c]}
                 continue
             label = _label(lower, upper, rows[c], flagged, force_low, state)
-            channels[c] = {"figure": text(lower), "lower": text(lower), "upper": text(upper), "label": label,
+            channels[c] = {"figure": text(figure), "lower": text(lower), "upper": text(upper), "label": label,
                            "rows": rows[c]}
         assumptions += [a for a in INCOMPLETE if a in applied]
         if recon_used:
