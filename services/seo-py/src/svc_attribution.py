@@ -37,11 +37,13 @@ question for the core, QB-FA-9).
 
 from __future__ import annotations
 
+import hmac
 import logging
 import re
 from typing import Optional
 
 import config
+import sink_guard
 import vault as vault_mod
 from agents import farrah, secret_guard
 from clock import iso
@@ -111,9 +113,36 @@ def join_amounts(skel: dict, amounts: dict) -> dict:
     return skel
 
 
-def _hex(dataset_id: str) -> str:
-    """A dataset id ``ds-<16 hex>`` as the log writes it: its keyed-HMAC hex part (sink class ``hash``)."""
-    return dataset_id[3:]
+def ref(kind: str, value: str) -> str:
+    """F-4 (round 2): a reference Farrah RECORDS (log and ledger) to a value it does not record: ``seo-att-<40 hex>``,
+    ``ledger.derived_id`` over (kind, value). The sink guard takes a service id of a listed prefix whatever its hex
+    digits are (``sink_guard._is_service_id``, the class every run id already uses: QB-FA-9), so a reference never
+    depends on the value's own digits. A raw hex part (a dataset id's 16 hex, an HMAC's 64) is refused by the sink's
+    rule when every one of its characters happens to be a decimal digit (about 1 dataset id in 1,850)."""
+    return derived_id(ATT, kind, value)
+
+
+def dataset_ref(dataset_id: str) -> str:
+    return ref("dataset", dataset_id)
+
+
+def mac_field(mac: str) -> str:
+    """A keyed HMAC as Farrah records it: the HMAC itself while the sink takes it as a ``hash`` (it holds a letter),
+    else (all 64 hex characters decimal digits, about 1 in 10^13) its reference. ``mac_ok`` reads either form."""
+    return mac if sink_guard.classify(mac) == "hash" else ref("hmac", mac)
+
+
+def mac_ok(vault, tid: str, field: str, obj, recorded) -> bool:
+    """True when ``recorded`` (an HMAC or its reference, ``mac_field``) is the keyed HMAC of ``obj``. Never raises."""
+    if not isinstance(recorded, str):
+        return False
+    try:
+        if recorded.startswith("seo-" + ATT + "-"):
+            got = ref("hmac", vault.field_hash(tid, field, canonical(obj))[1])
+            return hmac.compare_digest(got, recorded)
+        return vault.field_hash_matches(tid, field, canonical(obj), recorded)
+    except Exception:  # noqa: BLE001 - a reader fails closed
+        return False
 
 
 class AttributionMixin:
@@ -163,18 +192,25 @@ class AttributionMixin:
                 if self._idem("andre", rk, body):
                     return self.tenant_view(tid)
                 counts = {c: len(doc[c]) for c in ("organic_search", "ai_referral", "other_known")}
-                data = {"tenant_id": tid, "map_ref": sealed.ref, "map_hmac": sealed.hmac, "counts": counts}
+                mac = mac_field(sealed.hmac)
+                data = {"tenant_id": tid, "map_ref": sealed.ref, "map_hmac": mac, "counts": counts}
                 self._doc_commit(sealed, doc, lambda: self._commit(
                     "tenant_channel_map_set", self._req(data, "andre", rk, body, tid), "andre",
                     evidence=("tenant_channel_map_set", f"tenant:{tid}",
-                              {"tenant_id": tid, "map_hmac": sealed.hmac, **counts}, ("andre", rk))))
+                              {"tenant_id": tid, "map_hmac": mac, **counts}, ("andre", rk))))
                 return self.tenant_view(tid)
         finally:
             sealed.discard()
 
     def _a_tenant_channel_map_set(self, d, at):
         t = self.tenants[d["tenant_id"]]
-        doc = self._doc_applied(d["tenant_id"], MAP_FIELD, d["map_ref"], d["map_hmac"], self.optext_vault)
+        doc = self._doc_handoff.get(d["map_ref"])
+        if doc is None:
+            try:
+                got = self.optext_vault.get_blob(d["tenant_id"], d["map_ref"])
+                doc = got if mac_ok(self.optext_vault, d["tenant_id"], MAP_FIELD, got, d["map_hmac"]) else None
+            except Exception:  # noqa: BLE001 - lost, changed or unreadable: unavailable, never a guess
+                doc = None
         t["channel_map_hmac"] = d["map_hmac"]
         t["channel_map_counts"] = dict(d["counts"])
         if doc is None:
@@ -220,7 +256,7 @@ class AttributionMixin:
     def _verify_dataset(self, tid: str, doc: dict, mac: str) -> bool:
         try:
             return self.vault.field_hash_matches(tid, DATASET_FIELD, canonical(doc), mac)
-        except (TypeError, ValueError):
+        except Exception:  # noqa: BLE001 - F-3: any document that cannot be hashed is not recorded
             return False
 
     def request_attribution_run(self, actor: str, tid: str, body: dict) -> dict:
@@ -235,12 +271,18 @@ class AttributionMixin:
                 basis = self._attribution_rules(t, tid)
                 if not self.vault.key_configured:
                     raise Unavailable(R("VAULT_UNAVAILABLE"))       # AC-10: refused before any input is read
+                blocked = self.agent_blocked(farrah.PRODUCER)
         if prev:
             return self.attribution_run_view(tid, prev[1])
         view = self._osei_view(tid)                                  # outside the lock: Osei's store, never a port
         empty = {"basis": basis, "dataset": None, "covering": 0, "valid": 0, "refused": {}, "state": None,
                  "reconcile_difference": None, "other_dataset_id": None}
-        sel = farrah.select(tid, month, basis, view, self._verify_dataset) if view is not None else empty
+        if view is not None and blocked:
+            # F-2: Osei restricted or retired: every one of its documents is refused whole, none is read further
+            n = len(getattr(view, "datasets", None) or []) if isinstance(getattr(view, "datasets", None), list) else 0
+            sel = {**empty, "producer_blocked": True, "refused": {farrah.PRODUCER_RESTRICTED: n} if n else {}}
+        else:
+            sel = farrah.select(tid, month, basis, view, self._verify_dataset) if view is not None else empty
         tz = sel["dataset"]["window"]["timezone"] if sel["dataset"] is not None else "UTC"
         if not farrah.month_closed(month, self.now(), tz):
             raise Invalid(R("MONTH_NOT_CLOSED"), field="month")
@@ -251,6 +293,8 @@ class AttributionMixin:
             if not prev:
                 if self._attribution_rules(t, tid) != basis:
                     raise Conflict(R("REVENUE_BASIS_CHANGED"))
+                if self.agent_blocked(farrah.PRODUCER) and not blocked:
+                    raise Conflict(R("AGENT_RESTRICTED"))          # F-2: Osei restricted while its documents were read
                 if any(r["tenant_id"] == tid and r["run_id"] in self.running_attribution
                        for r in self.attribution_runs.values()):
                     raise Conflict(R("RUN_IN_PROGRESS"))
@@ -261,17 +305,18 @@ class AttributionMixin:
                 except vault_mod.VaultError:
                     raise Unavailable(R("VAULT_UNAVAILABLE")) from None
                 cur = self._current_run(tid, month)
-                if cur is not None and cur.get("inputs_hmac") == sig_hmac:
+                sig_ref = ref("inputs", sig_hmac)
+                if cur is not None and cur.get("inputs_ref") == sig_ref:
                     return self.attribution_run_view(tid, cur["run_id"])   # unchanged inputs: the current run
                 fid = derived_id(ATT, tid, actor, rk)
-                ids = [_hex(sel["dataset"]["dataset_id"])] if sel["dataset"] is not None else []
+                ids = [dataset_ref(sel["dataset"]["dataset_id"])] if sel["dataset"] is not None else []
                 first, _last = farrah.month_bounds(month)
                 data = {"run_id": fid, "tenant_id": tid, "month_start": first.isoformat(), "basis": basis,
-                        "input_dataset_hex": ids, "inputs_hmac": sig_hmac,
+                        "input_refs": ids, "inputs_ref": sig_ref,
                         "supersedes": cur["run_id"] if cur is not None else None}
                 ev = ("attribution_run_requested", f"attribution_run:{fid}",
                       {"run_id": fid, "tenant_id": tid, "month_start": data["month_start"], "basis": basis,
-                       "input_dataset_hex": ids, "inputs_hmac": sig_hmac}, (actor, rk))
+                       "input_refs": ids, "inputs_ref": sig_ref}, (actor, rk))
                 self._commit("attribution_run_requested", self._req(data, actor, rk, body, fid), actor, evidence=ev)
                 self.running_attribution.add(fid)
                 channel_map = t.get("channel_map")
@@ -303,6 +348,8 @@ class AttributionMixin:
                     stop = self.kill_code(tenant=tid, capability=CAPABILITY, write=True) or \
                         self.kill_code(capability="audit") or \
                         ("AGENT_RESTRICTED" if self.agent_blocked(farrah.AGENT) else None)
+                    if stop is None and not sel.get("producer_blocked") and self.agent_blocked(farrah.PRODUCER):
+                        stop = "AGENT_RESTRICTED"                # F-2: Osei restricted mid-run: nothing of it kept
                     if stop is None and not farrah.plan_allows(tid, self.plan_name(tid), self._own_tenant()):
                         stop = "PLAN_EXCLUDES_ATTRIBUTION"       # A-FA-03: downgraded mid-run: refused at commit
                     if stop is None:
@@ -341,11 +388,12 @@ class AttributionMixin:
         codes and the result's keyed HMAC: NO amount (W-FA-2, Q-FA-5)."""
         machine = {"outcome": facts["outcome"], "labels": facts["labels"], "rows": facts["rows"],
                    "unknown_rows": facts["unknown_rows"], "refund_rows": facts["refund_rows"],
-                   "assumptions": facts["assumptions"], "input_dataset_hex": [_hex(x) for x in facts["inputs"]],
+                   "assumptions": facts["assumptions"], "input_refs": [dataset_ref(x) for x in facts["inputs"]],
                    "limitations": facts["limitations"], "inputs_refused": facts["inputs_refused"]}
-        data = {"run_id": fid, "result_ref": sealed.ref, "result_hmac": sealed.hmac, "facts": machine}
+        mac = mac_field(sealed.hmac)
+        data = {"run_id": fid, "result_ref": sealed.ref, "result_hmac": mac, "facts": machine}
         ev = ("attribution_run_recorded", f"attribution_run:{fid}",
-              {"run_id": fid, "tenant_id": tid, "result_hmac": sealed.hmac, "outcome": machine["outcome"],
+              {"run_id": fid, "tenant_id": tid, "result_hmac": mac, "outcome": machine["outcome"],
                "labels": machine["labels"], "rows": machine["rows"]}, ("result", fid))
         self._vaulted_commit(sealed, lambda: self._commit("attribution_run_recorded", data, "seo", evidence=ev))
 
@@ -379,7 +427,7 @@ class AttributionMixin:
     def _a_attribution_run_requested(self, d, at):
         self.attribution_runs[d["run_id"]] = {
             "run_id": d["run_id"], "tenant_id": d["tenant_id"], "month_start": d["month_start"], "basis": d["basis"],
-            "input_dataset_hex": list(d["input_dataset_hex"]), "inputs_hmac": d["inputs_hmac"],
+            "input_refs": list(d["input_refs"]), "inputs_ref": d["inputs_ref"],
             "supersedes": d.get("supersedes"), "superseded_by": None, "status": "running", "requested_at": at,
             "requested_by": d["actor"], "completed_at": None, "result_ref": None, "result_hmac": None, "facts": None}
 
@@ -422,7 +470,7 @@ class AttributionMixin:
                 "BLOCKED" if r.get("interrupted_reason") == "PLAN_EXCLUDES_ATTRIBUTION" else
                 "FAILED" if r["status"] == "interrupted" else None),
                "labels": facts.get("labels"), "rows": facts.get("rows"), "assumptions": facts.get("assumptions"),
-               "inputs": ["ds-" + x for x in facts.get("input_dataset_hex", r["input_dataset_hex"])],
+               "inputs": list(facts.get("input_refs", r["input_refs"])),       # references (F-4); the owner: ids
                "findings": [], "methodology": [farrah.RULES_VERSION, farrah.AI_REFERRERS_VERSION,
                                                "thresholds:heuristic:uncalibrated"],
                "limitations": list(facts.get("limitations") or []), "not_connected":
@@ -433,11 +481,16 @@ class AttributionMixin:
             out["interrupted_reason"] = r.get("interrupted_reason")
         if who == "compliance_38" or r["status"] != "completed":
             return out
-        doc = self._vaulted_open(tid, RESULT_FIELD, r["result_ref"], r["result_hmac"])
+        try:
+            doc = self.vault.get_blob(tid, r["result_ref"])
+            doc = doc if mac_ok(self.vault, tid, RESULT_FIELD, doc, r["result_hmac"]) else None
+        except Exception:  # noqa: BLE001 - lost, changed, another tenant's or unreadable: unavailable
+            doc = None
         if doc is None or not farrah.validate_result(doc):
             out["result"], out["vault_unavailable"] = None, True
             return out
         skel, amounts = split_amounts(doc)
+        out["inputs"] = list(doc["inputs"])                          # the owner sees the dataset ids themselves
         out["result"] = join_amounts(owner_view(skel), amounts)
         out["display"] = {c: {k: farrah.display(doc["channels"][c][k]) for k in ("figure", "lower", "upper")}
                           for c in farrah.ATTRIBUTED}

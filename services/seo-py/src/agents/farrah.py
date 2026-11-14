@@ -70,16 +70,23 @@ NOT_CONNECTED = "NOT_CONNECTED"                     # Osei full is not on the ba
 MONTH_NOT_COVERED = "MONTH_NOT_COVERED"             # no VALID, recorded basis dataset covers the whole month
 BASIS_STATE = "BASIS_INPUT_"                        # + the basis input's freshness state (STALE / FAILED_LAST / ...)
 NOTHING_TO_ATTRIBUTE = "NOTHING_TO_ATTRIBUTE"       # U = 0: the figure is null, never 0
+# F-2 (round 2; AC-11 "documents of a retired producer", CB-2): the producer of every consumed document is Osei; while
+# the department manager has Osei restricted or retired, every Osei document is refused whole with CB-2's code
+PRODUCER = "osei"
+PRODUCER_RESTRICTED = "AGENT_RESTRICTED"
 
 # ------------------------------------------------------------------------------------------------ money (ADR 0003)
 
 AMOUNT_DIGITS = 40                                  # significant digits of one amount (GF-4: precision 40)
 AMOUNT_EXP = 40                                     # |adjusted exponent| of one amount: below 10^41, above 10^-41
 CTX = Context(prec=40, rounding=ROUND_HALF_EVEN, traps=[InvalidOperation, DivisionByZero, Overflow])
-# a sum of at most MAX_ROWS amounts, each bounded as above, is exact at this precision; Inexact is trapped, so a sum
-# that would round raises (it cannot, by the bounds: a guard, never a silent rounding)
-SUM_CTX = Context(prec=2 * AMOUNT_EXP + AMOUNT_DIGITS + 16, rounding=ROUND_HALF_EVEN,
-                  traps=[InvalidOperation, DivisionByZero, Overflow, Inexact])
+# Sums, the band's additions and the two products (share x total, |D| x F) are EXACT: a sum of at most MAX_ROWS bounded
+# amounts spans at most 2 x 40 + 40 + 7 digits, a product of two such values twice that, and the division's 40-digit
+# result added to an upper bound whose digits reach 10^-80 stays under 1,000 digits for every bounded input (round 2:
+# the review's 40-digit-by-127-digit product trapped at the old 136-digit precision and failed the run). The
+# precision is only a ceiling (a Decimal holds the digits it needs); Inexact stays trapped as the guard that nothing
+# on this path ever rounds silently.
+SUM_CTX = Context(prec=1000, rounding=ROUND_HALF_EVEN, traps=[InvalidOperation, DivisionByZero, Overflow, Inexact])
 CENT = Decimal("0.01")
 _AMOUNT = re.compile(r"[+-]?(?:[0-9]{1,80}(?:\.[0-9]{0,80})?|\.[0-9]{1,80})(?:[eE][+-]?[0-9]{1,3})?")
 
@@ -250,6 +257,11 @@ REVENUE_FIELD = {"analytics": "purchaseRevenue", "crm": "amount"}
 DAY_FIELD = {"analytics": "date", "crm": "closed_date"}
 OTHER_ROW = "(other)"                               # GA4's documented "other" row (B-OS-23, B-FA-22)
 MAX_ROWS = 50_000                                   # Osei's per-read row cap (B-OS-18): a larger dataset is refused
+# F-3 (round 2): every consumed document's shape is bounded BEFORE anything recurses into it (validation, the HMAC's
+# canonical JSON, a copy): nesting deeper than MAX_DEPTH or more than MAX_NODES containers and leaves refuse the
+# document whole. The deepest a valid document goes is 5 (surface.parts.property_settings.timezone).
+MAX_DEPTH = 16
+MAX_NODES = 2_000_000
 FRESHNESS_STATES = ("NEVER", "NOT_CONNECTED", "FRESH", "DUE", "STALE", "FAILED_LAST")   # osei-spec/1 B-OS-31
 INSUFFICIENT_STATES = ("STALE", "FAILED_LAST", "NOT_CONNECTED")                        # B-FA-25
 RECON_KEYS = frozenset(("contract", "tenant_id", "items", "produced_at"))
@@ -263,6 +275,29 @@ REVENUE_PANEL = "revenue"
 _DATASET_ID = re.compile(r"ds-[0-9a-f]{16}")
 _TS = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
 _SHORT = re.compile(r"[A-Za-z0-9_.:/-]{1,64}")
+
+
+def bounded(obj, code: str, max_depth: int = MAX_DEPTH, max_nodes: int = MAX_NODES) -> None:
+    """Iterative (never recursive) walk: refuses ``obj`` with ``code`` when it nests deeper than ``max_depth``, holds
+    more than ``max_nodes`` values, or is not plain JSON data (dict with str keys, list, str, int, bool, None; a float
+    is taken here and refused by the validators)."""
+    stack = [(obj, 0)]
+    nodes = 0
+    while stack:
+        x, depth = stack.pop()
+        nodes += 1
+        if nodes > max_nodes or depth > max_depth:
+            raise InputRefused(code)
+        t = type(x)
+        if t is dict:
+            for k, v in x.items():
+                if type(k) is not str:
+                    raise InputRefused(code)
+                stack.append((v, depth + 1))
+        elif t is list:
+            stack.extend((v, depth + 1) for v in x)
+        elif t not in (str, int, bool, float) and x is not None:
+            raise InputRefused(code)
 
 
 def _strict(obj, keys: frozenset, code: str) -> dict:
@@ -378,7 +413,7 @@ def validate_dataset(doc, tid: str, source: str) -> dict:
         _row(r, source)
     _timestamp(d["produced_at"], "DATASET_INVALID")
     _evidence_ref(d["evidence_ref"], "DATASET_INVALID")
-    if d["data_class"] != "measured" or type(d["labels"]) is not list or \
+    if d["data_class"] != "measured" or type(d["labels"]) is not list or len(d["labels"]) > 50 or \
             not all(type(x) is str and _SHORT.fullmatch(x) for x in d["labels"]):
         raise InputRefused("DATASET_INVALID")
     _short(d["grain"], "DATASET_INVALID")
@@ -584,20 +619,30 @@ def select(tid: str, month: str, basis: str, view, verify: Verifier) -> dict:
     month_bounds(month)
     datasets = getattr(view, "datasets", None)
     records = getattr(view, "records", None)
+    try:
+        bounded(records, "RECORDS_INVALID", max_nodes=MAX_NODES)
+    except InputRefused as e:
+        refuse(e.code)
+        records = []
     valid: dict = {basis: [], other: []}
     for doc in datasets if type(datasets) is list else []:
-        src = doc.get("source") if type(doc) is dict else None
-        if src not in (basis, other):
-            refuse("DATASET_INVALID") if src not in SOURCES else None
-            continue
         try:
+            bounded(doc, "DATASET_INVALID")                       # F-3: before anything recurses into it
+            src = doc.get("source") if type(doc) is dict else None
+            if src not in (basis, other):
+                if src not in SOURCES:
+                    refuse("DATASET_INVALID")
+                continue
             validate_dataset(doc, tid, src)
             _in_window(doc, src)
+            if not recorded(doc, records, tid, src, verify):
+                refuse("DATASET_NOT_RECORDED")
+                continue
         except InputRefused as e:
             refuse(e.code)
             continue
-        if not recorded(doc, records, tid, src, verify):
-            refuse("DATASET_NOT_RECORDED")
+        except Exception:  # noqa: BLE001 - UB: no shape of a document may raise out of the run
+            refuse("DATASET_INVALID")
             continue
         valid[src].append(doc)
     covering = [d for d in valid[basis] if covers(d, month)]
@@ -605,15 +650,22 @@ def select(tid: str, month: str, basis: str, view, verify: Verifier) -> dict:
     freshness = None
     if getattr(view, "freshness", None) is not None:
         try:
+            bounded(view.freshness, "FRESHNESS_INVALID")
             freshness = validate_freshness(view.freshness, tid)
         except InputRefused as e:
             refuse(e.code)
+        except Exception:  # noqa: BLE001
+            refuse("FRESHNESS_INVALID")
     recon, other_id = None, None
     if chosen is not None and getattr(view, "reconciliation", None) is not None:
         try:
+            bounded(view.reconciliation, "RECONCILIATION_INVALID")
             rec = validate_reconciliation(view.reconciliation, tid)
         except InputRefused as e:
             refuse(e.code)
+            rec = None
+        except Exception:  # noqa: BLE001
+            refuse("RECONCILIATION_INVALID")
             rec = None
         others = {d["dataset_id"]: d for d in valid[other]}
         first, last = month_bounds(month)
@@ -630,7 +682,7 @@ def select(tid: str, month: str, basis: str, view, verify: Verifier) -> dict:
                     parse_date(w["start"]) != first or parse_date(w["end"]) != last:
                 refuse("RECONCILIATION_NOT_FOR_MONTH")
                 continue
-            d = abs(amount(it["values"]["difference"]))
+            d = amount(it["values"]["difference"]).copy_abs()        # exact (F-1): never the thread's context
             if best is None or d > best[0]:
                 best = (d, oid)
         if best is not None:
@@ -644,7 +696,8 @@ def signature(sel: dict) -> dict:
     """What a run was computed from, as machine values (a month whose inputs changed gets a new run, B-FA-29)."""
     ds = sel["dataset"]
     return {"basis": sel["basis"], "dataset_id": ds["dataset_id"] if ds else None, "state": sel["state"],
-            "other_dataset_id": sel["other_dataset_id"], "reconcile_difference": text(sel["reconcile_difference"])}
+            "other_dataset_id": sel["other_dataset_id"], "reconcile_difference": text(sel["reconcile_difference"]),
+            "producer_blocked": bool(sel.get("producer_blocked"))}
 
 
 # ------------------------------------------------------------------------------------------------ the figure and band
@@ -667,6 +720,8 @@ def compute(tid: str, run_id: str, month: str, sel: dict, channel_map: Optional[
     reasons: list = []
     if not connected:
         reasons.append(NOT_CONNECTED)
+    elif sel.get("producer_blocked"):
+        reasons.append(PRODUCER_RESTRICTED)               # F-2: Osei restricted / retired: none of its documents
     elif doc is None:
         reasons.append(MONTH_NOT_COVERED)
     if doc is not None and state in INSUFFICIENT_STATES:

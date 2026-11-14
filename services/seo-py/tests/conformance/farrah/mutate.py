@@ -21,7 +21,7 @@ HERE = Path(__file__).resolve().parent
 CALLS = json.loads((HERE.parent / "calls_farrah.json").read_text())
 
 
-def run_mutant(file: str, old: str, new: str, tests: list, timeout: int = 900) -> dict:
+def run_mutant(file: str, old: str, new: str, tests: list, timeout: int = 900, env_extra=None) -> dict:
     """Apply ``old`` -> ``new`` (exactly one occurrence) to src/``file`` in a copy and run ``tests`` there."""
     tmp = Path(tempfile.mkdtemp(prefix="farrah-mut-"))
     try:
@@ -32,7 +32,7 @@ def run_mutant(file: str, old: str, new: str, tests: list, timeout: int = 900) -
         if text.count(old) != 1:
             return {"applied": False, "killed": False, "reason": f"old text occurs {text.count(old)} times"}
         path.write_text(text.replace(old, new))
-        env = {k: v for k, v in os.environ.items() if k != "CONFORMANCE_LEAD"}
+        env = {**{k: v for k, v in os.environ.items() if k != "CONFORMANCE_LEAD"}, **(env_extra or {})}
         proc = subprocess.run([sys.executable, "-m", "pytest", "-x", "-q", "-p", "no:cacheprovider", *tests],
                               cwd=dst, env=env, capture_output=True, text=True, timeout=timeout)
         return {"applied": True, "killed": proc.returncode != 0, "rc": proc.returncode,

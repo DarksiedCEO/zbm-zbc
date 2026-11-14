@@ -19,11 +19,11 @@ from secret_corpus import corpus as secret_corpus
 
 D = date(2026, 9, 9)
 ATTRIBUTION_KINDS = ("attribution_run_requested", "attribution_run_recorded", "attribution_run_interrupted")
-LOG_KEYS = {"attribution_run_requested": {"run_id", "tenant_id", "month_start", "basis", "input_dataset_hex",
-                                          "inputs_hmac", "supersedes", "actor", "request_id", "request_sha", "_obj",
+LOG_KEYS = {"attribution_run_requested": {"run_id", "tenant_id", "month_start", "basis", "input_refs",
+                                          "inputs_ref", "supersedes", "actor", "request_id", "request_sha", "_obj",
                                           "evidence"},
             "attribution_run_recorded": {"run_id", "result_ref", "result_hmac", "facts", "actor", "evidence"}}
-FACT_KEYS = {"outcome", "labels", "rows", "unknown_rows", "refund_rows", "assumptions", "input_dataset_hex",
+FACT_KEYS = {"outcome", "labels", "rows", "unknown_rows", "refund_rows", "assumptions", "input_refs",
              "limitations", "inputs_refused"}
 
 
@@ -36,7 +36,8 @@ def test_W_FA_1_requested_record_names_tenant_month_basis_inputs(fa):
     v = ok_run(fa)
     ev = fa.ledger.of_type("attribution_run_requested")[-1]["_payload"]
     assert ev["tenant_id"] == "acme" and ev["month_start"] == "2026-09-01" and ev["basis"] == "analytics"
-    assert ev["input_dataset_hex"] == [doc["dataset_id"][3:]] and ev["run_id"] == v["run_id"]
+    import svc_attribution
+    assert ev["input_refs"] == [svc_attribution.dataset_ref(doc["dataset_id"])] and ev["run_id"] == v["run_id"]
 
 
 def test_W_FA_2_D_FA_01_no_amount_in_the_log_or_the_ledger(fa):
