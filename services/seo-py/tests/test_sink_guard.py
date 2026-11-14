@@ -358,7 +358,9 @@ def test_there_is_no_legacy_list_and_no_bypass():
     src = open(sg.__file__, encoding="utf-8").read()
     assert "LEGACY-BEGIN" not in src and "_legacy(" not in src
     kinds = {name[3:] for name in dir(SeoService) if name.startswith("_a_")}
-    assert len(kinds) == 27
+    # 27 kinds + Farrah's 5 (farrah-spec/1: tenant_plan_set, tenant_channel_map_set, attribution_run_requested /
+    # _recorded / _interrupted); every one is checked by the loop below
+    assert len(kinds) == 32
     text = marker()
     for kind in sorted(kinds):
         assert sg.refused(kind, {"x": text}) == ["/x"], kind

@@ -1,0 +1,118 @@
+{
+ "spec": "farrah-spec/1",
+ "note": "tests-bite map (SUITE_PLAN 2.1): each call site replaced by an identity / no-op must make the named test FAIL",
+ "bite": [
+  {
+   "id": "TB-FA-1",
+   "call": "secret_guard.guard_record (W-FA-2)",
+   "file": "svc_attribution.py",
+   "old": "        swept = secret_guard.guard_record(skel)\n",
+   "new": "        swept = skel\n",
+   "tests": [
+    "tests/conformance/farrah/test_farrah_writes.py::test_TB_FA_1_guard_record_sweeps_every_non_amount_field"
+   ]
+  },
+  {
+   "id": "TB-FA-2",
+   "call": "_vaulted_seal(tid, 'revenue_attribution', doc) (W-FA-2)",
+   "file": "svc_attribution.py",
+   "old": "                sealed = self._vaulted_seal(tid, RESULT_FIELD, doc)\n",
+   "new": "                sealed = self._vaulted_seal(tid, RESULT_FIELD, {\"v\": 0})\n",
+   "tests": [
+    "tests/conformance/farrah/test_farrah_writes.py::test_W_FA_3_owner_views_and_compliance_label_and_counts_only"
+   ]
+  },
+  {
+   "id": "TB-FA-3",
+   "call": "the plan gate (B-FA-02)",
+   "file": "svc_attribution.py",
+   "old": "        if not farrah.plan_allows(tid, self.plan_name(tid), self._own_tenant()):\n            raise Forbidden(R(\"PLAN_EXCLUDES_ATTRIBUTION\"))\n",
+   "new": "        if False:\n            raise Forbidden(R(\"PLAN_EXCLUDES_ATTRIBUTION\"))\n",
+   "tests": [
+    "tests/conformance/farrah/test_farrah_registry_routes.py::test_B_FA_02_plan_gate_one_test_per_plan"
+   ]
+  },
+  {
+   "id": "TB-FA-4",
+   "call": "the month-coverage check (B-FA-04)",
+   "file": "agents/farrah.py",
+   "old": "    covering = [d for d in valid[basis] if covers(d, month)]\n",
+   "new": "    covering = list(valid[basis])\n",
+   "tests": [
+    "tests/conformance/farrah/test_farrah_inputs.py::test_B_FA_04_coverage_at_month_edges"
+   ]
+  },
+  {
+   "id": "TB-FA-5",
+   "call": "the unknown-into-upper-bound rule (B-FA-21)",
+   "file": "agents/farrah.py",
+   "old": "            upper = SUM_CTX.add(SUM_CTX.add(lower, r_unknown), widen)\n",
+   "new": "            upper = SUM_CTX.add(lower, widen)\n",
+   "tests": [
+    "tests/conformance/farrah/test_farrah_band.py::test_B_FA_20_B_FA_21_oracle_recomputation_on_generated_datasets"
+   ]
+  },
+  {
+   "id": "TB-FA-6",
+   "call": "the reconciliation widening (B-FA-24)",
+   "file": "agents/farrah.py",
+   "old": "                    upper = SUM_CTX.add(upper, term)\n",
+   "new": "                    upper = upper\n",
+   "tests": [
+    "tests/conformance/farrah/test_farrah_band.py::test_B_FA_24_reconciliation_widening"
+   ]
+  }
+ ],
+ "pinned_mutants": [
+  {
+   "id": "M-FA-float",
+   "what": "float on one path",
+   "file": "agents/farrah.py",
+   "old": "    d = Decimal(value)\n",
+   "new": "    d = Decimal(float(value))\n",
+   "tests": [
+    "tests/conformance/farrah/test_farrah_corpus.py::test_A_FA_01_money_edge_cases_fast"
+   ]
+  },
+  {
+   "id": "M-FA-unknown",
+   "what": "unknown left out of U",
+   "file": "agents/farrah.py",
+   "old": "            upper = SUM_CTX.add(SUM_CTX.add(lower, r_unknown), widen)\n",
+   "new": "            upper = SUM_CTX.add(lower, widen)\n",
+   "tests": [
+    "tests/conformance/farrah/test_farrah_band.py::test_B_FA_25_label_table_boundaries"
+   ]
+  },
+  {
+   "id": "M-FA-thresholds",
+   "what": "label thresholds swapped",
+   "file": "agents/farrah.py",
+   "old": "HIGH_WIDTH, MEDIUM_WIDTH = Decimal(\"0.10\"), Decimal(\"0.35\")\n",
+   "new": "HIGH_WIDTH, MEDIUM_WIDTH = Decimal(\"0.35\"), Decimal(\"0.10\")\n",
+   "tests": [
+    "tests/conformance/farrah/test_farrah_band.py::test_B_FA_25_label_table_boundaries"
+   ]
+  },
+  {
+   "id": "M-FA-partial-month",
+   "what": "a partial month accepted",
+   "file": "agents/farrah.py",
+   "old": "    return parse_date(w[\"start\"]) <= first and parse_date(w[\"end\"]) >= last\n",
+   "new": "    return parse_date(w[\"start\"]) <= last and parse_date(w[\"end\"]) >= first\n",
+   "tests": [
+    "tests/conformance/farrah/test_farrah_inputs.py::test_B_FA_04_coverage_at_month_edges"
+   ]
+  },
+  {
+   "id": "M-FA-entry",
+   "what": "Entry allowed",
+   "file": "agents/farrah.py",
+   "old": "ALLOWED_PLANS = (\"growth\", \"full\")",
+   "new": "ALLOWED_PLANS = (\"entry\", \"growth\", \"full\")",
+   "tests": [
+    "tests/conformance/farrah/test_farrah_registry_routes.py::test_B_FA_02_plan_gate_one_test_per_plan"
+   ]
+  }
+ ]
+}

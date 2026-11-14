@@ -1292,3 +1292,189 @@ def observe(ctx) -> dict:
     if ctx.pplx is not None:
         _pplx_state(ctx, state, outs)
     return state
+
+
+# ============================================================================================ Farrah (WR-FA-1)
+# farrah-spec/1: money-edge-cases, month-boundaries, plan-escalation, attribution-gaming. The fake is the fixture
+# Osei store (tests/conformance/gen/attribution.py, GF-2): the judge computes what it SERVED on its own (exact
+# decimals at 600 digits, its own month rule, its own exact-normalised channel rule, its own copy of the spec's
+# AI-referrer list) and compares that with the run; it never reads Farrah's label as a verdict.
+
+FA_AI = ("chatgpt.com", "chat.openai.com", "perplexity.ai", "gemini.google.com", "copilot.microsoft.com", "claude.ai")
+
+
+def _fa(ctx, plan="managed_2"):
+    from conformance.gen.attribution import OseiStore
+    if getattr(ctx, "fa", None) is None:
+        h = ctx.h
+        h.tenant("acme")
+        ctx.fa = SimpleNamespace(store=OseiStore(), runs=[], judge={}, plan_before=None, attempt=None)
+        h.svc.osei_source = ctx.fa.store
+        if plan is not None:
+            _fa_plan_put(ctx, plan)
+    return ctx.fa
+
+
+def _fa_plan_put(ctx, plan, caller="dashboard", andre=True, tenant=None):
+    h = ctx.h
+    return h.client.put("/seo/v1/tenants/acme/plan", json={"request_id": H.rid(), "plan": plan,
+                                                           "revenue_basis": "analytics"},
+                        headers=h.headers(caller, andre=andre, tenant=tenant))
+
+
+def _fa_data(ctx, rows, start=None, end=None):
+    from datetime import date as _date
+    from conformance.gen.attribution import dataset, freshness
+    doc = dataset("acme", "analytics", rows, start=start or _date(2026, 9, 1), end=end or _date(2026, 9, 30))
+    ctx.fa.store.add(ctx.h.svc, doc)
+    ctx.fa.store.tenant("acme")["freshness"] = freshness("acme")
+    return doc
+
+
+def _fa_run(ctx, caller="dashboard"):
+    r = ctx.h.post("/tenants/acme/attribution-runs", {"request_id": H.rid(), "month": "2026-09"}, caller=caller)
+    ctx.fa.runs.append(r)
+    return r
+
+
+def farrah_money(ctx, value):
+    from datetime import date as _date
+    from decimal import Context, Decimal
+    from conformance.gen.attribution import arow
+    _fa(ctx)
+    hi = Context(prec=600)
+    rows = [arow(_date(2026, 9, 1 + i), value, landing=f"/m{i}") for i in range(12)]
+    rows.append(arow(_date(2026, 9, 20), "10.00", landing="/base"))
+    want = Decimal(0)
+    for r in rows:
+        want = hi.add(want, Decimal(r["purchaseRevenue"]))
+    ctx.fa.judge = {"kind": "money", "organic": want}
+    _fa_data(ctx, rows)
+    return _fa_run(ctx)
+
+
+def _fa_month_of(value: str) -> str:
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+    if "T" not in value:
+        v = value.replace("-", "")
+        return f"{v[:4]}-{v[4:6]}"
+    d = _dt.fromisoformat(value.replace("Z", "+00:00"))
+    if d.tzinfo is not None:
+        d = d.astimezone(ZoneInfo("America/Los_Angeles"))
+    return d.strftime("%Y-%m")
+
+
+def farrah_month(ctx, at):
+    from datetime import date as _date
+    from conformance.gen.attribution import arow
+    _fa(ctx)
+    rows = [arow(at, "7.00", landing="/edge"), arow("2026-09-15", "1.00", landing="/mid")]
+    ctx.fa.judge = {"kind": "month", "rows": sum(_fa_month_of(r["date"]) == "2026-09" for r in rows)}
+    _fa_data(ctx, rows, start=_date(2026, 8, 1), end=_date(2026, 10, 31))
+    return _fa_run(ctx)
+
+
+def farrah_plan(ctx, attempt):
+    from datetime import date as _date
+    from conformance.gen.attribution import arow
+    _fa(ctx, plan=None if attempt == "no_plan" else "managed_1" if attempt.startswith("entry") else "managed_2")
+    _fa_data(ctx, [arow(_date(2026, 9, 3), "100.00", landing=f"/{i}") for i in range(3)])
+    ctx.fa.attempt = attempt
+    ctx.fa.plan_before = ctx.h.svc.tenants["acme"].get("plan")
+    if attempt in ("entry_dashboard", "entry_seo_agent", "entry_scheduler", "no_plan"):
+        return _fa_run(ctx, caller={"entry_seo_agent": "seo_agent", "entry_scheduler": "scheduler"}.get(attempt,
+                                                                                                        "dashboard"))
+    if attempt == "hub_sets_plan":
+        return _fa_plan_put(ctx, "managed_3", caller="hub", andre=False, tenant="acme")
+    if attempt == "agent_sets_plan":
+        return _fa_plan_put(ctx, "managed_3", caller="seo_agent", andre=False)
+    if attempt == "dashboard_without_andre_sets_plan":
+        return _fa_plan_put(ctx, "managed_3", andre=False)
+    if attempt == "downgrade_mid_run":
+        from agents import farrah as _farrah
+        real = _farrah.compute
+
+        def compute(*a, **k):
+            r = _fa_plan_put(ctx, "managed_1")                  # Andre downgrades the plan while the run computes
+            ctx.fa.plan_before = "managed_1" if r.status_code == 200 else ctx.fa.plan_before
+            return real(*a, **k)
+        _farrah.compute = compute
+        try:
+            return _fa_run(ctx)
+        finally:
+            _farrah.compute = real
+    raise ValueError("unknown attempt")
+
+
+def farrah_gaming(ctx, value, field="sessionMedium"):
+    from datetime import date as _date
+    from decimal import Decimal
+    from conformance.gen.attribution import arow
+    _fa(ctx)
+    rows = [arow(_date(2026, 9, 5), "5.00", landing="/base")]
+    for i in range(10):
+        r = arow(_date(2026, 9, 6), "1.00", "somewhere.example", "referral", "Referral", f"/g{i}")
+        r[field] = value
+        rows.append(r)
+    norm = value.strip().lower()
+    organic = field == "sessionMedium" and norm == "organic"
+    ai = field == "sessionSource" and norm in FA_AI
+    ctx.fa.judge = {"kind": "gaming", "organic": Decimal("15.00") if organic else Decimal("5.00"),
+                    "ai": Decimal("10.00") if ai else None}
+    _fa_data(ctx, rows)
+    return _fa_run(ctx)
+
+
+def _fa_observe(ctx, state):
+    from decimal import Decimal
+    h, fa = ctx.h, ctx.fa
+    last = fa.runs[-1] if fa.runs else None
+    body = last.json() if last is not None and last.headers.get("content-type", "").startswith("application/json") \
+        else {}
+    state["fa_http"] = last.status_code if last is not None else None
+    state["fa_5xx"] = any(r.status_code >= 500 for r in fa.runs) or any(
+        isinstance(s.get("status"), int) and s["status"] >= 500 for s in ctx.steps)
+    state["fa_status"] = body.get("status") if isinstance(body, dict) else None
+    res = body.get("result") if isinstance(body, dict) else None
+    ch = (res or {}).get("channels") or {}
+    j = fa.judge
+    if j.get("kind") in ("money", "gaming"):
+        fig = (ch.get("organic_search") or {}).get("figure")
+        state["fa_organic_exact"] = fig is not None and Decimal(fig) == j["organic"]
+        if j.get("kind") == "gaming":
+            ai = (ch.get("ai_referral") or {}).get("figure")
+            state["fa_ai_matches_judge"] = (ai is None) if j["ai"] is None else (ai is not None and
+                                                                                 Decimal(ai) == j["ai"])
+    if j.get("kind") == "month":
+        state["fa_rows_match"] = (ch.get("organic_search") or {}).get("rows") == j["rows"]
+
+    def floats(x):
+        if isinstance(x, float):
+            return True
+        if isinstance(x, dict):
+            return any(floats(v) for v in x.values())
+        if isinstance(x, list):
+            return any(floats(v) for v in x)
+        return False
+    state["fa_float_seen"] = floats(body)
+    amounts = [c.get(k) for c in ch.values() for k in ("figure", "lower", "upper") if c.get(k)]
+    logged = json.dumps([json.loads(x) for x in h.svc.log.raw_lines()]) + json.dumps(
+        [e.get("_payload") for e in h.ledger.events], default=str)
+    state["fa_amount_logged"] = any(f'"{a}"' in logged for a in amounts if len(a) > 2)
+    state["fa_results_recorded"] = len(h.ledger.of_type("attribution_run_recorded"))
+    if fa.attempt is not None:
+        state["fa_plan_unchanged"] = h.svc.tenants["acme"].get("plan") == fa.plan_before
+        state["fa_unauthorised_result"] = state["fa_results_recorded"] > 0
+
+
+ACTIONS.update({"farrah_money": farrah_money, "farrah_month": farrah_month, "farrah_plan": farrah_plan,
+                "farrah_gaming": farrah_gaming})
+_OBSERVE_BASE = observe
+
+
+def observe(ctx) -> dict:  # noqa: F811 - the base observation plus Farrah's
+    state = _OBSERVE_BASE(ctx)
+    if getattr(ctx, "fa", None) is not None:
+        _fa_observe(ctx, state)
+    return state

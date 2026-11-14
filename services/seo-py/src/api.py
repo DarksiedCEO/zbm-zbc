@@ -260,7 +260,7 @@ def _model_field_names() -> frozenset:
 # Sink job D: an error body is reason codes and machine values only; nothing the caller sent comes back. A ``loc``
 # element is an index, or a name from this closed set (the request models' fields, the parameter names of the
 # routes, the forbidden-key catalogue); any other element (a key the caller invented) is "*".
-ERROR_LOC_NAMES = frozenset(("body", "query", "path", "header", "cookie", "tid", "eid", "psid", "aid", "cid", "iid",
+ERROR_LOC_NAMES = frozenset(("body", "query", "path", "header", "cookie", "tid", "eid", "psid", "aid", "cid", "iid", "fid",
                              "sid", "agent", "name", "against", "since", "limit", "offset", "event_type",
                              "authorization")) | _model_field_names() | FORBIDDEN_KEYS
 # validation error types whose message is built from the schema alone (a pattern, a bound, the allowed literals)
@@ -568,6 +568,33 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
     def citation_mnc_priority(cid: str, scope: tuple = Depends(scoped(*CITATION_READERS))) -> dict:
         """Callum's Mentioned-Not-Cited priority list: the callum.mnc_priority/2 contract Roman and Adaeze read."""
         return svc.mnc_priority_view(scope[1], _id(cid))
+
+    # ------------------------------------------------------------------ Farrah's revenue attribution (farrah-spec/1)
+
+    @app.put(P + "/tenants/{tid}/plan", dependencies=auth)
+    def tenant_plan(tid: str, req: dict = Depends(body(m.PlanSet)), who: str = Depends(andre)) -> dict:
+        """GF-1: Andre sets the tenant's plan (config tier id) and revenue basis; no other caller can."""
+        return svc.set_plan(_id(tid, TENANT_RX), req)
+
+    @app.put(P + "/tenants/{tid}/channel-map", dependencies=auth)
+    def tenant_channel_map(tid: str, req: dict = Depends(body(m.ChannelMapSet)), who: str = Depends(andre)) -> dict:
+        """GF-3: Andre declares the closed lead_source -> channel mapping (unmapped values are ``unknown``)."""
+        return svc.set_channel_map(_id(tid, TENANT_RX), req)
+
+    ATTRIBUTION_READERS = ("dashboard", "seo_agent", "hub", "compliance_38")
+
+    @app.post(P + "/tenants/{tid}/attribution-runs", dependencies=auth, status_code=201)
+    def request_attribution_run(req: dict = Depends(body(m.AttributionRunCreate)),
+                                scope: tuple = Depends(scoped("dashboard", "seo_agent", "scheduler"))) -> dict:
+        return svc.request_attribution_run(scope[0], scope[1], req)
+
+    @app.get(P + "/tenants/{tid}/attribution-runs", dependencies=auth)
+    def attribution_runs(scope: tuple = Depends(scoped(*ATTRIBUTION_READERS))) -> list:
+        return svc.attribution_runs_view(scope[1], who=scope[0])
+
+    @app.get(P + "/tenants/{tid}/attribution-runs/{fid}", dependencies=auth)
+    def attribution_run(fid: str, scope: tuple = Depends(scoped(*ATTRIBUTION_READERS))) -> dict:
+        return svc.attribution_run_view(scope[1], _id(fid), who=scope[0])
 
     # ------------------------------------------------------------------ first-party log ingests (Wave 2)
 

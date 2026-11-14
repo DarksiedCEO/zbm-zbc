@@ -30,7 +30,7 @@ KNOWN_CALLERS = ("dashboard", "seo_agent", "scheduler", "hub", "finance_31", "co
 _PRINTABLE = re.compile(r"[\x21-\x7e]{32,512}")
 TENANT_ID = re.compile(r"[a-z][a-z0-9-]{1,39}")
 CAPABILITY_SWITCHES = ("fetch", "render", "ai_probe", "audit", "entity_write", "prompt_sets", "logs", "schedules",
-                       "reports")
+                       "reports", "attribution")
 PROVIDER_SWITCHES = ("web", "openai", "anthropic", "google", "perplexity", "gsc")
 
 # Pricing, locked by Andre (spec Oct 6). Config only: nothing in this service charges, quotes or invoices; payments
@@ -44,6 +44,10 @@ PRICING = {
     "self_serve_monthly_range": {"min": "29.00", "max": "500.00", "offered": False,
                                  "condition": "only after the client dashboard launches"},
 }
+
+# farrah-spec/1 GF-1 (v1.1): the tenant plan ids are the tier ids of the table above; their names in the pricing
+# ruling (revenue attribution is not in Entry, included from Growth up)
+PLAN_IDS = {"managed_1": "entry", "managed_2": "growth", "managed_3": "full"}
 
 
 def _flag(env, name: str) -> bool:

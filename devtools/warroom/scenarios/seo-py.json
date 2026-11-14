@@ -2981,6 +2981,430 @@
      }
     }
    ]
+  },
+  {
+   "id": "money-edge-cases",
+   "persona": "a client's first-party data carrying extreme, tiny, negative, signed-zero, exponent and 40-digit amounts",
+   "basis": "farrah-spec/1 A-FA-01 / ADR 0003: every amount an exact Decimal, refunds counted in their channel, never a float, no amount outside the vault (W-FA-2)",
+   "input_field": "value",
+   "seeds": [
+    {
+     "basis": "A-FA-01 generator families",
+     "literal": [
+      "999999999999999.99",
+      "0.005",
+      "-1234.56",
+      "-0",
+      "1E+3",
+      "2.5e-3",
+      "-4E2",
+      "1234567890123456789012345678901234567890",
+      "0.1234567890123456789012345678901234567891",
+      "1e15"
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "action": "farrah_money",
+     "args": {
+      "value": "$value"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "args": {
+      "key": "fa_http",
+      "value": 201
+     },
+     "check": "state_equals",
+     "id": "run_answered",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "fa_status",
+      "value": "completed"
+     },
+     "check": "state_equals",
+     "id": "run_completed",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "fa_organic_exact",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "figure_exact_as_the_judge_sums",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "fa_5xx",
+      "value": false
+     },
+     "check": "state_equals",
+     "id": "no_5xx",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "fa_float_seen",
+      "value": false
+     },
+     "check": "state_equals",
+     "id": "no_float_anywhere",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "fa_amount_logged",
+      "value": false
+     },
+     "check": "state_equals",
+     "id": "no_amount_in_log_or_ledger",
+     "severity": "MUST"
+    }
+   ],
+   "variants_per_seed": 0
+  },
+  {
+   "id": "month-boundaries",
+   "persona": "rows stamped at the edges of the month, across DST days, with and without offsets",
+   "basis": "farrah-spec/1 A-FA-02 / B-FA-04: each row in exactly one month of the dataset's timezone",
+   "input_field": "at",
+   "seeds": [
+    {
+     "basis": "A-FA-02 edges (America/Los_Angeles)",
+     "literal": [
+      "2026-09-01T00:00:00-07:00",
+      "2026-08-31T23:59:59-07:00",
+      "2026-09-30T23:59:59-07:00",
+      "2026-10-01T00:00:00-07:00",
+      "2026-09-01T06:59:59Z",
+      "2026-09-01T07:00:00Z",
+      "2026-10-01T06:59:59Z",
+      "2026-10-01T07:00:00Z",
+      "20260901",
+      "2026-09-30",
+      "2026-08-31",
+      "2026-10-01"
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "action": "farrah_month",
+     "args": {
+      "at": "$at"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "args": {
+      "key": "fa_http",
+      "value": 201
+     },
+     "check": "state_equals",
+     "id": "run_answered",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "fa_rows_match",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "rows_in_the_judges_month",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "fa_5xx",
+      "value": false
+     },
+     "check": "state_equals",
+     "id": "no_5xx",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "fa_float_seen",
+      "value": false
+     },
+     "check": "state_equals",
+     "id": "no_float_anywhere",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "fa_amount_logged",
+      "value": false
+     },
+     "check": "state_equals",
+     "id": "no_amount_in_log_or_ledger",
+     "severity": "MUST"
+    }
+   ],
+   "variants_per_seed": 0
+  },
+  {
+   "id": "plan-escalation",
+   "persona": "an Entry client, the hub and the agent runtime reaching for revenue attribution or a better plan",
+   "basis": "farrah-spec/1 B-FA-02 / A-FA-03: Entry or no plan never runs; only Andre sets a plan; a plan downgraded mid-run refuses the run at commit",
+   "input_field": "attempt",
+   "seeds": [
+    {
+     "basis": "A-FA-03 routes",
+     "literal": [
+      "entry_dashboard",
+      "entry_seo_agent",
+      "entry_scheduler",
+      "no_plan",
+      "hub_sets_plan",
+      "agent_sets_plan",
+      "dashboard_without_andre_sets_plan",
+      "downgrade_mid_run"
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "action": "farrah_plan",
+     "args": {
+      "attempt": "$attempt"
+     },
+     "as": "attempt"
+    }
+   ],
+   "invariants": [
+    {
+     "args": {
+      "key": "fa_unauthorised_result",
+      "value": false
+     },
+     "check": "state_equals",
+     "id": "no_result_recorded",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "fa_plan_unchanged",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "plan_only_as_andre_set_it",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "fa_5xx",
+      "value": false
+     },
+     "check": "state_equals",
+     "id": "no_5xx",
+     "severity": "MUST"
+    }
+   ],
+   "variants_per_seed": 0
+  },
+  {
+   "id": "attribution-gaming",
+   "persona": "campaign values spelling organic in lookalikes and AI-referrer lookalike hosts",
+   "basis": "farrah-spec/1 A-FA-04 / B-FA-11: mapping by exact normalised value (case, whitespace) only; lookalikes are other_known",
+   "input_field": "value",
+   "fixed_input": {
+    "field": "sessionMedium"
+   },
+   "seeds": [
+    {
+     "basis": "A-FA-04 mediums",
+     "literal": [
+      "organic",
+      "Organic ",
+      "  ORGANIC",
+      "оrganic",
+      "orga​nic",
+      "organic-search",
+      "cpc"
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "action": "farrah_gaming",
+     "args": {
+      "value": "$value",
+      "field": "$field"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "zero_width",
+    "homoglyph",
+    "fullwidth"
+   ],
+   "chain_max": 1,
+   "invariants": [
+    {
+     "args": {
+      "key": "fa_http",
+      "value": 201
+     },
+     "check": "state_equals",
+     "id": "run_answered",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "fa_organic_exact",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "organic_as_the_judge_maps_it",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "fa_ai_matches_judge",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "ai_as_the_judge_maps_it",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "fa_5xx",
+      "value": false
+     },
+     "check": "state_equals",
+     "id": "no_5xx",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "fa_float_seen",
+      "value": false
+     },
+     "check": "state_equals",
+     "id": "no_float_anywhere",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "fa_amount_logged",
+      "value": false
+     },
+     "check": "state_equals",
+     "id": "no_amount_in_log_or_ledger",
+     "severity": "MUST"
+    }
+   ],
+   "variants_per_seed": 2
+  },
+  {
+   "id": "attribution-gaming-hosts",
+   "persona": "AI-referrer lookalike hosts in the session source",
+   "basis": "farrah-spec/1 A-FA-04 / B-FA-11 / Q-FA-3: only the closed list's exact hosts are ai_referral",
+   "input_field": "value",
+   "fixed_input": {
+    "field": "sessionSource"
+   },
+   "seeds": [
+    {
+     "basis": "A-FA-04 hosts",
+     "literal": [
+      "chatgpt.com",
+      "CHATGPT.COM ",
+      "claude.ai",
+      "chatgpt.com.evil.test",
+      "chat-gpt.com",
+      "xclaude.ai",
+      "perplexity.ai.attacker.test",
+      "gemini.google.com.evil",
+      "copilot.microsoft.com",
+      "www.perplexity.ai"
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "action": "farrah_gaming",
+     "args": {
+      "value": "$value",
+      "field": "$field"
+     }
+    }
+   ],
+   "transforms": [
+    "case_flip",
+    "zero_width",
+    "homoglyph",
+    "fullwidth"
+   ],
+   "chain_max": 1,
+   "invariants": [
+    {
+     "args": {
+      "key": "fa_http",
+      "value": 201
+     },
+     "check": "state_equals",
+     "id": "run_answered",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "fa_organic_exact",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "organic_as_the_judge_maps_it",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "fa_ai_matches_judge",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "ai_as_the_judge_maps_it",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "fa_5xx",
+      "value": false
+     },
+     "check": "state_equals",
+     "id": "no_5xx",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "fa_float_seen",
+      "value": false
+     },
+     "check": "state_equals",
+     "id": "no_float_anywhere",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "fa_amount_logged",
+      "value": false
+     },
+     "check": "state_equals",
+     "id": "no_amount_in_log_or_ledger",
+     "severity": "MUST"
+    }
+   ],
+   "variants_per_seed": 2
   }
  ]
 }

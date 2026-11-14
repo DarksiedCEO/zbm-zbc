@@ -29,6 +29,7 @@ from primitives import Killed
 from reasons import R
 import sink_guard
 from svc_optext import url_view
+from svc_attribution import plan_view
 
 TENANT_KINDS = ("own", "client")
 # review 2b26d980 SHOULD 1: a punycode TLD (``xn--p1ai``) is a TLD too (an IDN domain is registered as A-labels)
@@ -286,7 +287,10 @@ class TenantsMixin:
     def tenant_view(self, tid: str) -> dict:
         with self.lock:
             t = self._get(self.tenants, tid, "TENANT_NOT_FOUND")
-            out = {**{k: v for k, v in t.items() if k not in ("gsc_property_host", "gsc_vault_unavailable")},
+            out = {**{k: v for k, v in t.items() if k not in ("gsc_property_host", "gsc_vault_unavailable", "channel_map",
+                                                               "channel_map_hmac", "channel_map_counts", "plan",
+                                                               "revenue_basis", "channel_map_unavailable")},
+                   **plan_view(t),
                    "domains": list(t["domains"]),
                    "audits": sum(1 for a in self.audits.values() if a["tenant_id"] == tid)}
             if t.get("gsc_vault_unavailable"):            # sink job D: bound, the property text cannot be read

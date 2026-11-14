@@ -1,0 +1,39 @@
+{
+ "fixture": "osei.dataset/1 consumer contract (frozen copy, CB-19)",
+ "producer": "osei (osei-spec/1, Osei full) - NOT on the base; this frozen copy is generated from osei-spec/1 B-OS-11, B-OS-13, B-OS-19, B-OS-23, B-OS-45 and CLARIFICATIONS v1.1 GO-2 / GF-2",
+ "producer_tree_sha": null,
+ "base_sha": "186471ebf9b3c76f585040dcf88b1641ed5bc90e",
+ "open_questions": ["QB-FA-1 row keys", "QB-FA-2 totals / rows_dropped_cap shapes", "QB-FA-3 reconciliation and freshness wrappers"],
+ "contracts": {
+  "osei.dataset/1": {
+   "keys": ["completeness", "contract", "data_class", "dataset_id", "evidence_ref", "grain", "labels", "produced_at", "read_id", "refresh_tier", "rows", "source", "surface", "tenant_id", "totals", "validation", "window"],
+   "window": ["end", "start", "timezone"],
+   "surface": ["fingerprint", "parts"],
+   "validation": ["counts", "reason", "state"],
+   "completeness": ["other_row_share", "rows_dropped_cap", "sampled", "thresholded"],
+   "evidence_ref": ["contract", "item_key", "run_id"],
+   "rows_dropped_cap": ["revenue", "rows"],
+   "analytics_row": ["date", "keyEvents", "landingPage", "purchaseRevenue", "sessionDefaultChannelGroup", "sessionMedium", "sessionSource", "sessions", "totalRevenue"],
+   "crm_row": ["amount", "closed_date", "created_date", "currency", "deal_ref", "landing_path", "lead_source", "stage", "utm_campaign", "utm_medium", "utm_source"],
+   "dataset_id": "ds-<16 lower hex>",
+   "max_rows": 50000
+  },
+  "records": {
+   "keys": ["at", "dataset_hmac", "dataset_id", "kind", "read_id", "tenant_id", "validation_state"],
+   "kinds": {"analytics": "source_read_recorded", "crm": "crm_import_recorded"},
+   "quarantine_kinds": {"analytics": "source_read_quarantined", "crm": "crm_import_quarantined"},
+   "hmac": "vault.field_hash(tenant, 'dataset', canonical JSON of the dataset) - Osei W-OS-2 seal field"
+  },
+  "osei.reconciliation/1": {
+   "keys": ["contract", "items", "produced_at", "tenant_id"],
+   "item": ["datasets", "evidence_ref", "label", "result", "rule", "values", "window"],
+   "rc4_values": ["analytics_revenue", "crm_won_revenue", "difference"]
+  },
+  "osei.panel_freshness/1": {
+   "keys": ["contract", "panels", "produced_at", "tenant_id"],
+   "panel": ["freshness_timestamp", "inputs", "panel", "state"],
+   "input": ["contract", "produced_at", "producer", "run_id", "state", "tier"],
+   "states": ["NEVER", "NOT_CONNECTED", "FRESH", "DUE", "STALE", "FAILED_LAST"]
+  }
+ }
+}

@@ -55,6 +55,9 @@ CODES = frozenset({
     "CITATION_RUN_NOT_FOUND", "CITATION_RUN_RUNNING", "CITATION_RUN_NOT_COMPLETED",
     # the client citation vault (ADR 0051, job 2; vault.py): no key (fail closed) / a record that cannot be read
     "VAULT_UNAVAILABLE", "VAULT_RECORD_NOT_FOUND",
+    # Farrah's attribution runs (farrah-spec/1; svc_attribution.py)
+    "PLAN_EXCLUDES_ATTRIBUTION", "ATTRIBUTION_RUN_NOT_FOUND", "RUN_IN_PROGRESS", "MONTH_NOT_CLOSED",
+    "REVENUE_BASIS_UNSET", "REVENUE_BASIS_CHANGED",
     # generic
     "REQUEST_ID_REUSED", "LEDGER_UNAVAILABLE", "STORE_UNAVAILABLE", "INTEGRITY_UNVERIFIED", "SERVICE_CLOSED",
     "JOB_UNKNOWN", "JOB_RUNNING", "INVALID", "FORBIDDEN_FIELD",

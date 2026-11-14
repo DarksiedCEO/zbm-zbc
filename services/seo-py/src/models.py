@@ -172,3 +172,30 @@ class CitationRunCreate(Strict):
     prompt_set_id: Annotated[StrictStr, Field(pattern=r"^seo-pst-[0-9a-f]{40}$")]
     engines: Optional[Annotated[list[Literal["openai", "anthropic", "google", "perplexity"]],
                                 Field(min_length=1, max_length=4)]] = None
+
+
+# ------------------------------------------------------------------ Farrah (farrah-spec/1; v1.1 GF-1, GF-3)
+
+MONTH = r"^20[0-9]{2}-(0[1-9]|1[0-2])$"
+# GF-3 gives no bound: a lead_source value is one CRM field value (<= 200 characters), at most 200 per channel
+# (open question QB-FA-8)
+LeadSource = Annotated[StrictStr, Field(min_length=1, max_length=200)]
+LeadSources = Annotated[list[LeadSource], Field(max_length=200)]
+
+
+class PlanSet(Strict):
+    request_id: RequestId
+    plan: Literal["managed_1", "managed_2", "managed_3"]
+    revenue_basis: Literal["analytics", "crm"]
+
+
+class ChannelMapSet(Strict):
+    request_id: RequestId
+    organic_search: LeadSources
+    ai_referral: LeadSources
+    other_known: LeadSources
+
+
+class AttributionRunCreate(Strict):
+    request_id: RequestId
+    month: Annotated[StrictStr, Field(pattern=MONTH)]

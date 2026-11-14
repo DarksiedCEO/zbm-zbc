@@ -367,6 +367,8 @@ class World:
         kw = {"headers": hd, "params": query} if query else {"headers": hd}
         if method == "GET":
             r = self.h.client.get(wire, **kw)
+        elif method == "PUT":                              # farrah-spec/1 GF-1 / GF-3: the plan and channel map
+            r = self.h.client.put(wire, json=body if body is not None else {}, **kw)
         else:
             r = self.h.client.post(wire, json=body if body is not None else {}, **kw)
         self.calls += 1
@@ -437,6 +439,14 @@ class World:
                                                             "prompt_set_id": ids["psid"], "engines": ["openai"]},
                            andre=True), 201)
         ids["cid"] = run["citation_run_id"]
+        # Farrah (farrah-spec/1): the plan, the channel map and one run (Osei is not on the base: NOT_CONNECTED)
+        self.ok(self.call("PUT", "/tenants/acme/plan", {"request_id": rid(), "plan": "managed_2",
+                                                        "revenue_basis": "crm"}, andre=True))
+        self.ok(self.call("PUT", "/tenants/acme/channel-map", {
+            "request_id": rid(), "organic_search": [c.new("flow", "channel_map", "prose")],
+            "ai_referral": [c.new("flow", "channel_map", "email")], "other_known": []}, andre=True))
+        att = self.ok(post("/tenants/acme/attribution-runs", {"request_id": rid(), "month": "2026-09"}), 201)
+        ids["fid"] = att["run_id"]
         s = self.ok(post("/tenants/acme/schedules", {
             "request_id": rid(), "domain": DOMAIN, "scheme": "http", "every_days": 7, "invoice_id": invoice_id(2),
             "paths": ["/", "/about", "/t/" + urllib.parse.quote(c.new("flow", "schedule_path", "prose"), safe="")],
@@ -592,6 +602,17 @@ class World:
         if key in (f"GET {P}/tenants/{{tid}}/citation-runs/{{cid}}",
                    f"GET {P}/tenants/{{tid}}/citation-runs/{{cid}}/mnc-priority"):
             return s({**A, "cid": ids["cid"]})
+        if key == f"PUT {P}/tenants/{{tid}}/plan":
+            return s(A, {**r, "plan": "managed_2", "revenue_basis": "crm"}, andre=True)
+        if key == f"PUT {P}/tenants/{{tid}}/channel-map":
+            return s(A, {**r, "organic_search": ["Google Search"], "ai_referral": ["ChatGPT"],
+                         "other_known": ["Trade show"]}, andre=True)
+        if key == f"POST {P}/tenants/{{tid}}/attribution-runs":
+            return s(A, {**r, "month": "2026-09"}, expect=201)
+        if key == f"GET {P}/tenants/{{tid}}/attribution-runs":
+            return s(A)
+        if key == f"GET {P}/tenants/{{tid}}/attribution-runs/{{fid}}":
+            return s({**A, "fid": ids["fid"]})
         if key == f"POST {P}/tenants/{{tid}}/log-ingests":
             return s(A, {**r, "domain": DOMAIN, "scheme": "http", "format": "combined"}, expect=201)
         if key == f"POST {P}/tenants/{{tid}}/log-ingests/{{iid}}/chunks":
@@ -735,7 +756,8 @@ def non_owner_reads(w: World) -> dict:
                      f"/tenants/{tid}/citation-runs/{ids['cid']}",
                      f"/tenants/{tid}/citation-runs/{ids['cid']}/mnc-priority", f"/tenants/{tid}/log-ingests",
                      f"/tenants/{tid}/log-ingests/{ids['iid']}", f"/tenants/{tid}/schedules",
-                     f"/tenants/{tid}/schedules/{ids['sid']}", f"/tenants/{tid}/prompt-sets/{ids['psid']}"):
+                     f"/tenants/{tid}/schedules/{ids['sid']}", f"/tenants/{tid}/prompt-sets/{ids['psid']}",
+                     f"/tenants/{tid}/attribution-runs", f"/tenants/{tid}/attribution-runs/{ids['fid']}"):
             r = take(path, "hub", tenant="globex")
             assert r.status_code in ((200, 403, 404) if tid == "globex" else (403, 404)), (path.split("/")[3:4],
                                                                                           r.status_code)

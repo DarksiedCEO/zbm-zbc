@@ -21,7 +21,7 @@ from envelope import sha
 from errors import Conflict, Forbidden, Invalid, Unavailable
 from reasons import R
 
-AGENTS = ("selene", "delia", "roman", "entity_check", "callum", "naomi", "osei")
+AGENTS = ("selene", "delia", "roman", "entity_check", "callum", "naomi", "osei", "farrah")
 # The agent registry (ADR 0046, owner rule: every agent has a human name, ONE job, and an entry with its assignment,
 # inputs and outputs). Shared plumbing (primitives/, answer_adapter.py and the engine adapters, the ports) is not an
 # agent and is not listed. Shown on GET /seo/v1/department.
@@ -53,10 +53,17 @@ REGISTRY = {
              "inputs": ["every run's quarantines and observations", "Search Console (when bound)",
                         "two completed audits"],
              "outputs": ["data_hygiene and search_performance envelopes", "drift reports"]},
+    # farrah-spec/1 B-FA-01 (CB-1): byte for byte
+    "farrah": {"assignment": "monthly revenue attributed to organic search and AI referrals, as a figure with a band "
+                             "and a confidence label",
+               "inputs": ["osei.dataset/1 (analytics, crm) for the month", "osei.reconciliation/1",
+                          "osei.panel_freshness/1", "the tenant's plan (config pricing table)"],
+               "outputs": ["farrah.revenue_attribution/1"]},
 }
 # Named in the spec, NOT built (no code, no registry entry until they are): Adaeze (content gap) is a consumer of
-# callum.mnc_priority/2; Marcus, Priya, Theo, Zara, Idris, Vesper, Julian, Sable, Farrah (ADR 0017).
-NOT_BUILT_AGENTS = ("adaeze", "marcus", "priya", "theo", "zara", "idris", "vesper", "julian", "sable", "farrah")
+# callum.mnc_priority/2; Marcus, Priya, Theo, Zara, Idris, Vesper, Julian, Sable (ADR 0017). Farrah is built
+# (farrah-spec/1, svc_attribution.py).
+NOT_BUILT_AGENTS = ("adaeze", "marcus", "priya", "theo", "zara", "idris", "vesper", "julian", "sable")
 STATES = ("active", "watch", "retrain", "restricted", "retired")
 MOVES = {"active": ("watch", "restricted"), "watch": ("active", "retrain", "restricted"),
          "retrain": ("active", "watch", "restricted"), "restricted": ("active", "retrain", "retired"),
@@ -169,6 +176,7 @@ class ManagerMixin:
                 if agent == "osei" else None,
                 "engine_runs": self.engine_scorecard() if agent == "callum" else None,
                 "citation_runs": self.citation_scorecard() if agent == "callum" else None,
+                "attribution_runs": self.attribution_scorecard() if agent == "farrah" else None,
                 "basis": "completed audit reports, finished log ingests, recorded drift reports and (Callum) "
                          "recorded answer-engine reservations and settlements"}
 
@@ -178,7 +186,9 @@ class ManagerMixin:
         for s in self.schedules.values():
             if s["status"] == "active" and str(self._slot(s)) not in s["slots"]:
                 due += 1
-        q = {"audits_running": running if agent != "osei" else 0, "schedule_slots_due": due}
+        q = {"audits_running": running if agent not in ("osei", "farrah") else 0, "schedule_slots_due": due}
+        if agent == "farrah":
+            q["attribution_runs_running"] = len(self.running_attribution)
         if agent == "selene":
             q["log_ingests_open"] = sum(1 for g in self.log_ingests.values() if g["status"] == "open")
         return q
