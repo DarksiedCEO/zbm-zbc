@@ -1861,10 +1861,11 @@ spelling classes.
     - **F2, F3, strict lane only** (`_STRICT_SEQ`, `_MARKED_STRICT`; `_strict_alternatives`): the label's WHOLE
       words (same word boundaries, proclitics, endings; the Korean compound's declared words apart too) joined by
       one to three characters that are no letter (`_STRICT_JOIN`: punctuation, symbols, digits, spaces, "_"), and
-      the label spelled one unit at a time with one of 57 separators (`_STRICT_SPACERS`: each of
-      `/ , : | + = ; ~ * - _ .`, the middle dot and the bullet, alone, with a space after, before, or on both
-      sides; the declared written spellings, i.e. the stem ffd28ca8 listed, too; a two-unit label only as a word
-      of its own). The client view never read these (its letters had a space or "_" between them at most) and
+      the label spelled one unit at a time with ONE generic gap between two units (`_STRICT_GAP`: one to three
+      characters that are no letter; the declared written spellings, i.e. the stem ffd28ca8 listed, too; a two-unit
+      label only as a word of its own). (Correction, round 8, G-8 of core-spec/1: this entry first named a list of 57
+      separators, `_STRICT_SPACERS`; no such list exists in the code, which uses the one generic gap, as M6 below
+      says.) The client view never read these (its letters had a space or "_" between them at most) and
       does not; a value after them is shown as at ffd28ca8 and cbdf5e78 (M4).
     - **F4.** The join in `_declared_alternatives` is built outside the f-string. `import api` from `src/` on
       Python 3.11.18, 3.12.3 and 3.13.18 (`uv venv -p /usr/bin/python3.11` / `3.12` / `3.13`, `uv pip install -r
@@ -1888,11 +1889,14 @@ spelling classes.
     | Latin entries, the same classes | 503,104 | 0 / 0 | 0 / 0 |
     | E: the in-word classes after a space, a tab, a line break, two spaces, ", ", "; ", " / ", " -- ", "... ", " , " (Korean syllables: the first three) | 722,800 | 630,800 / 0 (no client view read these) | 3,380 / 0: Hindi only |
 
-    read(ffd28ca8) U read(cbdf5e78) minus read(now) is EMPTY over these classes but the Hindi cells, which
-    ffd28ca8 did not read (the closed join S-1). Read now and by neither release: strict 288 (the Hindi label
+    read(ffd28ca8) U read(cbdf5e78) minus read(now) is EMPTY over these classes, AS THIS ROUND'S OWN GENERATOR MADE
+    THEM, but the Hindi cells, which ffd28ca8 did not read (the closed join S-1). (Correction, round 8: untrue
+    outside that generator; review rv-sink8 found five classes it did not hold, SP-24, SP-25, SP-29, SP-34 and SP-35
+    of core-spec/1: decision 76.) Read now and by neither release: strict 288 (the Hindi label
     spelled with the new separators), client view 2,664 (Greek F1 partial-accent forms 1,536, the label's own
     word; 1,128 spelled forms and tails cbb6d7b7 already masked). The claim "no form lost" is made over THIS class
-    list and decision 74's M1 list only.
+    list and decision 74's M1 list only. (From decision 76 on, every such claim is made over "the R cells of
+    core-spec/1", the frozen class list of the spec, and nothing else.)
 
     **M2** (`h/m2_7.py`, `h/m2_7diff.py`; 18 languages, wordfreq top 30,000, Thai 65,087 words; the words, every
     candidate pair and triple in four forms, and every pair also joined by "/" ":" "," "+" "|" ", " " - " "="
@@ -1952,7 +1956,9 @@ spelling classes.
     **Residuals (exact, M1+).** The Hindi label inside a longer written word is not read (strict 5,408 cells,
     client view 3,616): cbdf5e78 read it, ffd28ca8 did not, and it is the closed join S-1 (decision 73). Letters
     after a label are not masked by the client view (as at ffd28ca8 and cbdf5e78: M4 42 of 42 values shown at all
-    four releases). F2 and F3 forms are not masked by the client view (as at both releases).
+    four releases). F2 and F3 forms are not masked by the client view (as at both releases). (Correction, round 8:
+    untrue for one F2 shape, SP-24 of core-spec/1: a multi-word label with each word spelled with "_" and its words
+    apart by a space was masked by ffd28ca8 and cbdf5e78, and not here; read again in both lanes by decision 76.)
 
     **Tests.** `tests/test_review_cbb6d7b7.py` (24 tests): a noun or an undeclared letter before
     the label (Korean, Russian, Ukrainian, both Arabic labels spaced and glued, with a tatweel or each invisible
@@ -1982,6 +1988,143 @@ spelling classes.
     client view), label words joined by other characters (strict only), the two-letter spelled label with a letter
     joined and three separators between units (strict only), the derived joins (OWNER DECISION: glued, those whose
     letters end with a label are masked with a value: 24, ru 12, uk 11, he 1).
+
+## Review of 186471eb and the frozen spec core-spec/1: built to the spec, the permanent conformance suite
+
+Review rv-sink8 (of 186471eb) found four label classes unread (MUST-1 a multi-word label with each word spelled with
+"_" and its words apart by a space, shown to the owner; MUST-2 a label word split once inside, at many positions and
+endings; MUST-3 the stem ffd28ca8 listed with its words apart, and dotted in capitals; MUST-4 a label inside a longer
+word combined with the F2 joins or the F3 separators), six mutant survivors that were real gaps of the tests, and
+untrue statements in decision 75. The owner then froze the bar: `core-spec/1` (2026-11-13, every question at its
+default), a FINITE closed list of spelling classes (SP-01..40) x separators (SEP-1..5) with a required verdict per
+lane, the over-tightening corpora with their exact allowed counts, and a permanent conformance suite
+(`tests/conformance/`, SUITE_PLAN.md). Certification is pass / fail against the spec's numbered items and the suite.
+
+76. **Built to core-spec/1: every R cell of the spec read in its lanes, nothing ordinary newly read; the conformance
+    suite is the bar and only grows.**
+
+    **What the code does now** (`secret_guard.py`, section 2a; every rule is a listed SP row):
+    - **SP-24** (`_seq_alternatives`, both lanes): a multi-word label with each word spelled with "_" and its words
+      apart by one space (its endings spelled on the last word).
+    - **SP-25** (`_split_any_alternatives`, `_SPLIT_ANY`, `_SPLIT_MARKED`, `_SplitRx`): a label word split ONCE inside
+      by " ", "_", "-" or "." (the no-break space, a line break, a zero-width space + space: the views read each as a
+      space), at any inner position, with every declared ending or written form, on the view as written (`_WRITTEN`,
+      `_written`: no hamza / madda folded, a Greek letter with or without accents), the boundary rule's word start and
+      end, the proclitics. Each split is a named group and a nested conditional fails an alternative that took none
+      (the regex goes on to the next reading rather than stopping on the word written whole); a match counts with
+      exactly one split (two or more is no listed class: the mixed-separator spelling of review cbdf5e78 stays
+      unmasked, the pinned Thai triples hold two). The strict lane takes a split by any of the four characters, the
+      client view by a space or "_" (as ffd28ca8's and cbdf5e78's client views read a script label's letters). Never
+      after a CAPITAL sigma (`_SplitTable`: capitals do not tell a final sigma, and "CODE TO BAS-" in capitals is the
+      pinned Greek phrase), never between the Hindi label's two halves (residual c, the pinned Hindi pairs) nor the
+      Thai label's two words (the pinned Thai pairs), never between a letter and its mark. One alternative per
+      spelling: the pattern is 16 KB and compiles in 16 ms.
+    - **SP-29** (`_inword_alternatives`, strict "any"): inside a longer word the label's words may also be joined by
+      " - " or one to three F2 characters with no white space among them (`_INWORD_JOIN`: "admin" + the Arabic words
+      apart by ", " or " / " stay other words, review of cbb6d7b7) and the label may be spelled with the F3 separators
+      only (`_INWORD_GAP`, `_inword_spelled`: a label spelled with " ", "_", "-", "." and a letter joined to it is
+      another word, review 0334eeae; a two-unit label spelled is a word of its own, P-6e / P-6f); the stem ffd28ca8
+      listed joined and spelled likewise. Still only before a separator and a value.
+    - **SP-34 / SP-35** (`_declared_alternatives`, `_strict_alternatives`): the stem ffd28ca8 listed with its words
+      apart by a space or "_" (both lanes; its second word ends there), and joined by 1-3 non-letters (strict: dotted
+      in capitals).
+    - **Latin forms the suite's generator found unread at every release (ffd28ca8, cbdf5e78, 186471eb)**: a short
+      label spelled one letter at a time followed by a value whose first letter stands alone (`a u t h: q?0bj`) or
+      by another separator (`a_u_t_h - v`) (`_spelled_piece`: the single letters grouped while the separator between
+      two stays the same; a last letter that starts a value-looking token is dropped; a group that continues a
+      single-letter run with another separator is `_spaced_label`'s); a short label as the last camelCase piece
+      (`userAuth`, `myPin`, `userCl\u00e9`) before a separator and a value (`_camel_tail_label`, `_CAMEL_TAIL`; bare it
+      is an identifier); a split short label of `_NO_PAIR_JOIN` (`s id`, `c le`, `p w`) before any listed separator
+      and a value holding a letter and a non-letter (`_value_after`: "customer's ID is 48213" stays prose); the client
+      view's letter-spaced view keeps a lone dash that ENDS the run apart (`a c c e s s _ k e y \u2013 value`), not one
+      inside it (`x - a p i - k e y`).
+
+    - **Overlapping script labels in the client view** (`_cv_script_value`, `_OVERLAP_MAX`): two Han labels that
+      share a letter in one unspaced run ("mouth order" + "token") were read only as the first; a match is also tried
+      at each of the next positions inside an earlier one, up to 24 characters (the heavy matrix found it; the first
+      fix retried every position of a whole-word match and was quadratic on a long Korean word: the PF-3 smoke of the
+      CI lane caught it).
+
+    - **Cost** (PF-1 / PF-3 of the gate found the first candidates over the bar): the per-letter spelled-piece pass
+      runs only when the view holds two single letters of a script a Latin piece label can be written in with one to
+      three separator characters between them (`_SPELLED_PAIR`: a Devanagari word, split into single letters by its
+      marks, took it on 560 of 1,000 Hindi sentences, +16% strict); the camelCase pass only on a view with an
+      upper-case letter; the script value test only on a view holding a separator character or word of `_CV_AFTER`
+      (`_CV_SEP_HINT`, output-identical); long views (4,096 characters and more) are translated once per table per
+      call (`_translated`), and the split filter counts its groups in C.
+
+    **The conformance suite** (`tests/conformance/`, marker `conformance`, run with the service's suite and alone:
+    `python -m pytest -q -p no:cacheprovider -m conformance tests/conformance`, 3 min 13 s on the review box (2 cores, loaded);
+    heavy lane `CONFORMANCE_HEAVY=1 CONFORMANCE_SHARD=i/n ... -m conformance_heavy`, `tools/gate.sh`). The suite's own
+    escaped copy of the 101 entries (`core_ref.py`), the forms of every SP row (`core_forms.py`), the required
+    verdicts by rule (`core_matrix.py`: SP x SEP x M-2, never from a release), the CI sample (10 cells of every
+    (entry, SP, SEP class) triple: 107,020 cells) and the heavy enumeration (every form x SEP class: 4,877,192
+    cells), the URL places of M-3, the five MUST classes and the six P-6 rules, the end-to-end run of P-4, the pinned
+    collisions of O-4 PIN, the ordinary corpora of O-4 (N, F, U, MV, I, H, W derived joins) against the frozen
+    verdicts of ffd28ca8, cbdf5e78 and 2b26d980 (`data/baseline/*.json.gz`, one verdict string per item, no text,
+    stream-hash guarded; `tools/calibrate.py`, run once), an independent "own words" oracle (`oracle/core_own_words.py`:
+    the listed classes written out, holds every STRICT-R cell of the CI sample and no pinned collision), strong keys,
+    the client view's other findings, caps, performance (`tools/pf.py`), import on 3.11 / 3.12 / 3.13 and 288
+    environments, the residuals, the manifest (`data/manifest.json`) and the registry (`registry.json`: every item
+    of the spec has a test; a registered test cannot disappear; the count only grows).
+
+    **Measurements** (the suite's own generators; counts):
+
+    | measurement (the suite's generators) | 186471eb | now |
+    |---|---|---|
+    | CI matrix sample (107,020 cells): R cells unread, strict / client view | 1,595 / 229 | 0 / 0 |
+    | ... by class at 186471eb (strict / client view) | SP-11 16/6, SP-20 137/0, SP-22 129/0, SP-24 0/150, SP-25 569/26, SP-29 455/0, SP-32 8/5, SP-34 32/23, SP-35 40/0, SP-38 135/0, SP-40 74/19 | 0 |
+    | N cells read (client view) | 0 | 0 |
+    | heavy matrix (every form x SEP class: 4,877,192 cells): R cells unread | (not run) | deferred to the lead gate (a run on the previous candidate found 6 client-view cells, S08 in SP-27, two Han labels overlapping in one run: fixed, `_OVERLAP_MAX`; not re-run on the final code) |
+    | M-3: 5,000 STRICT-R cells x 4 URL places, fetched | - | 0 of 20,000 |
+    | P-4 end to end: 43 forms (36 CV-R) x 3 values: CV-R values shown / values on disk | - | 0 / 0 (CV-O shown: SP-22, 23, 28, 35, 3 each) |
+    | O-4 PIN, 7 sets (2,379 texts) read bare / with a value | 0 / 0 | 0 / 0 |
+    | O-4 W CI derived joins (5,488 texts x 6 lanes): NEW | - | 0 (allowed: read by ffd28ca8 5,224; own words 323; Thai 0) |
+    | O-4 N 7,840 sentences: new vs ffd28ca8 / Thai (a) / read by ffd28ca8 only | 0 / 12 / 504 | 0 / 12 / 492 |
+    | O-4 F 5,000 fuzz texts, new without a label token | - | 0 |
+    | O-4 U 13,000 URLs newly unfetched outside own words | - | 0 |
+    | O-4 H 10,000 + 171 hosts newly refused vs ffd28ca8 / vs 2b26d980 | 0 / 22 (P2 class) | 0 / 22 (P2 class, excluded) |
+    | O-4 MV 5,700 machine values / O-4 I 4,000 ids: differences / refused | 0 / 0 | 0 / 0 |
+    | O-4 UP: ffd28ca8 / cbdf5e78 data dirs (4 tenants, 29 IDN domains): 5xx / missing | - | 0 / 0 |
+    | PF (box: 2 cores at load 6-9, other builders running) | PF-1 in-process A/B, both orders: 186471eb / ffd28ca8 0.56..1.37 | the same within noise in every cell (build / ffd28ca8 0.66..1.24; the tool's two-run rule flagged hi and de strict, a 3-way A/B shows them at 186471eb's cost: hi 1.24 vs 1.37, de 0.94 vs 0.96): NOT conclusive under this load, to be re-measured at the lead gate. PF-2 cold start 0.90x (24 interleaved processes). PF-3 worst 64k 0.65 s, vs ffd28ca8 <= 2.38x except the Korean particle run, strict 2.34-2.65x (186471eb 2.42x); the per-doubling bound is not measurable at this load (single doublings swing 0.7-7x run to run) |
+    | mutants (G-6) | 6 P-6 survivors | 40 run (the six P-6 mutants, the three other rv-sink8 survivors, 31 over this round's code): 40 killed |
+
+    **Open spec questions (STOPPED items, not decided by the build; each reported by the suite, none judged).**
+    (1) SP-29 client view: "R where the in-word part alone is CV R (SP-26 / 27)" reads
+    literally as noun / letter before + SP-22 / 23 = CV R, but SP-22 / 23 are CV O and P-5 states 0 client-view misses
+    for SP-29 at 186471eb; the suite reports those cells (`Q:SP29`). (2) SP-31 client view for a Han / kana / Thai
+    label with letters AFTER it in the run: SP-28 (letters after) is CV O and no release's client view reads them
+    (`Q:SP31`). (3) SP-25 asks for S20 split by a space in both lanes; split at its compound boundary ("code" | "pass")
+    it is one of the pinned Thai pairs of O-4 PIN, which must stay N: the build does not split there (`Q:SP25T`).
+    (4) SP-25 in UPPER, split right after a sigma: the Greek label in capitals is then the pinned "CODE TO BAS-"
+    phrase (capitals do not tell a final sigma): not read (`Q:SP25S`). (5) O-4 N "0 differences vs ffd28ca8": on the
+    suite's neutral draw 186471eb and the build both leave unread sentences ffd28ca8 read by its letters-anywhere rule
+    (Hebrew, Ukrainian, Arabic, Russian: closed by decision 73), so the test asserts no NEW read and reports the
+    others. (6) P-6e / P-6f name the Han / kana two-character entries, but SP-31 reads those labels as substrings of
+    the letters-only view at every release: the guard is pinned on the Hangul two-unit labels. (7) O-4 H vs 2b26d980
+    "0 in all six lanes": generated hash-like hosts with a 9+ digit run and fewer than 4 hex letters are refused by the
+    host rule as H-1 requires (the P2 class, decision 64), which 2b26d980 took: excluded from that comparison and
+    counted. (8) The 648 real hosts of O-4 H are not available to the builder: the suite holds the 171 real hosts
+    already embedded in the tests.
+
+    **Interpretations taken where the text needed one** (recorded, owner may correct): "pw" spelled in SP-20 / 22 / 25 / 40 is the text of R-d5 (strict X); SEP-3b / 4b in the
+    strict lane take the M-2 bare verdict ("R (label word)": the whole-word classes R, the others O); a bare form of a
+    class outside SP-01..24 / 32 is O; "multi-word entry" (SP-18 / 19 / 23 / 24) is a multi-word SCRIPT entry and
+    S12's words apart (a Latin entry is one word; its natural spellings are SP-01..05 bases); a client-view N cell is
+    judged on the label finding (the Azure strong-key rule of K-1, frozen, masks "Shared Access Signature" prose);
+    the sigma-family code points are no SP-36 lookalike of a letter inside a label (their reading depends on the
+    position); an SP-36 / 37 code point whose compatibility form puts a short label in mixed case is the SP-06 text
+    (strict X d3); the Hindi label split at its halves is R-c; SP-29's spelled combinations skip the two-unit labels
+    (P-6e / P-6f).
+
+    **Residuals.** R-d5 ("pw" spelled letter by letter, strict) is read now before a separator and a value (the split
+    short-label rule above): it closes; the others are unchanged and sized by `test_core_residuals.py`.
+
+    **Tests.** `tests/conformance/` (156 tests in 20 modules; the heavy lane's tests skip unless enabled).
+    Changed assertion of an earlier file (G-7, moving toward the spec): `tests/test_review_0334eeae.py`
+    `test_boundary_joins_derived_from_the_entries_are_not_read`: a derived join whose glued form is a label word,
+    written with "-" or "." between its two words, is that label split once (SP-25): now asserted FLAGGED and still not
+    masked (26 joins), except the Hindi label's halves and the Thai label's words, which stay other words.
 
 ## Threat model
 

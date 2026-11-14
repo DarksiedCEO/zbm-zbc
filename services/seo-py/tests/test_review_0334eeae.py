@@ -375,15 +375,24 @@ def test_boundary_joins_derived_from_the_entries_are_not_read():
     assert all(not any(k in _letters(w) for k in keys) for ws in SAMPLE.values() for w in ws)
     joins = derived_joins()
     assert sum(len(j) for j in joins.values()) >= 200 and sum(1 for j in joins.values() if j) >= 7
-    bad, own, glued_read = [], 0, []
+    bad, own, glued_read, split_read = [], 0, [], []
     for lang, js in joins.items():
         for ws in js:
             # a join whose words glued ARE a label word (a declared form: "pa" + "rol'"): glued it is that word, and
-            # with ONE space inside it it is read as written (decision 73, as ffd28ca8 read it); with "-" or "." not
+            # with ONE space inside it it is read as written (decision 73, as ffd28ca8 read it); with "-" or "." it
+            # is that word SPLIT ONCE (core-spec/1 SP-25, round 8: STRICT R; the client view reads a split by a
+            # space or "_" only, so it is not masked)
             itself = flagged("".join(ws))
             own += itself
             for sep in (" ", "-", "", "."):
                 t = sep.join(ws)
+                # (not the Hindi label's two halves, residual c, nor the Thai label's two words, the pinned Thai
+                # pairs: those stay other words, as before)
+                if itself and sep in ("-", ".") and len(ws) == 2 and lang not in ("hi", "th"):
+                    split_read.append((lang, js.index(ws), sep))
+                    if not flagged(t) or masked(f"{t}: {value(r)}") or masked(f"{t}: ready today"):
+                        bad.append((lang, js.index(ws), sep))
+                    continue
                 if itself and sep in ("", " ") or lang == "th" and sep == "" and cbd.THAI in t:
                     continue                                   # (and residual (a): the Thai label as written)
                 if flagged(t) or sep != "" and (masked(f"{t}: {value(r)}") or masked(f"{t}: ready today")):
@@ -399,6 +408,7 @@ def test_boundary_joins_derived_from_the_entries_are_not_read():
                     glued_read.append((lang, js.index(ws)))
     assert bad == [] and own > 0
     assert len(glued_read) == 24                                    # ru 12, uk 11, he 1
+    print(f"derived joins that are a label split once by '-' or '.' (SP-25, flagged): {len(split_read)}")
 
 
 def test_a_new_bad_entry_is_caught_by_the_derived_joins(monkeypatch):

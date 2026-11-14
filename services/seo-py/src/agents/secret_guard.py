@@ -32,6 +32,7 @@ from __future__ import annotations
 import base64
 import binascii
 import html
+import itertools
 import re
 import re._parser as _sre_parse
 import threading
@@ -883,7 +884,25 @@ _SCRIPT_WORD = _ScriptWordTable()
 
 def _script_word_view(v: str) -> str:
     """The word view of the view ``v``: what the script labels are matched on by the boundary rule (both lanes)."""
-    return v.translate(_SCRIPT_WORD)
+    return _translated(v, _SCRIPT_WORD)
+
+
+_TRANSLATED = threading.local()
+_TRANSLATED_MIN = 4096                    # characters: a shorter view is translated again (cheaper than the lookup)
+
+
+def _translated(v: str, table) -> str:
+    """``v.translate(table)``, the last results for this thread kept for a LONG view (the same view is read through the
+    same table by several rules; review of 186471eb's PF-3 shapes: a 64 KB word was translated six times)."""
+    if len(v) < _TRANSLATED_MIN:
+        return v.translate(table)
+    memo = getattr(_TRANSLATED, "memo", None)
+    if memo is None or memo[0] is not v:
+        memo = _TRANSLATED.memo = [v, {}]
+    r = memo[1].get(id(table))
+    if r is None or r[0] is not table:
+        r = memo[1][id(table)] = (table, v.translate(table))
+    return r[1]
 
 
 def _in_blocks(o: int, blocks) -> bool:
@@ -1136,6 +1155,11 @@ def _seq_alternatives(spell) -> list:
     units = "".join(words)
     out += [f"(?<!{first}){_spelled(units, s)}{_ending_alt(endings, last, s)}(?!{last})" for s in _SPACERS
             if len(units) >= 3 or s in " _"]
+    # a multi-word label with EACH word spelled one letter at a time with "_" and its words apart by one space (review
+    # of 186471eb MUST-1; core-spec/1 SP-24): ffd28ca8 and cbdf5e78 read it in both lanes
+    if len(words) > 1:
+        spelled_words = " ".join(_spelled(w, "_") for w in words)        # (built outside the f-string: 3.11)
+        out.append(f"(?<!{first}){spelled_words}{_ending_alt(endings, last, '_')}(?!{last})")
     # a two-letter label with a hyphen or a dot between its letters: only the WHOLE entry so spelled, as a word of
     # its own (no letter of its script before or after it, nor another letter joined by the same separator), no
     # ending (review of ced056c5: brief item 4, the spaced-letter form with one uniform separator)
@@ -1186,6 +1210,10 @@ def _declared_alternatives(entry: str, spell) -> list:
         units = view(x.replace(" ", ""))
         if units not in have:
             out += [f"(?<!{first}){_spelled(units, s)}(?!{last})" for s in _SPACERS]
+            # its words apart by one space or "_" (review of 186471eb MUST-3; core-spec/1 SP-34: the stem ffd28ca8
+            # listed, as its client view read it before a separator); its second word ends there (no letter after)
+            apart = "[ _]".join(re.escape(view(w)) for w in x.split(" "))
+            out.append(f"(?<!{first}){apart}(?!{last})")
     return out
 
 
@@ -1207,6 +1235,14 @@ _MARKED_SEQ = _seq_pattern(sp for sp, _k in _SPELL_KEYS if sp[0])
 # never read these (its letters had a space or "_" between them at most), and does not.
 _STRICT_JOIN = "[\\W\\d_]{1,3}"                          # one to three characters that are no letter
 _STRICT_GAP = "[\\W\\d_]"                                 # a character that is no letter (the spelled units)
+# inside a longer word (review of 186471eb MUST-4; core-spec/1 SP-29 + SP-23): the label's words apart by one space (as
+# before) or joined by " - " or by one to three of the F2 characters with no white space among them ("admin" + the
+# Arabic words apart by ", " or " / " are other words: review of cbb6d7b7)
+_INWORD_JOIN = "(?: - |[.\\/:,+|_\\-\\d]{1,3}| )"
+# ... and spelled one unit at a time inside a longer word with the F3 separators only (core-spec/1 SP-22: "/" "," ":"
+# "|" "+" ";" "~" "*" "=" the middle dot, the bullet, alone or with a space before / after / both, and " . "); a label
+# spelled with " ", "_", "-" or "." (SP-20) and a letter joined to it is another word (review 0334eeae)
+_INWORD_GAP = "(?: ?[\\/,:|+;~*=\u00b7\u2022] ?| \\. )"
 
 
 def _strict_spelled(units: str) -> str:
@@ -1214,6 +1250,14 @@ def _strict_spelled(units: str) -> str:
     a mark that stays on its letter)."""
     return re.escape(units[0]) + "".join(
         _STRICT_GAP + ("{0,3}" if unicodedata.category(u)[0] == "M" else "{1,3}") + re.escape(u) for u in units[1:])
+
+
+def _inword_spelled(units: str) -> str:
+    """``units`` spelled one at a time with the F3 separators between two (``_INWORD_GAP``; a mark may stay on its
+    letter)."""
+    return re.escape(units[0]) + "".join(
+        ("(?:" + _INWORD_GAP + ")?" if unicodedata.category(u)[0] == "M" else _INWORD_GAP) + re.escape(u)
+        for u in units[1:])
 
 
 def _strict_alternatives(entry: str, spell) -> list:
@@ -1237,6 +1281,10 @@ def _strict_alternatives(entry: str, spell) -> list:
         w = _script_word_view(normalise(x.replace(" ", "")))
         if w not in have:
             out.append(f"(?<!{first}){_strict_spelled(w)}(?!{last})")
+            # its words joined by one to three non-letters (review of 186471eb MUST-3; core-spec/1 SP-35: dotted, in
+            # upper case, the capital sigma read as the medial one before the dot)
+            joined_w = _STRICT_JOIN.join(re.escape(_script_word_view(normalise(p))) for p in x.split(" "))
+            out.append(f"(?<!{first}){joined_w}(?!{last})")
     pre = "" if prefix is None else f"[{re.escape(prefix[0])}]{{0,{prefix[1]}}}"
     ending = _ending_alt(endings, last, None)
     parts = [words] if len(words) > 1 else []
@@ -1424,6 +1472,180 @@ def _glued_alternatives(entry: str, spell, inword: str = "") -> list:
 _SCRIPT_GLUED = re.compile("|".join(a for e, (sp, _k) in zip(_SCRIPT, _SPELL_KEYS) for a in _glued_alternatives(e, sp)))
 
 
+# A LABEL WORD SPLIT ONCE INSIDE (review of 186471eb MUST-2; core-spec/1 SP-25): a space, "_", "-" or "." put inside
+# one word of the label at any inner position (the no-break space, a line break, a zero-width space and a space: the
+# views read each as one space), the word with any of its declared endings, in any case. Read AS WRITTEN (``_WRITTEN``,
+# the view the glued spellings are read on: lower case, the tatweel dropped, no hamza, madda or mark folded; a Greek
+# letter with or without its accents, either sigma at a word's end: ``_written``), with the boundary rule's word start
+# and word end and the declared proclitics on the first word; the words of a multi-word label apart as the boundary
+# rule writes them or glued (SP-19). The strict lane reads a split by any of the four (ffd28ca8 and cbdf5e78 flagged a
+# label's letters in a row whatever stood between them); the client view a split by a space or "_" (both releases'
+# client views read a script label's letters with a space or "_" between two). The marked entries (Hindi, Thai) are
+# read on the marked views, each mark on its letter (a split never falls between a letter and its mark); the Hindi
+# label never at the boundary of its two halves (two ordinary words, "near" + "word": the closed joins S-1, residual c).
+# A split is optional between any two units, so one pattern per spelling reads every split position (and the unsplit
+# word, already read by the rules above).
+_SPLIT_CHARS = "[ _\\-.]"
+_HINDI_HALVES_AT = 2                     # units of the Hindi label's first half ("near" / "pass"): no split there
+_THAI_WORDS_AT = 3                       # units of the Thai label's first word ("code"): no split there
+
+
+def _split_units(w: str) -> list:
+    """The units of the written word ``w``: a letter with the marks written on it."""
+    out: list = []
+    for c in w:
+        if out and unicodedata.category(c)[0] == "M":
+            out[-1] += c
+        else:
+            out.append(c)
+    return out
+
+
+class _SplitTable(_WrittenTable):
+    """``str.translate`` table of the split view: the view as written (``_WRITTEN``), the CAPITAL sigma kept apart
+    (as the lunate small sigma, which no label holds): a word written in capitals does not say whether its sigma ends
+    a word, so no split is read right after a capital sigma ("CODE TO BAS-" in capitals, review cbdf5e78 MUST 1)."""
+
+    def __missing__(self, o: int) -> str:
+        r = _SPLIT_SIGMA if o == 0x3A3 else super().__missing__(o)
+        if len(self) < _CMAP_MAX:
+            self[o] = r
+        return r
+
+
+_SPLIT_SIGMA = "\u03f2"
+_SPLIT_VIEW = _SplitTable()
+
+
+def _split_view(v: str) -> str:
+    """``v`` through ``_SPLIT_VIEW`` (the view as written, unless it holds a capital sigma, is the same text)."""
+    return _translated(v, _SPLIT_VIEW if "\u03a3" in v else _WRITTEN)
+
+
+def _split_char(c: str) -> str:
+    """One written character's pattern on the split view: ``_written``, a sigma also as the capital one."""
+    if c == "\u03c3":
+        return "[\u03c3\u03f2]"
+    if c == _FINAL_SIGMA:
+        return "[\u03c2\u03c3\u03f2]"
+    return _written(c)
+
+
+def _split_unit(u: str, gap: str, names: list) -> str:
+    """One unit followed by an optional split (a named group, its name appended to ``names``); never after a capital
+    sigma (``_SplitTable``)."""
+    name = f"s{next(_SPLIT_GROUP)}"
+    names.append(name)
+    if u == "\u03c3":
+        return f"(?:\u03c3(?P<{name}>{gap})?|{_SPLIT_SIGMA})"
+    return "".join(_split_char(c) for c in u) + f"(?P<{name}>{gap})?"
+
+
+def _split_word(w: str, gap: str, names: list, never=(), open_end: bool = False) -> str:
+    """The pattern of the written word ``w`` with a split allowed between two of its units (never before the unit
+    indexes in ``never``); ``open_end``: also after its last unit (an ending follows)."""
+    us = _split_units(w)
+    out = ""
+    for k, u in enumerate(us):
+        if (k == len(us) - 1 and not open_end) or (k + 1) in never:
+            out += "".join(_split_char(c) for c in u)
+        else:
+            out += _split_unit(u, gap, names)
+    return out
+
+
+_SPLIT_GROUP = itertools.count()
+
+
+def _split_alt(words, gap: str, lead: str, close: str, never=(), tails=("",)) -> str:
+    """One split alternative: the written words (apart as the boundary rule writes them, or glued), the declared
+    endings on the last (a split before or inside one; none before an ending that starts with a mark: a mark stays
+    on its letter), and a guard that fails the alternative unless one of its splits was taken, so the regex goes on
+    trying the other readings instead of stopping on the label written whole (which the other rules read)."""
+    names: list = []
+    parts = [_split_word(w, gap, names, never) for w in words[:-1]]
+    ends = [t for t in tails if t]
+    last = _split_word(words[-1], gap, names, never, open_end=bool(ends))
+    if ends:
+        junction = names[-1]
+        alts = []
+        for t in sorted(ends, key=len, reverse=True):
+            no_split = f"(?({junction})(?!)|)" if unicodedata.category(t[0])[0] == "M" else ""
+            alts.append(no_split + _split_word(t, gap, names))
+        last += "(?:" + "|".join(alts) + "|" + f"(?({junction})(?!)|)" + ")"
+    parts.append(last)
+    guard = "(?!)"
+    for n in reversed(names):
+        guard = f"(?({n})|{guard})"
+    return lead + "[ _\\-]?".join(parts) + guard + close
+
+
+def _split_any_alternatives(entry: str, spell) -> list:
+    """The split-once patterns of one script entry (above): its words, a compound's declared words apart and its
+    declared written spellings, on the view as written."""
+    marked, unspaced, words, scripts, endings, prefix, glued = spell
+    if unspaced and not marked:
+        return []                                          # Han, kana: read in the letters, spelled or not
+    gap = _SPLIT_CHARS
+    form = _SCRIPT_FORMS.get(entry, {})
+
+    def written(x: str) -> str:
+        return (_clean_marked(x) if marked else normalise(x)).translate(_WRITTEN)
+
+    if unspaced:                                           # Thai: no word boundary in its script
+        # (never between its two words, "code" + "pass": two ordinary words, the pinned Thai pairs of review
+        # cbdf5e78 MUST 2)
+        return [_split_alt((written(entry),), gap, "", "", (_THAI_WORDS_AT,))]
+    first, last = _word_class(scripts[0]), _word_class(scripts[-1])
+    pre = ""
+    if form.get("prefix") is not None:
+        letters, n = form["prefix"]
+        pre = f"[{re.escape(written(letters))}]{{0,{n}}}"
+    lead, close = f"(?<!{first}){pre}", f"(?!{last})"
+    never = (_HINDI_HALVES_AT,) if marked else ()
+    tails = tuple(written(x) for x in form.get("endings", ("",)))
+    spellings = []
+    if form.get("apart"):
+        # (first: with its optional word gap it also reads the compound split once, ``_SplitRx``)
+        spellings.append(tuple(written(w) for w in form["apart"].split(" ")))
+    spellings.append(tuple(written(w) for w in entry.split(" ")))
+    out = [_split_alt(ws, gap, lead, close, never, tails) for ws in spellings]
+    out += [_split_alt(tuple(written(w) for w in x.split(" ")), gap, lead, close) for x in form.get("written", ())]
+    return out
+
+
+def _split_patterns(marked: bool):
+    alts = [a for e, (sp, _k) in zip(_SCRIPT, _SPELL_KEYS) if sp[0] == marked for a in _split_any_alternatives(e, sp)]
+    rx = re.compile("|".join(alts))
+    # the strict lane takes a split by any of the four; the client view by a space or "_" only
+    return {"strict": _SplitRx(rx, _SPLIT_CHARS), "cv": _SplitRx(rx, "[ _]")}
+
+
+class _SplitRx:
+    """A split pattern whose matches count only with exactly ONE split in them: each split character is a capturing
+    group of the pattern (a word of the label written whole is the other rules' to read; two splits or more are not
+    this class: a label spelled with mixed separators is not shown masked, review cbdf5e78, and the Thai triples of
+    that review hold the label with two spaces in it)."""
+
+    def __init__(self, rx: re.Pattern, chars: str):
+        self.rx, self.pattern, self.chars = rx, rx.pattern, re.compile(chars)
+
+    def finditer(self, s: str):
+        for m in self.rx.finditer(s):
+            gs = m.groups()
+            if gs.count(None) == len(gs) - 1 and self.chars.fullmatch(next(filter(None, gs))):
+                yield m
+
+    def search(self, s: str):
+        return next(self.finditer(s), None)
+
+
+
+
+_SPLIT_ANY = _split_patterns(False)
+_SPLIT_MARKED = _split_patterns(True)
+
+
 # A LABEL INSIDE A LONGER WRITTEN WORD (review cbb6d7b7, ADR 0051 decision 75): the Korean compound with a noun before
 # the label ("administrator" + "password", one word, as Korean writes it), a word with a prefix letter that is not a
 # declared proclitic, the Russian "password" + an adjective ending. ffd28ca8 and cbdf5e78 read every such word
@@ -1463,15 +1685,29 @@ def _inword_alternatives(entry: str, spell, inword: str) -> tuple:
     # a full form of ``_INWORD_FULL``: the Russian nominative, the Greek label's genitive)
     ends = tuple(x for x in (endings or ("",)) if x == "" or _inword_full_ending(words[-1] + x))
     close = f"{last}*(?:-{last}+)*" if inword == "any" else f"{_ending_alt(ends, last, None)}(?!{last})"
-    # between two words of the label: a space, "_" or "-" in the strict lane, a space or "_" in the client view (as
+    # between two words of the label: in the strict lane one to three characters that are no letter (its wider
+    # joins, ``_STRICT_JOIN``: review of 186471eb MUST-4, core-spec/1 SP-29), a space or "_" in the client view (as
     # those releases read them there: no hyphen)
-    between = "[ _\\-]" if inword == "any" else "[ _]"
-    gap = between + "?" if glued else between
+    between = _INWORD_JOIN if inword == "any" else "[ _]"
+    gap = f"(?:{between})?" if glued else between
     seq = [f"{gap.join(re.escape(w) for w in words)}{close}"]
     apart = _SCRIPT_FORMS.get(entry, {}).get("apart")
     if apart:
         parts = tuple(_script_word_view(normalise(w)) for w in apart.split(" "))
         seq.append(f"{between.join(re.escape(w) for w in parts)}{close}")
+    if inword == "any":
+        # the strict lane: the label spelled one unit at a time (its wider gap) inside a longer word, and the
+        # declared written spellings that are not its letters (the stem ffd28ca8 listed) joined or spelled; a two-unit
+        # label spelled is a word of its own only (core-spec/1 P-6e / P-6f)
+        units = "".join(words)
+        if len(units) >= 3:
+            seq.append(f"{_inword_spelled(units)}{close}")
+        have = {units + x for x in (endings or ("",))}
+        for x in _SCRIPT_FORMS.get(entry, {}).get("written", ()):
+            xw = tuple(_script_word_view(normalise(p)) for p in x.split(" "))
+            if "".join(xw) not in have:
+                seq.append(f"{_INWORD_JOIN.join(re.escape(p) for p in xw)}{close}")
+                seq.append(f"{_inword_spelled(''.join(xw))}{close}")
     return seq, _glued_alternatives(entry, spell, inword)
 
 
@@ -1500,7 +1736,7 @@ def _inword_value(v: str, inword: str) -> bool:
     for rx, table in ((seq, None), (glued, _WRITTEN)):
         if rx is None:
             continue
-        wv = _script_word_view(v) if table is None else v.translate(table)
+        wv = _script_word_view(v) if table is None else _translated(v, table)
         for end in _cv_script_ends(v, wv, rx.finditer(wv), table):
             b = _INWORD_GAP_VALUE.match(v, end)
             if b is not None and _cv_valueish(b.group("val").rstrip(".!?:")):
@@ -1541,12 +1777,14 @@ def _script_hit(v: str) -> bool:
         return True
     if g["_SCRIPT_SEQ"].search(_script_word_view(v)) is not None:
         return True
-    if g["_SCRIPT_GLUED"].search(v.translate(_WRITTEN)) is not None:
+    if g["_SCRIPT_GLUED"].search(_translated(v, _WRITTEN)) is not None:
         return True
-    if g["_SCRIPT_SPLIT"].search(v.translate(_LOWER)) is not None:
+    if g["_SCRIPT_SPLIT"].search(_translated(v, _LOWER)) is not None:
         return True
     if g["_STRICT_SEQ"].search(_script_word_view(v)) is not None:
         return True                                        # the strict lane's wider joins (decision 75)
+    if g["_SPLIT_ANY"]["strict"].search(_split_view(v)) is not None:
+        return True                                        # a label word split once inside (decision 76)
     # a label inside a longer written word, followed by a separator and a value (decision 75)
     return _inword_value(v, "any")
 
@@ -1568,8 +1806,10 @@ def _marked_hit(text: str) -> bool:
     """A marked ``_SCRIPT`` label (spelled with a non-spacing mark: the Hindi and Thai entries) on a marked view of
     ``text``, its marks as written (``_MARKED_SEQ`` on the word view, the pattern the client view reads too)."""
     seq, wide = globals()["_MARKED_SEQ"], globals()["_MARKED_STRICT"]
+    split = globals()["_SPLIT_MARKED"]["strict"]
     return seq is not None and any(not mv.isascii() and (seq.search(wv := _script_word_view(mv)) is not None
-                                                         or wide.search(wv) is not None)
+                                                         or wide.search(wv) is not None
+                                                         or split.search(_split_view(mv)) is not None)
                                    for mv in _marked_views(text))
 
 
@@ -1638,12 +1878,16 @@ def _single(t: str) -> bool:
     return len(t.rstrip(":=")) == 1 or (t != "" and not t.strip(":="))
 
 
-def _singles_view(v: str) -> str:
-    """``v`` with each run of single-character tokens (``_single``) joined; every other token keeps its spaces."""
+def _singles_view(v: str, keep=frozenset()) -> str:
+    """``v`` with each run of single-character tokens (``_single``) joined; every other token, and a token of
+    ``keep`` that ENDS a run (the next token is no single character: the separator before a value), keeps its
+    spaces."""
     out: list = []
     run: list = []
-    for t in v.split(" "):
-        if _single(t):
+    toks = v.split(" ")
+    for k, t in enumerate(toks):
+        ends = t in keep and not (k + 1 < len(toks) and _single(toks[k + 1]) and toks[k + 1] not in keep)
+        if _single(t) and not ends:
             run.append(t)
             continue
         if run:
@@ -1677,6 +1921,83 @@ def _fold_words(*words) -> str:
 _PIECES_IN = re.compile("|".join(sorted(_PIECE_KEYS, key=len, reverse=True)))
 
 
+def _value_after(v: str, end: int, mixed: bool = False, gap: bool = True) -> bool:
+    """A separator and a value follow ``v[:end]``: the client view's reading after a label (``_CV_AFTER``,
+    ``_cv_valueish``), or (``gap``) one to four characters that are no letter and a value-looking token of 4+
+    characters, as the strict lane reads after a label inside a longer word (``_INWORD_GAP_VALUE``). ``mixed``: the
+    value must also hold a letter and a character that is no letter (a split short label of ``_NO_PAIR_JOIN``:
+    "customer's ID is 48213" is prose)."""
+    a = globals()["_CV_AFTER"].match(v, end)
+    if a is not None and (a.group("w") is None or _cv_valueish(a.group("val"))):
+        val = a.group("val")
+    else:
+        b = _INWORD_GAP_VALUE.match(v, end) if gap else None
+        if b is None or not _cv_valueish(b.group("val").rstrip(".!?:")):
+            return False
+        val = b.group("val")
+    return not mixed or (any(c.isalpha() for c in val) and not val.isalpha())
+
+
+def _camel_tail_label(v: str, w: str, end: int) -> bool:
+    """The word ``w`` (ending at ``end`` in ``v``) ends with a short label as its last camelCase piece ("userAuth",
+    "myPin", "userCl\u00e9") followed by a separator and a value: as the client view reads it (review of 186471eb;
+    core-spec/1 SP-38). Bare, or with prose after it, such a word is an identifier."""
+    if w.isascii():
+        m = _CAMEL_TAIL.search(w)
+        tail = m.group(0) if m is not None else ""
+    else:
+        k = len(w) - 1
+        while k > 0 and not (w[k - 1].islower() and w[k].isupper()):
+            k -= 1
+        tail = w[k:] if k > 0 else ""
+    return tail != "" and _fold_piece(tail) in _PIECE_KEYS and _value_after(v, end, gap=True)
+
+
+# the last camelCase piece of an ASCII word: an upper-case letter after a lower-case one, and the letters after it
+# (another word is walked letter by letter: ``str.islower`` / ``str.isupper`` of each)
+_CAMEL_TAIL = re.compile(r"(?<=[a-z])[A-Z][^\W\d_A-Z]*$|(?<=[a-z])[A-Z]+$")
+
+
+# two single letters with one to three separator characters between them: the shape ``_spelled_piece`` needs; the
+# letters of scripts a Latin piece label can be written in (Latin, its lookalikes in Greek and Cyrillic, fullwidth and
+# mathematical forms: the piece keys are ASCII), so a Devanagari or Han text never takes the per-letter pass
+_SPELL_LETTER = "[A-Za-z\u00c0-\u024f\u0370-\u03ff\u0400-\u04ff\u1e00-\u1eff\uff21-\uff3a\uff41-\uff5a\U0001d400-\U0001d7ff]"
+_SPELLED_PAIR = re.compile(f"(?<![^\\W\\d_]){_SPELL_LETTER}[ \\t_.\\-/,:|+;~*=\u00b7\u2022]{{1,3}}{_SPELL_LETTER}(?![^\\W\\d_])")
+
+
+def _spelled_piece(v: str, runs: list) -> bool:
+    """A short label spelled one letter at a time with ONE separator between every two letters (review of 186471eb;
+    core-spec/1 SP-20, SP-22, SP-40): the single letters are grouped while the separator between two stays the same,
+    so a separator of another kind after the label (``a_u_t_h - value``) ends the group; a last letter that starts a
+    longer value-looking token (``a u t h g+fMRg4``) is not one of the label's letters."""
+    i, n = 0, len(runs)
+    while i < n:
+        if len(runs[i].group(0)) != 1:
+            i += 1
+            continue
+        j, gap = i, None
+        while j + 1 < n and len(runs[j + 1].group(0)) == 1:
+            g = v[runs[j].end():runs[j + 1].start()]
+            if not g or len(g) > 3 or any(c.isalnum() for c in g) or (gap is not None and g != gap):
+                break
+            gap = g
+            j += 1
+        group = [r.group(0) for r in runs[i:j + 1]]
+        if i > 0 and len(runs[i - 1].group(0)) == 1:
+            g = v[runs[i - 1].end():runs[i].start()]
+            if g and len(g) <= 3 and not any(c.isalnum() for c in g):
+                i = j + 1                                  # (a spelling with mixed separators: ``_spaced_label``)
+                continue
+        cands = [group]
+        tok = v[runs[j].start():].split(None, 1)[0] if j > i else ""
+        if len(tok) >= 4 and _cv_valueish(tok):
+            cands.append(group[:-1])                        # the last letter begins a value
+        if any(len(c) >= 3 and _fold_words(c) in _PIECE_KEYS for c in cands):
+            return True
+        i = j + 1
+    return False
+
+
 def _label_hit(v: str) -> bool:
     if _SIG_RX.search(v) or _KEY_VALUE.search(v):
         return True
@@ -1701,21 +2022,27 @@ def _label_hit(v: str) -> bool:
             return True
     runs = list(_LETTER_RUN.finditer(v))
     words = [r.group(0) for r in runs]
+    cased = v != v.lower()                                 # (a camelCase piece needs an upper-case letter)
     for i, w in enumerate(words):
         f = _fold_piece(w) if len(w) <= 16 else ""
         if f in _PIECE_KEYS and (len(f) >= 5 or w.isascii() is False):
             return True                                    # a whole word in any script (``\u015fifre``)
+        if cased and 2 < len(w) <= 32 and w != w.lower() and _camel_tail_label(v, w, runs[i].end()):
+            return True
         if i + 1 < len(words):
             # a short label split by one space / NBSP / separator (``to ken``, ``P IN``): two adjacent short words
             nxt = words[i + 1]
             if len(w) + len(nxt) <= 16 and (min(len(w), len(nxt)) <= 3 or len(w) + len(nxt) >= 8):
                 g = _fold_words(w, nxt)
                 if g in _PIECE_KEYS and (g not in _NO_PAIR_JOIN or _pair_has_separator(v, w, nxt, runs[i].start(),
-                                                                                    runs[i + 1].end())):
+                                                                                    runs[i + 1].end())
+                                         or _value_after(v, runs[i + 1].end(), mixed=True)):
                     return True
     # a label spelled one letter at a time (``t o k e n``)
     singles = "".join(w if len(w) == 1 else " " for w in words)
     if any(_fold_words(x) in _PIECE_KEYS for x in singles.split() if len(x) >= 3):
+        return True
+    if singles.strip() and _SPELLED_PAIR.search(v) is not None and _spelled_piece(v, runs):
         return True
     if globals()["_spaced_label"](v):
         return True
@@ -3681,11 +4008,33 @@ def _cv_script_ends(v: str, sv: str, matches, table=None) -> list:
     return out
 
 
+_OVERLAP_MAX = 24                         # characters: longer than any label written in one run
+# (only a label of a script written without spaces can overlap another: Han, kana, Thai)
+_UNSPACED_CHAR = re.compile("[\u0e00-\u0e7f\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uff66-\uff9f]")
+
+
+# a character or word every separator of ``_CV_AFTER`` holds: a view without one holds no label + separator + value
+# (the test is skipped in one C pass; output-identical)
+_CV_SEP_HINT = re.compile("[:=>|\u2192\u21d2]| (?i:is|was|are|would|will|remains) | [-\u2013\u2014] ")
+
+
 def _cv_script_value(v: str, rx, table=None) -> bool:
     """A script label that ``rx`` matches on the word view of ``v`` (or on ``v`` through ``table``), followed IN
     ``v`` by a separator and a value."""
-    wv = _script_word_view(v) if table is None else v.translate(table)
-    for end in _cv_script_ends(v, wv, rx.finditer(wv), table):
+    if _CV_SEP_HINT.search(v) is None:
+        return False
+    wv = _script_word_view(v) if table is None else _translated(v, table)
+    matches = list(rx.finditer(wv))
+    if matches and isinstance(rx, re.Pattern):
+        # labels that OVERLAP ("mouth order" + "token" share a letter in an unspaced run): a match of such a script
+        # is also tried at each of the next positions inside it, up to the longest label's length (``_OVERLAP_MAX``:
+        # linear; a match running to the end of a long word is not retried at every position of it)
+        inner = [x for m in matches if _UNSPACED_CHAR.match(wv, m.start())
+                 for x in (rx.match(wv, p) for p in range(m.start() + 1, min(m.end(), m.start() + _OVERLAP_MAX)))
+                 if x is not None]
+        if inner:
+            matches = sorted(matches + inner, key=lambda x: x.end())
+    for end in _cv_script_ends(v, wv, matches, table):
         a = _CV_AFTER.match(v, end)
         if a is not None and (a.group("w") is None or _cv_valueish(a.group("val"))):
             return True
@@ -3694,8 +4043,9 @@ def _cv_script_value(v: str, rx, table=None) -> bool:
 
 def _cv_marked(text: str) -> bool:
     """The client view's marked step: a marked script label and its value on a marked view of ``text``."""
-    rx = globals()["_MARKED_SEQ"]
-    return rx is not None and any(not mv.isascii() and _cv_script_value(mv, rx) for mv in _marked_views(text))
+    rx, split = globals()["_MARKED_SEQ"], globals()["_SPLIT_MARKED"]["cv"]
+    return rx is not None and any(not mv.isascii() and (_cv_script_value(mv, rx) or _cv_script_value(mv, split, _SPLIT_VIEW))
+                                  for mv in _marked_views(text))
 
 
 # ``Bearer <token>`` with only a space (review adacb2ca SHOULD 3): a token of 12+ token characters holding a digit or a
@@ -3726,7 +4076,8 @@ def _cv_label(v: str) -> bool:
     if g["_SCRIPT_RX"].search(letters) is not None or (_WRITTEN_RX is not None and _WRITTEN_RX.search(letters)):
         # the strict lane's patterns (section 2a), then a value
         return (_cv_script_value(v, g["_SCRIPT_SEQ"]) or _cv_script_value(v, g["_SCRIPT_GLUED"], _WRITTEN)
-                or _cv_script_value(v, g["_SCRIPT_SPLIT"], _LOWER) or _inword_value(v, "end"))
+                or _cv_script_value(v, g["_SCRIPT_SPLIT"], _LOWER) or _cv_script_value(v, g["_SPLIT_ANY"]["cv"], _SPLIT_VIEW)
+                or _inword_value(v, "end"))
     return False
 
 
@@ -4282,8 +4633,12 @@ def _cv_label_nospace(v: str) -> bool:
     glued to it)."""
     if " " not in v:
         return False
-    sv = _singles_view(v)
+    # (a dash standing alone is the separator `` - `` after the label: review of 186471eb, core-spec/1 SP-40)
+    sv = _singles_view(v, _CV_LONE_DASHES)
     return sv != v and _cv_label(sv)
+
+
+_CV_LONE_DASHES = frozenset(("-", "\u2013", "\u2014"))
 
 
 def _cv_findings(text: str) -> set:
