@@ -26,6 +26,7 @@ def _readable(blob: str, value: str) -> bool:
 
 
 _HEX = set("0123456789abcdefABCDEF")
+_MACHINE_RUN = 10   # shortest machine run on this surface: a 10-digit epoch
 
 
 def _short_digits(value: str) -> bool:
@@ -34,15 +35,22 @@ def _short_digits(value: str) -> bool:
 
 def _readable_stored(blob: str, value: str) -> bool:
     """``_readable`` for the "stored" surface (log lines, ledger payloads, encrypted objects). The service's own
-    machine numbers there (sha256 / hash-chain hex, epochs, byte counts, ids, throughput) cover ~27% of all 4-digit
-    strings per build, so a short all-digit probe (a 4-digit PIN) sits inside one of them by chance. Such a probe is
-    read only where an occurrence is NOT part of a longer hex/digit run; every other probe and surface: ``_readable``."""
+    machine numbers there (sha256 / hash-chain hex, epochs, ids) cover ~27% of all 4-digit strings per build, so a
+    short all-digit probe (a 4-digit PIN) sits inside one of them by chance. Such a probe is NOT counted only where
+    the occurrence lies inside an unbroken hex/digit run of >= _MACHINE_RUN characters (a hash, an epoch, an id);
+    anywhere else (a label glued to it, a short number around it) it is readable. Review MR-3 / lead ruling
+    2026-11-15 10:45 PT (replaces the "no hex neighbour" rule, which missed e.g. a glued "passcode" label).
+    Every other probe and surface: ``_readable``."""
     if not _short_digits(value):
         return _readable(blob, value)
     start = blob.find(value)
     while start != -1:
-        end = start + len(value)
-        if not ((start > 0 and blob[start - 1] in _HEX) or (end < len(blob) and blob[end] in _HEX)):
+        a, b = start, start + len(value)
+        while a > 0 and blob[a - 1] in _HEX:
+            a -= 1
+        while b < len(blob) and blob[b] in _HEX:
+            b += 1
+        if b - a < _MACHINE_RUN:
             return True
         start = blob.find(value, start + 1)
     return False
