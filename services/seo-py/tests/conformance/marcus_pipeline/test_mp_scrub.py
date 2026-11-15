@@ -25,16 +25,50 @@ def _readable(blob: str, value: str) -> bool:
     return False
 
 
+_HEX = set("0123456789abcdefABCDEF")
+
+
+def _short_digits(value: str) -> bool:
+    return value.isdigit() and len(value) <= 5
+
+
+def _readable_stored(blob: str, value: str) -> bool:
+    """``_readable`` for the "stored" surface (log lines, ledger payloads, encrypted objects). The service's own
+    machine numbers there (sha256 / hash-chain hex, epochs, byte counts, ids, throughput) cover ~27% of all 4-digit
+    strings per build, so a short all-digit probe (a 4-digit PIN) sits inside one of them by chance. Such a probe is
+    read only where an occurrence is NOT part of a longer hex/digit run; every other probe and surface: ``_readable``."""
+    if not _short_digits(value):
+        return _readable(blob, value)
+    start = blob.find(value)
+    while start != -1:
+        end = start + len(value)
+        if not ((start > 0 and blob[start - 1] in _HEX) or (end < len(blob) and blob[end] in _HEX)):
+            return True
+        start = blob.find(value, start + 1)
+    return False
+
+
+def _tag(i: int) -> str:
+    """Digit-free case tag for the filler host / anchor: a decimal index would itself contain short numeric probes
+    (a 4-digit PIN equals a case index once a build has > 1,000 cases) and read as a leak of the test's own filler."""
+    out = ""
+    while True:
+        i, r = divmod(i, 26)
+        out = "abcdefghijklmnopqrstuvwxyz"[r] + out
+        if i == 0:
+            return out
+
+
 def _plant_build(h, cases):
     """Each case -> one page whose URL, link target and anchor carry the planted carrier; returns the job."""
     pages = []
     for i, (where, carrier) in enumerate(cases):
-        src = gen_cc.Page(f"ref{i}.news.example", ("story",))
-        ln = gen_cc.Link("acme.test", ("p",), anchor=f"see {i}")
+        src = gen_cc.Page(f"ref{_tag(i)}.news.example", ("story",))
+        ln = gen_cc.Link("acme.test", ("p",), anchor=f"see {_tag(i)}")
         if where == "anchor":
             ln.anchor = carrier
         elif where == "src":
-            src = _PlantedPage(carrier.replace("site.test", f"ref{i}.news.example"))
+            src = _PlantedPage(carrier.replace("site.test", f"ref{_tag(i)}.news.example"))
         elif where == "dst":
             ln = _PlantedLink(carrier.replace("site.test", "acme.test").replace("docs.google.com", "acme.test")
                               .replace("github.com", "acme.test"))
@@ -82,10 +116,12 @@ def _readable_cases(h, j, cases):
     rows = json.dumps(all_rows(h, j["snapshot_id"]), ensure_ascii=False)
     blobs = {"shards": rows, "stored": stored_bytes(h).decode("utf-8", "replace"),
              "outputs": outputs(h).decode("utf-8", "replace")}
+    ub = {name: unquote(b) for name, b in blobs.items()}
     found = []
     for i, (_where, _c, probes) in enumerate(cases):
         for name, b in blobs.items():
-            if any(_readable(b, p) or _readable(unquote(b), p) for p in probes):
+            rd = _readable_stored if name == "stored" else _readable
+            if any(rd(b, p) or rd(ub[name], p) for p in probes):
                 found.append((i, name))
     return found
 

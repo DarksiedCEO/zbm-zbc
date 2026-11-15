@@ -89,3 +89,10 @@ build re-reads its plan (files, order, targets) from its encrypted staging.
 
 Throughput is reported, not certified (B-MP-26); the real numbers, rel capture and the WAT shape on a real file are the
 Phase-0 spike's (Q-MP-4, owner decision). Residuals R-MP-1..3 accepted as the spec proposes.
+
+## Review round 1 (2026-11-15): test-only changes and readings
+- AC-14 / CB-23 apply to every new module: `svc_link_index.py` now has a generated-mutant lane (24 generated, 24 killed by `test_mp_link_index_edges.py`).
+- O-MP-1 lead test asserts exact row equality, not only the row count.
+- AC-1 harness: filler hosts and anchors are labelled with letters, so a case index can never equal a planted digit value (19 false positives before). On the stored surface (log lines, ledger payloads, encrypted index objects), a planted all-digit probe of 5 characters or fewer counts as readable only where no hex or digit character touches it: such a probe appears by chance inside the service's own sha256 / id fields in about 35% of builds (9 of 26 identical builds, a different field each time), which is not the value being readable. Every other probe and surface is judged unchanged; a plain-text control is still caught 19/19.
+- Reading Q-MP-3: a report whose retention date is exactly now no longer protects its snapshot from retirement.
+- Residuals: duplicate WAT records across different files of one snapshot produce duplicate link rows (9 of 129 in a review probe; A-MP-01 covers duplicates within a file); a core vault key removed between runs is refused by the core integrity gate (503 INTEGRITY_UNVERIFIED) before Marcus runs.

@@ -58,7 +58,8 @@ def test_G_AC_14_pinned_mutants_are_killed(entry):
 
 
 @pytest.mark.lead_gate
-@pytest.mark.parametrize("file", [s[len("src/"):] for s in SCOPE if not s.endswith("__init__.py")])
+@pytest.mark.parametrize("file", [s[len("src/"):] for s in SCOPE if not s.endswith("__init__.py")]
+                         + ["svc_link_index.py"])                     # MR2-F1: the new service module too
 def test_G_AC_14_generated_mutants_lead(file):
     muts = generated(file, 24)
     assert len(muts) >= 20, len(muts)

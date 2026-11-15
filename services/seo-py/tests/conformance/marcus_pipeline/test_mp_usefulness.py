@@ -93,6 +93,8 @@ def test_O_MP_1_realistic_corpus_0_lost_well_formed_links(mp):
 def test_O_MP_1_lead_200_files(mp):
     j, kept, want, _ = _corpus_check(mp, 200, 25)
     assert len(kept) == len(want)
+    key = lambda r: json.dumps(r, sort_keys=True)                         # noqa: E731
+    assert sorted(map(key, kept)) == sorted(map(key, want))               # exact rows, as the fast test (MR2-F4)
 
 
 def test_O_MP_2_ordinary_urls_keep_every_segment_core_keeps():
