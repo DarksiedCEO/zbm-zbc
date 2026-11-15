@@ -120,17 +120,18 @@ def script_ok(code: str) -> bool:
     return code.lower() in cldr("script")
 
 
-def safe_lang(v):
+def safe_lang(v, coded=True):
     """A page's ``lang`` as stored (B-RO-05): None when absent (or only white space), ``invalid`` when it is not a
     BCP 47 tag or its language subtag is not valid in CLDR, else language[-Script][-REGION] normalised (``en-US``,
     ``zh-Hant-TW``), a script or region subtag that is not valid in CLDR left out; a private-use or grandfathered
-    tag (valid, nothing of it on the allowlist) is its ``{c:lang:..}`` code."""
+    tag (valid, nothing of it on the allowlist) is its ``{c:lang:..}`` code (``coded=False``: the lower-cased tag,
+    for the parser's validity bit only; rv-wave1v2r4 F-3)."""
     if not v or not v.strip():
         return None
     t = v.strip()
     low = t.lower()
     if low in GRANDFATHERED or _PRIVATE_USE.fullmatch(t):
-        return codes.code("lang", low)
+        return codes.code("lang", low) if coded else low
     m = _BCP47.fullmatch(t)
     if not m or _repeats(low):
         return "invalid"
@@ -191,8 +192,11 @@ def _run(ctx, pages: dict) -> dict:
         entity = bool(org_nodes)
         entity_seen |= entity
         title = " ".join((x["title"] or "").split())        # B-RO-01 / B-CD-05: measured, never stored
-        lang = safe_lang(x["lang"])
-        if lang == "invalid":
+        # rv-wave1v2r4 F-3: valid / invalid is the parser's bit on the WHOLE raw attribute; the copy is only stored
+        lang_ok = x["lang_valid"]
+        # lead ruling 18:25 PT (C11b): a valid bit whose copy is not itself valid reads as the whole raw value's code
+        lang = (x["lang_code"] or safe_lang(x["lang"])) if lang_ok else "invalid" if lang_ok is False else None
+        if lang_ok is False:
             lang_invalid += 1
         per_page[safe_path(path)] = {"title_withheld": True, "title_length": len(title), "title_empty": not title,
                           "title_same_as_h1": bool(title) and any(" ".join((h["text"] or "").split()) ==
@@ -217,10 +221,10 @@ def _run(ctx, pages: dict) -> dict:
                                     detail={"skips": skips[:10]}))
         if not (x["lang"] or "").strip():                 # R18: lang="" (or only white space) is missing
             findings.append(finding("LANG_MISSING", "low", "measured", "ACT", url=url, capability="P3"))
-        elif lang == "invalid":
+        elif lang_ok is False:
             # B-RO-05 / Q-12: a lang that is not a valid BCP 47 tag (or whose language subtag CLDR does not know)
             findings.append(finding("LANG_INVALID", "low", "measured", "ACT", url=url, capability="P3",
-                                    detail={"lang": codes.code("lang", x["lang"].strip())}))
+                                    detail={"lang": x["lang_code"]}))      # C11b: the WHOLE raw value's code
         too_large = [b for b in sd_invalid if b.get("truncated")]
         bad_json = [b for b in sd_invalid if not b.get("truncated")]
         for b in too_large:
@@ -303,7 +307,7 @@ def _readiness(ctx, path, f, x, h1, sd_errors, sd_invalid, entity, work=None) ->
             "title_present": bool(x["title"]),
             "single_h1": len(h1) == 1, "structured_data_valid": bool(x["jsonld"]) and not sd_errors and not sd_invalid,
             "entity_markup": entity, "text_in_raw_html": x["text_length"] >= RAW_TEXT_MIN,
-            "lang_declared": safe_lang(x["lang"]) not in (None, "invalid"),
+            "lang_declared": x["lang_valid"] is True,
         }
         checks = {k: ("undecided" if v is None else "pass" if v else "fail") if eng in CHECK_APPLIES[k] else "n/a"
                   for k, v in results.items()}

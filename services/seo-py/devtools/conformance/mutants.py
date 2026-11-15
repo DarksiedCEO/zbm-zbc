@@ -276,8 +276,8 @@ MUTANTS = [
       ["test_b_roman.py"]),
     m("ro-08", RO, "    if pages and not entity_seen and \"/\" in pages", "    if False and pages and not entity_seen and \"/\" in pages",
       ["test_b_roman.py"]),
-    m("ro-09", RO, "        elif lang == \"invalid\":", "        elif False:", ["test_b_roman.py"]),
-    m("ro-10", RO, "            \"lang_declared\": safe_lang(x[\"lang\"]) not in (None, \"invalid\"),",
+    m("ro-09", RO, "        elif lang_ok is False:", "        elif False:", ["test_b_roman.py"]),
+    m("ro-10", RO, "            \"lang_declared\": x[\"lang_valid\"] is True,",
       "            \"lang_declared\": bool(x[\"lang\"]),", ["test_b_roman.py"]),
     m("ro-11", RO, "    if lang not in cldr(\"language\"):", "    if False:", ["test_b_roman.py"]),
     m("ro-12", RO, "    if m.group(\"region\") and m.group(\"region\")[1:].lower() in cldr(\"region\"):",
@@ -615,6 +615,20 @@ MUTANTS = [
     m('rv-n19', 'agents/roman.py',
       '"zh-min-nan", ',
       '',
+      ['test_b_roman.py']),
+    # C11 (rv-wave1v2r4 F-3): decide lang validity on the bounded copy again -> a > 500-char invalid tag passes
+    m('c11-01', 'primitives/parse.py',
+      '            self.lang_valid = _lang_valid(a.get("lang"))',
+      '            self.lang_valid = _lang_valid(self.html_lang)',
+      ['test_b_roman.py']),
+    # C11b (lead ruling 18:25 PT): per-page lang and the LANG_INVALID detail on the copy again
+    m('c11b-01', 'agents/roman.py',
+      '                                    detail={"lang": x["lang_code"]}))      # C11b: the WHOLE raw value\'s code',
+      '                                    detail={"lang": codes.code("lang", x["lang"].strip())}))',
+      ['test_b_roman.py']),
+    m('c11b-02', 'agents/roman.py',
+      '        lang = (x["lang_code"] or safe_lang(x["lang"])) if lang_ok else',
+      '        lang = safe_lang(x["lang"]) if lang_ok else',
       ['test_b_roman.py']),
 ]
 

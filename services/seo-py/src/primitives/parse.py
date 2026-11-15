@@ -71,6 +71,28 @@ def _lang_copy(v: Optional[str], n: int = STR_MAX) -> Optional[str]:
     return "-".join(parts) if parts else v[:n]
 
 
+def _lang_valid(v: Optional[str]) -> Optional[bool]:
+    """rv-wave1v2r4 F-3 (B-RO-05, lead ruling 18:40 PT option (c)): the validity of the WHOLE raw ``<html lang>``
+    (white space folded; bounded only by the body read cap; Roman's rule, linear), never of the bounded copy: None
+    when absent or only white space, True when a valid BCP 47 tag, else False. Only this bit leaves the parse call,
+    the raw value is not kept (and not coded)."""
+    from agents.roman import safe_lang
+    s = safe_lang(_s(v, None), coded=False)
+    return None if s is None else s != "invalid"
+
+
+def _lang_whole_code(v: Optional[str], valid: Optional[bool], copy: Optional[str]) -> Optional[str]:
+    """Lead ruling 18:25 PT (C11b, B-RO-05): the ``{c:lang:..}`` code of the WHOLE raw ``<html lang>`` (white space
+    folded, existing codes path), only where the stored copy cannot speak for it: the bit is invalid (LANG_INVALID
+    detail and per-page ``invalid``), or the bit is valid but the whole-subtag copy is not itself a valid tag (per-page
+    ``lang`` is then this code, never ``invalid``). Else None. Only the code leaves the parse call, never the text."""
+    from agents.roman import safe_lang
+    if valid is None or (valid and safe_lang(copy, coded=False) not in (None, "invalid")):
+        return None
+    from primitives import codes
+    return codes.code("lang", _s(v, None).strip())
+
+
 class _Extractor(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -92,6 +114,8 @@ class _Extractor(HTMLParser):
         self.text_parts: list = []
         self.text_len = 0
         self.html_lang: Optional[str] = None
+        self.lang_valid: Optional[bool] = None
+        self.lang_code: Optional[str] = None
         self.elements = 0
         self.script_count = 0
 
@@ -100,6 +124,8 @@ class _Extractor(HTMLParser):
         a = {k.lower(): (v or "") for k, v in attrs if k}
         if tag == "html" and self.html_lang is None:
             self.html_lang = _lang_copy(a.get("lang"))
+            self.lang_valid = _lang_valid(a.get("lang"))
+            self.lang_code = _lang_whole_code(a.get("lang"), self.lang_valid, self.html_lang)
         elif tag == "title" and self.title is None:
             self._in_title = True
             self.title = ""
@@ -212,7 +238,8 @@ def parse_html(html: str, base_url: str) -> dict:
             links.append({"url": u, "nofollow": "nofollow" in an["rel"].split(), "text": an["text"]})
     text = " ".join(" ".join(p.text_parts).split())
     return {
-        "title": _s(p.title, 1000), "description": description, "lang": p.html_lang,
+        "title": _s(p.title, 1000), "description": description, "lang": p.html_lang, "lang_valid": p.lang_valid,
+        "lang_code": p.lang_code,
         "robots_meta": robots_meta, "robots_meta_noindex": sorted(p.robots_noindex),
         "robots_meta_not_stored": not_stored, "canonicals": [a for a in canon_abs if a][:10],
         # WR-F009: hrefs that are not readable http(s) URLs are counted, never kept as None

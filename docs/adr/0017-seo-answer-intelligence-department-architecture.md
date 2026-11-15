@@ -1592,6 +1592,10 @@ V4. **Agents.** Selene: same site includes subdomains of the registered domain (
    `LANG_INVALID` (low, ACT) and readiness `lang_declared: fail` for a tag that is not BCP 47 (a repeated variant or
    extension singleton included) or whose language CLDR does not know; a private-use tag (`x-default`) or a
    grandfathered one (`i-klingon`, `en-GB-oed`, the RFC 5646 list) is valid and stored as its `{c:lang:..}` code;
+   valid / invalid is decided on the whole raw attribute (a parser bit; the raw value is not kept), never on the
+   500-character stored copy (whole subtags, RFC 5646 4.4.2) - review rv-wave1v2r4 F-3, lead ruling option (c);
+   per-page `lang` agrees with that bit: a valid tag whose copy is not itself valid reads as the `{c:lang:..}` code
+   of the whole raw value, and the `LANG_INVALID` detail codes the whole raw value, not the copy (lead ruling C11b);
    types readable only from the rule table. Entity check: no canonical value in any finding, the on-site value as
    `{c:entity:..}`. Osei: quarantine records have one closed shape and `size_basis` from a closed list. Log task:
    request targets up to 8,192 bytes are parsed.

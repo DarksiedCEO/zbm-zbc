@@ -384,3 +384,125 @@ def test_B_RO_11_outcomes():
     web = site(Web())
     web.route("/", b"\x1f\x8b\0", ctype="text/html", content_encoding="gzip")
     assert _r(web)["outcome"] == "INSUFFICIENT_EVIDENCE"
+
+
+# ---- rv-wave1v2r4 F-3 (B-RO-05, lead ruling 18:40 PT option (c)): validity is decided on the WHOLE raw attribute
+def _fill(base: str, n: int, lo: int, hi: int) -> str:
+    """``base`` plus ``-`` subtags of lo..hi 'a' characters, exactly ``n`` characters long (synthetic)."""
+    s = base
+    while len(s) < n:
+        k = min(hi, n - len(s) - 1)
+        if 0 < n - len(s) - 1 - k <= lo:      # leave room for one more whole subtag
+            k = max(lo, k - lo - 1)
+        s += "-" + "a" * k
+    assert len(s) == n
+    return s
+
+
+def _valid(n):
+    return _fill("en-GB-x", n, 1, 8)
+
+
+def _invalid(n):                              # a 9-character private-use subtag last
+    return _valid(n - 10) + "-" + "b" * 9
+
+
+def _dup_singleton(n):                        # the extension singleton 'u' twice, the second near the end
+    return _fill("en-u", n - 5, 2, 8) + "-u-ab"
+
+
+F3_CASES = [("reviewer 600 invalid last subtag", _invalid(600), False),
+            ("reviewer 693 duplicate singleton", _dup_singleton(693), False),
+            ("500 valid", _valid(500), True), ("500 invalid", _invalid(500), False),
+            ("501 valid", _valid(501), True), ("501 invalid", _invalid(501), False),
+            ("2000 valid", _valid(2000), True), ("2000 invalid", _invalid(2000), False),
+            ("2000 duplicate singleton", _dup_singleton(2000), False)]
+
+
+@pytest.mark.parametrize("name,tag,ok", F3_CASES, ids=[c[0] for c in F3_CASES])
+def test_B_RO_05_lang_validity_is_decided_on_the_whole_raw_attribute(name, tag, ok):
+    """rv-wave1v2r4 F-3: valid / invalid follows the whole attribute (oracle: RFC 5646 well-formedness), never the
+    500-character copy; > 500 invalid -> LANG_INVALID + lang_declared fail; > 500 valid -> pass. The stored copy is
+    unchanged (whole subtags, RFC 5646 4.4.2) and the raw value is not kept in the extract."""
+    from primitives.parse import STR_MAX, _lang_copy, parse_html
+    assert bcp47.well_formed(tag) is ok, name
+    x = parse_html(f"<html lang='{tag}'><head><title>t</title></head><body>b</body></html>", "http://site.test/")
+    assert x["lang_valid"] is ok and x["lang"] == _lang_copy(tag) and len(x["lang"]) <= STR_MAX
+    assert (len(tag) <= STR_MAX) == (x["lang"] == tag)
+    assert [k for k, v in x.items() if isinstance(v, str) and len(v) > STR_MAX and v == tag] == []
+    web = site(Web())
+    web.route("/", page(lang=tag, ld=ORG_LD))
+    r = _r(web)
+    rd = r["facts"]["engine_readiness_heuristic"]["/"]
+    assert ("LANG_INVALID" in codes(r)) is (not ok) and "LANG_MISSING" not in codes(r)
+    assert r["facts"]["pages"]["/"]["lang"] == ("en-GB" if ok else "invalid")
+    assert all(rd[e]["checks"]["lang_declared"] == ("pass" if ok else "fail") for e in rd), rd
+
+
+@pytest.mark.parametrize("lang,want", [(None, None), ("", None), ("  ", None), ("en-US", True), ("123", False)])
+def test_B_RO_05_the_parser_lang_validity_bit(lang, want):
+    from primitives.parse import parse_html
+    attr = "" if lang is None else f" lang='{lang}'"
+    x = parse_html(f"<html{attr}><body>b</body></html>", "http://site.test/")
+    assert x["lang_valid"] is want
+
+
+def test_B_RO_05_lang_validity_is_linear_on_a_100_kb_attribute():
+    """rv-wave1v2r4 F-3 / lead ruling: no extra lang bound; a 100 KB attribute is decided whole, in linear time."""
+    import time
+    from primitives.parse import parse_html
+    for tag, ok in ((_valid(100_000), True), (_invalid(100_000), False), (_dup_singleton(100_000), False)):
+        doc = f"<html lang='{tag}'><body>b</body></html>"
+        t0 = time.monotonic()
+        x = parse_html(doc, "http://site.test/")
+        t1 = time.monotonic() - t0
+        t0 = time.monotonic()
+        parse_html(f"<html lang='{tag[:10_000]}'><body>b</body></html>", "http://site.test/")
+        t2 = time.monotonic() - t0
+        assert x["lang_valid"] is ok and t1 < 2.0 and t1 < 40 * t2 + 0.2, (t1, t2)
+
+
+# ---- lead ruling 18:25 PT (C11b, B-RO-05): per-page lang agrees with the validity bit; codes are of the WHOLE value
+def _pu_one_char(n):                          # private use, all 1-character subtags: valid whole, its copy is not
+    s = ("x" + "-a" * n)[:n]
+    return s if s[-1] != "-" else s[:-1] + "b"
+
+
+C11B_CASES = [("501 private use 1-char", _pu_one_char(501), "whole_code"),
+              ("2000 private use 1-char", _pu_one_char(2000), "whole_code"),
+              ("501 valid copy valid", _valid(501), "en-GB"), ("2000 valid copy valid", _valid(2000), "en-GB"),
+              ("501 invalid", _invalid(501), "invalid"), ("2000 invalid", _invalid(2000), "invalid"),
+              ("693 duplicate singleton", _dup_singleton(693), "invalid"), ("123", "123", "invalid")]
+
+
+@pytest.mark.parametrize("name,tag,want", C11B_CASES, ids=[c[0] for c in C11B_CASES])
+def test_B_RO_05_page_lang_agrees_with_the_bit_and_codes_are_of_the_whole_value(name, tag, want):
+    """C11b: bit valid -> the usual stored form when the whole-subtag copy is itself valid, else the ``{c:lang:..}``
+    code of the WHOLE raw attribute (never ``invalid``); bit invalid -> ``invalid`` + LANG_INVALID whose detail is the
+    code of the whole raw value, not of the copy. The raw text is not kept in the extract or the result."""
+    from primitives import codes as pc
+    from primitives.parse import STR_MAX, _lang_copy, parse_html
+    ok = want != "invalid"
+    assert bcp47.well_formed(tag) is ok, name
+    x = parse_html(f"<html lang='{tag}'><body>b</body></html>", "http://site.test/")
+    assert x["lang_valid"] is ok and x["lang"] == _lang_copy(tag)
+    assert [k for k, v in x.items() if isinstance(v, str) and len(v) > STR_MAX and v == tag] == []
+    web = site(Web())
+    web.route("/", page(lang=tag, ld=ORG_LD))
+    r = _r(web)
+    from agents_run import coding
+    with coding():
+        whole, copy = pc.code("lang", tag), pc.code("lang", _lang_copy(tag))
+    got = r["facts"]["pages"]["/"]["lang"]
+    if want == "whole_code":
+        assert len(tag) > STR_MAX and roman.safe_lang(_lang_copy(tag), coded=False) == "invalid"
+        assert got == whole and got != copy and got.startswith("{c:lang:")
+    else:
+        assert got == want
+    rd = r["facts"]["engine_readiness_heuristic"]["/"]
+    assert all(rd[e]["checks"]["lang_declared"] == ("pass" if ok else "fail") for e in rd), rd
+    assert ("LANG_INVALID" in codes(r)) is (not ok) and "LANG_MISSING" not in codes(r)
+    if not ok:
+        assert one(r, "LANG_INVALID")["detail"]["lang"] == whole
+        assert len(tag) <= STR_MAX or whole != copy
+    assert tag not in json.dumps(r) or len(tag) <= 3
