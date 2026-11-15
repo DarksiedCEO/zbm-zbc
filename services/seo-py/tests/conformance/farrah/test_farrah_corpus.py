@@ -157,7 +157,10 @@ def _corpus_run(fa, n, seed):
             ch = v["result"]["channels"][c]
             truth = case["truth"][c]
             if ch["label"] == "INSUFFICIENT_EVIDENCE":
-                assert truth <= 0 and case["unknown_pos"] == 0, (sp["seed"], c)
+                # OD-5 / GF-8 floor (B-FA band, frozen farrah-spec/1 v1.1): U = 0 here, so the truth lies in
+                # [L, 0] with L = F + negative part of the unknown rows (hidden refunds, OD-2); round 4, H-1.
+                floor = case["visible"][c] + case["unknown_neg"]
+                assert floor <= truth <= 0 and case["unknown_pos"] == 0, (sp["seed"], c, floor, truth)
                 continue
             lo, hi = Decimal(ch["lower"]), Decimal(ch["upper"])
             assert lo <= truth <= hi, ("O-FA-1", sp["seed"], c)                  # 100%: the bound

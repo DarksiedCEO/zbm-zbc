@@ -373,7 +373,8 @@ def validate_dataset(doc, tid: str, source: str) -> dict:
     if parse_date(w["start"]) > parse_date(w["end"]):
         raise InputRefused("DATASET_INVALID")
     s = _strict(d["surface"], SURFACE_KEYS, "DATASET_INVALID")
-    if type(s["parts"]) is not dict or len(s["parts"]) > 50:
+    # No parts / counts key-count cap (round 4, N-1, as J-2): B-OS-11 / B-OS-50 set none; bounded() runs first.
+    if type(s["parts"]) is not dict:
         raise InputRefused("DATASET_INVALID")
     _short(s["fingerprint"], "DATASET_INVALID")
     v = _strict(d["validation"], VALIDATION_KEYS, "DATASET_INVALID")
@@ -381,7 +382,7 @@ def validate_dataset(doc, tid: str, source: str) -> dict:
         raise InputRefused("DATASET_NOT_VALID")
     if v["reason"] is not None:
         _short(v["reason"], "DATASET_INVALID")
-    if type(v["counts"]) is not dict or len(v["counts"]) > 50:
+    if type(v["counts"]) is not dict:
         raise InputRefused("DATASET_INVALID")
     for k, n in v["counts"].items():
         _short(k, "DATASET_INVALID")

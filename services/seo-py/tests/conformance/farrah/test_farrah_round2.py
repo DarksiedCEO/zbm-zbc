@@ -268,3 +268,18 @@ def test_AC_11_J_2_no_label_count_cap_the_node_bound_applies(fa, n):
     v = ok_run(fa)
     assert v["status"] == "completed" and v["inputs"] == [d["dataset_id"]], (n, v.get("inputs"))
     assert v["result"]["channels"]["organic_search"]["figure"] == "1200"
+
+
+@pytest.mark.parametrize("n", [50, 51, 200])
+def test_AC_11_N_1_no_parts_or_counts_key_cap_the_node_bound_applies(fa, n):
+    """N-1 (round 4, as J-2): B-OS-11 / B-OS-50 bound neither surface.parts nor validation.counts, so a dataset with
+    50, 51 or 200 keys in each is USED; only bounded()'s MAX_NODES limits the document as a whole."""
+    d = dataset("acme", "analytics", [arow(D, "100.00", landing=f"/l/{i}") for i in range(12)])
+    d["surface"]["parts"].update({f"part_{i}": f"v{i}" for i in range(n - len(d["surface"]["parts"]))})
+    d["validation"]["counts"].update({f"count_{i}": i for i in range(n - len(d["validation"]["counts"]))})
+    assert len(d["surface"]["parts"]) == n and len(d["validation"]["counts"]) == n
+    fa.store.add(fa.svc, d)
+    fa.store.tenant("acme")["freshness"] = freshness("acme")
+    v = ok_run(fa)
+    assert v["status"] == "completed" and v["inputs"] == [d["dataset_id"]], (n, v.get("inputs"))
+    assert v["result"]["channels"]["organic_search"]["figure"] == "1200"

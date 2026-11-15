@@ -50,7 +50,9 @@ causation") and wave1 B-UL-03 forbids scores. Osei full (the only producer Farra
    the HMAC's canonical JSON, a copy), an iterative walk bounds it: nesting deeper than 16, more than 2,000,000
    values, a non-string key or a non-JSON value refuses it whole (round 2, F-3; a valid document nests 5 deep).
    There is no separate label-count cap (round 3, J-2: the spec sets none; MAX_NODES bounds the whole document;
-   50, 51 and 200 labels are used, `test_AC_11_J_2_*`).
+   50, 51 and 200 labels are used, `test_AC_11_J_2_*`). Likewise no key-count cap on `surface.parts` or
+   `validation.counts` (round 4, N-1: B-OS-11 / B-OS-50 set none; 50, 51 and 200 keys are used,
+   `test_AC_11_N_1_*`).
    Any other exception while reading one document refuses that document (`DATASET_INVALID` etc.), never the run.
    A dataset is used only when its producer, Osei, is ACTIVE in the department manager (round 2, F-2: restricted or
    retired through the lifecycle route -> every Osei document is refused whole with CB-2's code `AGENT_RESTRICTED`,
@@ -154,6 +156,8 @@ Mapping, review number -> this ADR:
 | O-2 (round-2 review) | a replay on an unchanged signature hides new refusal counts | R-14 |
 | H-1 (round-2 review) | the 50-label cap was not in the spec | removed (J-2, decision 5) |
 | H-2 (round-2 review) | W-FA-1's expected value used the code's own `dataset_ref` | the test now uses `ledger.derived_id("att", "dataset", id)` and checks two datasets give two refs (J-3) |
+| N-1 (round-3 review) | a 50-key cap on `surface.parts` / `validation.counts` was not in the spec | removed (round 4, decision 5) |
+| H-1 (round-3 review) | the corpus INSUFFICIENT_EVIDENCE branch checked `truth <= 0` without the floor | now `L <= truth <= 0` (OD-5 / GF-8), test-only |
 | (none) | builder-only | R-1 (closed), R-4, R-8, R-12 |
 
 Review measurements at round 2 (for the record): 0 oracle mismatches over 2,000 generated datasets on the service
