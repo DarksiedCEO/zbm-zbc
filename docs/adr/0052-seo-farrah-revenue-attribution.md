@@ -164,3 +164,20 @@ Review measurements at round 2 (for the record): 0 oracle mismatches over 2,000 
 path (3,196 truths checked); 0 planted-amount hits in the ledger, Python logging, the data directory, the
 Compliance / other-tenant / tenant / department / export views; AC-1 + AC-2 1,360 runs with 0 readable; depths 900,
 3,000 and 100,000 answer 201; an all-digit dataset id answers 201.
+
+## Owner decision and disclosures (round 4 certification, 2026-11-14)
+
+Owner decision (O-FA-2 scope, farrah-spec/1.2 clarification): the O-FA-2 bar (label HIGH or MEDIUM in >= 95% of
+tenant-months with unknown share <= 5% and no flags) applies to the `organic_search` channel. `ai_referral` is
+labelled "not complete" (B-FA-11) and its undercount is accepted (R-FA-2); its HIGH/MEDIUM share and band widths are
+reported per corpus class as information, not as a pass bar.
+
+Corpus of record for O-FA-1..3 (lead ruling under the fixed-test-set rule): the in-tree generator
+`tests/conformance/gen/attribution_truth.py` at this commit, seeds 3 (n=50), 4, 101 and 202 (n=500).
+
+| Disclosure | Size (independent review, round 4) |
+|---|---|
+| ai_referral HIGH/MEDIUM share (information) | 37-71% on n=500 runs (most months have < 10 rows in the channel, the B-FA-25 MEDIUM floor); band-width p90 up to 0.679 (organic <= 0.243) |
+| Thinnest O-FA-2 split | lead-generation organic, seed 202, hidden refunds: 19 / 20 = 95.0% |
+| C-2: corpus description | SUITE_PLAN 2.4 describes 3 business shapes x 12-24 months x 60 tenants; the generator has 2 shapes and 1 month per tenant |
+| PF-FA-1 margin | 1.719 s / 1.822 s against 2 s (86-91%), measured under load only |
