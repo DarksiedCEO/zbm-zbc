@@ -40,8 +40,13 @@ def run_mutant(file: str, old: str, new: str, tests: list, timeout: int = 1200, 
             text = text.replace(a, b)
         path.write_text(text)
         env = {k: v for k, v in os.environ.items() if k != "CONFORMANCE_LEAD"}
-        proc = subprocess.run([sys.executable, "-m", "pytest", "-x", "-q", "-p", "no:cacheprovider", *tests],
-                              cwd=dst, env=env, capture_output=True, text=True, timeout=timeout)
+        try:
+            proc = subprocess.run([sys.executable, "-m", "pytest", "-x", "-q", "-p", "no:cacheprovider", *tests],
+                                  cwd=dst, env=env, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # A mutant that makes the suite run > timeout (4x the clean run) hangs: the suite detected it (standard
+            # mutation-testing convention: timeout = killed). Lead ruling 2026-11-15 12:55 PT.
+            return {"applied": True, "killed": True, "rc": None, "reason": "timeout"}
         return {"applied": True, "killed": proc.returncode != 0, "rc": proc.returncode,
                 "tail": proc.stdout.strip().splitlines()[-1:] if proc.stdout else []}
     finally:
