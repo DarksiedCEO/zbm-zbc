@@ -2981,6 +2981,312 @@
      }
     }
    ]
+  },
+  {
+   "id": "wat-hostility",
+   "persona": "a WAT file that is a gzip bomb, truncated, corrupt, followed by garbage, or full of malformed, deep, oversized or duplicate records",
+   "basis": "marcus-pipeline-spec/1 B-MP-12 / B-MP-20 / A-MP-01 (wave1 decompression rules): the file is quarantined or its bad records skipped and counted, the job continues, the good file's rows are exactly the generator's truth",
+   "input_field": "kind",
+   "seeds": [
+    {
+     "basis": "the A-MP-01 classes of tests/conformance/marcus_pipeline/gen_cc.py hostile_cases",
+     "literal": [
+      "bomb",
+      "multi_member",
+      "truncated",
+      "corrupt",
+      "trailing_garbage",
+      "invalid_utf8",
+      "deep",
+      "deep65",
+      "long_line",
+      "duplicate",
+      "nul",
+      "not_json",
+      "nan",
+      "dup_keys",
+      "empty_file",
+      "not_gzip"
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "action": "mp_wat_hostile",
+     "args": {
+      "kind": "$kind"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "args": {
+      "key": "mp_http_ok",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "job_answered",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "mp_5xx",
+      "value": false
+     },
+     "check": "state_equals",
+     "id": "no_5xx",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "mp_quarantine_as_served",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "quarantined_as_the_judge_served",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "mp_good_rows_exact",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "good_file_rows_exact",
+     "severity": "MUST"
+    }
+   ],
+   "variants_per_seed": 0
+  },
+  {
+   "id": "index-tamper-and-crash",
+   "persona": "a disk that flips, truncates or swaps index bytes, and a process that dies or is killed at every build step",
+   "basis": "marcus-pipeline-spec/1 B-MP-32 (AES-256-GCM, sha256 in the manifest) and B-MP-33 (atomic publish; no complete manifest after an interrupted build), AC-13, CB-6",
+   "input_field": "how",
+   "seeds": [
+    {
+     "basis": "tamper classes and the builder's step names",
+     "literal": [
+      "flip_shard_byte",
+      "truncate_shard",
+      "swap_shard",
+      "flip_manifest_byte",
+      "delete_manifest"
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "action": "mp_tamper",
+     "args": {
+      "how": "$how"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "args": {
+      "key": "mp_5xx",
+      "value": false
+     },
+     "check": "state_equals",
+     "id": "no_5xx",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "mp_tamper_detected",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "tamper_detected",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "mp_tampered_not_listed",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "tampered_manifest_not_listed",
+     "severity": "MUST"
+    }
+   ],
+   "variants_per_seed": 0
+  },
+  {
+   "id": "index-tamper-and-crash-steps",
+   "persona": "a disk that flips, truncates or swaps index bytes, and a process that dies or is killed at every build step",
+   "basis": "marcus-pipeline-spec/1 B-MP-32 (AES-256-GCM, sha256 in the manifest) and B-MP-33 (atomic publish; no complete manifest after an interrupted build), AC-13, CB-6",
+   "input_field": "how",
+   "seeds": [
+    {
+     "basis": "crash and kill at each step boundary",
+     "literal": [
+      "crash:release_read",
+      "crash:file_open:0",
+      "crash:stage_written:0",
+      "crash:file_done:0",
+      "crash:file_done:1",
+      "crash:shards_written",
+      "crash:shard_verified:0",
+      "crash:manifest_built",
+      "crash:manifest_written",
+      "kill:file_open:1",
+      "kill:shards_written",
+      "kill:manifest_built"
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "action": "mp_tamper",
+     "args": {
+      "how": "$how"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "args": {
+      "key": "mp_5xx",
+      "value": false
+     },
+     "check": "state_equals",
+     "id": "no_5xx",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "mp_no_incomplete_manifest",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "no_incomplete_manifest",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "mp_no_half_snapshot",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "no_half_snapshot",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "mp_no_orphan_shards",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "no_orphan_shards",
+     "severity": "MUST"
+    }
+   ],
+   "variants_per_seed": 0
+  },
+  {
+   "id": "pii-in-urls-and-anchors",
+   "persona": "pages whose URLs and anchors carry credentials and personal data in every part",
+   "basis": "marcus-pipeline-spec/1 B-MP-23 (CC ToU clause l): 0 planted values readable in any shard (decrypted), the log, the ledger or a view; the clean page next to it is kept",
+   "input_field": "ref",
+   "seeds": [
+    {
+     "basis": "generator indices: leak_corpus_v2.url_cases / corpus (AC-1), the interim C1-C7 generator (AC-2); values are generated at run time, never written here",
+     "literal": [
+      "url:0",
+      "url:7",
+      "url:14",
+      "url:21",
+      "url:28",
+      "url:35",
+      "url:42",
+      "url:49",
+      "url:56",
+      "url:63",
+      "url:70",
+      "url:77",
+      "url:84",
+      "url:91",
+      "url:98",
+      "url:105",
+      "url:112",
+      "url:119",
+      "anchor:0",
+      "anchor:23",
+      "anchor:46",
+      "anchor:69",
+      "anchor:92",
+      "anchor:115",
+      "anchor:138",
+      "anchor:161",
+      "anchor:184",
+      "anchor:207",
+      "anchor:230",
+      "anchor:253",
+      "anchor:276",
+      "anchor:299",
+      "anchor:322",
+      "anchor:345",
+      "anchor:368",
+      "anchor:391",
+      "pd:0",
+      "pd:4",
+      "pd:8",
+      "pd:12",
+      "pd:16",
+      "pd:20",
+      "pd:24",
+      "pd:28",
+      "pd:32",
+      "pd:36",
+      "pd:40",
+      "pd:44",
+      "pd:48",
+      "pd:52",
+      "pd:56"
+     ]
+    }
+   ],
+   "steps": [
+    {
+     "action": "mp_plant",
+     "args": {
+      "ref": "$ref"
+     }
+    }
+   ],
+   "invariants": [
+    {
+     "args": {
+      "key": "mp_5xx",
+      "value": false
+     },
+     "check": "state_equals",
+     "id": "no_5xx",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "mp_planted_readable",
+      "value": false
+     },
+     "check": "state_equals",
+     "id": "nothing_planted_readable",
+     "severity": "MUST"
+    },
+    {
+     "args": {
+      "key": "mp_clean_row_kept",
+      "value": true
+     },
+     "check": "state_equals",
+     "id": "clean_row_kept",
+     "severity": "MUST"
+    }
+   ],
+   "variants_per_seed": 0
   }
  ]
 }

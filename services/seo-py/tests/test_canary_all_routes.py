@@ -437,6 +437,10 @@ class World:
                                                             "prompt_set_id": ids["psid"], "engines": ["openai"]},
                            andre=True), 201)
         ids["cid"] = run["citation_run_id"]
+        # the Marcus pipeline (marcus-pipeline-spec/1): one Release Watcher job (no fixture: NOT_CONNECTED)
+        lj = self.ok(self.call("POST", "/link-index/jobs", {"request_id": rid(), "service": "cc_release_watcher"}),
+                     201)
+        ids["lij"] = lj["job_id"]
         s = self.ok(post("/tenants/acme/schedules", {
             "request_id": rid(), "domain": DOMAIN, "scheme": "http", "every_days": 7, "invoice_id": invoice_id(2),
             "paths": ["/", "/about", "/t/" + urllib.parse.quote(c.new("flow", "schedule_path", "prose"), safe="")],
@@ -592,6 +596,14 @@ class World:
         if key in (f"GET {P}/tenants/{{tid}}/citation-runs/{{cid}}",
                    f"GET {P}/tenants/{{tid}}/citation-runs/{{cid}}/mnc-priority"):
             return s({**A, "cid": ids["cid"]})
+        if key == f"POST {P}/link-index/jobs":
+            return s(body={**r, "service": "cc_release_watcher", "crawl_ids": ["CC-MAIN-2026-40"],
+                           "paths": ["crawl-data/CC-MAIN-2026-40/segments/1700000000001.0/wat/"
+                                     "CC-MAIN-20261001000000-20261001010000-00000.warc.wat.gz"],
+                           "release_id": "cc-main-2026-jul-aug-sep", "kind": "host_graph", "resume": ids["lij"]},
+                     expect=201)
+        if key == f"GET {P}/link-index/jobs/{{job_id}}":
+            return s({"job_id": ids["lij"]})
         if key == f"POST {P}/tenants/{{tid}}/log-ingests":
             return s(A, {**r, "domain": DOMAIN, "scheme": "http", "format": "combined"}, expect=201)
         if key == f"POST {P}/tenants/{{tid}}/log-ingests/{{iid}}/chunks":

@@ -233,6 +233,10 @@ class Ports:
     bot_verifier: object = None
     finance: object = None
     compliance: object = None            # ADR 0024: compliance_client.py; NOT_CONNECTED refuses every client run
+    # marcus-pipeline-spec/1: the Common Crawl release list and the WAT / rank files. v1: the fixture directory
+    # (SEO_MARCUS_FIXTURE_DIR, tests only) or NOT_CONNECTED; the live adapters are config.NOT_BUILT
+    cc_releases: object = None
+    cc_wat: object = None
 
     @classmethod
     def default(cls, settings=None) -> "Ports":
@@ -257,7 +261,11 @@ class Ports:
         first_party = {n: NotConnectedSource(n) for n in FIRST_PARTY}
         if settings is not None and getattr(settings, "gsc_key", None) is not None:
             first_party["search_console"] = gsc_from_settings(settings)
-        return cls(fetcher=fetcher, renderer=NotConnectedRenderer(),
+        from marcus import release_watcher, wat_fetcher
+        fx = getattr(settings, "marcus_fixture_dir", None) if settings is not None else None
+        cc_releases = release_watcher.FixtureReleases(fx) if fx else release_watcher.NotConnectedReleases()
+        cc_wat = wat_fetcher.FixtureWatSource(fx) if fx else wat_fetcher.NotConnectedWat()
+        return cls(fetcher=fetcher, renderer=NotConnectedRenderer(), cc_releases=cc_releases, cc_wat=cc_wat,
                    engines=engines,
                    prompt_volume=NotConnectedSource("prompt_volume"),
                    first_party=first_party,
@@ -276,7 +284,8 @@ class Ports:
                 "first_party": {n: st(p) for n, p in self.first_party.items()},
                 "zero_day": st(self.zero_day), "orca_publish": st(self.orca_publish), "clientfix": st(self.clientfix),
                 "bot_dns_verification": st(self.bot_verifier), "bot_ip_range_verification": NOT_CONNECTED,
-                "finance": st(self.finance), "compliance": st(self.compliance)}
+                "finance": st(self.finance), "compliance": st(self.compliance),
+                "cc_releases": st(self.cc_releases), "cc_wat": st(self.cc_wat)}
 
     def engine_details(self) -> dict:
         """What /status shows of each answer engine: state, model, limits and the key's SOURCE (file or env), never

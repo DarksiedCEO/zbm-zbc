@@ -73,7 +73,8 @@ MAX_LEN = 160
 CODE_MAX = 64
 MAX_DEPTH = 64
 HASH_LENGTHS = frozenset((16, 32, 40, 64))
-SERVICE_ID_PREFIXES = frozenset(("anc", "aud", "blb", "cit", "egr", "evd", "lgi", "pst", "rpt", "sch", "vlt"))
+SERVICE_ID_PREFIXES = frozenset(("anc", "aud", "blb", "cit", "egr", "evd", "lgi", "pst", "rpt", "sch", "vlt",
+                                 "lij", "snp", "shd", "grk"))   # + the link index's jobs, snapshots, shards, graphs
 ACTORS = frozenset(KNOWN_CALLERS) | frozenset(("seo", "andre"))
 # the service's own enum words and schema keys that NAME a credential class (the strict check's label rule refuses
 # them as it would in prose); a closed list of constants, never data

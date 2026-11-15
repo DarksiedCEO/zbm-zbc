@@ -624,6 +624,17 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
                         who: str = Depends(dashboard)) -> dict:
         return svc.move_agent(agent, req, andre=andre_if_presented(request))
 
+    # ------------------------------------------------------------------ the Marcus index pipeline (svc_link_index.py)
+
+    @app.post(P + "/link-index/jobs", dependencies=auth, status_code=201)
+    def link_index_start(req: dict = Depends(body(m.LinkIndexJob)),
+                         who: str = Depends(caller("dashboard", "scheduler"))) -> dict:
+        return svc.link_index_start(who, req)
+
+    @app.get(P + "/link-index/jobs/{job_id}", dependencies=auth)
+    def link_index_job(job_id: str, who: str = Depends(caller("dashboard", "scheduler", "compliance_38"))) -> dict:
+        return svc.link_index_job_view(_id(job_id))
+
     # ------------------------------------------------------------------ jobs and audit
 
     @app.post(P + "/jobs/{name}/run", dependencies=auth)
