@@ -30,8 +30,8 @@ KNOWN_CALLERS = ("dashboard", "seo_agent", "scheduler", "hub", "finance_31", "co
 _PRINTABLE = re.compile(r"[\x21-\x7e]{32,512}")
 TENANT_ID = re.compile(r"[a-z][a-z0-9-]{1,39}")
 CAPABILITY_SWITCHES = ("fetch", "render", "ai_probe", "audit", "entity_write", "prompt_sets", "logs", "schedules",
-                       "reports")
-PROVIDER_SWITCHES = ("web", "openai", "anthropic", "google", "perplexity", "gsc")
+                       "reports", "link_index")
+PROVIDER_SWITCHES = ("web", "openai", "anthropic", "google", "perplexity", "gsc", "commoncrawl")
 
 # Pricing, locked by Andre (spec Oct 6). Config only: nothing in this service charges, quotes or invoices; payments
 # are Finance (31)'s, through Stripe. Above the top tier: "Contact us". Self-serve is not offered until the client
@@ -176,6 +176,8 @@ class Settings:
     callum_resolve_max: int = 40
     report_branding: object = field(default_factory=lambda: _default_branding())   # client_report.Branding
     vault_key: Optional[object] = field(default=None, repr=False)    # vault.VaultKey (redacted repr; ADR 0051)
+    marcus_fixture_dir: Optional[str] = None        # marcus-pipeline-spec/1 B-MP-10: tests only (non-production)
+    marcus_snapshots_kept: int = 6                  # B-MP-34 / Q-MP-3
     bind_addr: str = "127.0.0.1"
     port: int = 8500
 
@@ -212,6 +214,13 @@ NOT_BUILT = {
     "SEO_ZERO_DAY_URL": "Zero-Day: a port only in Wave 1 (NOT_CONNECTED)",
     "SEO_ORCA_PUBLISH_URL": "ORCA Publish: a port only in Wave 1 (NOT_CONNECTED)",
     "SEO_CLIENTFIX_URL": "Department 28 clientfix (fix execution): not in Wave 1",
+    # marcus-pipeline-spec/1 B-MP-03 / B-MP-10 / section 6: v1 reads fixtures only; the live Common Crawl ports and the
+    # v2 services are not built (AC-12)
+    "SEO_CC_RELEASES_ENABLED": "the live Common Crawl release-list port (Release Watcher v2): not built",
+    "SEO_CC_WAT_ENABLED": "the live Common Crawl WAT download port (WAT Fetcher v2): not built",
+    "SEO_LINK_VERIFIER_ENABLED": "the Link Verifier (marcus-pipeline v2): not built",
+    "SEO_SPAM_SCORER_ENABLED": "the Spam Scorer (marcus-pipeline v2): not built",
+    "SEO_RDAP_ENABLED": "the RDAP Enricher (marcus-pipeline v2): not built",
 }
 INVOICE_VERIFICATION_MODES = ("finance", "trust")
 _FINANCE_URL = re.compile(r"https?://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?(/[A-Za-z0-9._~-]+)*/?")
@@ -626,6 +635,24 @@ def _branding(env):
         raise RuntimeError(f"SEO_REPORT_BRAND_NAME / SEO_REPORT_BRAND_ACCENT: {exc}") from None
 
 
+FIXTURE_DIR_REFUSED = ("SEO_MARCUS_FIXTURE_DIR is for tests only (SEO_NON_PRODUCTION=1); the live Common Crawl ports "
+                       "are not built")
+
+
+def _marcus(env, s: "Settings") -> None:
+    """marcus-pipeline-spec/1: ``SEO_MARCUS_FIXTURE_DIR`` (B-MP-10: the v1 source of the release list, the WAT files
+    and the rank files; refused outside the test settings, ``SEO_NON_PRODUCTION=1``): an absolute path to an existing
+    directory, not a symlink. ``SEO_MARCUS_SNAPSHOTS_KEPT`` (B-MP-34): 1..60, default 6."""
+    raw = (env.get("SEO_MARCUS_FIXTURE_DIR") or "").strip()
+    if raw:
+        if not s.non_production:
+            raise RuntimeError(FIXTURE_DIR_REFUSED)
+        if not os.path.isabs(raw) or os.path.islink(raw) or not os.path.isdir(raw):
+            raise RuntimeError("SEO_MARCUS_FIXTURE_DIR must be an absolute path to a directory (not a symlink)")
+        s.marcus_fixture_dir = raw
+    s.marcus_snapshots_kept = _int(env, "SEO_MARCUS_SNAPSHOTS_KEPT", 6, 1, 60)
+
+
 def load(env: Optional[dict] = None) -> Settings:
     env = dict(os.environ if env is None else env)
     service_token = (env.get("SEO_SERVICE_TOKEN") or "").strip()
@@ -635,8 +662,11 @@ def load(env: Optional[dict] = None) -> Settings:
     callers = _tokens(env, "SEO_CALLER_TOKENS", lambda k: k in KNOWN_CALLERS, "caller", service_token)
     tenants = _tokens(env, "SEO_TENANT_TOKENS", lambda k: isinstance(k, str) and bool(TENANT_ID.fullmatch(k)),
                       "tenant", service_token, callers.values())
+    if not non_production and (env.get("SEO_MARCUS_FIXTURE_DIR") or "").strip():
+        raise RuntimeError(FIXTURE_DIR_REFUSED)      # B-MP-10: checked before any other production requirement
     s = Settings(service_token=service_token, caller_tokens=callers, tenant_tokens=tenants,
                  non_production=non_production, data_dir=_data_dir(env, non_production))
+    _marcus(env, s)
     for name, why in NOT_BUILT.items():
         if (env.get(name) or "").strip() not in ("", "none", "0"):
             raise RuntimeError(f"{name}: {why}. Unset it; this service refuses to start rather than pretend.")

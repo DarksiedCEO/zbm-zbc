@@ -358,7 +358,7 @@ def test_there_is_no_legacy_list_and_no_bypass():
     src = open(sg.__file__, encoding="utf-8").read()
     assert "LEGACY-BEGIN" not in src and "_legacy(" not in src
     kinds = {name[3:] for name in dir(SeoService) if name.startswith("_a_")}
-    assert len(kinds) == 27
+    assert len(kinds) == 35
     text = marker()
     for kind in sorted(kinds):
         assert sg.refused(kind, {"x": text}) == ["/x"], kind
@@ -443,7 +443,7 @@ def test_no_violating_path_anywhere_in_the_suite_and_every_kind_passed():
     """Runs LAST. Every record the suite committed went through the guard (conftest's observer). There is no legacy
     list: a violating path refuses its commit where it happens, and here ANY refusal outside the tests that provoke
     one on purpose (or of another sink or path in one of them) fails the suite (names of tests, sinks and paths
-    only). No test replaced a guard entry point unless it is listed. A full run also shows each of the 27 kinds was
+    only). No test replaced a guard entry point unless it is listed. A full run also shows each of the 35 kinds was
     committed and passed, and that every listed test did what it is listed for."""
     seen = conftest.SINK_SEEN
     stray = {t: sorted(v - EXPECTED_SINK_REFUSALS.get(t, frozenset())) for t, v in seen["violations"].items()

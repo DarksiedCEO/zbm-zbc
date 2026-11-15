@@ -133,6 +133,19 @@ class ScheduleStatus(Strict):
     status: Literal["active", "paused"]
 
 
+class LinkIndexJob(Strict):
+    """marcus-pipeline-spec/1: one job of a Marcus pipeline service (svc_link_index.py)."""
+    request_id: RequestId
+    service: Literal["cc_release_watcher", "cc_index_builder", "cc_graph_importer"]
+    crawl_ids: Optional[Annotated[list[Annotated[StrictStr, Field(pattern=r"^CC-MAIN-[0-9]{4}-[0-9]{2}$")]],
+                                  Field(min_length=1, max_length=4)]] = None
+    paths: Optional[Annotated[list[Annotated[StrictStr, Field(max_length=200)]],
+                              Field(min_length=1, max_length=1000)]] = None
+    release_id: Optional[Annotated[StrictStr, Field(pattern=r"^[a-z0-9-]{1,64}$")]] = None
+    kind: Optional[Literal["host_graph", "domain_graph"]] = None
+    resume: Optional[Annotated[StrictStr, Field(pattern=r"^seo-lij-[0-9a-f]{40}$")]] = None
+
+
 class AgentMove(Strict):
     request_id: RequestId
     to: Literal["active", "watch", "retrain", "restricted", "retired"]

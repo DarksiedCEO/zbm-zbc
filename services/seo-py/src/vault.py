@@ -76,6 +76,7 @@ _AAD_TAG = b"seo-citation-vault/v1"
 FIELD_HASH_INFO = b"seo-citation-vault/v1/log-field-hmac"
 FIELD_HASH_TAG = b"seo-log-field/v1"
 FIELD_HASH_NAME = re.compile(r"[a-z][a-z0-9_]{0,31}")
+INDEX_INFO = b"marcus-index/v1"          # GP-4: HKDF info of the link index's AES-256-GCM key
 _FIELDS = frozenset(("v", "id", "t", "k", "n", "c"))
 
 
@@ -114,13 +115,17 @@ class _Material:
     """One vault key, held as its three derived sub-keys (AES-256-GCM, the tenant-tag HMAC and the log-field HMAC,
     each from HKDF-SHA256 with its own info label). The raw key is not kept. Never printed, pickled or copied."""
 
-    __slots__ = ("key_id", "_aead", "_mac", "_field_mac")
+    __slots__ = ("key_id", "_aead", "_mac", "_field_mac", "_index_aead")
 
     def __init__(self, key_id: str, raw: bytes):
         self.key_id = key_id
         self._aead = AESGCM(_derive(raw, b"seo-citation-vault/v1/aes-256-gcm"))
         self._mac = _derive(raw, b"seo-citation-vault/v1/tenant-tag")
         self._field_mac = _derive(raw, FIELD_HASH_INFO)
+        # marcus-pipeline-spec/1 B-MP-32, CLARIFICATIONS v1.1 GP-4: the link index's service key (the index is not
+        # tenant data, Q-MP-2), derived from the same raw key at construction, as the other sub-keys (the raw key is
+        # not kept). Used only by marcus/index_store.py through ``CitationVault.index_keys``.
+        self._index_aead = AESGCM(_derive(raw, INDEX_INFO))
 
     def tenant_tag(self, tenant_id: str) -> bytes:
         return hmac.new(self._mac, tenant_id.encode("ascii"), hashlib.sha256).digest()
@@ -982,6 +987,14 @@ class CitationVault:
                 or not FIELD_HASH_NAME.fullmatch(field) or not isinstance(value, str):
             raise VaultRecordInvalid("the field cannot be hashed")
         return self._key.key_id, self._key._cur.field_hash(tenant_id, field, value)
+
+    def index_keys(self) -> list:
+        """GP-4: ``[(key id, AESGCM)]`` of the link index's service key, the current key first, then the one being
+        retired (decrypt only). No key: ``VaultUnavailable`` (the index refuses: INDEX_KEY_UNAVAILABLE)."""
+        key = self._key
+        if key is None:
+            raise VaultUnavailable("no vault key is configured")
+        return [(m.key_id, m._index_aead) for m in (key._cur, key._prev) if m is not None]
 
     def field_hash_matches(self, tenant_id: str, field: str, value: str, expected) -> bool:
         """Sink job B: True when ``expected`` is the log-field HMAC of ``value`` under the current key or the one

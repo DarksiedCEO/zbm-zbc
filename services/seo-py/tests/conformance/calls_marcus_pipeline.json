@@ -1,0 +1,137 @@
+{
+ "spec": "marcus-pipeline-spec/1",
+ "note": "tests-bite map (SUITE_PLAN 2.1) and the spec's pinned mutants (section 8): each replacement must make the named tests FAIL; 'pre' / 'also' are a second edit of the same mutant in the same file",
+ "bite": [
+  {
+   "id": "TB-MP-1",
+   "call": "the B-MP-23 scrub of a link target (scrub_url before make_row)",
+   "file": "marcus/link_extractor.py",
+   "old": "        dst = scrub_url(dst_norm)\n",
+   "new": "        dst = dst_norm\n",
+   "tests": [
+    "tests/conformance/marcus_pipeline/test_mp_scrub.py::test_B_MP_23_placeholders_are_set_before_the_row_exists"
+   ]
+  },
+  {
+   "id": "TB-MP-1b",
+   "call": "the B-MP-23 scrub of an anchor (scrub_anchor before make_row)",
+   "file": "marcus/link_extractor.py",
+   "old": "        yield make_row(src, dst, scrub_anchor(ln.get(\"text\")), path, rel)\n",
+   "new": "        yield make_row(src, dst, ln.get(\"text\") or \"\", path, rel)\n",
+   "tests": [
+    "tests/conformance/marcus_pipeline/test_mp_scrub.py::test_B_MP_23_anchors_are_scrubbed_inside_the_extraction"
+   ]
+  },
+  {
+   "id": "TB-MP-2",
+   "call": "the user info drop of B-MP-22 (normalise)",
+   "file": "marcus/link_extractor.py",
+   "old": "    netloc = p.netloc.rsplit(\"@\", 1)[-1]                  # user info is NEVER kept\n",
+   "new": "    netloc = p.netloc.rsplit(\"@\", 1)[-1]                  # user info is NEVER kept\n    host_ui = p.netloc.rsplit(\"@\", 1)[0] + \"@\" if \"@\" in p.netloc else \"\"\n",
+   "tests": [
+    "tests/conformance/marcus_pipeline/test_mp_link_extractor.py::test_B_MP_22_userinfo_never_kept_and_long_urls_counted"
+   ],
+   "also": {
+    "old": "    out = f\"{scheme}://{host}\"",
+    "new": "    out = f\"{scheme}://{host_ui}{host}\""
+   }
+  },
+  {
+   "id": "TB-MP-3",
+   "call": "the shard encryption of B-MP-32 (IndexStore.put)",
+   "file": "marcus/index_store.py",
+   "old": "        return self.put_blob(kind, name, self.encrypt(kind, name, data))\n",
+   "new": "        return self.put_blob(kind, name, data)\n",
+   "tests": [
+    "tests/conformance/marcus_pipeline/test_mp_index_builder.py::test_B_MP_32_shards_per_registrable_domain_encrypted_and_hashed"
+   ]
+  },
+  {
+   "id": "TB-MP-4",
+   "call": "the atomic-publish gate of B-MP-33 (every shard re-read and hash-checked)",
+   "file": "svc_link_index.py",
+   "old": "            if not ok:\n                self._li_discard(ctx, data, keep_stage=False)\n",
+   "new": "            if False:\n                self._li_discard(ctx, data, keep_stage=False)\n",
+   "tests": [
+    "tests/conformance/marcus_pipeline/test_mp_index_builder.py::test_B_MP_33_complete_only_after_every_shard_reread_and_hash_checked"
+   ]
+  },
+  {
+   "id": "TB-MP-5",
+   "call": "the path grammar of B-MP-11 (wat_fetcher.check_path)",
+   "file": "marcus/wat_fetcher.py",
+   "old": "    if m is None or m.group(1) != crawl_id:\n        raise PathNotAllowed()\n",
+   "new": "    if False:\n        raise PathNotAllowed()\n",
+   "tests": [
+    "tests/conformance/marcus_pipeline/test_mp_wat_fetcher.py::test_A_MP_03_generated_smuggling_fast",
+    "tests/conformance/marcus_pipeline/test_mp_wat_fetcher.py::test_B_MP_11_A_MP_03_a_bad_line_in_wat_paths_refuses_the_list_and_reads_nothing"
+   ]
+  }
+ ],
+ "pinned": [
+  {
+   "id": "PIN-userinfo-kept",
+   "file": "marcus/link_extractor.py",
+   "old": "    if u is None or not u[\"host\"] or u[\"host_kind\"] is not None or u[\"userinfo\"] or _pd(u[\"host\"]):\n",
+   "new": "    if u is None or not u[\"host\"] or u[\"host_kind\"] is not None or _pd(u[\"host\"]):\n",
+   "tests": [
+    "tests/conformance/marcus_pipeline/test_mp_link_extractor.py::test_B_MP_22_userinfo_never_kept_and_long_urls_counted"
+   ],
+   "pre": {
+    "old": "    netloc = p.netloc.rsplit(\"@\", 1)[-1]                  # user info is NEVER kept\n",
+    "new": "    netloc = p.netloc\n"
+   }
+  },
+  {
+   "id": "PIN-scrub-after-the-row-exists",
+   "file": "marcus/link_extractor.py",
+   "old": "        yield make_row(src, dst, scrub_anchor(ln.get(\"text\")), path, rel)\n",
+   "new": "        row = make_row(src, dst_norm, ln.get(\"text\") or \"\", path, rel)\n        row.update(dst=dst, anchor=scrub_anchor(ln.get(\"text\")))\n        yield row\n",
+   "tests": [
+    "tests/conformance/marcus_pipeline/test_mp_scrub.py::test_B_MP_23_placeholders_are_set_before_the_row_exists"
+   ]
+  },
+  {
+   "id": "PIN-complete-before-hash-check",
+   "file": "svc_link_index.py",
+   "old": "        self._mp_step(ctx, \"shards_written\")\n",
+   "new": "        self._mp_step(ctx, \"shards_written\")\n        st.put(\"manifest\", sid, st.dumps({\"complete\": True}))\n",
+   "tests": [
+    "tests/conformance/marcus_pipeline/test_mp_index_builder.py::test_B_MP_33_complete_only_after_every_shard_reread_and_hash_checked"
+   ]
+  },
+  {
+   "id": "PIN-lookalike-accepted",
+   "file": "marcus/index_builder.py",
+   "old": "        if m in (domain_match.EXACT, domain_match.SUBDOMAIN):\n",
+   "new": "        if m in (domain_match.EXACT, domain_match.SUBDOMAIN, domain_match.LOOKALIKE):\n",
+   "tests": [
+    "tests/conformance/marcus_pipeline/test_mp_index_builder.py::test_B_MP_30_target_slices_match_registered_domains_never_lookalikes"
+   ]
+  },
+  {
+   "id": "PIN-path-grammar-off",
+   "file": "marcus/wat_fetcher.py",
+   "old": "WAT_PATH = re.compile(r\"crawl-data/(CC-MAIN-\\d{4}-\\d{2})/segments/\\d{13}\\.\\d{1,2}/wat/\"\n                      r\"CC-MAIN-\\d{14}-\\d{14}-\\d{5}\\.warc\\.wat\\.gz\")\n",
+   "new": "WAT_PATH = re.compile(r\"crawl-data/(CC-MAIN-\\d{4}-\\d{2})/.*\")\n",
+   "tests": [
+    "tests/conformance/marcus_pipeline/test_mp_wat_fetcher.py::test_A_MP_03_generated_smuggling_fast",
+    "tests/conformance/marcus_pipeline/test_mp_wat_fetcher.py::test_B_MP_11_A_MP_03_targeted_paths_outside_the_grammar_refused"
+   ]
+  }
+ ],
+ "equivalent": [
+  {
+   "file": "marcus/wat_fetcher.py",
+   "old": "                    skipping = nl < 0                  # the rest of this line is dropped as it arrives\n",
+   "proof": "The line is reached only when held + len(piece) > max_line. If nl == 0 then start == 0 (nl >= start) so piece == b'' and the test is held > max_line. Invariant 0 <= held <= max_line (held is reset to 0 or grows only when held + len(piece) <= max_line), and every caller uses max_line = MAX_LINE >= 0 (no other max_line in src/). So nl == 0 never reaches this line, and for nl != 0 'nl < 0' == 'nl <= 0'. Fuzz: 20,000 random multi-member streams, max_line 0..8, outputs identical (MP-C3b).",
+   "card": "MP-C3b"
+  },
+  {
+   "file": "marcus/link_extractor.py",
+   "old": "    raw_host = netloc.rsplit(\":\", 1)[0] if \":\" in netloc and not netloc.endswith(\"]\") else netloc\n",
+   "proof": "The two differ only when ':' is in netloc AND netloc ends with ']'. p.port was already read (any non-numeric port raised -> urls_invalid), and urlsplit (CPython 3.13.18) refuses any text before '[' in the host part, so netloc (after the userinfo) starts with '['. Then both the original raw_host (netloc) and the mutant's (netloc up to its last ':') start with '[', which no _LABEL accepts: both return (None, 'urls_invalid'). Exhaustive check: 813,615 URLs built from bracket/colon/at/IPv6/IPvFuture/percent fragments (length 1..5), normalise identical. Note: on a CPython without the before-'[' check, test_mp_link_edges.py::test_B_MP_22_bracketed_authority_after_a_colon_is_invalid_not_the_prefix_host kills it.",
+   "card": "MP-C3b"
+  }
+ ]
+}

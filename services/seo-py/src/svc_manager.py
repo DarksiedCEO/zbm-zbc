@@ -21,7 +21,9 @@ from envelope import sha
 from errors import Conflict, Forbidden, Invalid, Unavailable
 from reasons import R
 
-AGENTS = ("selene", "delia", "roman", "entity_check", "callum", "naomi", "osei")
+AGENTS = ("selene", "delia", "roman", "entity_check", "callum", "naomi", "osei",
+          # the Marcus index pipeline v1 (marcus-pipeline-spec/1): role ids; names pending (Q-MP-1)
+          "cc_release_watcher", "cc_wat_fetcher", "cc_link_extractor", "cc_index_builder", "cc_graph_importer")
 # The agent registry (ADR 0046, owner rule: every agent has a human name, ONE job, and an entry with its assignment,
 # inputs and outputs). Shared plumbing (primitives/, answer_adapter.py and the engine adapters, the ports) is not an
 # agent and is not listed. Shown on GET /seo/v1/department.
@@ -53,10 +55,45 @@ REGISTRY = {
              "inputs": ["every run's quarantines and observations", "Search Console (when bound)",
                         "two completed audits"],
              "outputs": ["data_hygiene and search_performance envelopes", "drift reports"]},
+    # marcus-pipeline-spec/1 B-MP-04 / 15 / 27 / 36 / 43 (CB-1): the one job of each service is the spec's section 0
+    # sentence; the role id stands until the owner names the service (Q-MP-1, ``name_pending``)
+    "cc_release_watcher": {"assignment": "notice a new Common Crawl crawl or web-graph release and record it",
+                           "inputs": ["the cc_releases port (v1: a fixture release list shaped as CC's published "
+                                      "crawl list, GP-1)"],
+                           "outputs": ["cc_release_seen records {crawl id, kind, published date}"]},
+    "cc_wat_fetcher": {"assignment": "deliver the WAT files of one crawl (or one targeted subset) to the Link "
+                                     "Extractor, verified",
+                       "inputs": ["one recorded crawl release", "its wat.paths list or a targeted path list (path B)",
+                                  "the cc_wat port (v1: the fixture directory SEO_MARCUS_FIXTURE_DIR, tests only)"],
+                       "outputs": ["verified WAT record streams for the Link Extractor",
+                                   "wat_file_done records {path hash, records, bytes}"]},
+    "cc_link_extractor": {"assignment": "turn WAT records into normalised, personal-data-scrubbed link rows",
+                          "inputs": ["WAT records (GP-2) delivered by the WAT Fetcher"],
+                          "outputs": ["link rows {src, dst, anchor, path, rel}"]},
+    "cc_index_builder": {"assignment": "build one snapshot: the link slices for the registered target domains, "
+                                       "sharded, encrypted, manifested",
+                         "inputs": ["link rows from the Link Extractor",
+                                    "the registered domains of every tenant at build time",
+                                    "the previous snapshot's slices (crawled_sources)"],
+                         "outputs": ["marcus.index_snapshot/1 (manifest) and its encrypted shards"]},
+    "cc_graph_importer": {"assignment": "import the host / domain graph rank files of one release",
+                          "inputs": ["one recorded host_graph or domain_graph release (rank files, GP-3)",
+                                     "the current snapshot's slices (the hosts and domains to keep)"],
+                          "outputs": ["marcus.graph_ranks/1 (encrypted at rest)"]},
 }
+# Q-MP-1: the role id stands until the owner names the service; the naming state is shown BESIDE the registry block
+# on GET /seo/v1/department (the registry block itself stays assignment / inputs / outputs, CB-1).
+NAMES = {"cc_release_watcher": {"name_pending": True, "proposed_name": "Ruth"},
+         "cc_wat_fetcher": {"name_pending": True, "proposed_name": "Felix"},
+         "cc_link_extractor": {"name_pending": True, "proposed_name": "Esther"},
+         "cc_index_builder": {"name_pending": True, "proposed_name": "Ivan"},
+         "cc_graph_importer": {"name_pending": True, "proposed_name": "Gideon"}}
 # Named in the spec, NOT built (no code, no registry entry until they are): Adaeze (content gap) is a consumer of
-# callum.mnc_priority/2; Marcus, Priya, Theo, Zara, Idris, Vesper, Julian, Sable, Farrah (ADR 0017).
-NOT_BUILT_AGENTS = ("adaeze", "marcus", "priya", "theo", "zara", "idris", "vesper", "julian", "sable", "farrah")
+# callum.mnc_priority/2; Marcus, Priya, Theo, Zara, Idris, Vesper, Julian, Sable, Farrah (ADR 0017); the Marcus
+# pipeline's v2 services (marcus-pipeline-spec/1 section 6: Link Verifier, Spam Scorer, RDAP Enricher).
+NOT_BUILT_AGENTS = ("adaeze", "marcus", "priya", "theo", "zara", "idris", "vesper", "julian", "sable", "farrah",
+                    "link_verifier", "spam_scorer", "rdap_enricher")
+LINK_INDEX_AGENTS = AGENTS[7:]
 STATES = ("active", "watch", "retrain", "restricted", "retired")
 MOVES = {"active": ("watch", "restricted"), "watch": ("active", "retrain", "restricted"),
          "retrain": ("active", "watch", "restricted"), "restricted": ("active", "retrain", "retired"),
@@ -146,6 +183,11 @@ class ManagerMixin:
                     runs += 1
                     outcomes[outcome] = outcomes.get(outcome, 0) + 1
                     produced += n
+        if agent in LINK_INDEX_AGENTS:                 # the Marcus pipeline: its recorded jobs (svc_link_index.py)
+            li = self.link_index_scorecard(agent)
+            runs += li["runs"]
+            for k, v in li["outcomes"].items():
+                outcomes[k] = outcomes.get(k, 0) + v
         confirmed = overturned = drifts = 0
         for s in self.schedules.values():
             for d in s["drifts"]:
@@ -188,7 +230,7 @@ class ManagerMixin:
             return {"agents": {a: {"state": self.agent_state(a),
                                    "history": [dict(h) for h in self.agent_states.get(a, {}).get("history", [])],
                                    "queue": self._queues(a), "scorecard": self._scorecard(a),
-                                   "registry": dict(REGISTRY[a])} for a in AGENTS},
+                                   "registry": dict(REGISTRY[a]), **dict(NAMES.get(a, {}))} for a in AGENTS},
                     "not_built_agents": list(NOT_BUILT_AGENTS),
                     "lifecycle": {"states": list(STATES), "moves": {k: list(v) for k, v in MOVES.items()},
                                   "andre_only": "any move into or out of restricted, and into retired"}}

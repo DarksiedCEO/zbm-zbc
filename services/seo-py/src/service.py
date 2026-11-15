@@ -44,6 +44,7 @@ from svc_engines import EnginesMixin
 from svc_entity import EntityMixin, ZBM_ENTITY
 from svc_gsc import GscMixin
 from svc_invoices import InvoicesMixin
+from svc_link_index import LinkIndexMixin
 from svc_logs import LogsMixin
 from svc_manager import ManagerMixin
 from svc_optext import OperatorTextMixin
@@ -78,7 +79,8 @@ def request_sha(body: dict) -> str:
 
 
 class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixin, SchedulesMixin, ManagerMixin,
-                 GscMixin, EnginesMixin, ReportsMixin, CitationsMixin, OperatorTextMixin, VaultedMixin):
+                 GscMixin, EnginesMixin, ReportsMixin, CitationsMixin, OperatorTextMixin, VaultedMixin,
+                 LinkIndexMixin):
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, ports=None,
                  clock: Optional[Clock] = None, lock_token: Optional[str] = None, *,
                  observe_existing_on_start: bool = False):
@@ -109,6 +111,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
         self.client_reports: dict[str, dict] = {}       # recorded client-report renders (svc_reports.py)
         self.citation_runs: dict[str, dict] = {}        # Callum's citation-source runs (svc_citations.py, ADR 0046)
         self.requests: dict[tuple, tuple] = {}
+        self._init_link_index()                         # the Marcus index pipeline (svc_link_index.py)
         # memory only
         self.running_audits: set = set()               # audits this process is running now
         self.running_citation_runs: set = set()        # citation runs this process is running now (ADR 0046)
@@ -144,6 +147,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
             self.vault = self._open_vault(settings, repair=not observe_existing_on_start)
             # review c0c09bd1: operator free text (svc_optext.py) in its own vault file, same key and scheme
             self.optext_vault = self._open_vault(settings, repair=not observe_existing_on_start, operator=True)
+            self._open_index_store()                    # GP-4: the link index's encrypted store (svc_link_index.py)
             # review 2b26d980 MUST 2: the configured vault key ids are written to the log (the operator-text stub's
             # ``key_id``), so each must be one the sink guard takes: checked now (a closed configuration error, no
             # id in it), never found out at the first audit. They join the guard's closed ``key_id`` set.
@@ -157,6 +161,8 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
                 # AEGIS L-8: refuse to start rather than answer the client-report route with a 500
                 raise RuntimeError("settings.report_branding must be a client_report.Branding")
             self._start(observe_existing_on_start=observe_existing_on_start)
+            if not observe_existing_on_start:
+                self.link_index_sweep()                 # B-MP-33: no complete manifest without its record
             self._record_vault_repair()
         except BaseException:
             self.close()
@@ -723,7 +729,8 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
             else:
                 # ADR 0046: citation runs left running by a process that is gone are closed by the same job
                 summary = {**self.mark_interrupted_audits(),
-                           "citation_runs_interrupted": self.mark_interrupted_citation_runs()}
+                           "citation_runs_interrupted": self.mark_interrupted_citation_runs(),
+                           "link_index_jobs_interrupted": self.mark_interrupted_link_index_jobs()}
             with self.lock:
                 self._gate()
                 self._commit("job_ran", self._req({"job": name}, "scheduler", rk, body, summary), "scheduler")
