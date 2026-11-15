@@ -58,6 +58,19 @@ def _s(v: Optional[str], n: int = STR_MAX) -> Optional[str]:
     return v[:n]
 
 
+def _lang_copy(v: Optional[str], n: int = STR_MAX) -> Optional[str]:
+    """``<html lang>`` as kept (B-RO-05; rv-wave1v2r3 F-2): white space folded, the WHOLE value up to ``n``
+    characters (validated whole by Roman); past ``n`` only whole subtags are dropped from the end, and a singleton
+    left last with them (RFC 5646 4.4.2). No whole subtag fits -> the plain cut (it is not a valid tag either way)."""
+    v = _s(v, None)
+    if v is None or len(v) <= n:
+        return v
+    parts = v[:n + 1].split("-")[:-1]          # the last piece is cut (or empty when the cut falls on a hyphen)
+    while parts and len(parts[-1]) == 1:
+        parts.pop()
+    return "-".join(parts) if parts else v[:n]
+
+
 class _Extractor(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -86,7 +99,7 @@ class _Extractor(HTMLParser):
         self.elements += 1
         a = {k.lower(): (v or "") for k, v in attrs if k}
         if tag == "html" and self.html_lang is None:
-            self.html_lang = _s(a.get("lang"), 35)
+            self.html_lang = _lang_copy(a.get("lang"))
         elif tag == "title" and self.title is None:
             self._in_title = True
             self.title = ""

@@ -142,7 +142,8 @@ class FetchResult:
     status_seen: bool = False                            # a response status line arrived before the fetch stopped
     # B-SE-12 / A-27 (rv-wave1v2r2 #1): the X-Robots-Tag header lines AS SENT, for decisions in memory only (never
     # in ``summary`` or any stored form; ``headers["x-robots-tag"]`` stays the bounded stored copy). Bounded by
-    # XROBOTS_RAW_MAX octets in all; ``x_robots_incomplete`` when lines past that bound were not kept.
+    # XROBOTS_RAW_MAX octets in all; the line that crosses it keeps only its whole comma-separated items that fit
+    # (rv-wave1v2r3 F-1); ``x_robots_incomplete`` when any octet past that bound was not kept.
     x_robots_raw: tuple = ()
     x_robots_incomplete: bool = False
 
@@ -533,11 +534,15 @@ class Fetcher:
                         kept["x-robots-tag"] = safe_url_mod.HEADER_SEP.join(v[:2000] for v in xr[:50])
                         raw, n = [], 0
                         for v in xr:
-                            n += len(v.encode("utf-8", "surrogateescape"))
-                            if n > XROBOTS_RAW_MAX:
+                            enc = v.encode("utf-8", "surrogateescape")
+                            if n + len(enc) > XROBOTS_RAW_MAX:  # rv-wave1v2r3 F-1: the line's whole items that fit
+                                cut = enc[:XROBOTS_RAW_MAX - n + 1].rfind(b",")
+                                if cut > 0:
+                                    raw.append(enc[:cut].decode("utf-8", "surrogateescape"))
                                 break
+                            n += len(enc)
                             raw.append(v)
-                        kept[_XR_RAW] = (tuple(raw), len(raw) < len(xr))
+                        kept[_XR_RAW] = (tuple(raw), n < sum(len(v.encode("utf-8", "surrogateescape")) for v in xr))
                     if 300 <= resp.status_code < 400 and resp.headers.get("location"):
                         loc = resp.headers.get("location")
                         if len(loc.encode("utf-8", "surrogateescape")) > LOCATION_MAX:

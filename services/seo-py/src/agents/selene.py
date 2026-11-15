@@ -89,8 +89,8 @@ def noindex_for(fetch, extract: Optional[dict], token: str) -> Optional[bool]:
     header lines past that bound were not read and nothing read says noindex."""
     t = token.lower()
     raw = getattr(fetch, "x_robots_raw", ())
-    if raw or not fetch.headers.get("x-robots-tag"):
-        targets = _raw_header_noindex(raw)
+    if raw or getattr(fetch, "x_robots_incomplete", False) or not fetch.headers.get("x-robots-tag"):
+        targets = _raw_header_noindex(raw)    # rv-wave1v2r3 F-1: never the cut stored copy when lines were not read
     else:                                       # a result built without the raw lines (stored / older): the copy
         targets = {bot for bot, d, _ in robots_rules(fetch.headers.get("x-robots-tag")) if d in ("noindex", "none")}
     if None in targets or t in targets:

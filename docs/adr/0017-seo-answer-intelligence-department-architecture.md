@@ -1537,7 +1537,7 @@ V2. **Evidence map and owner displays** (spec 0.1, D-02f-h, D-06). Each audit's 
    returned form (D-05), and the owner display resolved 136 of 136 plants on surfaces a stored report references
    by code (D-06; a value-destroying placeholder has nothing to resolve). The scan's base64 forms count only when
    the token decodes to the whole value, and vault lines are left out of it only when their ciphertext
-   authenticates under the service key (76 of 76 lines); round 3 found a base64 core matching random ciphertext
+   authenticates under the service key (76 of 76 lines); round 2 found a base64 core matching random ciphertext
    by coincidence in one fast-tier run of ten.
 V3. **Robots and fetch** (spec sections 1-2). A sitemap or an ignored line no longer ends a run of user-agent lines
    (only a rule does; Google's parser; found by the conformance suite's RFC 9309 oracle); lines end at CR, LF or CRLF
@@ -1600,16 +1600,17 @@ V5. **Suite and war room.** The conformance suite (one test or family per spec i
    llmstxt.org proposal, Google's robots meta documentation, RFC 5646 with the CLDR XML) and seven new war-room
    scenarios (`store-codes-planted`, `robots-wire-and-length`, `robots-cost-charging`, `host-labels`,
    `large-sitemaps`, `codes-and-drift`, `vault-unavailable-audit`). Mutants: `devtools/conformance/mutants.py`.
-V6. **Owner items (open).** (a) B-UL-02 against B-SE-01: B-SE-01 names `ROBOTS_UNREACHABLE` critical / ACT for an
+V6. **Owner items ((a) open).** (a) B-UL-02 against B-SE-01: B-SE-01 names `ROBOTS_UNREACHABLE` critical / ACT for an
    unreachable robots.txt; B-UL-02, read literally, would make the network-failure case (this service's own failed
    observation) INSUFFICIENT_EVIDENCE / info. The build follows B-SE-01, the item that names the code; that is this
    build's reading, not a measured or reviewed result; the spec text is the owner's to reconcile. (b) A-32: the base's
-   `agents/public_suffix_list.dat` is MPL-2.0, not on the approved licence list; unchanged here, the owner's
-   decision. (c) B-RB-01 says a group applies when its user-agent value EQUALS the crawler's product token;
+   `agents/public_suffix_list.dat` is MPL-2.0, not on the approved licence list. DECIDED 2026-11-14: the owner
+   approved it (A-32 approved); the file is unchanged and A-32 passes on this tree.
+   (c) B-RB-01 says a group applies when its user-agent value EQUALS the crawler's product token;
    `primitives/robots.py` takes the token before a `/` (Google's parser: `User-agent: Googlebot/2.1` is a
    Googlebot group), and the RFC 9309 oracle follows the spec text. The reviewer's mutant r08 (the raw value) is
-   therefore the spec-literal behaviour and no honest test kills it; robots is a certified row and is unchanged:
-   the owner's to decide.
+   therefore the spec-literal behaviour and no honest test kills it; robots is a certified row and is unchanged.
+   DECIDED 2026-11-14: r08 is accepted as undefined behaviour (the accepted mutant survivor), not a finding.
 
 ## Unlock list
 

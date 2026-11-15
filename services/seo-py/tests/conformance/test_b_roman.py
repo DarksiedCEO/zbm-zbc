@@ -217,6 +217,65 @@ def test_B_RO_01_title_measured_white_space_folded_in_the_extract(title, n):
     assert p["title_length"] == n and p["title_empty"] is (n == 0)
 
 
+LANG_PROBE_VALID = ["en-US-u-ca-gregory", "de-DE-u-co-phonebk", "en-a-bbbbb-b-ccc", "sr-Latn-RS-u-nu-latn",
+                    "en-US-x-twain", "x-default", "x-whatever-abc", "zh-Hant-TW-u-nu-hanidec",
+                    "ja-JP-u-ca-japanese-x-lvariant-JP", "en-u-abcde-fghij", "en-t-de-latn", "es-419-u-ca-buddhist",
+                    "de-CH-1901-u-co-phonebk", "en-US-u-ca-gregory-va-posix", "en-a-myext-b-another", "en-u-12345",
+                    "fr-FR-x-12345678", "en-GB-u-sd-gbsct", "en-t-0abc", "hy-Latn-IT-arevela-u-co-trad"]
+LANG_PROBE_INVALID = ["en-US-u", "en-x", "en--US", "en-u-ca-u-nu", "de-1996-1996", "en-a-bbb-a-ccc", "e", "en-US-",
+                      "123"]
+LANG_PROBE_LONG = ["de-CH-1901-u-co-phonebk-ka-shifted-x-abc", "en-US-u-ca-gregory-nu-latn-x-a-bcdefgh",
+                   "sr-Latn-RS-u-ca-gregory-nu-latn-x-1"]
+
+
+def test_B_RO_05_the_reviewers_lang_probe_tags():
+    """rv-wave1v2r3 F-2 (lang.py, ported): RFC 5646 valid tags are valid, malformed ones invalid."""
+    from agents_run import coding
+    with coding():
+        assert [t for t in LANG_PROBE_VALID if roman.safe_lang(t) in (None, "invalid")] == []
+        assert [t for t in LANG_PROBE_INVALID if roman.safe_lang(t) != "invalid"] == []
+
+
+@pytest.mark.parametrize("tag", LANG_PROBE_LONG)
+def test_B_RO_05_a_valid_tag_longer_than_35_characters_is_validated_whole(tag):
+    """rv-wave1v2r3 F-2: the parser keeps the whole lang value (35 characters was a cut inside a subtag), so a valid
+    long tag is valid: stored language[-script][-region] equal to the oracle, no LANG_INVALID."""
+    from agents_run import coding
+    from primitives.parse import parse_html
+    assert len(tag) >= 35 and bcp47.well_formed(tag)
+    x = parse_html(f"<html lang='{tag}'><head><title>t</title></head><body>b</body></html>", "http://site.test/")
+    assert x["lang"] == tag
+    with coding():
+        assert roman.safe_lang(x["lang"]) == bcp47.stored(tag)
+    web = site(Web())
+    web.route("/", page(lang=tag, ld=ORG_LD))
+    assert "LANG_INVALID" not in codes(_r(web))
+
+
+@pytest.mark.parametrize("v,n,want", [
+    ("en-US-u-ca-gregory", 9, "en-US"),            # cut inside 'ca', then the dangling singleton 'u' dropped
+    ("en-US-u-ca-gregory", 10, "en-US-u-ca"),      # the cut falls on a hyphen: 'ca' is whole
+    ("de-CH-1901", 8, "de-CH"),
+    ("en-US", 5, "en-US"),
+    ("abcdefghij", 4, "abcd"),                     # no whole subtag fits: the plain cut (invalid either way)
+])
+def test_B_RO_05_the_stored_lang_copy_drops_whole_subtags_only(v, n, want):
+    """rv-wave1v2r3 F-2 / RFC 5646 4.4.2: past the bound the copy drops whole subtags (and a singleton left last)."""
+    from primitives.parse import _lang_copy
+    assert _lang_copy(v, n) == want
+
+
+def test_B_RO_05_a_tag_past_the_string_bound_keeps_whole_subtags():
+    from agents_run import coding
+    from primitives.parse import STR_MAX, parse_html
+    tag = "en-GB-x-" + "-".join(f"a{i:07d}" for i in range(80))
+    assert len(tag) > STR_MAX and bcp47.well_formed(tag)
+    x = parse_html(f"<html lang='{tag}'><head><title>t</title></head><body>b</body></html>", "http://site.test/")
+    assert len(x["lang"]) <= STR_MAX and tag.startswith(x["lang"] + "-") and bcp47.well_formed(x["lang"])
+    with coding():
+        assert roman.safe_lang(x["lang"]) == "en-GB"
+
+
 @pytest.mark.parametrize("lang", ["", " ", "\t"])
 def test_B_RO_05_lang_missing(lang):
     web = site(Web())

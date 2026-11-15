@@ -384,6 +384,55 @@ def test_A_27_x_robots_tag_past_the_raw_bound_is_undecided_never_indexable():
         sorted(e for e in bots.ENGINE_SEARCH_BOT if e != "google")
 
 
+@pytest.mark.parametrize("line", [
+    "a" * 1991 + ", noindexzz, " + "nofollow, " * 7000,      # rv-wave1v2r3 F-1 H12b: stored cut ends at 'noindex'
+    "a" * 1994 + ", nonesuch, " + "nofollow, " * 7000,       # H12c: stored cut ends at 'none'
+    "nofollow, " * 7000 + "noindex",                          # the noindex itself is past the bound
+])
+def test_B_SE_12_A_27_one_line_past_the_raw_bound_never_decides_on_the_stored_copy(line):
+    """rv-wave1v2r3 F-1 (h2.py, ported): a FIRST X-Robots-Tag line longer than fetch.XROBOTS_RAW_MAX alone. The
+    decision is made on the raw octets read (whole items only), never on the stored copy cut to 2,000 characters:
+    a word cut there is not a directive. Nothing read says noindex -> NOINDEX_CHECK_INCOMPLETE, outcome PARTIAL."""
+    from primitives import fetch as fetch_mod
+    assert len(line) > fetch_mod.XROBOTS_RAW_MAX
+    s, rr = _noix_run([line], [])
+    assert "NOINDEX" not in codes(s), by_code(s, "NOINDEX")
+    f = one(s, "NOINDEX_CHECK_INCOMPLETE")
+    assert sorted(f["detail"]["engines"]) == sorted(bots.ENGINE_SEARCH_BOT)
+    assert s["outcome"] == "PARTIAL" and s["facts"]["noindex_undecided_pages"] == 1
+    rd = rr["facts"]["engine_readiness_heuristic"]["/"]
+    assert all(rd[e]["checks"]["indexable"] == "undecided" for e in rd), rd
+
+
+@pytest.mark.parametrize("line,want", [
+    ("nofollow, noindex, " + "nofollow, " * 7000, sorted(bots.ENGINE_SEARCH_BOT)),
+    ("googlebot: noindex, " + "nofollow, " * 7000, ["google"]),
+    ("noindexzz, nonesuch, xnoindex, " + "nofollow, " * 7000, []),
+])
+def test_B_SE_12_a_directive_read_within_an_over_long_line_decides_as_a_whole_token(line, want):
+    """rv-wave1v2r3 F-1: the raw octets read of an over-long line still decide; only whole items count."""
+    s, _ = _noix_run([line], [])
+    got = by_code(s, "NOINDEX")
+    assert (sorted(got[0]["detail"]["engines"]) if got else []) == want
+    inc = by_code(s, "NOINDEX_CHECK_INCOMPLETE")
+    assert sorted(inc[0]["detail"]["engines"] if inc else []) == sorted(set(bots.ENGINE_SEARCH_BOT) - set(want))
+
+
+@pytest.mark.parametrize("over,want", [(0, sorted(bots.ENGINE_SEARCH_BOT)), (1, [])])
+def test_B_SE_12_the_item_that_ends_exactly_at_the_raw_bound_is_kept(over, want):
+    """rv-wave1v2r3 F-1 edge (C10): an over-long line keeps its whole items within fetch.XROBOTS_RAW_MAX octets. An
+    item ending exactly at the bound is read whole and decides; one octet past it is not read (incomplete)."""
+    from primitives import fetch as fetch_mod
+    head = ", noindex"
+    line = "x" * (fetch_mod.XROBOTS_RAW_MAX - len(head) + over) + head + ", nofollow" * 10
+    assert line.encode().index(b",", fetch_mod.XROBOTS_RAW_MAX - 1) == fetch_mod.XROBOTS_RAW_MAX + over
+    s, _ = _noix_run([line], [])
+    got = by_code(s, "NOINDEX")
+    assert (sorted(got[0]["detail"]["engines"]) if got else []) == want
+    inc = by_code(s, "NOINDEX_CHECK_INCOMPLETE")
+    assert sorted(inc[0]["detail"]["engines"] if inc else []) == sorted(set(bots.ENGINE_SEARCH_BOT) - set(want))
+
+
 @pytest.mark.parametrize("noindex", [True, False])
 def test_B_RO_10_readiness_indexable_follows_the_noindex_decision(noindex):
     """rv-wave1v2r2 #3 ro-15: readiness ``indexable`` per engine is the negation of B-SE-12 (fail for an engine
