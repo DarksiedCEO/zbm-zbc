@@ -1615,6 +1615,9 @@ V6. **Owner items ((a) open).** (a) B-UL-02 against B-SE-01: B-SE-01 names `ROBO
    Googlebot group), and the RFC 9309 oracle follows the spec text. The reviewer's mutant r08 (the raw value) is
    therefore the spec-literal behaviour and no honest test kills it; robots is a certified row and is unchanged.
    DECIDED 2026-11-14: r08 is accepted as undefined behaviour (the accepted mutant survivor), not a finding.
+   SUPERSEDED 2026-11-15 by the owner (wave1-spec/1.1 clarification of B-RB-01): the name on a User-agent line is
+   the part before the first `/`, trimmed (Google's parser); an empty name part reads as `*`. Pinned by
+   `test_B_RB_01_user_agent_name_is_the_part_before_the_slash` (4 cases); mutant rv-r08 is now killed.
 
 ## Unlock list
 

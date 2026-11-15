@@ -304,3 +304,19 @@ def test_B_RB_04_a_literal_piece_matches_whole_octets_only(pattern, path, want):
     data = b"User-agent: *\nDisallow: " + pattern + b"\n"
     assert rfc9309.allowed(data, "Googlebot", path) is want
     assert _dec(_svc(data), "Googlebot", path)["allowed"] is want
+
+
+# Owner decision 2026-11-15 ~01:35 PT (wave1-spec/1.1 clarification of B-RB-01, closes rv-r08): the name on a
+# User-agent line is the part before the first "/", trimmed (Google's open-source parser); "Googlebot/2.1" names the
+# Googlebot group. A line whose name part is empty ("/2.1") is read as "*".
+UA_VERSIONED = [
+    (b"User-agent: Googlebot/2.1\nDisallow: /private\n\nUser-agent: *\nDisallow:\n", "Googlebot", b"/private", False),
+    (b"User-agent: Googlebot /2.1\nDisallow: /private\n\nUser-agent: *\nDisallow:\n", "Googlebot", b"/private", False),
+    (b"User-agent: Googlebot/2.1\nDisallow: /private\n\nUser-agent: *\nDisallow:\n", "Bingbot", b"/private", True),
+    (b"User-agent: /2.1\nDisallow: /private\n", "anybot", b"/private", False),
+]
+
+
+@pytest.mark.parametrize("data,tok,path,allowed", UA_VERSIONED)
+def test_B_RB_01_user_agent_name_is_the_part_before_the_slash(data, tok, path, allowed):
+    assert _dec(_svc(data), tok, path)["allowed"] is allowed
