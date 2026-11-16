@@ -192,6 +192,22 @@ def test_t5_untyped_path_and_wrong_type_are_refused_never_rewritten():
     assert sf.field_violations("audit_requested_unknown_kind", {"a": "status_ok"}) == [("/a", "untyped")]
 
 
+def test_t5_enforce_refuses_at_write_and_never_rewrites():
+    """C2-R1 (F-B4): T-5 through the write entry itself (``sink_guard.enforce``), not via the T-4 recorder: a value
+    off its field's grammar, an untyped path and a seo_log kind with no table row each raise ``SinkViolation``; the
+    payload is left as written (never truncated or rewritten); a typed payload passes."""
+    k = next((k for k in sf.SINK_FIELDS if k[0] == "ledger"), None)
+    assert k is not None
+    kind = sf.LEDGER + k[1]
+    for knd, data in ((kind, {k[2].strip("/"): "two words"}), (kind, {"no_such_field": "status_ok"}),
+                      ("seo_log_kind_with_no_table_row", {"a": "status_ok"})):
+        before = dict(data)
+        with pytest.raises(sg.SinkViolation):
+            sg.enforce(knd, data)
+        assert data == before
+    assert sg.enforce("ledger:log_anchor", {"epoch": _hex(16), "seq": 3, "line_sha256": _hex(64)}) is None
+
+
 def test_t5_log_anchor_payload_is_typed():
     ok = {"epoch": _hex(16), "seq": 3, "line_sha256": _hex(64)}
     assert sf.field_violations("ledger:log_anchor", ok) == []

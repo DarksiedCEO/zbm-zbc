@@ -21,11 +21,11 @@ _SCR = "/tmp/claude-0/-home-claude/532895db-b797-5fa4-bc06-893a3fd5370e/scratchp
 R8 = os.environ.get("RV_SINK8_WORK", _SCR + "/rv-sink8/work")
 R9 = os.environ.get("RV_SINK9_WORK", _SCR + "/rv-sink9/work")
 SIZES = {"e1": 578_854, "e1b": 48_860, "e1c": 24_100, "p9": 23_603}
-NBSP = " "
+NBSP = "\u00a0"
 GREEK_UPPER = "".join(chr(c) for c in range(0x391, 0x3AA) if c != 0x3A2)
 
 # rv-sink8 h/gen_e1.py SEPS (identical list in gen_e1b / gen_e1c); written with escapes (RUF001).
-E_SEPS = [": ", ":", "=", " = ", " : ", "：", "： ", " is ", " Is ", " IS ", " was ", " Was ", " WAS ",
+E_SEPS = [": ", ":", "=", " = ", " : ", "\uff1a", "\uff1a ", " is ", " Is ", " IS ", " was ", " Was ", " WAS ",
           " are ", " Are ", " ARE ", " - ", " -> ", " => ", "|", " ", "\t", "\n", '": "']
 _E_VAL = re.compile(r"(?:maple|river|cobalt|tiger|window|garden|silver|orange|planet|harbor)[0-9]{2}")
 _P_VAL = re.compile(r"[A-HJKMNP-Za-hjkmnp-z2-9#%*+!?@$^~]{8,12}")
@@ -269,9 +269,9 @@ def run(corpus: str, select=None, shard=(0, 1), seed_vals=None) -> dict:
 
 
 # CV-10b F-1 cells by construction (lead ruling 21:50 PT, option (a)); labels never printed.
-SIGMA = "Σ"
+SIGMA = "\u03a3"
 F1_SEPS = (": ", " = ", " is ")
-E_SPLITS = {"sp": " ", "nbsp": " ", "nl": "\n", "zwsp+sp": "​ "}   # rv-sink8 h/gen_e1b.py SPLITS (subset)
+E_SPLITS = {"sp": " ", "nbsp": "\u00a0", "nl": "\n", "zwsp+sp": "\u200b "}   # rv-sink8 h/gen_e1b.py SPLITS (subset)
 
 
 def _frozen_guard():

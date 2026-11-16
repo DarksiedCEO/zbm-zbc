@@ -1308,7 +1308,7 @@ def _drop_values():
 def test_ordinary_cited_urls_are_kept_and_fetchable():
     assert len(KEEP_URLS) >= 40
     # ADR 0050: the path-word skip is removed (it let real AWS keys through), so a handful of ids that coincidentally
-    # fit the AWS 40-character format across "/" boundaries are now withheld — security over precision. Bounded here
+    # fit the AWS 40-character format across "/" boundaries are now withheld - security over precision. Bounded here
     # and measured on the disclosed corpus below (<= 2.5%); these are documented residual over-redaction, never leaks.
     flagged = [u for u in KEEP_URLS if callum.url_has_secret(u)]
     # ADR 0050 v2 (was: <= 3 flagged): a URL part holding a credential LABEL WORD is withheld and never fetched (rule

@@ -69,7 +69,7 @@ def test_gsc_limitations_are_shown_on_both_limitation_paths():
 def _off_template():
     m = METHODS[0]
     return [m + " ", " " + m, m[:-1], m + f" {TOKEN}", m.replace(m.split()[0], TOKEN, 1), m.upper(),
-            m + "​", METHODS[0] + METHODS[1]]
+            m + "\u200b", METHODS[0] + METHODS[1]]
 
 
 @pytest.mark.parametrize("v", _off_template())

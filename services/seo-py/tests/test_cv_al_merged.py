@@ -24,7 +24,7 @@ from agents import cv_shape
 MASK = "[hidden: looks like a credential]"
 TA, TB = "tenant-alpha", "tenant-beta"
 AT = "2026-11-14T17:30:00Z"
-SEPS = (" ", " ", "\t")
+SEPS = (" ", "\u00a0", "\t")
 LENS = (10, 14, 30)
 N = 200                                                  # tokens per length per tenant
 K5 = ("4111111111111111", "123-45-6789", "+14155550134")

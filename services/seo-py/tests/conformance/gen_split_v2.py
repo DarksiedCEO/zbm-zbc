@@ -21,7 +21,7 @@ from conformance import gen_values_v2 as VG
 from conformance.core_matrix import SEPS
 from conformance.corpora import EN_WORDS
 
-J = (" ", " ", "\t", "-", "_", ".", "/", ":", "+", "|", ",")
+J = (" ", "\u00a0", "\t", "-", "_", ".", "/", ":", "+", "|", ",")
 KS = (2, 3, 4)
 N_VALUES = 6_000
 PER_SEED = N_VALUES // len(VG.SEEDS)

@@ -71,8 +71,8 @@ def strong_keys(rng):
 
 _LABELS = ["password", "passcode", "passwd", "pwd", "PIN", "secret", "api_key", "apikey", "api-key", "x-api-key",
            "access_token", "refresh_token", "client_secret", "auth", "authorization", "token", "session_id",
-           "api key", "access code", "contraseña", "mot de passe", "schlüssel", "senha", "clé"]
-_SEPS = [": ", "=", " = ", ":", " -> ", " → ", " is ", " - ", '": "']
+           "api key", "access code", "contrase\u00f1a", "mot de passe", "schl\u00fcssel", "senha", "cl\u00e9"]
+_SEPS = [": ", "=", " = ", ":", " -> ", " \u2192 ", " is ", " - ", '": "']
 
 
 def labelled(rng):

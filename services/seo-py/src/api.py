@@ -19,33 +19,33 @@ from __future__ import annotations
 from startup_profile import existing_store_profile
 existing_store_profile()  # Refuse invalid profile before eager construction/configuration.
 
-import asyncio
-import hashlib
-import hmac
-import logging
-import re
-import time
-from typing import Any, Callable, Optional
+import asyncio  # noqa: E402 - after the startup profile check
+import hashlib  # noqa: E402 - after the startup profile check
+import hmac  # noqa: E402 - after the startup profile check
+import logging  # noqa: E402 - after the startup profile check
+import re  # noqa: E402 - after the startup profile check
+import time  # noqa: E402 - after the startup profile check
+from typing import Any, Callable, Optional  # noqa: E402 - after the startup profile check
 
-from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request, status
-from fastapi.exceptions import RequestValidationError
-from fastapi.exception_handlers import http_exception_handler
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ValidationError
-from starlette.concurrency import run_in_threadpool
-from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request, status  # noqa: E402 - after the startup profile check
+from fastapi.exceptions import RequestValidationError  # noqa: E402 - after the startup profile check
+from fastapi.exception_handlers import http_exception_handler  # noqa: E402 - after the startup profile check
+from fastapi.responses import JSONResponse  # noqa: E402 - after the startup profile check
+from pydantic import BaseModel, ValidationError  # noqa: E402 - after the startup profile check
+from starlette.concurrency import run_in_threadpool  # noqa: E402 - after the startup profile check
+from starlette.exceptions import HTTPException as StarletteHTTPException  # noqa: E402 - after the startup profile check
 
-import config as config_mod
-import models as m
-import reasons
-import sink_fields
-from errors import Forbidden, Invalid, NotFound, SeoError
-from founder import HEADER as FOUNDER_HEADER
-from founder import FounderGate
-from ledger import HttpLedgerClient, Recorder, UnconfiguredLedgerClient
-from reasons import R
-from service import JOBS, SeoService
-from store import RecordLog
+import config as config_mod  # noqa: E402 - after the startup profile check
+import models as m  # noqa: E402 - after the startup profile check
+import reasons  # noqa: E402 - after the startup profile check
+import sink_fields  # noqa: E402 - after the startup profile check
+from errors import Forbidden, Invalid, NotFound, SeoError  # noqa: E402 - after the startup profile check
+from founder import HEADER as FOUNDER_HEADER  # noqa: E402 - after the startup profile check
+from founder import FounderGate  # noqa: E402 - after the startup profile check
+from ledger import HttpLedgerClient, Recorder, UnconfiguredLedgerClient  # noqa: E402 - after the startup profile check
+from reasons import R  # noqa: E402 - after the startup profile check
+from service import JOBS, SeoService  # noqa: E402 - after the startup profile check
+from store import RecordLog  # noqa: E402 - after the startup profile check
 
 log = logging.getLogger("seo.api")
 

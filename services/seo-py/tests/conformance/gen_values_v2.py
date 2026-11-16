@@ -19,7 +19,7 @@ SYMBOLS = string.punctuation
 DIGITS = string.digits
 LETTERS = string.ascii_letters
 LEN_MIN, LEN_MAX = 8, 24
-PROSE_LANGS = tuple(sorted(l for l, ws in WORDS.items() if len(ws) >= 220))
+PROSE_LANGS = tuple(sorted(lang for lang, ws in WORDS.items() if len(ws) >= 220))
 N_VALUES_MANIFEST = 10_000
 N_PROSE_MANIFEST = 2_000
 

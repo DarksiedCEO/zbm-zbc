@@ -53,11 +53,11 @@ def corpus_paths() -> dict | None:
 
 # CI lane (lead ruling 21:05 PT): a FIXED 1,000-line sample of each frozen corpus, committed under data/cv8/ so CV-8 runs
 # on a clean checkout. Deterministic draw = ``sample(load(full), 1000)`` (every k-th line, k = len // 1000, first 1,000),
-# raw lines copied byte for byte; md5-pinned here. The full corpora stay the lead-gate row (C2-G5, CV8_* env).
+# lines as parsed objects, re-serialised ASCII-only (json ensure_ascii, C2-R1 G-3); md5-pinned here. The full corpora stay the lead-gate row (C2-G5, CV8_* env).
 SAMPLE_DIR = Path(__file__).resolve().parent / "data" / "cv8"
 SAMPLES = {                                              # name: (file, md5, line count)
     "N": ("N.sample1000.jsonl", "64e57e82ce1bec036b716f0b5bbd17b5", 1_000),
-    "ord18": ("ord18.sample1000.jsonl", "4e6a3bff93a99f310fb6fc6c1cf731cf", 1_000),
+    "ord18": ("ord18.sample1000.jsonl", "05021914229bc30f5fc1a26879323df7", 1_000),
     "oq19": ("oq19.sample1000.jsonl", "b267699a5c4f7f6c22d45cf23a2dfeb6", 1_000),
 }
 

@@ -15,8 +15,8 @@ from agents import cv_allowlist                          # AL-1 (C2-15); imports
 TOKEN_MIN = 8                    # CV-3: raw token length (code points) for the VS length test
 PIECE_MAX = 24                   # CV-4: a fragment is 1..24 code points
 RUN_MAX = 64                     # CV-4: the concatenation of a run is at most 64 code points
-J = frozenset("  \t-_./:+|,")                       # CV-4: the 11 separator characters
-JN = frozenset("-'’._")                             # CV-2: joiners (letters only between two letters)
+J = frozenset(" \u00a0\t-_./:+|,")                       # CV-4: the 11 separator characters
+JN = frozenset("-'\u2019._")                             # CV-2: joiners (letters only between two letters)
 W_L = frozenset("\"'`([{<*")                             # CV-2: leading wrap characters stripped from the core
 W_T = frozenset("\"'`)]}>*,.;:!?")                       # CV-2: trailing wrap characters stripped from the core
 _LINE = frozenset("\t\n\r\x0b\x0c\x1c\x1d\x1e\x1f\x85")  # control code points that are line / space separators
@@ -47,7 +47,7 @@ _EXEMPT = (                                              # CV-6, closed and froz
     ("version", r"v?" + _D + r"+(?:\." + _D + r"+){1,3}"),
     ("ordinal", _D + r"+(?:st|nd|rd|th)"),
     ("range", _D + r"+-" + _D + r"+"),
-    ("dimension", _D + r"+[x×]" + _D + r"+(?:[x×]" + _D + r"+)?[a-z]{0,3}"),
+    ("dimension", _D + "+[x\u00d7]" + _D + "+(?:[x\u00d7]" + _D + r"+)?[a-z]{0,3}"),
     ("unit", _NUM + r"(?:" + "|".join(sorted(_UNITS, key=len, reverse=True)) + r")"),
     ("tyre", _D + r"{3}/" + _D + r"{2}z?r ?" + _D + r"{2}"),
 )

@@ -81,15 +81,15 @@ def test_cv9_symbol_position_is_shuffled(seed):
 
 def test_cv9_prose_pool_is_the_v1_samples_lower_case_4_letters():
     pool = VG.prose_pool()
-    langs = {l for l, ws in WORDS.items() if len(ws) >= 220}
+    langs = {lang for lang, ws in WORDS.items() if len(ws) >= 220}
     assert VG.PROSE_LANGS == tuple(sorted(langs))
-    src = {w for l in langs for w in WORDS[l]}
+    src = {w for lang in langs for w in WORDS[lang]}
     assert pool and set(pool) <= src and len(pool) == len(set(pool))
     for w in pool:
         assert w == w.lower() and sum(c.isalpha() for c in w) >= 4
         assert all(c.isalpha() or unicodedata.category(c)[0] == "M" for c in w)
-    for l in langs:                                                # every script contributes
-        assert any(w in pool for w in WORDS[l]), l
+    for lang in langs:                                             # every script contributes
+        assert any(w in pool for w in WORDS[lang]), lang
 
 
 @pytest.mark.parametrize("seed", VG.SEEDS)
@@ -107,7 +107,7 @@ def test_cv9_manifest_frozen():
 # ------------------------------------------------------------------------------------------------ FS (CV-10c)
 
 def test_cv10c_frozen_constants():
-    assert FS.J == (" ", " ", "\t", "-", "_", ".", "/", ":", "+", "|", ",")
+    assert FS.J == (" ", "\u00a0", "\t", "-", "_", ".", "/", ":", "+", "|", ",")
     assert FS.KS == (2, 3, 4) and FS.N_VALUES == 6_000 and FS.PER_SEED * len(VG.SEEDS) == 6_000
     assert FS.PLACEMENTS == ("bare", "sep1", "sep2", "sentence")
     assert FS.N_CANDIDATES == 6_000 * 3 * 11 * 4

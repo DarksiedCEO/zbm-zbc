@@ -1,4 +1,4 @@
-# ADR 0050 (v2) — SEO (Dept 2): the shared redaction core (`secret_guard`): WITHHOLD THE WHOLE FIELD UNLESS IT IS CLEARLY SAFE
+# ADR 0050 (v2) - SEO (Dept 2): the shared redaction core (`secret_guard`): WITHHOLD THE WHOLE FIELD UNLESS IT IS CLEARLY SAFE
 
 Status: v2 built Nov 9 2026 on `claude/seo-callum-engines-20261108`, superseding the v1 text of this ADR (core v1 at
 `dfac59f9` was REJECTED by review). **Not in force.** Fixtures and synthetic data only: no provider has been called, no
@@ -34,10 +34,12 @@ at `URL_MAX_INPUT` = 8,192 characters):
   passphrase, PIN, OTP / TOTP, secret(s), token(s), api key / apikey / api_key, access key / token / code, security
   code, auth / authorization / bearer, credential(s), cookie(s), session id / sid / session token, seed / recovery
   phrase, mnemonic, private key, client secret, connection string, account key, refresh token, `sig=`, camelCase and
-  snake forms (authToken, userPassword, DB_PASS), "key" followed by `:`/`=` or a token-shaped value, and contraseña,
-  mot de passe, Passwort / Kennwort, senha, пароль, 密码 / 密碼 / 口令 / 密钥, パスワード / 暗証番号, 비밀번호 / 비번 / 암호,
-  wachtwoord, lösenord, hasło, şifre, kata sandi, mật khẩu, clave, chiave, Schlüssel, clé, parola, salasana, heslo,
-  jelszó, lozinka, adgangskode, كلمة المرور, رمز عبور, पासवर्ड, รหัสผ่าน, סיסמה, κωδικός πρόσβασης. Long labels are matched
+  snake forms (authToken, userPassword, DB_PASS), "key" followed by `:`/`=` or a token-shaped value, and the localised
+  password / key labels of `secret_guard` (ASCII forms kept here; the exact strings live in the code): Spanish
+  contrasena / clave, French mot de passe / cle, German Passwort / Kennwort / Schluessel, Portuguese senha, Russian,
+  Chinese, Japanese, Korean, Dutch wachtwoord, Swedish losenord, Polish haslo, Turkish sifre, Indonesian kata sandi,
+  Vietnamese mat khau, Italian chiave / parola, Finnish salasana, Czech heslo, Hungarian jelszo, Croatian lozinka,
+  Danish adgangskode, Arabic, Persian, Hindi, Thai, Hebrew and Greek. Long labels are matched
   with every non-letter removed (`p a s s w o r d`, `pass_word`); short ones as whole words (a label split in two by a
   space / NBSP is joined back; `sid` / `sig` / `pw` / `cle` only when an explicit `:` / `=` follows the split).
   **Generic prose holding a label word is withheld** ("Best password managers: Bitwarden, Dashlane"; "Victoria's
@@ -46,7 +48,7 @@ at `URL_MAX_INPUT` = 8,192 characters):
 - **(c) no strong-key prefix**: AWS ids, OpenAI / Anthropic `sk-`, GitHub, Stripe, Slack (+ webhooks), Google `AIza` /
   `ya29.` / `GOCSPX-` / refresh `1//0`, Perplexity, GitLab, npm / PyPI, Hugging Face, SendGrid, JWT, Shopify
   `shpat_ shpss_ shpca_ shppa_`, Amazon LWA `amzn1.oa2-cs` / `amzn1.application-oa2-client`, Azure `AccountKey=` /
-  `SharedAccessSignature` / `sv=…&` SAS, Square `sq0atp- sq0csp- sq0idp- EAAA`, Vault `hvs. hvb. hvr.`, Discord bot,
+  `SharedAccessSignature` / `sv=...&` SAS, Square `sq0atp- sq0csp- sq0idp- EAAA`, Vault `hvs. hvb. hvr.`, Discord bot,
   Mapbox `sk.eyJ`/`pk.eyJ`, Twilio `SK`/`AC`+32 hex, Mailgun, DigitalOcean, a misc SaaS set, DB / broker URIs with
   credentials (postgres, mysql, mariadb, mongodb(+srv), redis(s), amqp(s), mssql, jdbc), PEM / PGP / OpenSSH headers.
   Matched glued, with spaces removed (distinctive families), with separators removed after the prefix, and at the start
@@ -61,7 +63,7 @@ at `URL_MAX_INPUT` = 8,192 characters):
   domain dot com").
 - A URL written inside the text is judged by the URL rules (3): if any part fails, the text fails.
 
-**The safe-shape allowlist (small, disclosed)** — occurrences are masked before (d) and (e) only; (a), (b), (c), (f)
+**The safe-shape allowlist (small, disclosed)** - occurrences are masked before (d) and (e) only; (a), (b), (c), (f)
 still run: canonical UUID; Amazon order id `###-#######-#######`; ISO-8601 date / date-time; `YYYY/MM/DD`; ISBN-13
 (978/979, checksum) and ISBN-10 (after "ISBN", checksum); EAN-13 (checksum); a 7-40 hex commit SHA right after the
 word commit / commits / revision / sha.
@@ -84,7 +86,7 @@ News article ids; Notion page ids; Loom ids; Facebook `pfbid`; LinkedIn activity
 Squarespace / Google Fonts asset names; Next.js build ids; Google Maps paths; Gemini grounding redirect ids; hashed
 asset file names; Medium post ids; BBB profile ids; Amazon help node ids; Canva design / share / template ids; numeric
 item / post ids on X, TikTok, Pinterest, eBay, Walmart, Etsy, Vimeo, AliExpress, Stack Overflow, Facebook, DOI, arXiv,
-Hacker News, Chewy and listed retailers; numeric values of query keys `variant`, `id`, `page`, `p`, `t`… Each is a
+Hacker News, Chewy and listed retailers; numeric values of query keys `variant`, `id`, `page`, `p`, `t`... Each is a
 residual risk (below).
 
 ### 4. guard_record (fail closed)
@@ -94,7 +96,7 @@ other object (`str()` then checked); a failing value becomes `[withheld]` (None 
 booleans and None are kept. Bounded (`GUARD_MAX_DEPTH` 16, `GUARD_MAX_NODES` 200,000; beyond them `[withheld]`). Any
 internal exception withholds the WHOLE record (the return is the string `[withheld]`), and
 `svc_citations._execute_citation_run` then closes the run as `RUN_FAILED` instead of storing it. Exact constants the
-service itself emits (`VOCAB`: `secret_redacted`, `SECRET_REDACTED`, `NOT_FETCHED_SECRET`, the placeholders…) pass;
+service itself emits (`VOCAB`: `secret_redacted`, `SECRET_REDACTED`, `NOT_FETCHED_SECRET`, the placeholders...) pass;
 values under `*_sha256` / `*_at` / `*_due` / `*_id` keys pass only when they fullmatch the service's own machine shape
 (64 hex; ISO date-time; `seo-<kind>-<40 hex>`); placeholders are blanked before a kept URL is checked.
 

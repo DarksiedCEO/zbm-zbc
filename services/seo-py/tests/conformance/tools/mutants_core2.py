@@ -4,8 +4,9 @@ rule off (joiner_rule_off); one exempt shape added (exempt_shape_added); T-4 dyn
 audit written after the value (rv_audit_after_value); AL accepting K-1 (al_accepts_k1).
 
 Same runner contract as tools/mutants.py (core-spec/1): each mutant is ONE exact source edit (old text must occur
-exactly once); the runner copies services/seo-py into a temporary directory, applies it and runs the G-2 CI lane
-(lanes_core2.CI, the mutant's own group first, -x). KILLED = a test fails. Counts and names only. A SURVIVOR must be
+exactly once); the runner makes a git-aware copy (git worktree of HEAD + the current seo-py state), applies it
+and runs the G-2 CI lane (lanes_core2.CI, own group first, -x) after a mandatory green CONTROL
+run. KILLED = a named test fails (``by``). Counts and names only. A SURVIVOR must be
 shown output-identical on VM, FS and the CV-8 corpora (G-6) - the runner only reports it.
 
     python tests/conformance/tools/mutants_core2.py --check          every edit applies exactly once (no tests run)
@@ -35,7 +36,7 @@ def _j_mutants() -> dict:
     lit = line[len('J = frozenset("'):line.index('")')]
     toks, k = [], 0
     while k < len(lit):
-        n = 2 if lit[k] == "\\" else 1
+        n = (6 if lit[k + 1] == "u" else 2) if lit[k] == "\\" else 1   # \uXXXX is one character (G-3 ASCII)
         toks.append(lit[k:k + n])
         k += n
     out = {}
@@ -104,23 +105,74 @@ def check() -> dict:
     return {"mutants": len(MUTANTS), "not_exactly_once": bad}
 
 
+REPO = ROOT.parents[1]                       # the git checkout holding services/seo-py
+REL = ROOT.relative_to(REPO)
+_IGNORE = shutil.ignore_patterns("__pycache__", ".pytest_cache", ".data*")
+
+
+def _tree(tmp: Path) -> Path:
+    """C2-R1 (F-B1): a GIT-AWARE copy. ``git worktree add --detach <tmp> HEAD`` (so ``git show 3120f0b0:...`` in
+    cv8_tool works there), then the current, possibly uncommitted services/seo-py state copied over it."""
+    subprocess.run(["git", "-C", str(REPO), "worktree", "add", "--detach", "-q", str(tmp), "HEAD"], check=True,
+                   capture_output=True)
+    dst = tmp / REL
+    shutil.copytree(ROOT, dst, ignore=_IGNORE, dirs_exist_ok=True)
+    return dst
+
+
+def _drop(tmp: Path) -> None:
+    subprocess.run(["git", "-C", str(REPO), "worktree", "remove", "--force", str(tmp)], capture_output=True)
+    shutil.rmtree(tmp, ignore_errors=True)
+    subprocess.run(["git", "-C", str(REPO), "worktree", "prune"], capture_output=True)
+
+
+def _pytest(dst: Path, tests: list) -> tuple:
+    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-x", "-rfE", "-p", "no:cacheprovider", "-m",
+                        "core2_ci", *tests], cwd=dst, capture_output=True, text=True, timeout=3 * 3600)
+    ids = [x.split(" ", 1)[1].split(" - ")[0] for x in r.stdout.splitlines() if x.startswith(("FAILED ", "ERROR "))]
+    return r.returncode, ids, (r.stdout.strip().splitlines() or [""])[-1]
+
+
+def control() -> dict:
+    """Mandatory CONTROL: the unmutated git-aware copy with the full selection every mutant runs (the union of
+    ``tests_for``; mutants only reorder it). Must be 0 failed, else no kill is evidence."""
+    tmp = Path(tempfile.mkdtemp(prefix="mut2-control-"))
+    tmp.rmdir()
+    try:
+        rc, ids, tail = _pytest(_tree(tmp), L.paths("ci"))
+        return {"name": "CONTROL", "result": "GREEN" if rc == 0 and not ids else "RED", "rc": rc, "by": ids,
+                "summary": tail}
+    finally:
+        _drop(tmp)
+
+
 def run(name: str) -> dict:
     path, old, new = MUTANTS[name]
     tmp = Path(tempfile.mkdtemp(prefix=f"mut2-{name}-"))
+    tmp.rmdir()
     try:
-        dst = tmp / "seo-py"
-        shutil.copytree(ROOT, dst, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", ".data*"))
+        dst = _tree(tmp)
         p = dst / path
         src = p.read_text(encoding="utf-8")
         if src.count(old) != 1:
-            return {"name": name, "result": "NOT_APPLIED", "count": src.count(old)}
+            return {"name": name, "result": "NOT_APPLIED", "count": src.count(old), "by": []}
         p.write_text(src.replace(old, new), encoding="utf-8")
-        r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-x", "-p", "no:cacheprovider", "-m", "core2_ci",
-                            *tests_for(path)], cwd=dst, capture_output=True, text=True, timeout=3 * 3600)
-        failed = [x.split(" - ")[0] for x in r.stdout.splitlines() if x.startswith(("FAILED", "ERROR"))]
-        return {"name": name, "result": "KILLED" if r.returncode != 0 else "SURVIVED", "by": failed[:1]}
+        rc, ids, tail = _pytest(dst, tests_for(path))
+        if rc == 0:
+            res = "SURVIVED"
+        elif rc == 1 and ids:
+            res = "KILLED"                       # a named test failed: ``by`` is never empty for a KILLED
+        else:
+            res = "ERROR"                        # collection / usage / internal error: not evidence of a kill
+        return {"name": name, "result": res, "rc": rc, "by": ids, "summary": tail}
     finally:
-        shutil.rmtree(tmp, ignore_errors=True)
+        _drop(tmp)
+
+
+def table(rows: list) -> str:
+    out = ["| mutant | status | killing test |", "|---|---|---|"]
+    out += [f"| {r['name']} | {r['result']} | {', '.join(r.get('by') or []) or '-'} |" for r in rows]
+    return "\n".join(out)
 
 
 if __name__ == "__main__":
@@ -128,10 +180,22 @@ if __name__ == "__main__":
         print(json.dumps(check()))
         sys.exit(0)
     names = sys.argv[1].split(",") if len(sys.argv) > 1 else list(MUTANTS)
+    unknown = [n for n in names if n not in MUTANTS]
+    if unknown:
+        sys.exit(f"unknown mutants: {unknown}")
+    ctl = control()
+    print(json.dumps(ctl), flush=True)
+    if ctl["result"] != "GREEN":
+        print(table([ctl]))
+        sys.exit("CONTROL FAILED: the unmutated copy is not green, so no mutant result is evidence - aborting")
     out = []
     for n in names:
         out.append(run(n))
         print(json.dumps(out[-1]), flush=True)
-    print(json.dumps({"run": len(out), "killed": sum(o["result"] == "KILLED" for o in out),
+    print(table([ctl] + out))
+    print(json.dumps({"control": ctl["result"], "run": len(out),
+                      "killed": sum(o["result"] == "KILLED" for o in out),
                       "survived": [o["name"] for o in out if o["result"] == "SURVIVED"],
+                      "error": [o["name"] for o in out if o["result"] == "ERROR"],
                       "not_applied": [o["name"] for o in out if o["result"] == "NOT_APPLIED"]}))
+    sys.exit(0 if all(o["result"] == "KILLED" for o in out) else 1)
