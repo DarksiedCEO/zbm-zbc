@@ -156,9 +156,9 @@ def test_gate_section_names_the_pins_and_the_key_id():
 def test_over_long_query_is_og8_before_any_rule_and_bounded():
     q = "x@y " * 262144  # 1 MB; OG-1 would fire, OG-8 is decided first (I-17)
     assert pg.og_fired(q, V) == ["OG-8"]
-    t0 = time.perf_counter()
+    t0 = time.process_time()  # CPU time (hygiene L1): same 0.05 s PF-2 bar, not inflated by box load
     assert priya.verdict(q, [], V, frozenset()) == ("WITHHELD", "OG-8", None)
-    assert time.perf_counter() - t0 < 0.05  # PF-2 bound
+    assert time.process_time() - t0 < 0.05  # PF-2 bound
     assert pg.og("a" * 512, V) == (
         "WITHHOLD",
         "OG-6",

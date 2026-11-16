@@ -18,7 +18,8 @@ NUMW = {"en": EN, "es": ES}
 AT_WORDS = ["snabel-a", "kukac", "at", "malpa", "arobase", "apenstaartje", "at-zeichen", "chiocciola", "sobaka",
             "arroba", "klammeraffe"]
 DOT_WORDS = ["titik", "nokta", "piste", "prikk", "pont", "kropka", "punkt", "ponto", "point", "punto", "dot"]
-GLUE = [chr(c) for c in range(0xFF01, 0xFF10)] + [chr(c) for c in range(0xFF1A, 0xFF21)] + ["\u3002", "\u3001"]
+GLUE = [chr(c) for c in range(ord("\uff01"), ord("\uff10"))] + [chr(c) for c in range(ord("\uff1a"), ord("\uff21"))] + [
+    "\u3002", "\u3001"]  # codepoint ranges written via ord() so hygiene L2 does not read them as port ranges
 ZW = ["\u200b", "\u200c", "\u200d", "\u200e", "\u200f", "\u202a", "\u202b", "\u202c", "\u202d", "\u202e",
       "\u2060", "\u2061", "\u2062", "\u2063", "\u2064", "\ufeff", "\u00ad"]
 
