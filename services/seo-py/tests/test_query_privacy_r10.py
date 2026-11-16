@@ -14,6 +14,7 @@ import test_query_privacy_r8 as r8
 import test_query_privacy_r9 as r9
 
 from agents import priya
+from test_priya import coder as vault_coder  # synthetic vault key (priya-spec/2 F-7)
 from agents import search_performance as sp
 
 J = "".join
@@ -107,7 +108,8 @@ def test_one_shared_normalisation_no_drop_case_ever_becomes_a_ledger_key():
                       priya.SourceResult("search_console", "OK", "OK", rows,
                                          {"window": {"start": "2026-10-09", "end": "2026-11-05"},
                                           "truncated": False, "unattributed": {"clicks": 0, "impressions": 0}}),
-                      priya.SourceResult("bing_webmaster", "NOT_REQUESTED", "NOT_REQUESTED"))
+                      priya.SourceResult("bing_webmaster", "NOT_REQUESTED", "NOT_REQUESTED"),
+                      coder=vault_coder())
     assert [r["query"]["text"] for r in led["rows"] if r["origin"] == "observed"] == ["rug cleaner"]
     assert CARD not in json.dumps(led) and "4111 1111" not in json.dumps(led)
 

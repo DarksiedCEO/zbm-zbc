@@ -76,17 +76,19 @@
    "test_priya_ordinary.py::test_OQ1_corpus_shape"
   ],
   "OQ-2": [
-   "test_priya_ordinary.py::test_OQ2_every_drop_labelled"
+   "test_priya_ordinary.py::test_OQ2_every_query_labelled_and_every_withheld_coded"
   ],
   "OQ-3": [
-   "test_priya_ordinary.py::test_OQ3_list_mandated_drops_are_required"
+   "test_priya_ordinary.py::test_OQ3_mandated_readable_is_zero_ci",
+   "test_priya_ordinary.py::test_OQ3_mandated_readable_is_zero_heavy"
   ],
   "OQ-4": [
-   "test_priya_ordinary.py::test_OQ4_not_mandated_drops_equal_the_adr_table",
+   "test_priya_ordinary.py::test_OQ4_disclosure_table_ci",
+   "test_priya_ordinary.py::test_OQ4_disclosure_table_heavy",
    "../test_query_privacy_r21.py::test_sizes_and_product_codes_that_decode_to_a_short_x_at_y_are_kept"
   ],
   "OQ-5": [
-   "test_priya_ordinary.py::test_OQ5_text_classes_drop_nothing"
+   "test_priya_ordinary.py::test_OQ5_text_classes_capped_or_disclosed"
   ],
   "OI-1": [
    "test_priya_owner_items.py::test_OI1_zip_plus_year_spelling_an_ssn_is_dropped"
@@ -302,6 +304,14 @@
    "test_priya_reviewer_corpora.py::test_C5_Z1_rv20_vg_heavy",
    "test_priya_reviewer_corpora.py::test_C5_OQ_rv20_oq20_ci",
    "test_priya_reviewer_corpora.py::test_C5_OQ_rv20_oq20_heavy"
+  ],
+  "OQ-CAP": [
+   "test_priya_ordinary.py::test_OQCAP_ci",
+   "test_priya_ordinary.py::test_OQCAP_heavy"
+  ],
+  "OQ-DISCLOSE": [
+   "test_priya_ordinary.py::test_OQDISCLOSE_adr_v2_table_equals_suite_heavy",
+   "test_priya_ordinary.py::test_OQ4_disclosure_table_heavy"
   ]
  }
 }

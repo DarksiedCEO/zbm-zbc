@@ -16,10 +16,18 @@ from gsc_fakes import FakeGoogle
 from helpers import rid
 from oracle import priya_list as o
 from test_gsc import PROP, bind, gsc_harness
+from test_priya import VAULT_ENV
 
 from agents import priya
 
 pytestmark = pytest.mark.conformance
+
+
+@pytest.fixture(autouse=True)
+def vault_key(monkeypatch):
+    # P2-5 / V-2: synthetic vault key (F-7: the service refuses 503 VAULT_UNAVAILABLE without one)
+    for k, v in VAULT_ENV.items():
+        monkeypatch.setenv(k, v)
 
 
 def _list_rows(n: int) -> list:

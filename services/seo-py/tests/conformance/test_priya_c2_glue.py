@@ -12,7 +12,7 @@ import collections
 import priya_gen_c2 as g21
 import pytest
 from oracle import priya_list as o
-from priya_common import dropped
+from priya_common import dropped, readable_report
 
 pytestmark = pytest.mark.conformance
 # the builder's enumeration (a generator change must change these: drift guard)
@@ -26,6 +26,7 @@ def test_C2_every_glue_character_in_every_position_for_every_class():
     chars = collections.Counter(k.split("|")[1] for k, _q in cases)
     assert len(chars) == 24 and len({k.split("|")[0] for k, _q in cases}) == len(g21.FORMS), dict(chars)
     kept = collections.Counter(k for k, q in cases if not dropped(q))
+    readable_report("C-2 c2glue", len(cases), sum(kept.values()))
     assert sum(kept.values()) == 0, dict(kept)
     unlisted = collections.Counter(k for k, q in cases if o.mandated(q) is None)
     assert sum(unlisted.values()) == 0, dict(unlisted)
@@ -35,5 +36,6 @@ def test_C4_spelled_code_digit_glued_to_the_keypad_letters():
     cases = list(g21.glued_vanity())
     assert len(cases) == VANITY_GLUED_SIZE, len(cases)
     kept = collections.Counter(k for k, q in cases if not dropped(q))
+    readable_report("CP vanity_glued", len(cases), sum(kept.values()))
     assert sum(kept.values()) == 0, dict(kept)
     assert all(o.mandated(q) == "vanity" for _k, q in cases)

@@ -11,7 +11,7 @@ import collections
 
 import priya_gen as g
 import pytest
-from priya_common import dropped
+from priya_common import dropped, readable_report
 
 pytestmark = pytest.mark.conformance
 FAMILIES = {"gap_exactly_3", "gap_mixed_1_3", "nd_block", "invisible", "number_words", "one_number_word",
@@ -24,6 +24,7 @@ def test_M2_boundary_set_every_case_drops():
     fams = collections.Counter(f for f, _q in cases)
     assert set(fams) == FAMILIES and len(cases) == BOUNDARY_SIZE, (len(cases), dict(fams))
     kept = collections.Counter(f for f, q in cases if not dropped(q))
+    readable_report("M-2 boundary", len(cases), sum(kept.values()))
     assert sum(kept.values()) == 0, dict(kept)
 
 

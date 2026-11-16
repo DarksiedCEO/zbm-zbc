@@ -4,15 +4,30 @@ volume, honest statuses, and the Theo / Naomi hand-off contract. Synthetic rows 
 
 from __future__ import annotations
 
+import base64
 import json
+import re
 
 import pytest
 
+import vault
 from agents import priya
+from agents import priya_tenant as pt
 from agents.priya import SourceResult
 
 WINDOW = {"start": "2026-10-09", "end": "2026-11-05", "timezone": "America/Los_Angeles"}
 BRANDS = ["acme"]
+# Synthetic vault key for the codes of WITHHELD rows (priya-spec/2 F-7; P2-4 I-18: build() refuses VAULT_UNAVAILABLE without a
+# coder when a key is withheld). 32 high-variety bytes made up here; never a real key.
+VAULT_KEY = base64.urlsafe_b64encode(bytes((i * 37 + 11) % 256 for i in range(32))).decode()
+VAULT_KEY_ID = "k-test-priya"
+VAULT_ENV = {"SEO_VAULT_KEY": VAULT_KEY, "SEO_VAULT_KEY_ID": VAULT_KEY_ID}
+CODE_RE = re.compile(r"^\{c:query:[0-9a-f]{16}\}$")  # F-7 code shape
+
+
+def coder(tenant="acme"):
+    """The coder the service would hand build() (svc_keywords: vault.Coder(key, tid)), from the synthetic key."""
+    return vault.Coder(vault.load_vault_key(VAULT_ENV), tenant)
 
 
 def gsc(rows, **meta):
@@ -26,13 +41,27 @@ def off(name="bing_webmaster", state="NOT_REQUESTED", outcome="NOT_REQUESTED"):
     return SourceResult(name, state, outcome)
 
 
-def build(g=None, b=None):
+def build(g=None, b=None, t=None, c="default"):
+    """priya.build for tenant acme; c = the coder (default: the synthetic-key coder; None = no coder, as I-18)."""
     return priya.build("acme", "seo-kwl-" + "0" * 40, "2026-11-08T12:00:00+00:00", BRANDS,
-                       g if g is not None else off("search_console"), b if b is not None else off())
+                       g if g is not None else off("search_console"), b if b is not None else off(),
+                       tenant_vocab=t, coder=coder() if c == "default" else c)
 
 
 def by_text(ledger):
     return {r["query"]["text"]: r for r in ledger["rows"]}
+
+
+def tvocab(*words):
+    """A tenant word list T (priya-spec/2 section 2.4) of operator-allowed words (T-1 b); each passes T-2.
+    Without it build() uses T = empty (T-4), the certification setting."""
+    for w in words:
+        assert pt.t2_reason(w) is None and pt.one_word(w) == w
+    return pt.TenantVocab("acme", frozenset(words), pt.tenant_vocab_sha256(words), "OFF")
+
+
+def observed_impressions(ledger):
+    return sum(r["metrics"]["search_console"]["impressions"] for r in ledger["rows"] if r["origin"] == "observed")
 
 
 # A small synthetic site: established heads, a long tail with repeated frames, a brand query, PII.
@@ -41,7 +70,7 @@ SITE = [
     ("carpet cleaner", 20, 900, 0.022, 3.4),
     ("sofa cleaner", 6, 300, 0.02, 3.0),
     ("tile cleaner", 5, 250, 0.02, 3.3),
-    ("grout cleaner", 4, 220, 0.018, 3.1),
+    ("qzvrexil cleaner", 4, 220, 0.018, 3.1),     # synthetic non-word (not in V T=2.5, not in T): OG-6 path
     ("acme pricing", 40, 200, 0.2, 1.1),
     ("rug cleaner near me", 2, 12, 0.16, 4.0),
     ("carpet cleaner near me", 1, 8, 0.12, 5.0),
@@ -90,10 +119,24 @@ def test_pii_suspect_queries_never_enter_the_ledger_only_their_counts():
     led = build(gsc(SITE))
     blob = json.dumps(led)
     assert "jane.doe" not in blob and "555 010 0199" not in blob and "example.com" not in blob
-    assert led["counts"]["pii_suspect_dropped"] == {"queries": 2, "clicks": 1, "impressions": 5}
+    # v1 pin: pii_suspect_dropped == {queries 2, clicks 1, impressions 5}. priya-spec/2 F-5 + LP-2 (G-7): the same two
+    # rows are WITHHELD with a reason code and conserved metrics. With T empty (T-4) "qzvrexil cleaner" is WITHHELD
+    # too: OG-6, the synthetic non-word "qzvrexil" is in neither V nor T (lead ruling 15:05 PT: it replaced the v1
+    # fixture word "grout", which is in V since T = 2.5, so the OG-6 intent of this test is kept).
+    w = led["counts"]["withheld"]
+    assert w["by_reason"] == {"OG-1": {"queries": 1, "clicks": 1, "impressions": 3},
+                              "S2:pii_suspect": {"queries": 1, "clicks": 0, "impressions": 2},
+                              "OG-6": {"queries": 1, "clicks": 4, "impressions": 220}}
+    assert (w["queries"], w["clicks"], w["impressions"]) == (3, 5, 225) and "qzvrexil" not in blob
+    assert observed_impressions(led) + w["impressions"] == sum(r[2] for r in SITE)           # metrics conserved
+    # with "qzvrexil" as a tenant word (T-1 b) the v1 numbers hold exactly: only the two personal rows are withheld
+    w = build(gsc(SITE), t=tvocab("qzvrexil"))["counts"]["withheld"]
+    assert (w["queries"], w["clicks"], w["impressions"]) == (2, 1, 5) and set(w["by_reason"]) == {"OG-1",
+                                                                                                "S2:pii_suspect"}
     # fullwidth digits and lookalike spellings are caught too (the normalised text is classified as well)
     led = build(gsc([("ｃａｌｌ ５５５ ０１０ ０１９９", 0, 2, 0.0, 1.0), ("jane．doe＠example．com", 0, 1, 0.0, 1.0)]))
-    assert led["rows"] == [] and led["counts"]["pii_suspect_dropped"]["queries"] == 2
+    assert led["rows"] == [] and led["counts"]["withheld"]["queries"] == 2
+    assert led["counts"]["withheld"]["impressions"] == 3 and "jane" not in json.dumps(led)
 
 
 @pytest.mark.parametrize("q", ["123 main st springfield", "45 oak avenue apt 3", "1200 5th ave new york",
@@ -110,19 +153,57 @@ def test_street_addresses_are_dropped_as_personal_data(q):
     led = build(gsc([(q, 1, 30, 0.03, 4.0)]))
     assert led["rows"] == [] and led["counts"]["pii_suspect_dropped"] == {"queries": 1, "clicks": 1,
                                                                           "impressions": 30}
+    # priya-spec/2 F-5/F-7 (G-7: v1 DROP -> WITHHELD, not weaker): one coded row, closed reason, metrics kept, no text.
+    w = led["counts"]["withheld"]
+    assert (w["queries"], w["clicks"], w["impressions"]) == (1, 1, 30)
+    (row,) = led["withheld_rows"]
+    assert CODE_RE.match(row["code"]) and row["reason"] in priya.REASON_CODES
+    assert (row["metrics"]["search_console"]["clicks"], row["metrics"]["search_console"]["impressions"]) == (1, 30)
+    assert q not in json.dumps(led, ensure_ascii=False)
 
 
 @pytest.mark.parametrize("q", ["rug cleaner near me", "4 way stop", "top 10 rug cleaners", "rug cleaner 90210",
-                               "#1 rug cleaner", "ac unit 12000 btu", "24 hour emergency plumber near dr",
+                               "#1 rug cleaner", "24 hour emergency plumber near dr",
                                "2 bedroom flat close to station", "10 best hiking trail", "2 lane road",
-                               "cars under 30000 in 50000 miles", "or 50000 btu", "ohio 45000 jobs",
+                               "cars under 30000 in 50000 miles", "ohio 45000 jobs",
                                "apt 12 carpet cleaning", "3 days in st louis", "ca 90210 zip code",
                                "top 5 pizza places 5th ave", "2 rd round draft", "2.5 ton heat pump",
-                               "tires 225/65r17", "2012 ford f150 3.5 ecoboost", "carrier 24acc636a003 manual",
+                               "tires 225/65r17",
                                "food court mall hours", "bmw x5 3rd row", "ipad pro m4 1tb",
                                "3 new dr pepper flavors", "2 old court cases", "5 route options"])
 def test_ordinary_queries_with_numbers_are_kept(q):
     assert by_text(build(gsc([(q, 1, 30, 0.03, 4.0)])))[q]["origin"] == "observed"
+
+
+# v1 KEEP cases that V (T = 2.5, owner decision 14:45 PT) makes READABLE again with T empty (T-4): "btu" and
+# "ecoboost" are in V. Lead ruling 15:05 PT: regression tests that these stay readable (NB-12 over-tightening).
+OG6_V1_READABLE = ["ac unit 12000 btu", "or 50000 btu", "2012 ford f150 3.5 ecoboost"]
+
+
+@pytest.mark.parametrize("q", OG6_V1_READABLE)
+def test_v1_kept_queries_are_readable_with_v_t25_and_t_empty(q):
+    led = build(gsc([(q, 1, 30, 0.03, 4.0)]))
+    assert by_text(led)[q]["origin"] == "observed"
+    assert led["counts"]["withheld"]["queries"] == 0
+
+
+# Queries still WITHHELD by priya-spec/2 OG-6 with T empty (T-4). Second column: the tenant words (T-1 b) that make
+# the query READABLE again, or None where T cannot (OG-6's alphanumeric clause: no safe shape, T not consulted).
+# "vexquorn" is a synthetic alpha non-word, checked absent from V (T = 2.5) and T (lead ruling 15:05 PT).
+OG6_WITHHELD = [("vexquorn filter size", ("vexquorn",)), ("carrier 24acc636a003 manual", None)]
+
+
+@pytest.mark.parametrize(("q", "words"), OG6_WITHHELD)
+def test_queries_with_unknown_tokens_are_withheld_og6_when_t_is_empty(q, words):
+    led = build(gsc([(q, 1, 30, 0.03, 4.0)]))
+    one = {"queries": 1, "clicks": 1, "impressions": 30}
+    assert led["rows"] == [] and led["counts"]["withheld"] == {**one, "by_reason": {"OG-6": one}}
+    assert q not in json.dumps(led)
+    if words is None:
+        led = build(gsc([(q, 1, 30, 0.03, 4.0)]), t=tvocab("24acc636a003"))
+        assert led["rows"] == [] and set(led["counts"]["withheld"]["by_reason"]) == {"OG-6"}
+    else:
+        assert by_text(build(gsc([(q, 1, 30, 0.03, 4.0)]), t=tvocab(*words)))[q]["origin"] == "observed"
 
 
 def test_dropped_queries_are_counted_once_across_sources_and_bing_weeks():
@@ -133,12 +214,24 @@ def test_dropped_queries_are_counted_once_across_sources_and_bing_weeks():
                       ("123 main st", "2026-10-05", 0, 6, None, None)], {"site_sha256": "s" * 64})
     led = build(gsc([("jane.doe@example.com", 1, 5, 0.2, 1.0)]), b)
     assert led["counts"]["pii_suspect_dropped"] == {"queries": 2, "clicks": 2, "impressions": 20}
+    # priya-spec/2 F-5/F-7 (G-7): the same two keys are WITHHELD rows, one each across sources and weeks, coded, no text.
+    w = led["counts"]["withheld"]
+    assert (w["queries"], w["clicks"], w["impressions"]) == (2, 2, 20)
+    codes = [r["code"] for r in led["withheld_rows"]]
+    assert len(codes) == 2 == len(set(codes)) and all(CODE_RE.match(c) for c in codes)
+    blob = json.dumps(led, ensure_ascii=False).lower()
+    assert "jane" not in blob and "123 main st" not in blob
 
 
 def test_ctr_curve_is_the_propertys_own_and_inconclusive_without_support():
-    led = build(gsc(SITE))
+    # T empty (T-4): "qzvrexil cleaner" is WITHHELD (OG-6, NB-12) and a withheld row never feeds the curve (F-7: only a
+    # coded row + metrics), so bucket "3" keeps 4 queries, under the support minimum.
+    b3 = build(gsc(SITE))["ctr_curve"]["buckets"]["3"]
+    assert b3 == {"ctr": None, "queries": 4, "impressions": 2650, "clicks": 61, "status": "INSUFFICIENT_SUPPORT"}
+    # the v1 assertions, unchanged, with "qzvrexil" as a tenant word (T-1 b)
+    led = build(gsc(SITE), t=tvocab("qzvrexil"))
     b3 = led["ctr_curve"]["buckets"]["3"]
-    # rug, carpet, sofa, tile, grout: 5 non-brand established rows in bucket "3" (positions 3.0-3.4)
+    # rug, carpet, sofa, tile, qzvrexil: 5 non-brand established rows in bucket "3" (positions 3.0-3.4)
     assert b3["status"] == "COMPUTED" and b3["queries"] == 5 and b3["impressions"] == 2870
     assert b3["ctr"] == round(65 / 2870, 6)
     assert led["ctr_curve"]["buckets"]["1"]["status"] == "INSUFFICIENT_SUPPORT"      # only the brand row is there
@@ -259,8 +352,14 @@ def test_unicode_queries_are_kept_and_normalised():
                      ("ＲＵＧ CLEANER", 1, 30, 0.03, 4.0), ("rug\u200bcleaner tips", 0, 5, 0.0, 9.0)]))
     t = by_text(led)
     assert "東京 ホテル 安い" in t and "café prices" in t and "rug cleaner" in t
-    assert "rugcleaner tips" in t                                     # the zero-width space is removed, not a space
+    # v1: "rugcleaner tips" in t. priya-spec/2: the key is unchanged (F-2, the zero-width space is removed, not a
+    # space), but with T empty (T-4) the glued word is in neither V nor T -> WITHHELD OG-6 (NB-12, reported).
+    assert priya.normalize("rug\u200bcleaner tips") == "rugcleaner tips" and "rugcleaner tips" not in t
+    assert led["counts"]["withheld"] == {"queries": 1, "clicks": 0, "impressions": 5,
+                                         "by_reason": {"OG-6": {"queries": 1, "clicks": 0, "impressions": 5}}}
     assert all(r["query"]["untrusted"] for r in led["rows"])
+    led = build(gsc([("rug\u200bcleaner tips", 0, 5, 0.0, 9.0)]), t=tvocab("rugcleaner"))
+    assert "rugcleaner tips" in by_text(led)                          # READABLE through T (T-1 b)
 
 
 def test_duplicate_spellings_merge_and_near_duplicates_are_flagged_not_summed():

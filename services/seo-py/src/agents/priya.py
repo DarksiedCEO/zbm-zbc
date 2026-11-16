@@ -44,8 +44,11 @@ import re
 import unicodedata
 
 import lookalikes
+from agents import priya_gate as pg
+from agents import priya_tenant as pt
 from agents import search_performance as sp
 from envelope import observed
+from primitives import codes
 
 AGENT, TASK = "priya", "keyword_ledger"
 VERSION = "2026-11-08.2"                       # tiers, thresholds, curve, near-duplicate and frame rules below
@@ -86,6 +89,44 @@ _CONSTRAINT = re.compile(r"\b(near me|nearby|open now|under|below|without|with|f
                          r"top|affordable|free|same day|24/7|emergency|price|cost)\b")
 _LOOKALIKE = lookalikes.Table()
 PII_CLASS = "pii_suspect"
+# priya-spec/2 F-5: the closed set of reason codes of a WITHHELD row (no value inside). Stage 2 (classify_query) names
+# one class only, so its code is "S2:pii_suspect".
+S2_CODE = "S2:" + PII_CLASS
+REASON_CODES = tuple(f"OG-{n}" for n in range(1, 9)) + (S2_CODE,)
+_VOCAB = None
+
+
+class VaultUnavailable(Exception):
+    """F-7: no vault key, so a WITHHELD row cannot be stored as a code; the ingest is refused before any row."""
+
+    code = "VAULT_UNAVAILABLE"
+
+
+def default_vocab():
+    """V, loaded and pin-checked once per process (V-3; never raises: a failed pin withholds every query)."""
+    global _VOCAB
+    if _VOCAB is None:
+        _VOCAB = pg.load_vocab()
+    return _VOCAB
+
+
+def verdict(raw: str, brands: list, vocab, tenant, counter: list | None = None) -> tuple[str, str | None, str | None]:
+    """F-3..F-5 for one query text: ("READABLE", None, v1 intent class) or ("WITHHELD", reason code, None).
+    Stage 1 OG on the raw text (F-10: over 512 characters it withholds, OG-8 unless an earlier rule fires); stage 2
+    the v1 detectors on the raw text and on its key, unchanged, never given V or T (S2-3). Stage 2 is not run when
+    OG already withholds: the order is free, the verdict is not (PF-3). ``counter[0]`` counts stage-2 calls."""
+    state, rule = pg.og(raw, vocab, tenant)
+    if state != "PASS":
+        return "WITHHELD", rule, None
+    norm = normalize(raw)
+    cls = sp.classify_query(raw, brands)
+    n = 1
+    if cls != PII_CLASS and norm != raw:
+        cls = sp.classify_query(norm, brands)
+        n = 2
+    if counter is not None:
+        counter[0] += n
+    return ("WITHHELD", S2_CODE, None) if cls == PII_CLASS else ("READABLE", None, cls)
 # The only words a frame may add around a head (conservative, closed): stop words, question words, the constraint and
 # commercial words above, and a short list of generic verbs and modifiers. A frame with any other word is not used,
 # because that word could be a name, a place or an identifier that no rule here can classify.
@@ -426,74 +467,96 @@ def _bing_metrics(c: int, i: int, pw: float, pi: int, dates: set) -> dict:
 
 
 def build(tenant_id: str, run_id: str, generated_at: str, brands: list, gsc: SourceResult,
-          bing: SourceResult) -> dict:
-    """The keyword ledger. Deterministic: the same inputs give the same ledger."""
-    pii = {"queries": 0, "clicks": 0, "impressions": 0}
-    pii_seen: set = set()             # distinct dropped queries (in memory only; a query in both sources, or on many
-    merged: dict = {}                 #  Bing dates, is one query). norm -> {...}
+          bing: SourceResult, vocab=None, tenant_vocab=None, coder=None) -> dict:
+    """The keyword ledger. Deterministic: the same inputs give the same ledger. priya-spec/2 F-5: a key is READABLE
+    only when every spelling of it is READABLE; a WITHHELD key leaves no text, only its metrics under its reason code
+    (F-7: ``withheld_rows`` = store code + metrics + reason, coded with ``coder``, a ``vault.Coder`` for this tenant;
+    without one a withheld key raises VaultUnavailable before any row is built, never the ephemeral fallback).
+    ``vocab`` = V (default: the pinned file), ``tenant_vocab`` = T (default: empty, T-4)."""
+    vocab = default_vocab() if vocab is None else vocab
+    tenant = pt.empty_tenant_vocab(tenant_id) if tenant_vocab is None else tenant_vocab
+    merged: dict = {}                 # norm -> {...}; a query in both sources, or on many Bing dates, is one key
+    verdicts: dict = {}               # raw -> verdict, in memory only for this build (PF-3: one per query text)
+    stage2 = [0]
     dup_merged = 0
-
-    def drop(raw: str, c: int, i: int) -> None:
-        k = hashlib.sha256(normalize(raw).encode("utf-8", "surrogatepass")).digest()
-        if k not in pii_seen:
-            pii_seen.add(k)
-            pii["queries"] += 1
-        pii["clicks"] += c
-        pii["impressions"] += i
+    refused: list = []                # MC (a): rows refused at schema, listed (source, index, reason); no text
 
     def slot(raw: str) -> dict | None:
-        nonlocal dup_merged
         norm = normalize(raw)
         if not norm:
             return None
-        cls = sp.classify_query(raw, brands)
-        if cls != PII_CLASS and norm != raw:             # round 19: the same text is not classified twice
-            cls = sp.classify_query(norm, brands)        # the normalised text too (fullwidth digits, case)
-        if cls == PII_CLASS:
-            return None
+        v = verdicts.get(raw)
+        if v is None:
+            v = verdicts[raw] = verdict(raw, brands, vocab, tenant, stage2)
         e = merged.get(norm)
         if e is None:
-            e = merged[norm] = {"norm": norm, "raw": raw, "intent_class": cls, "gsc": None, "bing": None,
-                                "_g": [0, 0, 0.0, 0], "_b": [0, 0, 0.0, 0, set(), 0]}
+            e = merged[norm] = {"norm": norm, "raw": raw, "intent_class": v[2], "reason": v[1], "gsc": None,
+                                "bing": None, "_g": [0, 0, 0.0, 0], "_b": [0, 0, 0.0, 0, set(), 0], "_bd": {}}
+        elif v[1] is not None and (e["reason"] is None or REASON_CODES.index(v[1]) < REASON_CODES.index(e["reason"])):
+            e["reason"] = v[1]                            # one withheld spelling withholds the key
         return e
 
     gwin = gsc.meta.get("window") or {}
     if gsc.ok:
-        for q, c, i, _ctr, pos in gsc.rows:
+        for n, (q, c, i, _ctr, pos) in enumerate(gsc.rows):
             e = slot(q)
             if e is None:
-                if normalize(q):
-                    drop(q, c, i)
+                refused.append({"source": "search_console", "index": n, "reason": REFUSED_EMPTY_KEY, "clicks": c,
+                                "impressions": i, "pw": (pos or 0.0) * i, "pi": i, "date": None})
                 continue
             g = e["_g"]
             if g[3]:
-                dup_merged += 1                           # two engine spellings, one normalised query
+                e["_dup"] = e.get("_dup", 0) + 1          # two engine spellings, one normalised query
             g[0] += c
             g[1] += i
             g[2] += (pos or 0.0) * i
             g[3] += 1
     if bing.ok:
-        for q, d, c, i, _cpos, ipos in bing.rows:
+        for n, (q, d, c, i, _cpos, ipos) in enumerate(bing.rows):
             e = slot(q)
             if e is None:
-                if normalize(q):
-                    drop(q, c, i)
+                refused.append({"source": "bing_webmaster", "index": n, "reason": REFUSED_EMPTY_KEY, "clicks": c,
+                                "impressions": i, "pw": 0.0 if ipos is None else ipos * i,
+                                "pi": 0 if ipos is None else i, "date": d})
                 continue
             b = e["_b"]
+            bd = e["_bd"].setdefault(d, [0, 0])
+            bd[0] += c
+            bd[1] += i
+            b[5] += 1
             b[0] += c
             b[1] += i
             if ipos is not None:
                 b[2] += ipos * i
                 b[3] += i
             b[4].add(d)
+    if coder is None and any(e["reason"] is not None for e in merged.values()):
+        raise VaultUnavailable("VAULT_UNAVAILABLE")      # F-7: before any row; never text, never an ephemeral code
+    withheld = {"queries": 0, "clicks": 0, "impressions": 0, "by_reason": {}}
+    withheld_rows = []
+    mc = _mc_partition(merged, refused, gwin)
     for e in merged.values():
         g, b = e.pop("_g"), e.pop("_b")
+        e.pop("_bd")
+        if e["reason"] is not None:                       # WITHHELD: metrics counted under the reason, no text
+            tot = withheld["by_reason"].setdefault(e["reason"], {"queries": 0, "clicks": 0, "impressions": 0})
+            for t in (tot, withheld):
+                t["queries"] += 1
+                t["clicks"] += g[0] + b[0]
+                t["impressions"] += g[1] + b[1]
+            withheld_rows.append(_withheld_row(e, g, b, gwin, coder))
+            continue
+        dup_merged += e.pop("_dup", 0)
         if g[3]:
             e["gsc"] = _gsc_metrics(g[0], g[1], g[2], gwin)
         if b[4]:
             e["bing"] = _bing_metrics(b[0], b[1], b[2], b[3], b[4])
+    withheld["by_reason"] = {k: withheld["by_reason"][k] for k in REASON_CODES if k in withheld["by_reason"]}
+    pii = {k: withheld[k] for k in ("queries", "clicks", "impressions")}   # v1 counter; replaced in P2-4 / P2-6
+    withheld_keys = {n for n, e in merged.items() if e["reason"] is not None}
+    withheld_rows.sort(key=lambda r: (r["code"], r["reason"]))
 
-    entries = sorted(merged.values(), key=lambda e: e["norm"])
+    entries = sorted((e for e in merged.values() if e["reason"] is None), key=lambda e: e["norm"])
     curve = ctr_curve(entries)
     truncated = bool(gsc.meta.get("truncated"))
     unattributed = gsc.meta.get("unattributed") or {}
@@ -551,21 +614,25 @@ def build(tenant_id: str, run_id: str, generated_at: str, brands: list, gsc: Sou
                                                                  "others": ndg[e["norm"]][1]},
             "evidence": _evidence(e, run_id, gsc, bing)})
 
-    derived, frames = _derive(entries, rows, brands, run_id)
+    derived, frames, derived_withheld = _derive(entries, rows, brands, run_id, vocab, tenant, withheld_keys,
+                                                stage2)
     rows += derived
     rows.sort(key=_order)
     dropped = max(0, len(rows) - ROWS_CAP)
     if dropped:
-        keep = sorted(rows, key=_weight)[:ROWS_CAP]
-        rows = sorted(keep, key=_order)
+        ranked = sorted(rows, key=_weight)
+        rows = sorted(ranked[:ROWS_CAP], key=_order)
+        _mc_overflow(mc, ranked[ROWS_CAP:])
 
     status = _status(gsc, bing, rows, pii)
     counts = {"rows": len(rows), "rows_dropped_past_cap": dropped,
               "established": sum(1 for r in rows if r["tier"] == "ESTABLISHED"),
               "emerging_observed": sum(1 for r in rows if r["tier"] == "EMERGING" and r["origin"] == "observed"),
               "emerging_derived": sum(1 for r in rows if r["origin"] == "derived"),
-              "pii_suspect_dropped": pii, "duplicate_spellings_merged": dup_merged,
-              "near_duplicate_groups": len({v[0] for v in ndg.values()})}
+              "pii_suspect_dropped": pii, "withheld": withheld, "derived_withheld": derived_withheld,
+              "classifications": {"query_texts": len(verdicts), "verdicts": len(verdicts), "stage2_calls": stage2[0]},
+              "gate_status": pg.gate_status(vocab), "duplicate_spellings_merged": dup_merged,
+              "near_duplicate_groups": len({v[0] for v in ndg.values()}), "mc": mc}
     ledger = {
         "schema": LEDGER_SCHEMA, "version": VERSION, "agent": AGENT, "task": TASK, "tenant_id": tenant_id,
         "run_id": run_id, "generated_at": generated_at, "status": status,
@@ -586,8 +653,12 @@ def build(tenant_id: str, run_id: str, generated_at: str, brands: list, gsc: Sou
                                                  "data); none is fabricated"},
         "market_volume": {"measured": False, "why": "no paid keyword vendor; Google Ads Keyword Planner adapter not "
                                                     "built; engine impressions are not market volume"},
-        "frames": frames, "counts": counts, "rows": rows,
-        "handoff": handoff(tenant_id, run_id, generated_at, rows),
+        "frames": frames, "counts": counts, "rows": rows, "withheld_rows": withheld_rows,
+        "gate": {"vocab_sha256": pg.VOCAB_SHA256, "gate_status": counts["gate_status"],
+                 "codes_key_id": None if coder is None else coder.key_id,
+                 "tenant_vocab_sha256": getattr(tenant, "sha256", None) or pt.tenant_vocab_sha256(tenant)},
+        "withheld_view": withheld_view(withheld_rows),
+        "handoff": handoff(tenant_id, run_id, generated_at, rows, withheld_rows),
         "limitations": list(LIMITS), "headline_score": None,
     }
     return ledger
@@ -601,6 +672,127 @@ STATUS_MEANING = {
     "INCONCLUSIVE": "no source could be read; an empty ledger here means nothing was measured, not that there are "
                     "no keywords",
 }
+
+
+def _withheld_row(e: dict, g: list, b: list, gwin: dict, coder) -> dict:
+    """F-7: a WITHHELD key as stored: its Wave-1 store code (kind "query", this tenant's coder, no evidence kept),
+    its per-source metrics, its tier and its reason code. No text, no other hash, no vault entry."""
+    with codes.coding(coder, own=(), evidence=None):
+        code = codes.code("query", e["norm"])
+    gm = _gsc_metrics(g[0], g[1], g[2], gwin) if g[3] else None
+    bm = _bing_metrics(b[0], b[1], b[2], b[3], b[4]) if b[4] else None
+    established = gm is not None and gm["impressions"] >= ESTABLISHED_MIN_IMPRESSIONS
+    return {"code": code, "reason": e["reason"], "tier": "ESTABLISHED" if established else "EMERGING",
+            "metrics": {"search_console": gm, "bing_webmaster": bm}}
+
+
+REFUSED_EMPTY_KEY = "SCHEMA:EMPTY_KEY"   # MC (a): a source row whose key normalises to "" (P2-6 I-24)
+MC_PARTS = ("readable", "withheld", "refused")
+_SRC = ("search_console", "bing_webmaster")
+
+
+def _mc_add(part: dict, src: str, cell: str, c: int, i: int, pw: float, pi: int, rows: int) -> None:
+    t = part["by_source"][src]
+    t["rows"] += rows
+    t["clicks"] += c
+    t["impressions"] += i
+    t["position_weighted"] += pw
+    t["position_impressions"] += pi
+    v = part["cells"].setdefault(cell, [0, 0])
+    v[0] += c
+    v[1] += i
+
+
+def _mc_partition(merged: dict, refused: list, gwin: dict) -> dict:
+    """priya-spec/2 5 MC: every source row lands in exactly one part - READABLE key, WITHHELD key or refused at schema
+    (listed, with its reason) - with its clicks, impressions and position weight, per (page, date, source) cell and per
+    source. Unrounded sums (the rows show rounded ctr / position). Page is "" (no page dimension is read, NB-20); a
+    Search Console cell's date is its window. Tiers count WITHHELD keys too (MC d)."""
+    gdate = f"{gwin.get('start')}/{gwin.get('end')}"
+    out = {p: {"keys": 0, "by_source": {s: {"rows": 0, "clicks": 0, "impressions": 0, "position_weighted": 0.0,
+                                            "position_impressions": 0} for s in _SRC}, "cells": {}} for p in MC_PARTS}
+    tiers = {p: {"ESTABLISHED": 0, "EMERGING": 0} for p in ("readable", "withheld")}
+    for e in merged.values():
+        part = "withheld" if e["reason"] is not None else "readable"
+        g, b = e["_g"], e["_b"]
+        out[part]["keys"] += 1
+        if g[3]:
+            _mc_add(out[part], "search_console", f"|{gdate}|search_console", g[0], g[1], g[2], g[1], g[3])
+        for d, (c, i) in e["_bd"].items():
+            _mc_add(out[part], "bing_webmaster", f"|{d}|bing_webmaster", c, i, 0.0, 0, 0)
+        if b[5]:
+            t = out[part]["by_source"]["bing_webmaster"]
+            t["rows"] += b[5]
+            t["position_weighted"] += b[2]
+            t["position_impressions"] += b[3]
+        if g[3] or b[4]:   # an observed key; tier as the row gets it (Search Console count vs the threshold)
+            tiers[part]["ESTABLISHED" if g[3] and g[1] >= ESTABLISHED_MIN_IMPRESSIONS else "EMERGING"] += 1
+    for r in refused:
+        d = gdate if r["date"] is None else r["date"]
+        _mc_add(out["refused"], r["source"], f"|{d}|{r['source']}", r["clicks"], r["impressions"], r["pw"], r["pi"], 1)
+    out["refused"]["keys"] = len(refused)
+    out["refused"]["listed"] = [{k: r[k] for k in ("source", "index", "reason")} for r in refused]
+    for p in MC_PARTS:
+        out[p]["cells"] = {k: {"clicks": v[0], "impressions": v[1]} for k, v in sorted(out[p]["cells"].items())}
+    out["tiers"] = tiers
+    out["dropped_past_cap"] = {"keys": 0, **{s: {"clicks": 0, "impressions": 0} for s in _SRC}}
+    return out
+
+
+def _mc_overflow(mc: dict, dropped_rows: list) -> None:
+    """ROWS_CAP overflow (observed rows past the cap) stays counted: keys and metrics per source. Derived rows carry no
+    source metrics and are not source rows."""
+    o = mc["dropped_past_cap"]
+    for r in dropped_rows:
+        if r["origin"] != "observed":
+            continue
+        o["keys"] += 1
+        for s in _SRC:
+            m = (r["metrics"] or {}).get(s) or {}
+            o[s]["clicks"] += m.get("clicks", 0)
+            o[s]["impressions"] += m.get("impressions", 0)
+
+
+WITHHELD_LABEL = "Withheld query {code}"            # F-8 / OW-8: what a WITHHELD row shows instead of its text
+WITHHELD_CLIENT_LINE = "may contain personal data"  # OW-8: the one generic line the client sees for every reason
+REASON_FAMILIES = ("OG", "S2")                      # P2-5 I-21: OG-1..OG-8 = the ordinary gate; S2:* = stage 2
+
+
+def reason_family(reason: str) -> str:
+    """The reason family a reason code belongs to (display grouping only; the reason code itself stays stored)."""
+    return "S2" if reason.startswith("S2:") else "OG"
+
+
+def _withheld_ci(r: dict) -> tuple:
+    m = r["metrics"]
+    return tuple(sum((m[s] or {}).get(f, 0) for s in ("search_console", "bing_webmaster")) for f in ("clicks",
+                                                                                                    "impressions"))
+
+
+def withheld_view(withheld_rows: list, rows: bool = True) -> dict:
+    """F-8: WITHHELD rows as shown: "Withheld query {code}" + metrics, grouped per page and per reason family, with
+    totals. The reason code is in the API (``reason``); the client is shown only WITHHELD_CLIENT_LINE. Never text:
+    there is no reveal of a withheld row to anyone (OW-5). ``rows=False`` gives the totals only (run views)."""
+    groups: dict = {}
+    for r in withheld_rows:
+        k = (r.get("page"), reason_family(r["reason"]))
+        g = groups.setdefault(k, {"page": k[0], "family": k[1], "shown_reason": WITHHELD_CLIENT_LINE,
+                                  "totals": {"queries": 0, "clicks": 0, "impressions": 0}, "rows": []})
+        c, i = _withheld_ci(r)
+        g["totals"]["queries"] += 1
+        g["totals"]["clicks"] += c
+        g["totals"]["impressions"] += i
+        if rows:
+            g["rows"].append({"label": WITHHELD_LABEL.format(code=r["code"]), "code": r["code"],
+                              "reason": r["reason"], "shown_reason": WITHHELD_CLIENT_LINE, "tier": r["tier"],
+                              "metrics": r["metrics"]})
+    out = [groups[k] for k in sorted(groups, key=lambda k: (k[0] is not None, k[0] or "", k[1]))]
+    if not rows:
+        for g in out:
+            del g["rows"]
+    tot = {f: sum(g["totals"][f] for g in out) for f in ("queries", "clicks", "impressions")}
+    return {"label": WITHHELD_LABEL, "shown_reason": WITHHELD_CLIENT_LINE, "revealable": False, "groups": out,
+            "totals": tot}
 
 
 def _status(gsc: SourceResult, bing: SourceResult, rows: list, pii: dict) -> str:
@@ -649,7 +841,8 @@ def _weight(r: dict):
 
 # ====================================================================== EMERGING: derived variants
 
-def _derive(entries: list, rows: list, brands: list, run_id: str) -> tuple[list, dict]:
+def _derive(entries: list, rows: list, brands: list, run_id: str, vocab=None, tenant=frozenset(),
+            withheld_keys=frozenset(), stage2: list | None = None) -> tuple[list, dict, dict]:
     """Frames from the site's own long tail transferred to its established head terms. A frame is an observed query
     with an established head replaced by ``{head}`` (``how to clean {head}``, ``{head} near me``); it is kept when it
     was seen around at least FRAME_MIN_HEADS distinct heads. Each kept frame is applied to the other heads; a variant
@@ -687,7 +880,9 @@ def _derive(entries: list, rows: list, brands: list, run_id: str) -> tuple[list,
                         "supporting_rows": sorted(support[f]["rows"])[:20]} for f in kept],
               "candidates_seen": len(support)}
     out = []
-    seen = set(by_norm)
+    seen = set(by_norm) | set(withheld_keys)       # a withheld key is never shown again as a variant
+    vocab = default_vocab() if vocab is None else vocab
+    dropped: dict = {}
     for f in kept:
         for h in head_text:
             if len(out) >= VARIANTS_CAP:
@@ -697,8 +892,10 @@ def _derive(entries: list, rows: list, brands: list, run_id: str) -> tuple[list,
             v = " ".join(f.replace("{head}", h).split())
             if v in seen:
                 continue
-            v_cls = sp.classify_query(v, brands)         # round 19: classified once, not twice
-            if v_cls == PII_CLASS:
+            state, reason, v_cls = verdict(v, brands, vocab, tenant, stage2)   # F-5, once per variant
+            if state != "READABLE":
+                seen.add(v)
+                dropped[reason] = dropped.get(reason, 0) + 1
                 continue
             seen.add(v)
             out.append({
@@ -715,7 +912,7 @@ def _derive(entries: list, rows: list, brands: list, run_id: str) -> tuple[list,
                 "evidence": {"run_id": run_id, "rule": frames["rule"], "frame_sha256": hashlib.sha256(
                     f.encode("utf-8", "surrogatepass")).hexdigest(), "head_key": row_key(h),
                     "supporting_rows": sorted(support[f]["rows"])[:20], "pointers": []}})
-    return out, frames
+    return out, frames, {k: dropped[k] for k in REASON_CODES if k in dropped}
 
 
 def _has_capital(raw: str) -> bool:
@@ -733,6 +930,9 @@ HANDOFF_ITEM_KEYS = ("key", "query", "origin", "emerging_kinds", "volume_status"
 
 
 HANDOFF_RECORD_CONTRACT = "priya.handoff_record/1"
+HANDOFF_WITHHELD_CONTRACT = "priya.handoff_withheld/1"   # F-9 (P2-5): WITHHELD EMERGING items, code + metrics only
+HANDOFF_WITHHELD_KEYS = ("code", "observed_counts")
+_CODE_RE = re.compile(r"^\{c:query:[0-9a-f]{16}\}$")
 
 
 def handoff_sha(doc: dict) -> str:
@@ -742,7 +942,14 @@ def handoff_sha(doc: dict) -> str:
                           .encode("utf-8", "surrogatepass")).hexdigest()
 
 
-def handoff(tenant_id: str, run_id: str, generated_at: str, rows: list) -> dict:
+def _observed(m: dict | None) -> dict | None:
+    m = m or {}
+    g = m.get("search_console") or m.get("bing_webmaster")        # Bing's only for a Bing-only (untiered) row
+    return None if g is None else {"impressions": g["impressions"], "clicks": g["clicks"],
+                                   "date_range": g["date_range"], "source": g["source"]}
+
+
+def handoff(tenant_id: str, run_id: str, generated_at: str, rows: list, withheld_rows: list = ()) -> dict:
     """The EMERGING tier as Theo and Naomi will receive it (contract only: neither is built). Every item says it has
     no reliable volume; observed thin counts travel as they were measured, never as a volume."""
     items = []
@@ -758,9 +965,16 @@ def handoff(tenant_id: str, run_id: str, generated_at: str, rows: list) -> dict:
                                                                  "date_range": g["date_range"],
                                                                  "source": g["source"]},
                       "evidence": r["evidence"], "requested_measurements": ["conversation_mining", "prompt_volume"]})
-    return {"schema": HANDOFF_SCHEMA, "tenant_id": tenant_id, "run_id": run_id, "generated_at": generated_at,
-            "consumers": {k: dict(v) for k, v in HANDOFF_CONSUMERS.items()}, "items": items,
-            "rule": "an item is a candidate to measure, not a measured demand"}
+    doc = {"schema": HANDOFF_SCHEMA, "tenant_id": tenant_id, "run_id": run_id, "generated_at": generated_at,
+           "consumers": {k: dict(v) for k, v in HANDOFF_CONSUMERS.items()}, "items": items,
+           "rule": "an item is a candidate to measure, not a measured demand"}
+    # F-9: a WITHHELD EMERGING row travels as its code + metrics only (no text, no key, no reason). Added only when
+    # there is one, so a READABLE-only document (and its handoff_sha) is byte-identical to priya.handoff_record/1.
+    wi = [{"code": r["code"], "observed_counts": _observed(r["metrics"])} for r in withheld_rows
+          if r["tier"] == "EMERGING"]
+    if wi:
+        doc.update(withheld_contract=HANDOFF_WITHHELD_CONTRACT, withheld_items=wi)
+    return doc
 
 
 def validate_handoff(doc) -> list:
@@ -788,4 +1002,20 @@ def validate_handoff(doc) -> list:
             p.append(f"items[{n}].query")
         if not it["emerging_kinds"] or not set(it["emerging_kinds"]) <= set(EMERGING_KINDS):
             p.append(f"items[{n}].emerging_kinds")
+    if "withheld_items" in doc or "withheld_contract" in doc:
+        wi = doc.get("withheld_items")
+        if doc.get("withheld_contract") != HANDOFF_WITHHELD_CONTRACT:
+            p.append("withheld_contract")
+        if not isinstance(wi, list) or not wi:
+            return p + ["withheld_items"]
+        for n, it in enumerate(wi):
+            if not isinstance(it, dict) or tuple(sorted(it)) != HANDOFF_WITHHELD_KEYS:
+                p.append(f"withheld_items[{n}].keys")
+                continue
+            if not isinstance(it["code"], str) or not _CODE_RE.match(it["code"]):
+                p.append(f"withheld_items[{n}].code")
+            oc = it["observed_counts"]
+            if oc is not None and (not isinstance(oc, dict) or sorted(oc) != ["clicks", "date_range", "impressions",
+                                                                               "source"]):
+                p.append(f"withheld_items[{n}].observed_counts")
     return p

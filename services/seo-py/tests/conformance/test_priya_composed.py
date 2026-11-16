@@ -1,8 +1,9 @@
-"""priya-spec/1 section 3 (CP-1..CP-4): composed pairs, built structurally (units and gaps; no gap longer than three
+"""priya-spec/1 section 3 (CP-1..CP-3, kept by priya-spec/2 0.2; CP-4 now Z-PROMOTED): composed pairs, built structurally (units and gaps; no gap longer than three
 characters; none inside a word; a spelled transform's joiner replaced by a gap so a number word may touch gap
 letters; the e-mail pair is b(a(value))). Every ordered pair a != b outside one family, each equally often, a quarter
-in context. Bar: kept <= 1.0% overall and <= 5% for every ordered pair (owner Q-5 default). CI 4,000 cases (every pair
-at least seven times); heavy 42,000."""
+in context. Bar (priya-spec/2 section 4 Z-PROMOTED, 0.2 CP-4 REPLACED): 0 READABLE overall and in EVERY ordered pair;
+the v1 caps (1.0% overall, 5% per ordered pair, v1.1 C-3) are removed. CI 4,000 cases (every pair at least seven
+times); heavy 42,000."""
 
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ import collections
 
 import priya_gen as g
 import pytest
-from priya_common import dropped
+from priya_common import dropped, readable_report
 
 DIGIT_FAMILIES_EXCLUDED = {("gap", "gap"), ("spelled", "spelled"), ("glyph", "glyph")}
 
@@ -54,17 +55,16 @@ def _cp(n: int):
         total[(c, name)] += 1
         kept[(c, name)] += not dropped(q)
     k = sum(kept.values())
-    worst = max(((kept[p] / total[p], p) for p in total), default=(0, None))
+    readable_report(f"CP composed{n}", n, k)
     assert sum(total.values()) == n
-    assert k <= 0.01 * n, (k, n)
-    assert worst[0] <= 0.05, worst
-    return k, worst
+    pairs = {p: c for p, c in kept.items() if c}                    # spec 4: every cell, every ordered pair = 0
+    assert k == 0 and not pairs, (k, n, pairs)                      # pair ids and counts only
+    return k
 
 
 @pytest.mark.conformance
 def test_CP4_residual_ci_4000():
-    k, _w = _cp(4000)
-    assert k <= CP_KEPT_CI, k
+    assert _cp(4000) == CP_KEPT_CI
 
 
 @pytest.mark.conformance_heavy
@@ -72,4 +72,4 @@ def test_CP4_residual_heavy_42000():
     _cp(42000)
 
 
-CP_KEPT_CI = 0          # measured at round 19 on the final code (ADR 0047)
+CP_KEPT_CI = 0          # priya-spec/2 section 4: Z-PROMOTED = 0 (no residual on a frozen CP corpus; section 9: P-r11 removed)

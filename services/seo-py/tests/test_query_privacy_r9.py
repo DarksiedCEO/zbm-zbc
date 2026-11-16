@@ -10,6 +10,7 @@ import json
 import pytest
 
 from agents import priya
+from test_priya import coder as vault_coder  # synthetic vault key (priya-spec/2 F-7)
 from agents import search_performance as sp
 
 J = "".join
@@ -69,7 +70,8 @@ def test_no_round9_attack_ever_reaches_a_ledger():
                       priya.SourceResult("search_console", "OK", "OK", rows,
                                          {"window": {"start": "2026-10-09", "end": "2026-11-05"},
                                           "truncated": False, "unattributed": {"clicks": 0, "impressions": 0}}),
-                      priya.SourceResult("bing_webmaster", "NOT_REQUESTED", "NOT_REQUESTED"))
+                      priya.SourceResult("bing_webmaster", "NOT_REQUESTED", "NOT_REQUESTED"),
+                      coder=vault_coder())
     assert [r["query"]["text"] for r in led["rows"] if r["origin"] == "observed"] == ["rug cleaner"]
     blob = json.dumps(led, ensure_ascii=False)
     for frag in ("4539", "0199", "9f86d081", "amFuZS5", "2001:db8", "fe80", "0xc0a8", "3232235777"):

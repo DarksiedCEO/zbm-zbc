@@ -901,6 +901,184 @@ dashboard / agent runtime the query text Google or Bing reported (both already a
 naming a person can appear in the answer as an observed row. The frame rules only stop such a word from being
 transferred into new variants.
 
+<!-- priya-spec2-round:begin -->
+
+### priya-spec/2 round entry (v2 build; measured on the final code)
+
+Tree: uncommitted on `33472699`; final code md5: priya.py c95aff3b4e6e23c41318bf95275e57a7, priya_gate.py 431901494f0c420d67fb64c618d37e0b, test_priya_zraw.py efdbca95607284abde80006f4a78f4af, test_priya_mutants_pinned.py 864fcc198a09679fdd399bef62b341b3, test_priya_reviewer_corpora.py b909a71d01341eba708645fa01e6590d, test_priya_ordinary.py 5ac94f86eb4c6c7d447d6bcbc580c6ba, devtools/conformance/mutants.py c8e09d69e28be5aecb172c255798b8a5. Spec `priya-spec/2` with its amendments `2.1` (C21-1..C21-4), `2.2` (C22-1..C22-3, Appendix A), `2.3` (PF-1 absolute bar, PF-2 readings), `2.8` (PF-2 owner decision) and the lead's R-Z1 / R-Z1a gap rulings. Every number below is copied by script from the lane's gate outputs (file named in each item) and re-checked by `p215/check.py`; lines marked PENDING have no evidence yet.
+
+- **OG-PIN:** VOCAB_SHA256 7239fa821cbec6631ea96ea2adb70fcc4e7fe6c6f7f266a8a4129195acec7c68, VOCAB_N 1,861,560 (recomputed from the tree's `priya_vocab.txt.gz`); T empty in every run.
+- **OG-X:** independent reimplementation vs the service gate on the final code, every case of 32 frozen corpora (26 personal + 6 OQ): 0 disagreements of 2,190,081 rows, failure file absent (`review2/full23.log`, `full23/`).
+- **Z-PROMOTED:** CI lane on the final code (GATE-2c): 45 cells, 105,212 cases, READABLE 0 (`gates/g2c_ci.txt`); every case of the 25 frozen PERSONAL corpora: 2,062,641 cases, READABLE 0 (`van/zabs/`, measured on priya_gate md5 730102c855b7567e2659974f516931e8, before the behaviour-preserving GATE-3X cache; OG-X and MC were re-run in full on the final code).
+- **LP (LP-2 BASE):** CI lane on the final code: 22 corpora, 91,745 BASE cases, READABLE 0 (`gates/g2c_ci.txt`).
+- **MC:** every case of the OQ corpora plus a personal sample, final code: oq 24,400 diffs 0, rv18_ord 22,600 diffs 0, rv19_oq19 24,400 diffs 0, rv20_oq20 24,400 diffs 0, rv21_oq21 24,400 diffs 0, rv21_sw 6,000 diffs 0, PERSONAL_sample 15,000 diffs 0 (`p26/mc_final.log`, TOTAL PASS).
+- **POS / Z-SVC:** oq 1,800 differences 0, rv18_ord 1,800 differences 0, rv19_oq19 1,800 differences 0, rv20_oq20 1,800 differences 0, rv21_oq21 1,800 differences 0, rv21_sw 1,800 differences 0 (`gates/g2c_ci.txt`, final code).
+- **CODES:** (a)-(d) and G-9 asserted by `test_priya_codes_v2.py` / `test_priya_codes_g9.py`, green in the GATE-2c CI lane; (e) NOT APPLICABLE (lead ruling: no consumer of two runs' codes exists; `test_priya_codes_rotation.py` green in the full suite).
+  - Full corpus (`p28/codes_full.log`, `codes_full.json`; measured on priya_gate md5 730102c855b7567e2659974f516931e8, before the GATE-3X cache): 2,190,081 cases, a_same 2,190,081, collisions 0, diffs 0, distinct keys 2,026,436 = distinct codes 2,026,436, b_equal 0 of 82,555; TOTAL PASS.
+- **OQ-3:** mandated READABLE, every case: oq 2,683 mandated READABLE 0, rv18_ord 1,751 mandated READABLE 0, rv19_oq19 2,383 mandated READABLE 0, rv20_oq20 1,812 mandated READABLE 0, rv21_oq21 1,939 mandated READABLE 0 (`p211/heavy.txt`; re-measured on the final code in the GATE-2e heavy lane: every OQ-3 and OQ-CAP line identical, `gates/g2e_heavy.txt`).
+- **OQ-CAP** (not-mandated WITHHELD / not mandated, cap 5.0%; `p211/heavy.txt`): oq corpus 828/21717 = 3.81%, plain 3/2500, question 0/2000, local 0/1500; rv18_ord corpus 878/20849 = 4.21%, plain 0/2500, question 2/2000, local 0/1500; rv19_oq19 corpus 543/22017 = 2.47%, plain 0/2500, question 0/2000, local 0/1500; rv20_oq20 corpus 689/22588 = 3.05%, plain 0/2500, question 0/2000, local 0/1500; rv21_oq21 corpus 559/22461 = 2.49%, plain 0/2500, question 0/2000, local 0/1500.
+- **Z-RAW** (R-Z1 in force): CI lane (GATE-2c, test file `27680eb3`) 29 nodes, cases 179,052, WITHHELD 112,872, forms 2,475,847, collided 1,102, hits 0, svc_readable_withheld 0, reruns 0, collided_random 0; D-08 canary forms 9, outputs 15, hits 0 (`gates/g2c_ci.txt`).
+  Heavy seeded sample on the final code (GATE-2e, test file `efdbca95`, R-Z1a in force): cases 12,360, WITHHELD 12,360, forms 328,136, collided 150, hits 0, svc_readable_withheld 0, reruns 0, collided_random 0 (`gates/g2e_heavy.txt`).
+  R-Z1 (lead ruling, gap fill; the bar stays real hits = 0): on a hit the batch is re-run once in a fresh process; a form seen again is a HIT; a form not seen again whose every occurrence lies inside a hex token of at least twelve characters that differs between the runs is `collided_random` (counted apart, case ids only). R-Z2 (cutting digest / id fields) was rejected: it would blind the lane to a hex leak placed in those fields.
+  R-Z1a (lead ruling `10:05 PT`, after GATE-2Z3; gap fill, extends R-Z1, bar unchanged): a canonical UUID (`8-4-4-4-12` hex with dashes) is one random token for the R-Z1 inside-a-run-varying-hex-token test (its hex length is `32`); a form that appears again on the fresh rerun still counts as a HIT; every HIT / collided_random line records why (reappeared-on-rerun or outside-random-token), the output, the form kind and the form length, never the form. Implemented in test_priya_zraw.py `efdbca95` (GATE-2Z4). It followed GATE-2c's single full-run red (one Z-RAW hit on rv19_b19, not reproduced; GATE-2Z3 class (a), `g2z3/`).
+- **PF-1** (`2.3` absolute bar, final code, `pf/pf1_final.json`, every OQ query, best of three, two runs): pooled median 0.574 ms (worst run; bar 2.0 ms), max 3.05 ms (bar 50 ms). Relative cost disclosed: pooled rise vs `644b4901` / `65f8b92a` 9.2% / 16.1% and 8.2% / 14.9% (worst 16.1%, worst per corpus 25.5%); reference medians 527.7 / 496.85 us.
+- **PF-2** (owner decision `2.8`; `pf2r/pf2r_r1.json`, `pf2r_r2.json`; process time, best of 15 rounds, two runs): absolute bar, verdict path 58 families (25 rv + 30 suite + 3 gate) worst at `512` chars 31.188 / 26.878 ms, suite path 30 families worst 21.575 / 21.431 ms (bar 50 ms; families over the bar 0). Independent-draw ratios, REPORTED not judged: suite path `double_base64_chunk4` `64->128` 2.67x / 2.63x; verdict path `digit_groups_sep3` `256->512` 3.69x / 3.58x = the early exit of reading `2.3` (b) (like-for-like `257` to `512` 1.85x, `p214b/sweep.txt`); every other judged step at most 2.41x. Same-content prefix cuts: `double_base64_chunk4` 1.56x / 1.77x / 1.92x per doubling (`pf2r/diag_db64c4.log`); suite path, every family cut from one string (test version `eee2980e`, not installed; `pf2r2/heavyE_1.txt`, `heavyE_2.txt`, `ci.txt`, `ci2.txt`): 29 of 30 families within both bars in all 4 runs; the exception is named as a cut-position artefact under `2.8`: `filler_words` `64->128` 7.81x to 8.44x, cost not monotonic in length (`128` chars 5.32 to 5.7 ms, `256` chars 2.18 to 2.44 ms, `512` chars at most 21.95 ms; the cut ends inside the family's repeated unit).
+- **Owner decision `2.8`** (PF-2, `2026-11-16 12:18 PT`): Andre: "I'm giving the ok to run whatever it is that we need to do to continue to move this app forward" - read by the lead as approval of the recommended option B (absolute bar plus same-content cuts, independent-draw ratios disclosed); Andre may reverse it.
+- **PF-3:** 5 OQ corpora, 120,200 rows, one classification per row (`pf/pf1_final.json`).
+- **PF-4** (HANDOFF P2-14 record, P2-14 tree; no output file kept; not re-run on the final code): load 0.574 / 0.439 / 0.618 s, steady RSS +59.0 MB, transient peak 170.0 MB absolute.
+- **GATE-1 (G-3, G-10):** ruff 0.15.11 findings 100 = merge-base `a4af277b` 100 (none new); non-ASCII added lines none (two literal zero-width characters in `tests/test_priya.py` escaped); data files exempt (V, `confusables-15.1.0.txt`). Scope notes for the judge: `reasons.py` (+1 line, reason codes) and `THIRD_PARTY_NOTICES.md` (wordfreq CC BY-SA, owner-approved) lie outside the literal G-10 list; `primitives/codes.py` and `vault.py` are byte-identical to the certified Wave-1 copies (`a7e7ef5f`, `0d2305c7`).
+- **GATE-2F:** five full-suite reds fixed in tests / docs only: the `SEO_VAULT_KEY*` settings documented in `services/seo-py/README.md`; four legacy privacy tests given the synthetic vault coder / key their F-7 contract needs (no assertion changed).
+- **GATE-2c / GATE-2d (G-1, G-2):** CI lane on the final src (GATE-2c, `gates/g2c_ci.txt`): pass 218 / deselected 73 / fail 0; src md5 equal at start and end. Full suite, two runs, on the final src with test_priya_zraw.py `efdbca95` (GATE-2d, `gates/g2d_full_1.txt`, `g2d_full_2.txt`): pass 3939 / skip 73 / fail 0 and pass 3939 / skip 73 / fail 0; src md5 equal at start and end. These runs predate the G6-S test (+1, below).
+  - Heavy lane (GATE-2e, `gates/g2e_heavy.txt`, src md5 equal at start and end): pass 72 / fail 1 / deselected 218; Z-PROMOTED 60 heavy cells READABLE 0, Z-RAW hits 0; OQDISCLOSE disagreements oq 0, rv18_ord 0, rv19_oq19 0, rv20_oq20 0, rv21_oq21 1 (rv21_oq21 = the disclosed OQ-2 relabel); every other heavy test passed, `test_OQDISCLOSE_adr_v2_table_equals_suite_heavy` included. The red: `test_PF2_linear_and_bounded_heavy` (timing); alone on a quiet box (`gates/g2e_pf2_alone_1.txt`, `_2.txt`): passed 1 / failed 0 and passed 0 / failed 1. Resolved by owner decision `2.8` (PF-2 above); the test file is unchanged.
+- **G-5 war room** (GATE-3 r3, driver `43117bc8`, `gates/g3/r3_wr_*.txt`): seo-py s1 PASS, cases 555 / PASS 555 / FAIL 0 / ERROR 0, MUST 100.0%; seo-py-priya s1..s5 PASS, cases 460 / 472 / 464 / 467 / 468, PASS 460 / 472 / 464 / 467 / 468, FAIL 0, ERROR 0, MUST 100.0% in every seed, known failures 12 in every seed. Harness-only fixes before r3: GATE-3F (synthetic vault key, added to the leak checker) and GATE-3H (leak checker made efficient, same hit set).
+- **GATE-3P / GATE-3P2 / GATE-3X:** the war-room build cost on a withheld-heavy case came from `priya_gate._num_toks` rebuilding the CJK number-word set on every verdict; cached at module level (GATE-3X, priya_gate.py `43190149`; behaviour-preserving, identical outputs; every gate above re-ran on it). The large run response on that case is spec-shaped (the grouped rows of `ledger.withheld_view` repeat the coded withheld rows; F-8, frozen POS (b) and the route test require them; the ledger is not stored, `ledger_retained=False`): lead ruling NO CHANGE; response size / pagination = OWNER QUESTION, not a certification blocker. The `Gate 5` `512 KiB` figure is the whole-SEO-store backup cap, not a per-response cap.
+- **G-6 mutants** (final code, mutants.py `c8e09d69`, `gates/g6/chunk1.json`..`chunk3.json`): 67 mutants, 59 killed, 8 survived, 0 pinned survived. Survivors classified per G6-S over the frozen corpora (`g6s/cmp_part1.json`, `cmp_part2.json`; OQ full + personal stride sample, 177,036 rows per mutant, sample level): `g_dotted12` BEHAVIOURAL, 27 verdict / reason / stored changes (26 on oq version rows = the disclosed OQ-4 / P-r9 version class) -> killed by the new test `test_G6S_g_dotted12_frozen_attack40672_case_22600_withheld` (test_priya_mutants_pinned.py `864fcc19`); `n11_xs_no_vanity` MASKED, 6 stage-2 changes, every one on an OG-withheld row, verdict changes 0; 6 NON-BEHAVIOURAL, verdict / reason / stored changes 0 and stage-2 changes 0: `e_marker_no_script`, `n06_despell_tld_at`, `n28_ideographic_space_no_end`, `n38_window_never_cut`, `p_key_never`, `w_no_raw`. Full-personal confirmation: see PENDING.
+  - **GATE-2f, final full suite x2 on the frozen tree** (includes the G6-S test; `gates/g2f_full_1.txt`, `g2f_full_2.txt`; priya.py, priya_gate.py, test_priya_zraw.py, test_priya_mutants_pinned.py and ADR (pre-fill copy `17d44cdd`) md5 equal at start and end, `gates/g2f_md5_start.txt` = `g2f_md5_end.txt`): pass 3940 / skip 73 / fail 0 and pass 3940 / skip 73 / fail 0; collected 4013 = the `docs/test-counts.md` seo-py row (written by `devtools/hygiene_check.py run --counts write`).
+  - PENDING: G-4 gitleaks (pusher).
+  - PENDING: G6-S full-personal confirmation (`g6s/out/<id>/*.full.json`: 0 of 8 mutants have all 32 corpora of base; `g6s/cmp.py` on full when complete).
+
+**OQ-4 / OQ-DISCLOSE tables** (every case, `p211/oq_table_<corpus>_heavy.json`; columns: class, n, WITHHELD, mandated, not-mandated WITHHELD, reasons of every WITHHELD, not-mandated share, delta vs `33472699` = WITHHELD minus v1 dropped, reasons of the not-mandated WITHHELD; disclosed classes are residual P-r9):
+
+<!-- priya-oq2-table-oq:begin -->
+| class | n | withheld | mandated | nm WITHHELD | reasons | nm share | delta vs v1 | nm reasons |
+|---|---|---|---|---|---|---|---|---|
+| business_address | 500 | 500 | 500 | 0 | OG-6=74;S2:pii_suspect=426 | 0.00% | 0 | - |
+| date | 1000 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| date_time | 900 | 731 | 731 | 0 | S2:pii_suspect=731 | 0.00% | 0 | - |
+| flight | 900 | 127 | 116 | 11 | S2:pii_suspect=127 | 1.40% | 0 | S2:pii_suspect=11 |
+| local | 1500 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| model_number | 1500 | 251 | 0 | 251 | OG-6=251 | 16.73% | 251 | OG-6=251 |
+| multilingual | 2500 | 300 | 0 | 300 | OG-4=19;OG-6=281 | 12.00% | 300 | OG-4=19;OG-6=281 |
+| part_number | 1500 | 39 | 0 | 39 | OG-4=1;OG-6=26;S2:pii_suspect=12 | 2.60% | 26 | OG-4=1;OG-6=26;S2:pii_suspect=12 |
+| plain_text | 2500 | 3 | 0 | 3 | OG-4=3 | 0.12% | 3 | OG-4=3 |
+| price | 1200 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| product_code | 900 | 49 | 2 | 47 | OG-6=47;S2:pii_suspect=2 | 5.23% | 47 | OG-6=47 |
+| quantity | 1000 | 98 | 0 | 98 | OG-6=98 | 9.80% | 98 | OG-6=98 |
+| question | 2000 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| size | 1200 | 33 | 33 | 0 | S2:pii_suspect=33 | 0.00% | 0 | - |
+| time | 600 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| tire_size | 900 | 394 | 394 | 0 | S2:pii_suspect=394 | 0.00% | 0 | - |
+| version | 1000 | 248 | 193 | 55 | S2:pii_suspect=248 | 6.82% | 0 | S2:pii_suspect=55 |
+| year | 1000 | 24 | 0 | 24 | OG-6=24 | 2.40% | 24 | OG-6=24 |
+| zip | 1000 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| zip_year | 800 | 714 | 714 | 0 | S2:pii_suspect=714 | 0.00% | 0 | - |
+<!-- priya-oq2-table-oq:end -->
+
+<!-- priya-oq2-table-rv18_ord:begin -->
+| class | n | withheld | mandated | nm WITHHELD | reasons | nm share | delta vs v1 | nm reasons |
+|---|---|---|---|---|---|---|---|---|
+| business_address | 500 | 173 | 173 | 0 | S2:pii_suspect=173 | 0.00% | 0 | - |
+| date | 1000 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| date_time | 900 | 524 | 524 | 0 | S2:pii_suspect=524 | 0.00% | 0 | - |
+| flight | 600 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| local | 1500 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| model_number | 1500 | 242 | 0 | 242 | OG-6=242 | 16.13% | 242 | OG-6=242 |
+| multilingual | 2500 | 229 | 0 | 229 | OG-4=153;OG-6=76 | 9.16% | 229 | OG-4=153;OG-6=76 |
+| plain_text | 2500 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| price | 1200 | 1 | 1 | 0 | S2:pii_suspect=1 | 0.00% | 0 | - |
+| product_code | 900 | 289 | 89 | 200 | S2:pii_suspect=289 | 24.66% | 0 | S2:pii_suspect=200 |
+| quantity | 1000 | 11 | 11 | 0 | S2:pii_suspect=11 | 0.00% | 0 | - |
+| question | 2000 | 2 | 0 | 2 | OG-4=2 | 0.10% | 2 | OG-4=2 |
+| size | 1200 | 7 | 0 | 7 | OG-4=7 | 0.58% | 7 | OG-4=7 |
+| time | 600 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| tire_size | 900 | 309 | 305 | 4 | S2:pii_suspect=309 | 0.67% | 0 | S2:pii_suspect=4 |
+| version | 1000 | 185 | 112 | 73 | OG-6=73;S2:pii_suspect=112 | 8.22% | 73 | OG-6=73 |
+| year | 1000 | 121 | 0 | 121 | OG-6=121 | 12.10% | 121 | OG-6=121 |
+| zip | 1000 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| zip_year | 800 | 536 | 536 | 0 | S2:pii_suspect=536 | 0.00% | 0 | - |
+<!-- priya-oq2-table-rv18_ord:end -->
+
+<!-- priya-oq2-table-rv19_oq19:begin -->
+| class | n | withheld | mandated | nm WITHHELD | reasons | nm share | delta vs v1 | nm reasons |
+|---|---|---|---|---|---|---|---|---|
+| business_address | 500 | 500 | 500 | 0 | S2:pii_suspect=500 | 0.00% | 0 | - |
+| date | 1000 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| date_time | 900 | 737 | 737 | 0 | S2:pii_suspect=737 | 0.00% | 0 | - |
+| flight | 900 | 270 | 245 | 25 | S2:pii_suspect=270 | 3.82% | 0 | S2:pii_suspect=25 |
+| local | 1500 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| model_number | 1500 | 146 | 0 | 146 | OG-6=146 | 9.73% | 146 | OG-6=146 |
+| multilingual | 2500 | 138 | 0 | 138 | OG-6=138 | 5.52% | 138 | OG-6=138 |
+| part_number | 1500 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| plain_text | 2500 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| price | 1200 | 1 | 1 | 0 | S2:pii_suspect=1 | 0.00% | 0 | - |
+| product_code | 900 | 1 | 1 | 0 | S2:pii_suspect=1 | 0.00% | 0 | - |
+| quantity | 1000 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| question | 2000 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| size | 1200 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| time | 600 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| tire_size | 900 | 397 | 181 | 216 | S2:pii_suspect=397 | 30.04% | 0 | S2:pii_suspect=216 |
+| version | 1000 | 18 | 0 | 18 | S2:pii_suspect=18 | 1.80% | 0 | S2:pii_suspect=18 |
+| year | 1000 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| zip | 1000 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| zip_year | 800 | 718 | 718 | 0 | S2:pii_suspect=718 | 0.00% | 0 | - |
+<!-- priya-oq2-table-rv19_oq19:end -->
+
+<!-- priya-oq2-table-rv20_oq20:begin -->
+| class | n | withheld | mandated | nm WITHHELD | reasons | nm share | delta vs v1 | nm reasons |
+|---|---|---|---|---|---|---|---|---|
+| business_address | 500 | 500 | 500 | 0 | S2:pii_suspect=500 | 0.00% | 0 | - |
+| date | 1000 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| date_time | 900 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| flight | 900 | 263 | 232 | 31 | S2:pii_suspect=263 | 4.64% | 0 | S2:pii_suspect=31 |
+| local | 1500 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| model_number | 1500 | 268 | 0 | 268 | OG-6=268 | 17.87% | 268 | OG-6=268 |
+| multilingual | 2500 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| part_number | 1500 | 7 | 7 | 0 | S2:pii_suspect=7 | 0.00% | 0 | - |
+| plain_text | 2500 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| price | 1200 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| product_code | 900 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| quantity | 1000 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| question | 2000 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| size | 1200 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| time | 600 | 3 | 3 | 0 | S2:pii_suspect=3 | 0.00% | 0 | - |
+| tire_size | 900 | 418 | 418 | 0 | S2:pii_suspect=418 | 0.00% | 0 | - |
+| version | 1000 | 394 | 4 | 390 | OG-6=383;S2:pii_suspect=11 | 39.16% | 382 | OG-6=382;S2:pii_suspect=8 |
+| year | 1000 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| zip | 1000 | 0 | 0 | 0 | - | 0.00% | 0 | - |
+| zip_year | 800 | 648 | 648 | 0 | S2:pii_suspect=648 | 0.00% | 0 | - |
+<!-- priya-oq2-table-rv20_oq20:end -->
+
+<!-- priya-oq2-table-rv21_oq21:begin -->
+| class | n | withheld | mandated | nm WITHHELD | reasons | nm share | delta vs v1 | nm reasons |
+|---|---|---|---|---|---|---|---|---|
+| business_address | 500 | 500 | 500 | 0 | S2:pii_suspect=500 | 0.00% | n/a | - |
+| date | 1000 | 0 | 0 | 0 | - | 0.00% | n/a | - |
+| date_time | 900 | 402 | 402 | 0 | S2:pii_suspect=402 | 0.00% | n/a | - |
+| flight | 900 | 191 | 166 | 25 | S2:pii_suspect=191 | 3.41% | n/a | S2:pii_suspect=25 |
+| local | 1500 | 0 | 0 | 0 | - | 0.00% | n/a | - |
+| model | 1500 | 248 | 0 | 248 | OG-6=248 | 16.53% | n/a | OG-6=248 |
+| multilingual | 2500 | 0 | 0 | 0 | - | 0.00% | n/a | - |
+| part_number | 1500 | 0 | 0 | 0 | - | 0.00% | n/a | - |
+| plain | 2500 | 0 | 0 | 0 | - | 0.00% | n/a | - |
+| price | 1200 | 0 | 0 | 0 | - | 0.00% | n/a | - |
+| product_code | 900 | 1 | 1 | 0 | S2:pii_suspect=1 | 0.00% | n/a | - |
+| quantity | 1000 | 0 | 0 | 0 | - | 0.00% | n/a | - |
+| question | 2000 | 0 | 0 | 0 | - | 0.00% | n/a | - |
+| size | 1200 | 0 | 0 | 0 | - | 0.00% | n/a | - |
+| time | 600 | 1 | 0 | 1 | S2:pii_suspect=1 | 0.17% | n/a | S2:pii_suspect=1 |
+| tire | 900 | 362 | 355 | 7 | S2:pii_suspect=362 | 1.28% | n/a | S2:pii_suspect=7 |
+| version | 1000 | 280 | 2 | 278 | OG-6=269;S2:pii_suspect=11 | 27.86% | n/a | OG-6=269;S2:pii_suspect=9 |
+| year | 1000 | 0 | 0 | 0 | - | 0.00% | n/a | - |
+| zip | 1000 | 0 | 0 | 0 | - | 0.00% | n/a | - |
+| zip_year | 800 | 513 | 513 | 0 | S2:pii_suspect=513 | 0.00% | n/a | - |
+<!-- priya-oq2-table-rv21_oq21:end -->
+
+rv21_oq21 labels follow OQ-2 (the independent oracle). The suite oracle and the OQ-2 oracle disagree on 1 query (class time, index 14602: suite = vanity, OQ-2 = not mandated); it is WITHHELD by stage 2 and counted as not-mandated WITHHELD. No OQ-CAP verdict changes (corpus 2.48% vs 2.49%, both under 5.0%). Lead ruling 2026-11-15 22:55 PT; evidence `priya-v2/g2h2/heavy.txt`.
+
+**Residuals (spec 9), measured size on this build:**
+
+| R | Size on this build |
+|---|---|
+| PR-1, PR-3, PR-4, P-r2 / P-r4 / P-r5, P-r10, P-r12 | class (no frozen generator; nothing measured) |
+| PR-2, PR-5 | Z-PROMOTED on the frozen sets: READABLE 0 of 2,062,641 |
+| P-r6 | READABLE 0 on the frozen sets (the one rv21_cp21 case closed by the `2.1` decode check) |
+| P-r7 | oq business_address READABLE 0 of 500 |
+| P-r7g | rv21_ag (reported, OW-6) READABLE 371 of 1,240 |
+| P-r9 | not-mandated WITHHELD per corpus: oq 828, rv18_ord 878, rv19_oq19 543, rv20_oq20 689, rv21_oq21 559 (tables above) |
+| R-Z1 | short hex probe forms vs run-random digests / ids: collided_random 0 in the CI lane |
+
+<!-- priya-spec2-round:end -->
+
 ## EMERGING hand-off to Theo and Naomi (contract only)
 
 `ledger.handoff`, schema `priya-emerging-handoff/1`: `tenant_id`, `run_id`, `generated_at`, `consumers` (theo:

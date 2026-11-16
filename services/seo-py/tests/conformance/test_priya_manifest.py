@@ -34,6 +34,17 @@ REVIEW_FILES = {
     "rv20_cp20": (43680, "a53fb1884ddc13632101ec2689cff280d7a5bea67c192a0acbaa5562b142ecc7"),
     "rv20_vg": (1680, "063cf982a07770458b84dc349692e9cf9e5f46988c87f1a68559c926828f22d0"),
     "rv20_oq20": (24400, "55385527ac7834d22a167b44aed6a23d8f998f10d6822336947b3c07ed727969"),
+    # rv-priya21 (review of 33472699; priya-spec/2 FG-3, CAL-2): no text files either; the reviewer's own generators
+    # (h/*.py, source sha256 pinned in spec 6) were run beside the ports and matched case for case (n, these sha256
+    # and a length-prefixed sha256) before these were pinned. rv21_ag = the g21ag address classes only (1,240).
+    "rv21_m21": (260000, "396edf24de937d1c18905791b9d1cb633664e3e9ae4b73597f042dc25f7bba02"),
+    "rv21_b21": (47622, "29936d0d0f654b0cb79e11e6fb221023bb57f0a8f9e121d07e56da204805a21c"),
+    "rv21_cp21": (41550, "d3a2aeccf0812636b212bc4981127d6e6640daaa8134eddfd856dd02100d335f"),
+    "rv21_d21": (15200, "258e4111cd896ea492a3942ca22e5c56ed9fe9fdb232314af46375519ab1d5d1"),
+    "rv21_short": (7800, "65c84150486102d70cc22710adae26d80602f7ae6348a9ec6e73196db539d55f"),
+    "rv21_oq21": (24400, "7866f4895864622dbbf1b3da314b17f5152895d29a21fb4e81aae3f2fc07e289"),
+    "rv21_sw": (6000, "b008363010210102443917e808313592c08d8da992e8be77c23e09c7a2282f93"),
+    "rv21_ag": (1240, "8beb64a6b32cfc3e69a47c0627bff3d7c03cf1e908f0bd609be47fb72d78a6df"),
 }
 
 

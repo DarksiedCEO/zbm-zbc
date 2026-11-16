@@ -27,11 +27,12 @@ import logging
 from datetime import date, timedelta
 
 import bing_webmaster as bw
+import vault
 from agents import priya
 from agents import search_performance as sp
 from clock import iso, parse_iso
 from envelope import envelope, sha
-from errors import Conflict, Forbidden, Invalid, NotFound
+from errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from gsc_client import GscError
 from ledger import derived_id
 from primitives import Killed
@@ -63,6 +64,9 @@ class KeywordsMixin:
         sources = list(body["sources"])
         if len(set(sources)) != len(sources):
             raise Invalid(R("KEYWORD_SOURCES_INVALID"))
+        key = _vault_key()
+        if key is None:                                    # F-7: no store code without a key -> nothing recorded or read
+            raise Unavailable(R("VAULT_UNAVAILABLE"))
         with self.lock:
             self._gate()
             t = self._get(self.tenants, tid, "TENANT_NOT_FOUND")
@@ -104,7 +108,7 @@ class KeywordsMixin:
             self._commit("keyword_ledger_started", self._req(data, actor, rk, body, run_id), actor, evidence=evidence)
             self.running_keyword_runs.add(run_id)
         try:
-            return self._kw_execute(tid, run_id, plan)
+            return self._kw_execute(tid, run_id, plan, vault.Coder(key, tid))
         finally:
             with self.lock:
                 self.running_keyword_runs.discard(run_id)
@@ -160,13 +164,13 @@ class KeywordsMixin:
                 b.update(state="PLANNED", site=bw.site_url_for(body["bing_site_domain"]))
         return plan
 
-    def _kw_execute(self, tid: str, run_id: str, plan: dict) -> dict:
+    def _kw_execute(self, tid: str, run_id: str, plan: dict, coder) -> dict:
         guard = self.guard(tid, run="keywords")
         try:
             guard(agent=priya.AGENT)
             gsc = self._kw_gsc(plan["gsc"], guard)
             bing = self._kw_bing(plan["bing"], guard)
-            ledger = priya.build(tid, run_id, iso(self.now()), plan["brands"], gsc, bing)
+            ledger = priya.build(tid, run_id, iso(self.now()), plan["brands"], gsc, bing, coder=coder)
         except Killed as k:
             return self._kw_interrupt(tid, run_id, R(k.code) if k.code in _KILL_CODES else R("KILLED_GLOBAL"))
         except Exception as exc:  # noqa: BLE001 - a crash closes the run, never leaves it running or answers 500
@@ -185,7 +189,14 @@ class KeywordsMixin:
                    # contract priya.handoff_record/1 (ADR 0047 / ADR 0049): what Theo and Naomi verify against
                    "handoff_record": priya.HANDOFF_RECORD_CONTRACT,
                    "handoff_sha256": priya.handoff_sha(ledger["handoff"]),
-                   "handoff_items": len(ledger["handoff"]["items"])}
+                   "handoff_items": len(ledger["handoff"]["items"]),
+                   "handoff_withheld_items": len(ledger["handoff"].get("withheld_items", ())),
+                   # F-8 (P2-5): WITHHELD rows per page and reason family, totals only (codes and text never here)
+                   "withheld_view": priya.withheld_view(ledger["withheld_rows"], rows=False),
+                   # F-7 / NB-7: the pins and the codes key every run report names (ids and hashes only)
+                   "codes_key_id": ledger["gate"]["codes_key_id"], "vocab_sha256": ledger["gate"]["vocab_sha256"],
+                   "tenant_vocab_sha256": ledger["gate"]["tenant_vocab_sha256"],
+                   "gate_status": ledger["gate"]["gate_status"]}
             self._commit("keyword_ledger_recorded", rec, "seo",
                          evidence=("keyword_ledger_recorded", f"keywords:{run_id}", dict(rec), ("recorded", run_id)))
             view = self.keyword_run_view(tid, run_id)
@@ -299,7 +310,9 @@ class KeywordsMixin:
             {"start": d["window_start"], "end": d["window_end"]}, "andre_approved": bool(d.get("andre_approved")),
             "requested_by": d["actor"], "requested_at": at, "status": "running", "completed_at": None,
             "ledger_status": None, "outcome": None, "ledger_sha256": None, "counts": None, "source_states": None,
-            "handoff_record": None, "handoff_sha256": None, "handoff_items": None}
+            "handoff_record": None, "handoff_sha256": None, "handoff_items": None, "handoff_withheld_items": None,
+            "withheld_view": None, "codes_key_id": None,
+            "vocab_sha256": None, "tenant_vocab_sha256": None, "gate_status": None}
         if d["gsc_read"]:                                  # one read against the tenant's keyword-ledger budget
             reads = self.gsc_ledger_reads.setdefault(d["tenant_id"], [])
             reads.append(at)
@@ -311,7 +324,12 @@ class KeywordsMixin:
                                               counts=dict(d["counts"]), source_states=dict(d["sources"]),
                                               handoff_record=d.get("handoff_record"),
                                               handoff_sha256=d.get("handoff_sha256"),
-                                              handoff_items=d.get("handoff_items"))
+                                              handoff_items=d.get("handoff_items"),
+                                              handoff_withheld_items=d.get("handoff_withheld_items"),
+                                              withheld_view=d.get("withheld_view"),
+                                              codes_key_id=d.get("codes_key_id"), vocab_sha256=d.get("vocab_sha256"),
+                                              tenant_vocab_sha256=d.get("tenant_vocab_sha256"),
+                                              gate_status=d.get("gate_status"))
 
     def _a_keyword_ledger_interrupted(self, d, at):
         self.keyword_runs[d["run_id"]].update(status="interrupted", completed_at=at, interrupted_reason=d["reason"],
@@ -362,6 +380,14 @@ class KeywordsMixin:
 
 _KILL_CODES = frozenset({"KILLED_GLOBAL", "KILLED_TENANT", "KILLED_CAPABILITY", "KILLED_PROVIDER", "KILLED_WRITE",
                          "AGENT_RESTRICTED", "SERVICE_CLOSED"})
+
+
+def _vault_key():
+    """The vault key from the environment, or None (absent, partial or malformed: no codes can be made)."""
+    try:
+        return vault.load_vault_key()
+    except vault.VaultError:
+        return None
 
 
 def _count_view(c: dict) -> dict:

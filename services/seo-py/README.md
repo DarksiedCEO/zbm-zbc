@@ -79,6 +79,8 @@ MUST failure or ERROR.
 | `SEO_PROBE_SAMPLES` | `5` | answers sampled per prompt per engine (3..50) |
 | `SEO_BOT_INFO_URL` | unset | an https page about the crawler, added to its User-Agent |
 | `SEO_LOG_HASH_KEY_FILE` | — (required with `SEO_DATA_DIR`) | key for the keyed hashes behind the distinct-client-IP sketch of uploaded logs (`openssl rand -hex 32`, mode 0600); no IP and no IP hash is ever stored |
+| `SEO_VAULT_KEY`, `SEO_VAULT_KEY_ID` | unset | the vault / store-code key (Wave-1 `src/vault.py`, `src/primitives/codes.py` B-CD-01): base64url of exactly 32 random bytes and its short id, set together or not at all (partial or malformed = no key). Priya codes every WITHHELD keyword-ledger row as `{c:query:<16 hex>}` under it and records `codes_key_id` in the run report (priya-spec/2 F-7); unset, a keyword-ledger ingest with a withheld key is refused `503 VAULT_UNAVAILABLE` before any row is written, never a fallback to text. Never logged, shown or recorded |
+| `SEO_VAULT_KEY_PREVIOUS`, `SEO_VAULT_KEY_PREVIOUS_ID` | unset | the key being retired during a rotation: decrypt only (records written under it), every new write and code uses the current key; needs a current key |
 | `SEO_LOG_MAX_BYTES` | 256 MiB | bytes per log ingest (1 MiB..2 GiB) |
 | `SEO_LOG_RETENTION_DAYS` | `90` | after this an ingest is served as totals only (`expired`) |
 | `SEO_LOG_MAX_OPEN_INGESTS` | `2` | open log ingests per tenant (1..20) |

@@ -21,6 +21,7 @@ import pytest
 from gsc_fakes import FakeGoogle
 from helpers import rid
 from test_gsc import PROP, bind, gsc_harness
+from test_priya import VAULT_ENV
 
 from agents import priya
 from agents import search_performance as sp
@@ -293,7 +294,9 @@ def test_long_inputs_are_not_examined_and_adversarial_ones_finish():
 
 
 # ------------------------------------------------------------------ the service path (ingest -> ledger -> API -> disk)
-def test_service_path_never_carries_a_list_case(tmp_path):
+def test_service_path_never_carries_a_list_case(tmp_path, monkeypatch):
+    for k, v in VAULT_ENV.items():                 # the ledger run needs the vault key (priya-spec/2 F-7; synthetic)
+        monkeypatch.setenv(k, v)
     cases = [t for _c, _n, _p, t, _v in rc.closed_list(per_class=6)]
     values = [v for c, _n, _p, _t, v in rc.closed_list(per_class=6) if c in ("email", "address")]
     ordinary = [t for _c, t in rc.ordinary(120)]

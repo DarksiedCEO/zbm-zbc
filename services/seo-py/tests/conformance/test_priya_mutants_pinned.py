@@ -67,3 +67,17 @@ def test_G6_diners_36_on():
     body = "36" + "".join(str(R.randint(0, 9)) for _ in range(11))
     d = body + rc._luhn_digit(body)
     assert sp.card_iin(d) and dropped(" ".join((d[:4], d[4:10], d[10:])))
+
+
+def test_G6S_g_dotted12_frozen_attack40672_case_22600_withheld():
+    """G6-S (2026-11-16): the survivor g_dotted12 (dotted-group digit cap 8 -> 12) reads this frozen PERSONAL case
+    (attack40672 #22600, ssn_shape, dot-separated groups, reversed) READABLE; the final code withholds it at stage 2."""
+    import corpora
+
+    from agents import priya
+    from agents import priya_tenant as pt
+
+    row = next(r for i, r in enumerate(corpora.rows("attack40672")) if i == 22600)
+    q = [x for x in row if isinstance(x, str)][-1]
+    assert sp.classify_query(q, ["acme"]) == "pii_suspect"
+    assert priya.verdict(q, ["acme"], priya.default_vocab(), pt.empty_tenant_vocab(""))[:2] == ("WITHHELD", priya.S2_CODE)

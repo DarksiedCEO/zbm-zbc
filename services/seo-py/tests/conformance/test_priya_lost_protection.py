@@ -16,7 +16,7 @@ from pathlib import Path
 
 import corpora
 import pytest
-from priya_common import dropped
+from priya_common import dropped, readable_report
 
 DATA = Path(__file__).resolve().parent / "data"
 REPO = Path(__file__).resolve().parents[4]
@@ -37,12 +37,14 @@ def _lost(name: str, heavy: bool) -> dict:
     bases = [_bits(name, r) for r in corpora.REVISIONS]
     assert all(len(b) == (2 * n + 7) // 8 for b in bases), name
     rows = enumerate(corpora.rows(name)) if heavy else ((i, (k, q)) for i, k, q in corpora.ci_rows(name))
-    lost, seen = {}, 0
+    lost, seen, base = {}, 0, 0
     for i, (key, q) in rows:
         seen += 1
         if any(_dropped_at(b, i) for b in bases):
+            base += 1
             if not dropped(q):
                 lost[key] = lost.get(key, 0) + 1
+    readable_report(f"LP-2 BASE {name}", base, sum(lost.values()))     # LP-2: 0 BASE cases READABLE (spec 5)
     assert seen and (seen == n or not heavy), (name, seen, n)
     return lost
 
@@ -53,7 +55,11 @@ def _none_lost(names, heavy: bool) -> None:
 
 
 REVIEWER = ("rv18_p1", "rv18_bnd", "rv18_p2v2", "rv19_m1", "rv19_b19", "rv19_cp19", "rv19_cpx19", "rv20_m20",
-            "rv20_b20", "rv20_cp20", "rv20_vg")
+            "rv20_b20", "rv20_cp20", "rv20_vg",
+            # priya-spec/2 LP-1 (extended): the round-21 PERSONAL corpora (JUDGEMENT owner item 5)
+            "rv21_m21", "rv21_b21", "rv21_cp21", "rv21_d21", "rv21_short")
+# rv21_ag (ASCII-glue addresses, OW-6 reported residual P-r7g) has frozen bits but is not an LP-1 corpus of spec 2 section 5
+REPORTED = ("rv21_ag",)
 
 
 @pytest.mark.conformance
@@ -95,7 +101,7 @@ def test_LP1_LP2_reviewer_corpora_heavy():
 
 @pytest.mark.conformance
 def test_LP1_every_personal_corpus_has_frozen_bits():
-    assert set(REVIEWER) | {"matrix5", "boundary", "composed4000", "attack676", "matrix200", "composed42000",
+    assert set(REVIEWER) | set(REPORTED) | {"matrix5", "boundary", "composed4000", "attack676", "matrix200", "composed42000",
                             "attack40672", "c2glue", "vanity_glued"} == set(corpora.PERSONAL)
     for n in corpora.PERSONAL:
         for r in corpora.REVISIONS:

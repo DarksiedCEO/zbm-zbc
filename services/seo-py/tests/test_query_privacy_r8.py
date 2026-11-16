@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 
 from agents import priya
+from test_priya import coder as vault_coder  # synthetic vault key (priya-spec/2 F-7)
 from agents import search_performance as sp
 
 J = "".join
@@ -146,7 +147,8 @@ def test_priya_drops_round8_smuggles_and_counts_them():
                       priya.SourceResult("search_console", "OK", "OK", rows,
                                          {"window": {"start": "2026-10-09", "end": "2026-11-05"},
                                           "truncated": False, "unattributed": {"clicks": 0, "impressions": 0}}),
-                      priya.SourceResult("bing_webmaster", "NOT_REQUESTED", "NOT_REQUESTED"))
+                      priya.SourceResult("bing_webmaster", "NOT_REQUESTED", "NOT_REQUESTED"),
+                      coder=vault_coder())
     assert [r["query"]["text"] for r in led["rows"] if r["origin"] == "observed"] == ["rug cleaner"]
     assert led["counts"]["pii_suspect_dropped"]["queries"] == len({priya.normalize(q) for q in ROUND8_SMUGGLES})
 

@@ -17,7 +17,8 @@ import attack_corpus as ac
 import priya_gen as g
 import priya_gen_c2 as g21
 from rvgen import (rv18_bnd, rv18_ord, rv18_p1p2, rv19_g4, rv19_g5, rv19_g6, rv19_g7, rv20_g20bnd,
-                   rv20_g20cp, rv20_g20m, rv20_g20oq, rv20_g20vg)
+                   rv20_g20cp, rv20_g20m, rv20_g20oq, rv20_g20vg, rv21_g21ag, rv21_g21bnd, rv21_g21cp, rv21_g21d21,
+                   rv21_g21m, rv21_g21oq, rv21_g21short, rv21_g21sw)
 
 # rv-priya19's "cpx" construction: the ten digit / vanity pairs it measured with more cases (its own file's seed is not
 # recorded in the generator; the suite draws them with the review's composed-pair driver, seed 19, 400 per pair)
@@ -26,6 +27,11 @@ CPX_JOBS = (("nanp", "gap_other", "spelled_en"), ("vanity", "zw_bidi", "spelled_
             ("ssn", "gap_other", "spelled_mixed"), ("ssn", "gap_other", "spelled_es"), ("ssn", "gap_other", "spelled_en"),
             ("nanp", "spelled_mixed", "gap_other"), ("card", "gap_other", "spelled_en"),
             ("e164", "gap_other", "spelled_en"))
+
+
+def _rv21(it):
+    """rv-priya21 cases: the key is every meta field but the index ``i``, in the generator's own order."""
+    return (("|".join(str(v) for k, v in m.items() if k != "i"), q) for m, q in it)
 
 
 def _matrix(n):
@@ -65,20 +71,34 @@ PERSONAL = {
                          for m, q in rv20_g20bnd.iter_cases()),
     "rv20_cp20": lambda: ((m["c"] + "|" + m["a"] + ">" + m["b"], q) for m, q in rv20_g20cp.iter_cases()),
     "rv20_vg": lambda: ((m["c"] + "|" + m["d"] + "|" + m["y"], q) for m, q in rv20_g20vg.iter_cases()),
+    # rv-priya21 (review of 33472699; priya-spec/2 FG-3, CAL-2): M-1 at N = 200, boundary set + probes, composed pairs,
+    # D21 probe, short e-mail probe, ASCII-glue probe
+    "rv21_m21": lambda: _rv21(rv21_g21m.iter_cases()),
+    "rv21_b21": lambda: _rv21(rv21_g21bnd.iter_cases()),
+    "rv21_cp21": lambda: _rv21(rv21_g21cp.iter_cases()),
+    "rv21_d21": lambda: _rv21(rv21_g21d21.iter_cases()),
+    "rv21_short": lambda: _rv21(rv21_g21short.iter_cases()),
+    # rv21_ag = the ASCII-glue ADDRESS cases of g21ag (classes address, address_ord: 31 x 10 x 2 x 2 = 1,240), as the
+    # review counted them (JUDGEMENT P-r "ASCII glue ... around addresses", 1,240) and spec 6 lists them
+    "rv21_ag": lambda: _rv21((m, q) for m, q in rv21_g21ag.iter_cases() if m["c"] in ("address", "address_ord")),
 }
 ORDINARY = {
     "oq": lambda: ((c, q) for c, _i, q in g.ordinary()),
     "rv18_ord": lambda: ((r["c"], r["q"]) for r in rv18_ord.cases()),
     "rv19_oq19": lambda: ((r["c"], r["q"]) for r in rv19_g7.cases(19)),
     "rv20_oq20": lambda: ((m["c"], q) for m, q in rv20_g20oq.iter_cases()),
+    # rv-priya21: OQ-1 classes; short-word over-drop probe (reported)
+    "rv21_oq21": lambda: _rv21(rv21_g21oq.iter_cases()),
+    "rv21_sw": lambda: _rv21(rv21_g21sw.iter_cases()),
 }
-COMPOSED = ("composed4000", "composed42000", "rv18_p2v2", "rv19_cp19", "rv19_cpx19", "rv20_cp20")
+COMPOSED = ("composed4000", "composed42000", "rv18_p2v2", "rv19_cp19", "rv19_cpx19", "rv20_cp20", "rv21_cp21")
 HEAVY = ("matrix200", "composed42000", "attack40672", "rv18_p1", "rv18_bnd", "rv18_p2v2", "rv19_m1", "rv19_cp19",
-         "rv19_cpx19", "rv20_m20", "rv20_b20", "rv20_cp20")
+         "rv19_cpx19", "rv20_m20", "rv20_b20", "rv20_cp20", "rv21_m21", "rv21_b21", "rv21_cp21")
 # the CI lane's draw of each heavy corpus: every k-th case (about 2,000-3,500 cases each)
 CI_STRIDE = {"matrix200": 0, "composed42000": 0, "attack40672": 0, "rv18_p1": 200, "rv18_bnd": 20, "rv18_p2v2": 20,
              "rv19_m1": 100, "rv19_cp19": 20, "rv19_cpx19": 2, "rv18_ord": 4, "rv19_oq19": 4,
-             "rv20_m20": 100, "rv20_b20": 12, "rv20_cp20": 20, "rv20_oq20": 4}
+             "rv20_m20": 100, "rv20_b20": 12, "rv20_cp20": 20, "rv20_oq20": 4,
+             "rv21_m21": 100, "rv21_b21": 16, "rv21_cp21": 20, "rv21_oq21": 4}
 REVISIONS = {"644b4901": "644b4901725fdd077dac60a0703591d6ce1a4088",
              "65f8b92a": "65f8b92ace21cdce68c38ad6880184a0bee537b9"}
 

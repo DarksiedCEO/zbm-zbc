@@ -1,27 +1,45 @@
-"""Shared helpers of the Priya conformance modules (priya-spec/1). Failures print ids and counts, never text."""
+"""Shared helpers of the Priya conformance modules (priya-spec/2). Failures print ids and counts, never text."""
 
 from __future__ import annotations
 
 import collections
 
 from agents import priya
-from agents import search_performance as sp
+from agents import priya_tenant as pt
 
 BRANDS = ["acme"]
-SPEC = "priya-spec/1"
+SPEC = "priya-spec/2"
+
+_T = pt.empty_tenant_vocab("")          # T-4: the frozen corpora are judged with T empty
+_MEMO: dict = {}
+
+
+def readable(q: str) -> bool:
+    """F-5 at the function level, as Priya decides: stage 1 OG (the tree's pinned V, T empty) then stage 2 on the raw
+    text and its key (``priya.verdict``). Only a READABLE row is ever shown with its key text (spec 4 Z-PROMOTED)."""
+    r = _MEMO.get(q)
+    if r is None:
+        if len(_MEMO) > 200_000:        # bound the memo in the heavy lane (corpora up to 452,000 rows)
+            _MEMO.clear()
+        r = _MEMO[q] = priya.verdict(q, BRANDS, priya.default_vocab(), _T)[0] == "READABLE"
+    return r
 
 
 def dropped(q: str) -> bool:
-    """Z-1 at the function level, as Priya decides (``priya.build``'s slot): a row is dropped when its raw text OR its
-    stored key is personal data; only a row kept by both ever reaches an output."""
-    return sp.classify_query(q, BRANDS) == "pii_suspect" or sp.classify_query(priya.normalize(q), BRANDS) == "pii_suspect"
+    """priya-spec/2 (CAL3-1, P2-10): a v1 DROP becomes "not READABLE" (WITHHELD with a code); never weakened (G-7)."""
+    return not readable(q)
+
+
+def readable_report(name: str, n: int, readable_n: int) -> None:
+    """The per-corpus Z-PROMOTED count line of the CI / heavy lanes (counts only)."""
+    print(f"Z-PROMOTED {name}: n={n} READABLE={readable_n}")
 
 
 def leak_report(items) -> dict:
-    """items: iterable of (key, text). Returns {key: count} of LEAKED texts (kept raw or kept key)."""
+    """items: iterable of (key, text). Returns {key: count} of READABLE (promoted) texts."""
     out = collections.Counter()
     for key, q in items:
-        if not dropped(q):
+        if readable(q):
             out[key] += 1
     return dict(out)
 

@@ -13,6 +13,7 @@ from bing_fakes import FakeBing
 from gsc_fakes import FakeGoogle, pem_fragments
 from helpers import rid
 from test_gsc import PROP, bind, gsc_harness
+from test_priya import VAULT_ENV
 
 from agents import priya
 from envelope import sha
@@ -22,6 +23,15 @@ QUERIES = [("rug cleaner", 30, 1200, 0.025, 3.2), ("carpet cleaner", 20, 900, 0.
            ("rug cleaner near me", 2, 12, 0.16, 4.0), ("carpet cleaner near me", 1, 8, 0.12, 5.0),
            ("jane.doe@example.com", 1, 3, 0.33, 1.0), ("東京 ホテル 安い", 1, 25, 0.04, 6.0)]
 SECRET_TEXTS = ("rug cleaner", "carpet cleaner", "jane.doe", "東京", "acme pricing")
+
+
+@pytest.fixture(autouse=True)
+def vault_key(monkeypatch):
+    """Every keyword-ledger run needs the vault key since P2-4 (svc_keywords refuses 503 VAULT_UNAVAILABLE without
+    it; priya-spec/2 F-7). Synthetic key from test_priya; a test that needs no key deletes it itself."""
+    for k, v in VAULT_ENV.items():
+        monkeypatch.setenv(k, v)
+    return VAULT_ENV
 
 
 def fake_google():
@@ -82,6 +92,10 @@ def test_full_run_is_record_first_handed_out_once_and_never_stored(tmp_path):
     assert t["rug cleaner"]["tier"] == "ESTABLISHED" and t["rug cleaner near me"]["tier"] == "EMERGING"
     assert "東京 ホテル 安い" in t and "jane.doe@example.com" not in t
     assert led["counts"]["pii_suspect_dropped"]["queries"] == 1
+    # priya-spec/2 F-7 (G-7): the dropped key is one coded WITHHELD row; the run names the key that coded it.
+    (wrow,) = led["withheld_rows"]
+    assert wrow["code"].startswith("{c:query:") and wrow["metrics"]["search_console"]["impressions"] == 3
+    assert out["codes_key_id"] == VAULT_ENV["SEO_VAULT_KEY_ID"]
     paths = {r["path"] for r in fake.api_requests() if r["path"].endswith("/query")}
     assert paths == {"/webmasters/v3/sites/sc-domain%3Aacme.test/searchAnalytics/query"}
     # recorded: the ledger's hash and counts, never the ledger

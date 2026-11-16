@@ -1,0 +1,15 @@
+priya_vocab.txt.gz - licence note
+
+This data file (Priya's vocabulary V) is licensed under the Creative Commons Attribution-ShareAlike 4.0
+International licence (CC BY-SA 4.0): https://creativecommons.org/licenses/by-sa/4.0/
+
+It is an adapted work of the word lists of wordfreq 3.1.1 by Robyn Speer (https://github.com/rspeer/wordfreq),
+whose data is CC BY-SA 4.0. Changes: words re-normalized to a canonical form, de-duplicated across languages,
+frequencies dropped (see devtools/priya/build_vocab.py).
+
+wordfreq's data derives from: Google Books Ngrams (http://books.google.com/ngrams), the Leeds Internet Corpus
+(University of Leeds Centre for Translation Studies), Wikipedia, ParaCrawl, OPUS OpenSubtitles 2018 / the
+OpenSubtitles project, the SUBTLEX word lists (SUBTLEX-US/UK/CH/DE/NL, Marc Brysbaert et al.; SUBTLEX is freely
+available data) and Twitter statistics. Full attribution: services/seo-py/THIRD_PARTY_NOTICES.md.
+
+This licence applies to this one data file only. The code of this repository is not covered by it.

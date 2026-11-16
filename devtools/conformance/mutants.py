@@ -74,7 +74,7 @@ MUTANTS = [
     ("g_no_tire", 0, SP, '    t = _TIRE.sub(" # ", text)', "    t = text"),
     ("g_dotted12", 0, SP, "sum(c.isdigit() for c in m.group()) <= 8 else", "sum(c.isdigit() for c in m.group()) <= 12 else"),
     ("w_no_raw", 0, SP, '    raw = folded if "%" not in w else _LOOKALIKE.fold_cased(strip_marks(w))', "    raw = folded"),
-    ("p_key_never", 0, PR, "        if cls != PII_CLASS and norm != raw:", "        if False:"),
+    ("p_key_never", 0, PR, "    if cls != PII_CLASS and norm != raw:", "    if False:"),   # v2: verdict() moved it to function level
     # ---- round 20's changed code (C-1 lists, C-2 glue, C-4 in-word reading, the per-character script view)
     ("n01_no_point", 0, SP, '"dot", "punto", "point", "ponto"', '"dot", "punto", "ponto"'),
     ("n02_no_kukac", 0, SP, '"malpa", "kukac", "snabel-a"', '"malpa", "snabel-a"'),

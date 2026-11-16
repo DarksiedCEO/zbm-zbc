@@ -7,7 +7,7 @@ import collections
 
 import priya_gen as g
 import pytest
-from priya_common import define, dropped
+from priya_common import define, dropped, readable_report
 
 D_IDS = tuple(f"D{i:02d}" for i in range(1, 25))
 N_CI, N_HEAVY = 5, 200
@@ -23,6 +23,7 @@ def _run(d: str, n: int):
             total += 1
             if not dropped(g.make(cell, g.cell_rng(cell, k))):
                 kept[":".join(cell)] += 1
+    readable_report(f"M-1 matrix{n}:{d}", total, sum(kept.values()))
     assert total == n * len(cells)
     assert sum(kept.values()) == 0, (d, total, dict(kept))     # ids and counts only
 
@@ -52,5 +53,7 @@ def test_M1_generators_are_pure_functions_of_seed_and_index():
 
 @pytest.mark.conformance
 def test_M3_Z1_every_cell_alone_and_in_context_drops_ci():
-    kept = [":".join(c) for c, k, q in g.matrix(1) if not dropped(q)]
+    cases = list(g.matrix(1))
+    kept = [":".join(c) for c, k, q in cases if not dropped(q)]
+    readable_report("M-1 matrix1", len(cases), len(kept))
     assert kept == [], kept[:20]
