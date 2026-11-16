@@ -123,6 +123,42 @@ def _scrub(blob: str) -> str:
     return _SERVICE_RANDOM.sub("~", blob)
 
 
+# F-HARN-1: the vault files' AES-GCM ciphertext ("c") and nonce ("n") are random bytes (base64url), not text: a 4-digit
+# PIN probe matched a chance digit run there in ~3.5% of full runs. Only those two values are removed, and only in a line
+# of exactly the vault record shape (src/vault.py put: keys v, id, t, k, n, c; n = 12 bytes, c >= 16 bytes, strict
+# unpadded base64url) in one of the two vault files. Any other field, any other line shape, any other file and a value
+# that is not strict base64url of that size stays searched (G-7). The plaintext lives in the vault by design (V-1).
+VAULT_FILES = frozenset({"citation_vault.jsonl", "operator_text_vault.jsonl"})
+_VAULT_KEYS = frozenset({"v", "id", "t", "k", "n", "c"})
+_B64URL = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def _b64_len(s, minimum: int, exact: bool) -> bool:
+    if not isinstance(s, str) or not _B64URL.fullmatch(s) or len(s) % 4 == 1:
+        return False
+    n = len(s) * 3 // 4
+    return n == minimum if exact else n >= minimum
+
+
+def scrub_vault_file(name: str, raw: str) -> str:
+    """``raw`` (the text of data file ``name``) with the ciphertext and nonce of every vault record line replaced by
+    "~"; every other byte is kept as written."""
+    if name not in VAULT_FILES:
+        return raw
+    out = []
+    for line in raw.split("\n"):
+        try:
+            rec = json.loads(line) if line.startswith("{") else None
+        except ValueError:
+            rec = None
+        if (type(rec) is dict and set(rec) == _VAULT_KEYS and _b64_len(rec["n"], 12, True)
+                and _b64_len(rec["c"], 16, False)):
+            rec = dict(rec, n="~", c="~")
+            line = json.dumps(rec, sort_keys=True, separators=(",", ":"))
+        out.append(line)
+    return "\n".join(out)
+
+
 def openai_body(te, text: str, url: str, title: str) -> dict:
     b = te.fixture("openai")
     b["output"][1]["content"][0]["text"] = text
@@ -162,7 +198,7 @@ def run_service(tmp_path, cases_with_carriers, te, base, service, prompt_set, ru
             for f in files:
                 seen_log = seen_log or f == "seo_log.jsonl"
                 with open(os.path.join(root, f), "rb") as fh:
-                    raw = fh.read().decode("utf-8", "replace")
+                    raw = scrub_vault_file(f, fh.read().decode("utf-8", "replace"))
                 blob += raw + json.dumps([json.loads(x) for x in raw.splitlines() if x.startswith("{")],
                                          ensure_ascii=False)
         assert seen_log, "the run wrote no data/seo_log.jsonl"

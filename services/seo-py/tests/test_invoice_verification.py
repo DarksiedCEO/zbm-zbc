@@ -281,7 +281,7 @@ def test_binding_a_finance_client_is_andre_s_and_only_for_client_tenants(tmp_pat
     assert h.post("/tenants/acme/finance-client", {"request_id": rid(), "finance_client_id": "a b"},
                   andre=True).status_code == 422
     t = h.ok(h.post("/tenants/acme/finance-client", body, andre=True))
-    assert t["finance_client_id"] == CLIENT
+    assert t["finance_client_id"] == h.svc._fc_code("acme", CLIENT)   # C2-6g2 E-COMP: the T-2 code
     assert h.ledger.of_type("tenant_finance_client_set")
 
 
@@ -523,6 +523,6 @@ def test_consumption_and_binding_survive_a_restart(tmp_path, srv):
     iid = f.add()
     h.ok(paid_audit(h, invoice_id=iid), 201)
     h2 = h.restart(SEO_INVOICE_VERIFICATION=None)
-    assert h2.ok(h2.get("/tenants/acme"))["finance_client_id"] == CLIENT
+    assert h2.ok(h2.get("/tenants/acme"))["finance_client_id"] == h2.svc._fc_code("acme", CLIENT)   # C2-6g2
     h2.refused(paid_audit(h2, invoice_id=iid), 409, "INVOICE_ALREADY_USED")
     assert h2.ok(paid_audit(h2, invoice_id=f.add(2)), 201)["invoice_verification"]["verdict"] == "PAID"

@@ -73,6 +73,14 @@ def _digits(s: str) -> int:
 
 _LOOKALIKE = lookalikes.Table()
 
+# The closed set of placeholders ``template_path`` writes (owner decision 19:20 PT / card C2-OV2: report_fields reads
+# its template grammar from here). A file name becomes FILE_PLACEHOLDER + its extension lowercased (``_FILE``: 1-5
+# letters or digits -> FILE_EXT).
+PH_EMAIL, PH_UUID, PH_NUMBER, PH_ID, PH_TOKEN = "{email}", "{uuid}", "{number}", "{id}", "{token}"
+PLACEHOLDERS = frozenset((PH_EMAIL, PH_UUID, PH_NUMBER, PH_ID, PH_TOKEN))
+FILE_PLACEHOLDER = "{file}."
+FILE_EXT = re.compile(r"[a-z0-9]{1,5}")
+
 
 def _segment(seg: str) -> str:
     """The placeholder for one path segment, or the segment itself when nothing in it looks identifying. Judged on
@@ -91,25 +99,25 @@ def _segment(seg: str) -> str:
     # "**Password:**%20<v>", "password%20is%20<v>", a markdown-table label) becomes {token}
     name = secret_guard.check(seg)
     if name is not None and not (name == "a_label" and secret_guard.label_only(seg)):
-        return "{token}"
-    return _DIGITS.sub("{id}", seg)[:40]
+        return PH_TOKEN
+    return _DIGITS.sub(PH_ID, seg)[:40]
 
 
 def _kind(seg: str) -> Optional[str]:
     if "@" in seg or _EMAIL.search(seg) or _AT_WORD.search(seg):
-        return "{email}"
+        return PH_EMAIL
     if _UUID.fullmatch(seg):
-        return "{uuid}"
+        return PH_UUID
     if _digits(seg) >= 7:                      # phone numbers, SSNs, card numbers, long ids, across any separator
-        return "{number}"
+        return PH_NUMBER
     if seg.isdigit():
-        return "{id}"
+        return PH_ID
     m = _FILE.fullmatch(seg)
     if m and m.group(2).lower() not in STATIC_EXT:
-        return "{file}." + m.group(2).lower()  # a document or image file name may name a person
+        return FILE_PLACEHOLDER + m.group(2).lower()  # a document or image file name may name a person
     if _HEX.fullmatch(seg) or len(seg) > 40 or _TOKENISH.fullmatch(seg) or (
             len(seg) >= 8 and _digits(seg) >= 2 and any(c.isalpha() for c in seg)):
-        return "{token}"
+        return PH_TOKEN
     return None
 
 
@@ -126,16 +134,16 @@ def template_path(target: str) -> Optional[str]:
     segs = p.split("/")[1:]
     out = [_segment(s) for s in segs]
     # review c0c09bd1 SHOULD: the segment after a label word alone carries its value ("/token/<v>")
-    out = ["{token}" if o == segs[i][:40] and secret_guard.after_label(segs, i) else o for i, o in enumerate(out)]
+    out = [PH_TOKEN if o == segs[i][:40] and secret_guard.after_label(segs, i) else o for i, o in enumerate(out)]
     # digits split over several short numeric segments (/123/45/6789) count together
     i = 0
     while i < len(segs):
         j = i
-        while j < len(segs) and segs[j].isdigit() and out[j] == "{id}":
+        while j < len(segs) and segs[j].isdigit() and out[j] == PH_ID:
             j += 1
         if j - i >= 2 and sum(_digits(segs[k]) for k in range(i, j)) >= 7:
             for k in range(i, j):
-                out[k] = "{number}"
+                out[k] = PH_NUMBER
         i = max(j, i + 1)
     return ("/" + "/".join(out))[:300]
 

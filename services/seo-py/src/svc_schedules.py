@@ -37,6 +37,7 @@ from ledger import derived_id
 from reasons import R
 from svc_audits import _authorize, _check_paths
 from svc_optext import path_view
+from report_fields import DRIFT_REPORT
 from svc_vaulted import DRIFT_FIELD, normalised, owner_view
 
 log = logging.getLogger("seo.schedules")
@@ -161,7 +162,7 @@ class SchedulesMixin:
                 report = self._vaulted_open(tid, DRIFT_FIELD, d["drift_ref"], d.get("drift_hmac"))
                 if report is None:
                     out["vault_unavailable"] = True
-            out["drift"] = owner_view(report) if report is not None else None
+            out["drift"] = owner_view(report, doc=DRIFT_REPORT) if report is not None else None
         return out
 
     def schedule_view(self, tid: str, sid: str, detail: bool = True) -> dict:

@@ -59,6 +59,24 @@ ALNUM = string.ascii_lowercase + string.digits
 CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
 
 
+def off_table(kind: str, path: str) -> bool:
+    """True when the frozen SINK_FIELDS table (core-spec/2 T-3) has no type decision for ``path`` of ``kind``."""
+    import sink_fields
+    return (*sink_fields.sink_of(kind), path) not in sink_fields.SINK_FIELDS
+
+
+def beyond_t3(kind: str, found: list) -> list:
+    """CL-5 re-pin (card C2-2e): the violations other than the T-3 ``untyped`` refusal of a path the frozen table does
+    not type (a synthetic field of this test). A class refusal, or a ``field_type`` refusal of a typed field (T-5),
+    is still reported."""
+    return [x for x in found if not (x[1] == "untyped" and off_table(kind, x[0]))]
+
+
+def class_only(found: list) -> list:
+    """CL-5 re-pin (card C2-2e): the value-class violations alone (without the T-3 / T-5 per-field reasons)."""
+    return [x for x in found if x[1] not in ("untyped", "field_type")]
+
+
 def clear_guard_caches() -> None:
     sg._CACHE.clear()
     sg._HOST_CACHE.clear()
@@ -415,9 +433,28 @@ def test_no_externally_issued_identifier_is_refused(name):
     values = list(closed) if closed is not None else [gen(rng) for _ in range(N_IDS)]
     assert closed is not None or len(set(values)) >= N_IDS * 0.9 or name in ("gsc_window_date",)
     refused = collections.Counter()
+    coder = vault_mod.Coder(vault_mod.ephemeral_vault_key(), "acme")
     for v in values:
+        if name == "finance_client_reference":
+            # C2-6g4 (G-7; lead ruling 2026-11-15 03:20 PT F6g3-1; OWNER DECISION 02:00 PT E-COMP; O-4 I, T-2): the
+            # raw reference never reaches a sink. The route judges it by its own grammar (0 refused); the sink
+            # fields (the declared T-2 fields of tenant_finance_client_set, log + ledger) hold its T-2 code
+            # c:text:<16hex>; the sink still refuses the raw value there
+            if svc_tenants.finance_ref_refused(v):
+                refused["route"] += 1
+                continue
+            code = "c:text:" + coder.code("text", v)
+            for sink, data in (("tenant_finance_client_set", {"tenant_id": "acme", "finance_client_id": code}),
+                               (sg.LEDGER + "tenant_finance_client_set", {"finance_client_id": code})):
+                # the reference's own field only (tenant_id is another kind, typed by its own branch)
+                found = [x for x in beyond_t3(sink, sg.violations(sink, data)) if x[0] == "/finance_client_id"]
+                raw = [x for x in sg.violations(sink, {**data, "finance_client_id": v}) if x[0] == "/finance_client_id"]
+                if found or not raw:
+                    refused[found[0][1] if found else "raw_accepted"] += 1
+                    break
+            continue
         for sink in ("audit_requested", sg.LEDGER + "audit_requested"):
-            found = sg.violations(sink, {field: v, "nested": {"rows": [{field: v}]}})
+            found = beyond_t3(sink, sg.violations(sink, {field: v, "nested": {"rows": [{field: v}]}}))
             if found:
                 refused[found[0][1]] += 1
                 break
@@ -487,20 +524,21 @@ def test_each_new_class_bites(name, monkeypatch):
     mutate, _fixed, field = CLASS_MUTATIONS[name]
     value = _class_value(name)
     for sink in ("engine_run_settled", sg.LEDGER + "engine_run_settled"):
-        assert sg.violations(sink, {field: value}) == [], name
+        assert beyond_t3(sink, sg.violations(sink, {field: value})) == [], name
     with monkeypatch.context() as m:
         mutate(m)
         clear_guard_caches()
-        assert [p for p, _r in sg.violations("engine_run_settled", {field: value})] == ["/" + field], name
+        assert [p for p, _r in class_only(sg.violations("engine_run_settled", {field: value}))] == ["/" + field], name
     clear_guard_caches()
-    assert sg.violations("engine_run_settled", {field: value}) == [], name
+    assert beyond_t3("engine_run_settled", sg.violations("engine_run_settled", {field: value})) == [], name
 
 
 def test_the_amount_and_jurisdiction_classes_are_exact():
     for ok in ("0.000000", "100.000000", "999999.999999", "12.500000"):
         assert sg.classify(ok) == "amount", ok
-    assert sg.violations("engine_run_settled", {"spend_usd": "100.000000", "reserved_usd": "2500.500000",
-                                                "days": {"2026-10-09": {"calls": 3, "spend_usd": "250.000001"}}}) == []
+    assert beyond_t3("engine_run_settled", sg.violations("engine_run_settled", {
+        "spend_usd": "100.000000", "reserved_usd": "2500.500000",
+        "days": {"2026-10-09": {"calls": 3, "spend_usd": "250.000001"}}})) == []
     for bad in ("1000000.000000", "100.0000000", "100.00000", ".000000", "100,000000", "1e3.000000",
                 "-100.000000", "100.000000.1", digits(4) + "." + digits(4) + "." + digits(4)):
         assert sg.classify(bad) != "amount", len(bad)
@@ -847,19 +885,25 @@ def test_date_stamped_key_ids_are_accepted_only_as_a_configured_key_id_under_key
     fresh = "k-" + digits(8) + "-" + digits(2)               # a well-formed key id nobody configured
     assert sg.key_id_refusal(fresh) is None and fresh not in sg.KEY_IDS
     stub = {"vault_id": secrets.token_hex(16), "i": 0, "key_id": fresh, "hmac": secrets.token_hex(32), "flag": None}
-    assert sg.violations("audit_requested", {"paths": [stub]}) == [("/paths[]/key_id", "secret")]
+    # T-5 (C2-2e): /paths[]/key_id is typed key_id; an id nobody configured is not a value of that type
+    assert sg.violations("audit_requested", {"paths": [stub]}) == [("/paths[]/key_id", "field_type"),
+                                                                   ("/paths[]/key_id", "secret")]
     sg.register_key_ids([fresh, None])
     try:
         assert sg.violations("audit_requested", {"paths": [stub]}) == []
         # only under ``key_id``: the same value in any other field, in a list or as a key is refused
-        assert sg.violations("audit_requested", {"note": fresh}) == [("/note", "secret")]
-        assert sg.violations("audit_requested", {"key_ids": [fresh]}) == [("/key_ids[]", "secret")]
-        assert sg.violations("audit_requested", {fresh: 1}) == [("/{key}", "secret")]
+        assert beyond_t3("audit_requested", sg.violations("audit_requested", {"note": fresh})) == [("/note", "secret")]
+        assert beyond_t3("audit_requested", sg.violations("audit_requested", {"key_ids": [fresh]})) == [("/key_ids[]", "secret")]
+        assert beyond_t3("audit_requested", sg.violations("audit_requested", {fresh: 1})) == [("/{key}", "secret")]
         assert sg.classify(fresh) is None and sg.scrub(fresh) == sg.WITHHELD
         # a line READ BACK may carry a retired key's id (well-formed); a write may not
         other = "k-" + digits(8) + "-" + digits(2)
         assert sg.violations("audit_requested", {"key_id": other}) != []
-        assert sg.violations("audit_requested", {"key_id": other}, stored=True) == []
+        assert beyond_t3("audit_requested", sg.violations("audit_requested", {"key_id": other}, stored=True)) == []
+        retired = {"paths": [{**stub, "key_id": other}]}          # the same at the typed stub field (T-5)
+        assert sg.violations("audit_requested", retired) == [("/paths[]/key_id", "field_type"),
+                                                             ("/paths[]/key_id", "secret")]
+        assert sg.violations("audit_requested", retired, stored=True) == []
     finally:
         sg.KEY_IDS.discard(fresh)
 
@@ -947,7 +991,9 @@ def test_real_world_host_names_are_accepted(name):
     r = random.Random(SEED)
     sample = [h for h in (gen(r) for _ in range(300)) if sg.host_refusal(h) is None]
     assert all(sg.classify(h) == "hostname" and not svc_tenants.domain_refused(h) for h in sample)
-    assert sg.violations("tenant_domains_set", {"domains": sample, "property_host": sample[0]}) == []
+    # C2-2e re-pin (T-3): property_host is a field of tenant_gsc_property_set, not of tenant_domains_set
+    assert sg.violations("tenant_domains_set", {"domains": sample}) == []
+    assert sg.violations("tenant_gsc_property_set", {"property_host": sample[0]}) == []
 
 
 def test_the_hosts_the_review_names_are_accepted():
@@ -968,7 +1014,8 @@ def test_secret_carrying_hosts_stay_refused(name):
     assert accepted == 0, (name, accepted)
     h = gen()
     assert sg.classify(h) is None and svc_tenants.domain_refused(h)
-    assert sg.violations("tenant_domains_set", {"domains": [h]}) == [("/domains[]", "host")]
+    assert sg.violations("tenant_domains_set", {"domains": [h]}) == [("/domains[]", "field_type"),   # T-5
+                                                                     ("/domains[]", "host")]
 
 
 def test_a_24_character_random_token_label_is_refused_with_a_measured_miss_rate():
@@ -1102,8 +1149,13 @@ def test_idn_platform_and_label_word_domains_are_accepted_by_every_domain_field(
 
 # ================================================================================================ SHOULD 2: finance id
 
-def test_the_finance_client_id_pattern_is_what_the_guard_can_write_and_never_ends_in_503(tmp_path):
-    assert models.FINANCE_CLIENT == r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+def test_the_finance_client_id_pattern_is_what_the_guard_can_write_and_never_ends_in_503(tmp_path, monkeypatch):
+    # C2-6g6 (G-7; ruling 03:55 PT F6g4-2): the schema cap = the declared reference grammar {1,100}
+    assert models.FINANCE_CLIENT == r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$"
+    # C2-6g6 (ruling 03:55 PT F6g4-3): the guard's registered-tenant state is fixture-local, so the sink check below
+    # judges the WHOLE record (tenant_id too) the same whatever ran before
+    monkeypatch.setattr(sg, "_REGISTERED", set())
+    sg.register_tenant("acme")
     rx = re.compile(models.FINANCE_CLIENT)
     rng = random.Random(SEED + 7)
     alphabet = string.ascii_letters + string.digits + "._-"
@@ -1113,9 +1165,13 @@ def test_the_finance_client_id_pattern_is_what_the_guard_can_write_and_never_end
             rng.choice(alphabet) for _ in range(rng.choice((1, 3, 6, 10, 16, 24, 40, 63))))
         corpus.append(x)
     assert all(rx.fullmatch(x) for x in corpus)
-    accepted = [x for x in corpus if not svc_tenants.identifier_refused(x, prose=True)]
-    # whatever validation accepts, both sinks take: a 422 or a write, never a 503
-    stuck = [x for x in accepted
+    # C2-6g4 (G-7; ruling 03:20 PT F6g3-1, E-COMP): the route judges a reference by its grammar
+    # (svc_tenants.finance_ref_refused) and every sink holds its T-2 code, never the raw value
+    accepted = [x for x in corpus if not svc_tenants.finance_ref_refused(x)]
+    coder = vault_mod.Coder(vault_mod.ephemeral_vault_key(), "acme")
+    coded = ["c:text:" + coder.code("text", x) for x in accepted]
+    # whatever validation accepts, both sinks take (as its code): a 422 or a write, never a 503
+    stuck = [x for x in coded
              if sg.violations("tenant_finance_client_set", {"tenant_id": "acme", "finance_client_id": x})
              or sg.violations(sg.LEDGER + "tenant_finance_client_set", {"finance_client_id": x})]
     print(f"finance client ids: generated={len(corpus)} accepted={len(accepted)} "
@@ -1129,6 +1185,7 @@ def test_the_finance_client_id_pattern_is_what_the_guard_can_write_and_never_end
         codes[r.status_code] += 1
     assert set(codes) <= {200, 422}, dict(codes)
     assert codes[200] > 100 and codes[422] >= 5
+    assert re.fullmatch(r"c:text:[0-9a-f]{16}", h.svc.tenants["acme"]["finance_client_id"])
 
 
 def test_a_key_typed_as_the_finance_client_id_is_422_and_the_identifier_check_is_load_bearing(tmp_path, monkeypatch):
@@ -1305,7 +1362,7 @@ def test_old_format_lines_are_counted_at_start_and_their_prose_is_never_served(t
     assert [i for i, s in enumerate(titles) if s in text] == []
     # every served line is machine values only; ids, codes, hashes and counts are still there
     for ev in page["events"]:
-        assert sg.violations(ev["kind"], ev["data"], stored=True) == [], ev["kind"]
+        assert beyond_t3(ev["kind"], sg.violations(ev["kind"], ev["data"], stored=True)) == [], ev["kind"]
     by_kind = collections.defaultdict(list)
     for ev in page["events"]:
         by_kind[ev["kind"]].append(ev["data"])
@@ -1344,7 +1401,7 @@ def test_withhold_keeps_machine_values_and_replaces_everything_else():
     assert out == {"audit_id": data["audit_id"], "n": 3, "ok": True, "none": None, "ratio": 0.5, "bad": W, "note": W,
                    "rows": [{"host": "example.com", "text": W}, W, 7], "epoch": data["epoch"], "other": W,
                    "key_id": kid, "raw": W, W: {"a": W}, W + ".2": 1, "at": data["at"]}
-    assert n == 9 and sg.violations("job_ran", out, stored=True) == []
+    assert n == 9 and beyond_t3("job_ran", sg.violations("job_ran", out, stored=True)) == []
     clean = {"a": derived_id("aud", 2), "b": [1, "COMPLETED", {"c": "example.org"}]}
     assert sg.withhold(clean) == (clean, 0)
     deep: dict = {}
@@ -1353,6 +1410,32 @@ def test_withhold_keeps_machine_values_and_replaces_everything_else():
         cur["d"] = {}
         cur = cur["d"]
     assert sg.withhold(deep)[1] == 1
+
+
+def test_withhold_judges_a_t2_reference_by_its_declared_field():
+    """C2-6g6 (ruling 03:55 PT F6g4-1, pattern of ruling 21:45 PT; spec T-1 / T-2 / T-3): the served export judges
+    each value with its FIELD's declared type. A brace-less T-2 code in a declared T-2 reference field is served;
+    a raw reference there, the same code in an undeclared field, under another kind or untyped, and the braced
+    form stay withheld (no global exemption)."""
+    rng = random.Random(SEED + 66)
+    kind, strict = "tenant_finance_client_set", 0
+    for _ in range(200):
+        code = "c:text:" + "".join(rng.choice("0123456789abcdef") for _ in range(16))
+        line = {"tenant_id": "acme", "finance_client_id": code,
+                "evidence": [{"payload": {"finance_client_id": code}}]}
+        out, n = sg.withhold(line, kind)
+        assert out["finance_client_id"] == code and out["evidence"][0]["payload"]["finance_client_id"] == code
+        # the same code: untyped, in an undeclared field, under a kind that does not declare it, braced
+        for d, k in (({"finance_client_id": code}, None), ({"note": code}, kind),
+                     ({"finance_client_id": code}, "job_ran"), ({"finance_client_id": "{" + code + "}"}, kind)):
+            if sg.classify(code) is None:                  # the codes the untyped check withholds (most)
+                strict += 1
+                assert sg.withhold(d, k)[1] == 1
+    assert strict >= 4 * 150
+    # a raw (secret-shaped) reference in the declared field is not a T-2 code: withheld
+    raw = "a" + secrets.token_hex(20)
+    assert sg.withhold({"finance_client_id": raw, "evidence": []}, kind)[1] == (sg.classify(raw) is None)
+    assert sg.withhold({"finance_client_id": "two words"}, kind) == ({"finance_client_id": sg.WITHHELD}, 1)
 
 
 # ================================================================================================ SHOULD 6: schedule
@@ -1378,8 +1461,13 @@ def test_a_schedule_naming_a_prompt_set_whose_blob_is_lost_is_503(tmp_path, srv)
     h2.refused(h2.post("/tenants/acme/audits", {k: v for k, v in body.items() if k != "every_days"},
                        caller="dashboard", andre=True), 503, "VAULT_UNAVAILABLE")
     # without the prompt set the schedule is created
-    h2.ok(h2.post("/tenants/acme/schedules", {k: v for k, v in body.items() if k != "prompt_set_id"},
-                  caller="dashboard", andre=True), 201)
+    plain = {k: v for k, v in body.items() if k != "prompt_set_id"}
+    # C2-6g4 (G-7; ruling 03:20 PT; OWNER DECISION 02:00 PT E-COMP): the deleted operator vault also held the Finance
+    # client record, so the binding fails closed (503 VAULT_UNAVAILABLE) until Andre rebinds it
+    h2.refused(h2.post("/tenants/acme/schedules", plain, caller="dashboard", andre=True), 503, "VAULT_UNAVAILABLE")
+    h2.ok(h2.post("/tenants/acme/finance-client", {"request_id": rid(), "finance_client_id": "acme-party-1"},
+                  andre=True))
+    h2.ok(h2.post("/tenants/acme/schedules", {**plain, "request_id": rid()}, caller="dashboard", andre=True), 201)
 
 
 # ================================================================================================ SHOULD 9: identifiers
@@ -1482,13 +1570,13 @@ def test_mutation_without_the_atless_rule_the_forms_are_accepted(tmp_path, monke
 
 def test_a_non_finite_float_is_not_a_machine_value():
     for bad in (float("nan"), float("inf"), float("-inf")):
-        assert sg.violations("job_ran", {"x": bad}) == [("/x", "float")]
-        assert sg.violations("job_ran", {"rows": [1.5, bad]}) == [("/rows[]", "float")]
-        assert sg.violations("job_ran", bad) == [("", "float")]
+        assert beyond_t3("job_ran", sg.violations("job_ran", {"x": bad})) == [("/x", "float")]
+        assert beyond_t3("job_ran", sg.violations("job_ran", {"rows": [1.5, bad]})) == [("/rows[]", "float")]
+        assert beyond_t3("job_ran", sg.violations("job_ran", bad)) == [("", "float")]
         assert sg.scrub(bad) == sg.WITHHELD
         with pytest.raises(sg.SinkViolation):
             sg.enforce("job_ran", {"x": {"y": bad}})
-    assert sg.violations("job_ran", {"x": 0.25, "y": -1e300, "z": 0.0, "n": 7}) == []
+    assert beyond_t3("job_ran", sg.violations("job_ran", {"x": 0.25, "y": -1e300, "z": 0.0, "n": 7})) == []
     assert sg.scrub(0.25) == 0.25
 
 
@@ -1525,20 +1613,20 @@ def test_logging_extra_attributes_are_scrubbed(tmp_path, caplog):
         "client_note": prose, "audit": aid, "extra_value": key, "count": 3, "ratio": float("nan"),
         "detail": {"host": "example.com", "text": prose, "n": 2}, "rows": [prose, "COMPLETED"],
         "obj": object(), "two words": prose})
-    (rec,) = [r for r in caplog.records if r.name == "seo.test"]
+    # C2-3a re-pin (core-spec/2 T-5: refused, never rewritten; lead ruling F3-1: no /extra/<name> is typed, and
+    # seo.test has no table): the record is NOT written; it becomes the typed `log_refused` record, extras removed
+    (rec,) = [r for r in caplog.records if r.name == "log_refused" and r.args[0] == "seo.test"]
     d = rec.__dict__
-    assert d["client_note"] == sg.WITHHELD and d["extra_value"] == sg.WITHHELD and d["obj"] == sg.WITHHELD
-    assert d["audit"] == aid and d["count"] == 3 and d["ratio"] == sg.WITHHELD
-    assert d["detail"] == {"host": "example.com", "text": sg.WITHHELD, "n": 2}
-    assert d["rows"] == [sg.WITHHELD, "COMPLETED"] and "two words" not in d
-    assert rec.getMessage() == f"audit {aid} recorded"
-    formatted = logging.Formatter("%(message)s %(client_note)s %(detail)s").format(rec) + json.dumps(
+    for k in ("client_note", "audit", "extra_value", "count", "ratio", "detail", "rows", "obj", "two words"):
+        assert k not in d, k
+    assert rec.getMessage() == "log_refused logger=seo.test reason=untyped"
+    formatted = logging.Formatter("%(message)s").format(rec) + json.dumps(
         {k: v for k, v in d.items() if isinstance(v, (str, int, float, dict, list))}, default=str)
     assert prose not in formatted and key not in formatted
     # a record made by hand (no factory) with extras is scrubbed when a handler takes it
     made = logging.makeLogRecord({"name": "seo.test", "msg": "x", "client_note": prose, "levelno": logging.INFO})
     log_sink.FILTER.filter(made)
-    assert made.__dict__["client_note"] == sg.WITHHELD
+    assert "client_note" not in made.__dict__ and made.name == "log_refused"     # C2-3a re-pin (T-5, F3-1)
 
 
 def test_mutation_without_the_extra_scrub_the_attribute_is_kept(tmp_path, caplog, monkeypatch):
@@ -1547,7 +1635,8 @@ def test_mutation_without_the_extra_scrub_the_attribute_is_kept(tmp_path, caplog
     prose = f"zq{letters(8)} wv{letters(8)}"
     monkeypatch.setattr(log_sink, "_scrub_extra", lambda record: None)
     logging.getLogger("seo.test").info("noted", extra={"client_note": prose})
-    (rec,) = [r for r in caplog.records if r.name == "seo.test"]
+    # C2-3a re-pin (F3-1): the record is refused either way; without the extra scrub its attribute survives
+    (rec,) = [r for r in caplog.records if r.name == "log_refused" and r.args[0] == "seo.test"]
     assert rec.__dict__["client_note"] == prose
 
 

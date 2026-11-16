@@ -51,6 +51,7 @@ from svc_reports import ReportsMixin
 from svc_schedules import SchedulesMixin
 from svc_tenants import TenantsMixin, OWN_TENANT
 from svc_vaulted import VaultedMixin
+from svc_allowlist import CvAllowlistMixin
 
 INTERNAL = "seo"
 INTEGRITY_RETRY_S = 15
@@ -78,7 +79,7 @@ def request_sha(body: dict) -> str:
 
 
 class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixin, SchedulesMixin, ManagerMixin,
-                 GscMixin, EnginesMixin, ReportsMixin, CitationsMixin, OperatorTextMixin, VaultedMixin):
+                 GscMixin, EnginesMixin, ReportsMixin, CitationsMixin, OperatorTextMixin, VaultedMixin, CvAllowlistMixin):
     def __init__(self, settings: Settings, recorder: Recorder, log: RecordLog, ports=None,
                  clock: Optional[Clock] = None, lock_token: Optional[str] = None, *,
                  observe_existing_on_start: bool = False):
@@ -142,6 +143,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
                                   "stale, another instance's, or already adopted); refusing to start")
         try:
             self.vault = self._open_vault(settings, repair=not observe_existing_on_start)
+            self._cv_allow_init()                         # C2-15b (AL-1): codes only, the tenant's vault
             # review c0c09bd1: operator free text (svc_optext.py) in its own vault file, same key and scheme
             self.optext_vault = self._open_vault(settings, repair=not observe_existing_on_start, operator=True)
             # review 2b26d980 MUST 2: the configured vault key ids are written to the log (the operator-text stub's
@@ -240,6 +242,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
         return n
 
     def _start(self, *, observe_existing_on_start: bool = False) -> None:
+        self._observe_only = observe_existing_on_start    # C2-10c3: replay seals no legacy finance ref when observing
         for r in self.log.iter_records():
             self._apply(r["kind"], r["data"], r["at"])
         self._legacy_scan_len = len(self.log)
@@ -761,10 +764,12 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
                 line_sha = sha256_hex(raw)
                 if cache["epoch"] is None:
                     cache["epoch"] = line_sha[:16]
-                evs = r["data"].get("evidence")
+                data = r.get("data") if isinstance(r, dict) else None
+                evs = data.get("evidence") if isinstance(data, dict) else None
                 if evs:
-                    rk = r["data"].get("request_id") or f"{INTERNAL}|{r['kind']}"
-                    cache["lines"].append((r["seq"], line_sha, rk, r["kind"], evs))
+                    kind = r.get("kind")
+                    rk = data.get("request_id") or f"{INTERNAL}|{kind}"
+                    cache["lines"].append((r.get("seq"), line_sha, rk, kind, evs))
                 cache["n"] += 1
             epoch, lines, n_lines = cache["epoch"], list(cache["lines"]), cache["n"]
         try:
@@ -774,13 +779,24 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
         mine = [e for e in entries if e.get("department") == DEPARTMENT]
         anchors = {e.get("event_id"): e for e in mine if e.get("event_type") == "log_anchor"}
         named: dict[str, tuple] = {}                     # event_id -> (seq, rk, payload, log kind) of an anchored line
+        legacy_ev = 0                                    # C2-10c5 (F10c4-1): malformed / legacy evidence entries
         for seq, line_sha, line_rk, kind, evs in lines:
+            good = []
+            for ev in (evs if isinstance(evs, list) else [evs]):
+                eid = ev.get("event_id") if isinstance(ev, dict) else None
+                if type(eid) is not str:                 # no / wrong-type event_id: counted, never named, never a 5xx
+                    legacy_ev += 1
+                    continue
+                p = ev.get("payload")
+                good.append((eid, p if isinstance(p, dict) else {}))
+            if not good or type(seq) is not int:
+                continue
             aid, apayload = self._anchor_ids(epoch, seq, line_sha)
             a = anchors.get(aid)
             if a is None or a.get("payload_sha256") != payload_sha256(apayload) or a.get("subject_id") != f"log:{epoch}":
                 continue
-            for ev in evs:
-                named[ev["event_id"]] = (seq, line_rk, ev.get("payload") or {}, kind)
+            for eid, p in good:
+                named[eid] = (seq, line_rk, p, kind)
         out, counts = [], {"committed": 0, "attempted": 0}
         for e in mine:
             if e.get("event_type") == "log_anchor" or (event_type is not None and e.get("event_type") != event_type):
@@ -798,7 +814,7 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
             out.append(row)
         return {"rule": "unanchored evidence = attempted, not done", "consistency": "eventual; re-read to settle",
                 "total": len(out), **counts, "limit": limit, "offset": offset,
-                "evidence": out[offset:offset + limit], "log_length": n_lines}
+                "evidence": out[offset:offset + limit], "log_length": n_lines, "legacy_evidence_entries": legacy_ev}
 
     def audit_export(self, since_seq: int, limit: int) -> dict:
         """The local log (it holds ids, codes, hashes and the tenants' registered domains; no raw page body is ever
@@ -819,8 +835,8 @@ class SeoService(TenantsMixin, EntityMixin, AuditsMixin, InvoicesMixin, LogsMixi
                 # ``expired``; report_sha256 is still the hash of the report as recorded). Lines written before sink
                 # job B only: later ones carry no report
                 d["report"] = self.gsc_retained(d["report"], r["at"])
-            d, n = sink_guard.withhold(d)
-            withheld += n
+            d, n = sink_guard.withhold(d, r["kind"] if type(r["kind"]) is str else None)   # F6g4-1: typed
+            withheld += n                                 # C2-10c4: incl. a legacy raw finance ref (T-2 field)
             kind = r["kind"] if sink_guard.classify(r["kind"]) is not None else sink_guard.WITHHELD
             at = r["at"] if sink_guard.classify(r["at"]) is not None else sink_guard.WITHHELD
             out.append({"seq": r["seq"], "kind": kind, "at": at, "data": d})

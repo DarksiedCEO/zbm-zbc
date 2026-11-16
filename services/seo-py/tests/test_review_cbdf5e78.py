@@ -104,7 +104,9 @@ def ordinary(text: str, r) -> list:
     out = []
     if sg.check(text) is not None:
         out.append("flagged")
-    if sg.client_view_findings(f"{text}: {value(r)}") or sg.client_view_findings(text):
+    # core-spec/2 CV-3 / G-7 re-pin: before a value the text must be SHOWN with only the value-shaped value masked
+    # (cd0.value_only: no label_value, the one span == the value); alone it must have no finding at all
+    if not cd0.value_after(f"{text}: ", r) or sg.client_view_findings(text):
         out.append("masked")
     for u in (f"https://site.test/blog/{slug}/", f"https://site.test/s?q={text}&page=2"):
         if sg.url_has_secret(u):
@@ -883,7 +885,9 @@ def test_a_citation_run_citing_the_ordinary_phrases_fetches_them_all(tmp_path):
         "prompts": ["who recovers marketplace revenue"], "engines": ["openai"]}), 201)["prompt_set_id"]
     run = h.ok(h.post("/tenants/zbm/citation-runs", {"request_id": rid(), "domain": vw.DOMAIN,
                                                      "prompt_set_id": psid}), 201)
-    view = h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}", caller="dashboard"))
+    # C2-10e re-pin (G-7; lead ruling 10:05 PT F10b-1, V-4 D-02h): the run text is read by the owner
+    # caller (hub + tenant token); dashboard now gets the code-only view. Assertions unchanged.
+    view = h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}", caller="hub", tenant="zbm"))
     rows = view["result"]["facts"]["rows"]
     fields = cd0.evidence_fields(view)
     classes = collections.Counter((row["class"], row.get("reason"), (row.get("chain") or {}).get("resolution"))
@@ -924,7 +928,9 @@ def test_a_citation_run_carrying_the_label_forms_shows_no_value(tmp_path):
     run = h.ok(h.post("/tenants/zbm/citation-runs", {"request_id": rid(), "domain": vw.DOMAIN,
                                                      "prompt_set_id": psid}), 201)
     assert run["status"] == "completed" and port.asked >= len(forms)
-    view = h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}", caller="dashboard"))
+    # C2-10e re-pin (G-7; lead ruling 10:05 PT F10b-1, V-4 D-02h): the run text is read by the owner
+    # caller (hub + tenant token); dashboard now gets the code-only view. Assertions unchanged.
+    view = h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}", caller="hub", tenant="zbm"))
     fields = cd0.evidence_fields(view)
     disk = vw.written(h)
     print(f"end to end, label forms: forms={len(forms)} values={len(values)} fields={len(fields)} "

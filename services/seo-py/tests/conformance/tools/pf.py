@@ -1,7 +1,8 @@
 """core-spec/1 PF-1 / PF-2 / PF-3 under the spec's protocol (the gate runs it; counts and ratios only):
 
     python tests/conformance/tools/pf.py pf1 [passes]     both modules (ffd28ca8, the build) in ONE process, timed
-                                                          alternately, best of >= 7 passes, two runs in opposite orders
+                                                          alternately, best of >= 7 passes, two runs in opposite orders;
+                                                          third run decides a cell the two disagree on
     python tests/conformance/tools/pf.py pf2 [n]          cold start, >= 24 fresh interleaved processes each
     python tests/conformance/tools/pf.py pf3              17+ shapes 2k..64k, both lanes, best of 3, vs ffd28ca8
 """
@@ -53,21 +54,55 @@ def _pass(mod, lane, texts) -> float:
     return time.perf_counter() - t
 
 
-def pf1(passes: int = 7) -> dict:
-    ffd = RL.load_guard(RL.export("ffd28ca8"), "ffd_secret_guard")
+def _pf1_run(order: str, keys, passes: int, build, ffd) -> dict:
+    """One PF-1 run: best-of-``passes`` ratio build / ffd28ca8 - 1 per ``lang|lane`` key, timed alternately."""
+    mods = (build, ffd) if order == "build_first" else (ffd, build)
     out = {}
+    for key in keys:
+        lang, lane = key.split("|")
+        texts = sentences(lang)
+        best = {id(m): float("inf") for m in mods}
+        for _ in range(passes):
+            for m in mods:
+                best[id(m)] = min(best[id(m)], _pass(m, lane, texts))
+        out[key] = round(best[id(build)] / best[id(ffd)] - 1, 4)
+    return out
+
+
+def pf1_verdict(cells: dict, bar: float = 0.10) -> dict:
+    """PF-1 third-run rule (core-spec/2 section 7; certification row PF "two runs, third decides"): a cell fails when
+    both runs are over ``bar``, passes when both are within it; when the two runs DISAGREE the third run decides.
+    ``cells`` = {key: {"build_first": r, "ffd_first": r, ["third": r]}}. Returns fails / need_third / decided_by_third."""
+    fails, need, third = [], [], []
+    for k, v in sorted(cells.items()):
+        over = [v[o] > bar for o in ("build_first", "ffd_first")]
+        if all(over):
+            fails.append(k)
+        elif any(over):
+            if "third" not in v:
+                need.append(k)
+                continue
+            third.append(k)
+            if v["third"] > bar:
+                fails.append(k)
+    return {"fails": fails, "need_third": need, "decided_by_third": third}
+
+
+def pf1(passes: int = 7, build_mod=None, ffd_mod=None) -> dict:
+    """Two runs in opposite orders over every cell; a third run (build first) only for the cells they disagree on."""
+    b = build_mod or build
+    ffd = ffd_mod or RL.load_guard(RL.export("ffd28ca8"), "ffd_secret_guard")
+    keys = [f"{lang}|{lane}" for lang in PF1_LANGS for lane in ("strict", "cv")]
+    out = {k: {} for k in keys}
     for order in ("build_first", "ffd_first"):
-        mods = (build, ffd) if order == "build_first" else (ffd, build)
-        for lang in PF1_LANGS:
-            texts = sentences(lang)
-            for lane in ("strict", "cv"):
-                best = {id(m): float("inf") for m in mods}
-                for _ in range(passes):
-                    for m in mods:
-                        best[id(m)] = min(best[id(m)], _pass(m, lane, texts))
-                out.setdefault(f"{lang}|{lane}", {})[order] = round(best[id(build)] / best[id(ffd)] - 1, 4)
-    fails = [k for k, v in out.items() if all(x > 0.10 for x in v.values())]
-    return {"cells": out, "fail_both_runs": fails}
+        for k, r in _pf1_run(order, keys, passes, b, ffd).items():
+            out[k][order] = r
+    need = pf1_verdict(out)["need_third"]
+    for k, r in _pf1_run("build_first", need, passes, b, ffd).items():
+        out[k]["third"] = r
+    v = pf1_verdict(out)
+    return {"cells": out, "fail": v["fails"], "decided_by_third": v["decided_by_third"],
+            "fail_both_runs": [k for k in v["fails"] if k not in v["decided_by_third"]]}
 
 
 COLD = ("import sys, time; t = time.perf_counter(); sys.path[:0] = [sys.argv[1] + '/tests', sys.argv[1] + '/src']; "

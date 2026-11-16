@@ -324,6 +324,9 @@ BITES = {
 }
 
 
+VS_CARRIED = frozenset({"b64_digit_suffix", "b64_format_chars"})   # C2-CL2a: see t8.vs_carries (CV-3, ST-2, G-7)
+
+
 @pytest.mark.parametrize("name", sorted(BITES))
 def test_each_new_rule_is_load_bearing(monkeypatch, name):
     patch, cls, lanes = BITES[name]
@@ -339,7 +342,12 @@ def test_each_new_rule_is_load_bearing(monkeypatch, name):
     patch(monkeypatch)
     if "strict" in lanes:
         assert sum(1 for p in probes if sg.check(p) is None) > 0, (name, "strict: removing this rule broke nothing")
-    if "client" in lanes:
+    if "client" in lanes and name in VS_CARRIED:                       # C2-CL2a re-point (CV-3, ST-2, G-7)
+        lost, shown, shown_no_vs = t8.vs_carries(monkeypatch, probes, want)
+        assert lost > 0, (name, "client: removing this rule lost no v1 finding")
+        assert shown == 0, (name, "CV-3 value shape must still mask every case")
+        assert shown_no_vs > 0, (name, "client: removing this rule and the VS rule broke nothing")
+    elif "client" in lanes:
         assert leaks() > 0, (name, "client: removing this rule broke nothing")
 
 
@@ -354,7 +362,8 @@ def test_each_b64_part_is_load_bearing(monkeypatch):
     monkeypatch.undo()
     # (d) only: format characters kept (counted as unreadable)
     monkeypatch.setattr(sg, "_visible", lambda s: s)
-    assert sum(1 for p in c["b64_format_chars"] if not sg.client_view_findings(p)) > 0
+    lost, shown, shown_no_vs = t8.vs_carries(monkeypatch, c["b64_format_chars"])   # C2-CL2a (CV-3, ST-2, G-7)
+    assert lost > 0 and shown == 0 and shown_no_vs > 0, (lost, shown, shown_no_vs)
     monkeypatch.undo()
     # (b) only, read without trims: an 8-character aligned prefix is read from offset 8 alone
     monkeypatch.setattr(sg, "DECODE_TRIM", 0)
@@ -562,13 +571,27 @@ def _excerpt_masked(answer: str) -> bool:
 
 
 CV_UTILITY_BAR = 0.05
+# core-spec/2 re-pin (G-7; owner decision 4, lead ruling F7b-1 principle, judged by CV-8; this shop corpus is not a CV-8
+# corpus -> disclosed): CV_UTILITY_BAR applies to masks from v1 findings (0 / 480 at core-v2 C2-CL3); value_shape-only
+# masks (CV-3/CV-5/CV-6) are counted and pinned to the measured disclosure (28 / 480: shapes a-9 16 = SKUs, a9 12 =
+# model numbers). Any change of this count must be explained.
+CV8_DISCLOSED_SHOP_VS = 28
 
 
 def test_client_view_utility_on_the_generated_shop_corpus_is_under_the_bar():
     answers, phones = shop_corpus()
     assert len(answers) >= 460
-    masked = sum(1 for a in answers if _excerpt_masked(a))
+    masked = vs_only = 0
+    for a in answers:
+        if _excerpt_masked(a):
+            term = a.split(" ", 1)[0]
+            found = set(sg.client_view_findings(callum._raw_excerpt(a, [term])))
+            if found | set(callum._excerpt_view_findings(a, [term])) <= {"value_shape"}:
+                vs_only += 1                                                   # CV-3 value shape only: disclosed
+            else:
+                masked += 1                                                    # a v1 finding: under the bar
     assert masked / len(answers) <= CV_UTILITY_BAR, masked
+    assert vs_only == CV8_DISCLOSED_SHOP_VS, vs_only
     assert sum(1 for a in phones if _excerpt_masked(a)) == len(phones)   # business phones: masked (a required class)
 
 
@@ -776,7 +799,7 @@ def test_a_real_service_run_writes_nothing_raw_and_the_owner_view_masks_every_re
     assert len(parts) >= len(cases)
     assert vw.found(blob, {**parts, **sec}) == []
     # the owner's view: every case row's excerpt masked (a strict-only case may show; it has no client class)
-    got = h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}"))
+    got = h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}", caller="hub", tenant="zbm"))
     by_url = {}
     for r in got["result"]["facts"]["rows"]:
         cu = (r.get("evidence") or {}).get("cited_url") or {}

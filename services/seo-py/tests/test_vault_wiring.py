@@ -245,7 +245,7 @@ def test_a_real_run_logs_ids_and_hashes_only_and_the_owner_sees_full_evidence(tm
     assert sum(1 for r in logged if r["evidence"]["fields"].get("cited_url", {}).get("flag")) == 4
 
     # the owner's view: legitimate fields in full, flagged fields masked with an alert
-    got = h.ok(h.get(f"/tenants/zbm/citation-runs/{cid}"))
+    got = h.ok(h.get(f"/tenants/zbm/citation-runs/{cid}", caller="hub", tenant="zbm"))
     assert got["result_hmac"] == run["result_hmac"] == line["data"]["result_hmac"] and got["result_sha256"] is None
     by = rows_by(got)
     legit = by[LEGIT_URL]
@@ -269,7 +269,7 @@ def test_a_real_run_logs_ids_and_hashes_only_and_the_owner_sees_full_evidence(tm
               for k in ("title", "hint", "excerpt") if r["evidence"].get(k) and r["evidence"][k]["alert"]]
     assert "LOOKS_LIKE_CREDENTIAL" in alerts and "LOOKS_LIKE_PERSONAL_DATA" in alerts
     # the owner's view never carries a flagged raw value (run, list and the MNC export)
-    mp = h.ok(h.get(f"/tenants/zbm/citation-runs/{cid}/mnc-priority"))
+    mp = h.ok(h.get(f"/tenants/zbm/citation-runs/{cid}/mnc-priority", caller="hub", tenant="zbm"))
     listing = h.ok(h.get("/tenants/zbm/citation-runs"))
     out = json.dumps([got, mp, listing], ensure_ascii=False)
     assert found(out, v) == []
@@ -306,7 +306,7 @@ def test_a_restart_with_the_key_reads_the_same_view(tmp_path):
     start(h, v)
     a = citation_run(h)
     h2 = h.restart()
-    b = h2.ok(h2.get(f"/tenants/zbm/citation-runs/{a['citation_run_id']}"))
+    b = h2.ok(h2.get(f"/tenants/zbm/citation-runs/{a['citation_run_id']}", caller="hub", tenant="zbm"))
     assert b["result"] == a["result"]
 
 
@@ -316,12 +316,12 @@ def test_a_restart_without_the_key_shows_no_evidence_and_never_fails(tmp_path):
     start(h, v)
     a = citation_run(h)
     h2 = h.restart(SEO_VAULT_KEY_FILE=None)
-    b = h2.ok(h2.get(f"/tenants/zbm/citation-runs/{a['citation_run_id']}"))
+    b = h2.ok(h2.get(f"/tenants/zbm/citation-runs/{a['citation_run_id']}", caller="hub", tenant="zbm"))
     # sink job C: the whole result is in the vault, so without the key NOTHING of it is shown (it was: the logged
     # rows with every evidence marked unavailable); the machine facts are still served, and the read never fails
     assert b["status"] == "completed" and b["result"] is None and b["vault_unavailable"] is True
     assert b["facts"]["outcome"] == "OK" and b["facts"]["rows"] == len(a["result"]["facts"]["rows"])
-    r = h2.get(f"/tenants/zbm/citation-runs/{a['citation_run_id']}/mnc-priority")
+    r = h2.get(f"/tenants/zbm/citation-runs/{a['citation_run_id']}/mnc-priority", caller="hub", tenant="zbm")
     assert r.status_code == 503 and r.json()["detail"] == "VAULT_UNAVAILABLE"
     assert MARK not in json.dumps(b) and LEGIT_URL not in json.dumps(b)
 
@@ -434,7 +434,7 @@ def _scenario(tmp_path) -> dict:
     start(h, v)
     cid = citation_run(h)["citation_run_id"]
     h.tenant("acme", domains=("other.test",))
-    got = h.get(f"/tenants/zbm/citation-runs/{cid}").json()
+    got = h.get(f"/tenants/zbm/citation-runs/{cid}", caller="hub", tenant="zbm").json()
     return {"log_clean": MARK not in written(h) and found(written(h), v) == [],
             "owner_masked": found(json.dumps(got, ensure_ascii=False), v) == [],
             "owner_full": LEGIT_URL in json.dumps(got),
@@ -459,6 +459,8 @@ def test_mutation_no_vault_split_is_caught(tmp_path, monkeypatch):
     assert _scenario(tmp_path) == {"log_clean": True, "owner_masked": True, "owner_full": True, "cross_404": True}
 
 
+# C2-9c (V-1, T-2; lead ruling 17:55 PT F9-4): synthesises 12 of the 105 F2b-2 paths; no current src
+# writer emits them (core-v2/c29c/paths.md), so they stay untyped and refused. Kept, never deleted.
 def test_mutation_the_result_written_to_the_log_again_is_caught(tmp_path, monkeypatch):
     # the mutation that now breaks ``log_clean``: the completion record carries the stored envelope again. With the
     # sink guard's refusal removed as well, the evidence-free envelope's legitimate text is in the log line.
@@ -509,16 +511,27 @@ EXCERPT_BAR = 0.05
 URL_BAR = 0.025
 
 
+# core-spec/2 re-pin (G-7; owner decision 4 + lead ruling F7b-1, judged by CV-8): EXCERPT_BAR applies to masks from
+# v1 findings; masks whose ONLY finding is value_shape (CV-3/CV-5) are counted and pinned to the measured disclosure
+# (23 / 312 at core-v2 C2-CL3: shapes a/a 16, a9 8, 9a 8, a:a 5, a+ 2). Any change of this count must be explained.
+CV8_DISCLOSED_EXCERPT_VS = 23
+
+
 def test_utility_client_view_excerpts_meet_the_bar():
     ex = uc.excerpts()
     assert len(ex) == 312
-    masked = 0
+    masked = vs_only = 0
     for i, b, e in ex:
         raw = callum._raw_excerpt(uc.ANSWERS[i], [b] if b else [])
-        d = callum._display("excerpt", raw, e["withheld"],
-                            callum._excerpt_view_findings(uc.ANSWERS[i], [b] if b else []))       # span + margins
-        masked += bool(d and d["alert"])
+        found = callum._excerpt_view_findings(uc.ANSWERS[i], [b] if b else [])
+        d = callum._display("excerpt", raw, e["withheld"], found)                                  # span + margins
+        if d and d["alert"]:
+            if set(sg.client_view_findings(raw)) | set(found) <= {"value_shape"}:
+                vs_only += 1                                                   # CV-3 value shape only: disclosed
+            else:
+                masked += 1                                                    # a v1 finding: under the bar
     assert masked / len(ex) <= EXCERPT_BAR, masked
+    assert vs_only == CV8_DISCLOSED_EXCERPT_VS, vs_only
     # the strict lane is unchanged: it still withholds the same 22 excerpts from the log (recorded flag)
     assert sum(1 for _i, _b, e in ex if e["withheld"]) == 22
 

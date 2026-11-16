@@ -229,6 +229,8 @@ def test_m4_page_and_ruler_both_changed_is_unknown_never_real_change(tmp_path, s
     install_site(srv)
     h = harness(tmp_path, srv)
     own(h)
+    # re-pinned back (G-7; owner decision 19:20 PT "Show machine fields", card C2-OV; replaces ruling 16:15 PT): the
+    # fingerprints / robots SHA-256 are typed hash fields, shown in the API owner view the R-rules read
     a = h.ok(audit(h), 201)["report"]
     srv.html("site.test", "/", home_html(canonical=None))
     b = copy.deepcopy(h.ok(audit(h), 201)["report"])
@@ -241,6 +243,8 @@ def test_m4_robots_and_ruler_both_changed_is_unknown(tmp_path, srv):
     install_site(srv)
     h = harness(tmp_path, srv)
     own(h)
+    # re-pinned back (G-7; owner decision 19:20 PT "Show machine fields", card C2-OV; replaces ruling 16:15 PT): the
+    # fingerprints / robots SHA-256 are typed hash fields, shown in the API owner view the R-rules read
     a = h.ok(audit(h), 201)["report"]
     srv.text("site.test", "/robots.txt", "User-agent: GPTBot\nDisallow: /\n")
     b = copy.deepcopy(h.ok(audit(h), 201)["report"])

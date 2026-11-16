@@ -88,10 +88,9 @@ PROSE_KEPT = [
     "Pass the holiday rush with these 12 tips.", "The secret menu items at the cafe are listed below.",
     "Bearer bonds were common in the 1920s.", "Authorization letter template (free download).",
     "The key takeaway is revenue growth.", "PIN codes and passcodes: a primer for shop owners.",
-    "Order 112-1234567-1234567 shipped on 2026-11-08.", "ISBN 978-3-16-148410-0 is in stock.",
+    "ISBN 978-3-16-148410-0 is in stock.",
     "Prices from $1,299.99 to $2,499.00 in 2024-2025 (12 items).", "Call us between 9:00 and 17:30, Monday-Friday.",
-    "Revenue grew 1,250,000 units in Q3 2026; the target is 3,000,000.", "Item 550e8400-e29b-41d4-a716-446655440000 ok.",
-    "commit 8f14e45fceea167a5a36dedd4bea2543c1b2d3e4 fixed it", "Meet us (at) the venue on Friday.",
+    "Revenue grew 1,250,000 units in Q3 2026; the target is 3,000,000.", "Meet us (at) the venue on Friday.",
     "The password would be reset after 90 days.", "Klaviyo vs Omnisend: pricing, flows and reviews for 2026.",
 ]
 
@@ -99,6 +98,25 @@ PROSE_KEPT = [
 @pytest.mark.parametrize("text", PROSE_KEPT)
 def test_bare_label_words_and_ordinary_numbers_are_shown_in_full(text):
     assert sg.client_view_findings(text) == [], sg.client_view_findings(text)
+
+
+# Re-pinned by C2-7b (G-7, toward core-spec/2): these three cells were in PROSE_KEPT under v1. CV-3 masks UUIDs and long
+# hex in the client view (K-2 now applies in CV) and CV-6 says UUIDs, hashes and order ids are NOT exempt shapes, so each
+# is now masked with the single finding value_shape, and ONLY the value is the span (the label words and the ISO date,
+# an exempt CV-6 shape, stay shown).
+PROSE_VALUE_SHAPE = [
+    ("Order 112-1234567-1234567 shipped on 2026-11-08.", "112-1234567-1234567"),        # CV-6: order id not exempt
+    ("Item 550e8400-e29b-41d4-a716-446655440000 ok.", "550e8400-e29b-41d4-a716-446655440000"),  # CV-3 K-2: UUID
+    ("commit 8f14e45fceea167a5a36dedd4bea2543c1b2d3e4 fixed it", "8f14e45fceea167a5a36dedd4bea2543c1b2d3e4"),  # long hex
+]
+
+
+@pytest.mark.parametrize("text,value", PROSE_VALUE_SHAPE)
+def test_uuid_hash_and_order_id_are_value_shape_masked_cv3_cv6(text, value):
+    from agents import cv_shape
+    assert sg.client_view_findings(text) == ["value_shape"]
+    a = text.index(value)
+    assert cv_shape.value_spans(text) == [(a, a + len(value))]
 
 
 def test_the_strict_lane_is_unchanged_by_the_client_view():

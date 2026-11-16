@@ -36,6 +36,16 @@ from ports import Ports, gsc_from_settings
 from primitives import Killed
 
 PROP = "sc-domain:acme.test"
+
+
+@pytest.fixture(autouse=True)
+def _e_auth_configured_property():
+    """C2-3c4 re-pin (E-AUTH, lead ruling 17:15 PT F3c3-2, G-7; nothing deleted, no assertion changed): a direct
+    connector read outside svc_gsc binds this suite's PROP as the tenant's configured property (svc_gsc binds the
+    tenant record's own property itself)."""
+    import outbound
+    with outbound.configured(gsc_property=PROP):
+        yield
 W = ("2026-09-09", "2026-10-06")
 GLOBAL_IP = "142.250.80.42"
 

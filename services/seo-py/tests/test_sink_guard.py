@@ -19,6 +19,7 @@ import pytest
 import conftest
 import ledger as ledger_mod
 import sink_guard as sg
+import t4_recorder
 import vault
 from errors import Unavailable
 from helpers import Harness, invoice_id, ruling_id
@@ -104,7 +105,8 @@ def test_every_class_is_accepted_and_the_set_is_closed():
     assert set(values) | {"key_id"} == set(sg.CLASSES)
     wrong = [(cls, i) for cls, vs in values.items() for i, v in enumerate(vs) if sg.classify(v) != cls]
     assert wrong == []
-    assert all(sg.violations("job_ran", {"k": vs}) == [] for vs in values.values())
+    # C2-2c (CL-5; T-1 + T-3): every class value is a machine value; ``/k`` is synthetic, so it has no type decision
+    assert all(sg.violations("job_ran", {"k": vs}) == [("/k[]", "untyped")] for vs in values.values())
 
 
 def refused_values() -> dict:
@@ -147,22 +149,30 @@ def test_refused_values(name):
     value, reason = refused_values()[name]
     assert sg.classify(value) is None
     assert sg._judge(value)[1] == reason, name
-    assert sg.violations("job_ran", {"note": value}) == [("/note", reason)]
-    assert sg.violations("job_ran", {"rows": [{"x": [value]}]}) == [("/rows[]/x[]", reason)]
-    assert [r for _p, r in sg.violations("job_ran", {value: 1})] == [reason]       # as a dict KEY
+    # C2-2c (CL-5): the class reason is unchanged (T-1); the synthetic paths also have no type decision (T-3)
+    assert sg.violations("job_ran", {"note": value}) == sorted([("/note", reason), ("/note", "untyped")])
+    assert sg.violations("job_ran", {"rows": [{"x": [value]}]}) == sorted([("/rows[]/x[]", reason),
+                                                                          ("/rows[]/x[]", "untyped")])
+    rs = [r for _p, r in sg.violations("job_ran", {value: 1})]                     # as a dict KEY
+    assert rs.count(reason) == 1 and "untyped" in rs and set(rs) <= {reason, "untyped"}
+    # T-5: the same value in a TYPED field (audit_requested /domain: hostname) is refused as not of its type
+    assert ("/domain", "field_type") in sg.violations("audit_requested", {"domain": value})
 
 
 def test_non_strings_are_not_machine_values_and_other_objects_are_violations():
     assert all(sg.classify(v) is None for v in (None, 1, 1.5, True, b"ab", ["a"], {"a": 1}, object()))
     data = {"a": 1, "b": 2.5, "c": True, "d": None, "e": [1, 2, (3, None)], "f": {"g": []}}
-    assert sg.violations("job_ran", data) == []
+    # C2-2c (CL-5; T-3): non-strings pass the class check; these synthetic paths have no type decision
+    assert sg.violations("job_ran", data) == [(p, "untyped") for p in ("/a", "/b", "/c", "/d", "/e[]", "/e[][]")]
     bad = {"raw": b"ab", "s": {1, 2}, "o": object(), "t": (b"x",), 7: "seven", "n": {"deep": [bytearray(b"z")]}}
-    assert sg.violations("job_ran", bad) == [("/n/deep[]", "type"), ("/o", "type"), ("/raw", "type"), ("/s", "type"),
-                                             ("/t[]", "type"), ("/{key}", "key_type")]
+    assert sg.violations("job_ran", bad) == sorted([("/n/deep[]", "type"), ("/o", "type"), ("/raw", "type"), ("/s", "type"),
+                                                    ("/t[]", "type"), ("/{key}", "key_type")]
+                                                   + [(p, "untyped") for p in ("/*", "/n/deep[]", "/o", "/raw", "/s",
+                                                                              "/t[]", "/{key}")])   # C2-2c T-3
 
     class Text(str):
         pass
-    assert sg.violations("job_ran", {"x": Text("ok")}) == [("/x", "type")]
+    assert sg.violations("job_ran", {"x": Text("ok")}) == [("/x", "type"), ("/x", "untyped")]   # C2-2c T-3
     assert sg.violations("not a kind", {}) == [("", "kind")]
     assert sg.violations("ledger:audit_requested", {"audit_id": derived_id("aud", 1)}) == []
 
@@ -170,6 +180,10 @@ def test_non_strings_are_not_machine_values_and_other_objects_are_violations():
 EXPECTED_PATHS = [("/report/*", "space"), ("/report/pages/*/hN", "space"), ("/report/pages/*/title", "space"),
                   ("/report/pages/{key}", "charset"), ("/report/pages/{key}", "space"),
                   ("/report/rows[]/cellN", "secret"), ("/report/rows[]/cellN", "space"), ("/report/shaN", "space")]
+# C2-2c (CL-5; T-3): the synthetic report fields have no type decision either (audit_completed writes the report as a
+# vault reference / its own typed fields, not these)
+EXPECTED_UNTYPED = [(p, "untyped") for p in ("/report/*", "/report/pages/*/hN", "/report/pages/*/title",
+                                             "/report/pages/{key}", "/report/rows[]/cellN", "/report/shaN", "/report/{key}")]
 
 
 def test_paths_are_normalised_and_never_carry_content():
@@ -178,7 +192,7 @@ def test_paths_are_normalised_and_never_carry_content():
                        "sha256": prose, "rows": [{"cell9": secret}, {"cell9": prose}],
                        "Mixed-Key": prose, "x" * 41: prose}}
     found = sg.violations("audit_completed", data)
-    assert found == EXPECTED_PATHS
+    assert found == sorted(EXPECTED_PATHS + EXPECTED_UNTYPED)
     text = repr(found)
     assert secret not in text and prose not in text and "pricing" not in text and "Mixed" not in text
     assert all(set(p) <= set(string.ascii_lowercase + "_N/*[]{}") for p, _ in found)
@@ -193,19 +207,21 @@ def test_depth_is_bounded_and_the_epoch_exemption_is_exact():
     for _ in range(sg.MAX_DEPTH + 5):
         cur["d"] = {}
         cur = cur["d"]
-    assert [r for _p, r in sg.violations("job_ran", deep)] == ["depth"]
+    assert [r for _p, r in sg.violations("job_ran", deep)] == ["depth", "field_type"]   # C2-2c T-5: no type that deep
     digits16 = rnd(16, "123456789")
     assert sg.violations("ledger:log_anchor", {"epoch": digits16, "seq": 1, "line_sha256": hexa(64)}) == []
-    assert sg.violations("ledger:log_anchor", {"other": digits16}) == [("/other", "shape")]
-    assert sg.violations("ledger:log_anchor", {"epoch": rnd(17, "123456789")}) == [("/epoch", "shape")]
-    assert sg.violations("ledger:log_anchor", {"epoch": [digits16]}) == [("/epoch[]", "shape")]
+    assert sg.violations("ledger:log_anchor", {"other": digits16}) == [("/other", "shape"), ("/other", "untyped")]   # C2-2c T-3
+    assert sg.violations("ledger:log_anchor", {"epoch": rnd(17, "123456789")}) == [("/epoch", "field_type"), ("/epoch", "shape")]  # T-5
+    assert sg.violations("ledger:log_anchor", {"epoch": [digits16]}) == [("/epoch[]", "shape"), ("/epoch[]", "untyped")]   # C2-2c T-3
     digits32 = rnd(32, "123456789")
-    assert sg.violations("prompt_set_version", {"p": [{"vault_id": digits32, "repair_id": digits32}]}) == []
-    assert sg.violations("prompt_set_version", {"p": [{"hmac": digits32}]}) == [("/p[]/hmac", "shape")]
-    assert sg.violations("prompt_set_version", {"vault_id": digits32 + "1"}) == [("/vault_id", "shape")]
+    # C2-2c (CL-5): the digit-hex exemption is exact in the class check (no class reason); /p[] is synthetic (T-3)
+    assert sg.violations("prompt_set_version", {"p": [{"vault_id": digits32, "repair_id": digits32}]}) == [
+        ("/p[]/repair_id", "untyped"), ("/p[]/vault_id", "untyped")]
+    assert sg.violations("prompt_set_version", {"p": [{"hmac": digits32}]}) == [("/p[]/hmac", "shape"), ("/p[]/hmac", "untyped")]   # C2-2c T-3
+    assert sg.violations("prompt_set_version", {"vault_id": digits32 + "1"}) == [("/vault_id", "shape"), ("/vault_id", "untyped")]   # C2-2c T-3
     # review 2b26d980: the log hash key's 16-hex fingerprint is derived by the service too
     assert sg.violations("log_ingest_created", {"key_fp": digits16}) == []
-    assert sg.violations("log_ingest_created", {"key_fp": digits16 + "1"}) == [("/key_fp", "shape")]
+    assert sg.violations("log_ingest_created", {"key_fp": digits16 + "1"}) == [("/key_fp", "field_type"), ("/key_fp", "shape")]   # C2-2c T-5
     assert sg.DIGIT_HEX_KEYS == {"epoch", "vault_id", "repair_id", "key_fp"}
 
 
@@ -217,7 +233,15 @@ def test_the_guard_is_linear_on_a_two_thousand_row_record():
              "position": i % 9, "cited": bool(i % 2), "model_version": "v1.2", "at": "2026-10-09T18:00:00Z"}
             for i in range(2000)]
     data = {"citation_run_id": derived_id("cit", 1), "result": {"facts": {"rows": rows}}, "result_sha256": hexa(64)}
-    assert sg.violations("citation_run_recorded", data) == []
+    # C2-2c (CL-5): no class violation (T-1); this synthetic row shape is not the writer's, so its off-table fields are
+    # refused untyped (T-3) and the two whose values are not of their field's type field_type (T-5)
+    found = sg.violations("citation_run_recorded", data)
+    assert [x for x in found if x[1] not in ("untyped", "field_type")] == []
+    rows_ = "/result/facts/rows[]/"
+    assert found == sorted([(rows_ + p, "untyped") for p in (
+        "at", "cited", "evidence/fields/excerpt/hmac_shaN", "evidence/fields/hint/hmac_shaN",
+        "evidence/fields/title/hmac_shaN", "evidence/fields/url/flag", "evidence/fields/url/hmac_shaN",
+        "evidence/vault_id", "status")] + [(rows_ + "model_version", "field_type"), (rows_ + "prompt_id", "field_type")])
     best = min(_timed(lambda: sg.violations("citation_run_recorded", data)) for _ in range(5))
     assert best < 0.25, round(best, 4)                      # measured about 0.02 s; the bound only catches a blow-up
 
@@ -258,6 +282,23 @@ def refused_commit(h, kind, data, evidence=None):
     assert h.svc.integrity["ok"] and h.svc._own_pending is None
 
 
+def test_an_unknown_seo_log_kind_is_refused_at_enforce(hd):
+    """C2-3b2 (core-spec/2 T-5 fail closed; lead ruling 17:50 PT F4-0): a seo_log record whose kind has no row in
+    SINK_FIELDS is refused at enforce (reason ``kind``) and the commit answers SINK_REFUSED, nothing written; a table
+    kind is typed as before. ``violations`` itself is unchanged (it also serves non-sink checks)."""
+    import sink_fields as sf
+    h, kind = hd, "c23b2_unknown_kind"
+    assert kind not in sf.LOG_KINDS and "job_ran" in sf.LOG_KINDS
+    assert sg.refused(kind, {"job": "nightly"}) == [""] and ("", "kind") not in sg.violations(kind, {"job": "nightly"})
+    with pytest.raises(sg.SinkViolation):
+        sg.enforce(kind, {"job": "nightly"})
+    assert sg.refused("job_ran", {"job": "nightly"}) == []
+    before_disk = disk(h)
+    refused_commit(h, kind, {"job": "nightly"})
+    assert disk(h) == before_disk
+    h.svc._commit("job_ran", {"job": "nightly"}, "scheduler")           # and the service still writes
+
+
 def test_commit_refuses_a_non_legacy_value_and_writes_nothing(hd):
     h, text = hd, marker()
     h.svc._commit("job_ran", {"job": "nightly"}, "scheduler")           # the control: a machine value passes
@@ -277,16 +318,34 @@ def test_commit_refuses_a_non_legacy_value_and_writes_nothing(hd):
 
 
 def test_commit_refuses_an_evidence_payload_before_any_ledger_event(hd):
+    # C2-2c-b (F2c-1; T-3 / T-5, CL-5): the evidence-carrying kind is switch_set, whose writer (svc_tenants.set_switch)
+    # carries kill_switch_set evidence and whose /evidence[]/... paths are typed in SINK_FIELDS; a release of the
+    # global switch replays from a minimal line. So the refusals below come from the bad evidence ALONE (the same line
+    # with the good evidence is committed end to end), unlike job_ran, which has no evidence fields (F2b-5).
     h, text = hd, marker()
-    good = ("audit_requested", "audit:" + derived_id("aud", 1), {"audit_id": derived_id("aud", 1)}, ("a", 1))
-    bad = ("audit_requested", "audit:" + derived_id("aud", 2), {"audit_id": derived_id("aud", 2), "why": text},
-           ("a", 2))
+    body, body2 = {"request_id": str(uuid.uuid4())}, {"request_id": str(uuid.uuid4())}
+    rk = h.svc.rk("switch", "global", body)
+    data = {"kind": "global", "arg": None, "engaged": False}
+    line = h.svc._req(data, "andre", rk, body, None)
+    good = ("kill_switch_set", "switch:global:-", data, ("andre", rk))
+    bad = ("kill_switch_set", "switch:global:-", {**data, "why": text}, ("andre", h.svc.rk("switch", "global", body2)))
+    assert sg.violations("switch_set", line) == [] and sg.violations("ledger:kill_switch_set", data) == []
+    assert ("/evidence[]/payload/why", "untyped") in sg.violations("switch_set", {**line, "evidence": [
+        {"event_id": derived_id("evd", 1), "event_type": "kill_switch_set", "subject_id": "switch:global:-",
+         "payload": bad[2]}]})
     before = disk(h)
-    refused_commit(h, "job_ran", {"job": "nightly"}, evidence=bad)
-    refused_commit(h, "job_ran", {"job": "nightly"}, evidence=[good, bad])    # the good event is not recorded either
+    refused_commit(h, "switch_set", line, evidence=bad)
+    refused_commit(h, "switch_set", line, evidence=[good, bad])    # the good event is not recorded either
     assert disk(h) == before and not any(n in json.dumps(h.ledger.events).encode() for n in needles(text))
-    h.svc._commit("job_ran", {"job": "nightly"}, "scheduler", evidence=good)
-    assert [e["event_type"] for e in h.ledger.events[-2:]] == ["audit_requested", "log_anchor"]
+    # control: the same line with the good evidence alone is written end to end (ledger evidence + anchor, log line)
+    n_log, n_ev = len(h.svc.log), len(h.ledger.events)
+    h.svc._commit("switch_set", line, "andre", evidence=good)
+    assert [e["event_type"] for e in h.ledger.events[-2:]] == ["kill_switch_set", "log_anchor"]
+    assert len(h.svc.log) == n_log + 1 and len(h.ledger.events) == n_ev + 2 and disk(h) != before
+    assert h.svc.integrity["ok"] and h.svc._own_pending is None
+    hh = h.restart()                                              # the committed line replays
+    assert hh.svc.integrity["ok"] and hh.svc.switches["global"] is False
+    assert not any(n in disk(hh) for n in needles(text))
 
 
 def test_the_ledger_recorder_refuses_payloads_and_anchors_itself(h):
@@ -358,7 +417,9 @@ def test_there_is_no_legacy_list_and_no_bypass():
     src = open(sg.__file__, encoding="utf-8").read()
     assert "LEGACY-BEGIN" not in src and "_legacy(" not in src
     kinds = {name[3:] for name in dir(SeoService) if name.startswith("_a_")}
-    assert len(kinds) == 27
+    # C2-3b2 re-pin (catalogue count; C2-15b AL-1 added the service kind cv_allowlist_set): 27 -> 28
+    # C2-14b re-pin (RV-1 / T-3: C2-14 added the service kind span_reveal, the audited reveal line): 28 -> 29
+    assert len(kinds) == 29 and "span_reveal" in kinds
     text = marker()
     for kind in sorted(kinds):
         assert sg.refused(kind, {"x": text}) == ["/x"], kind
@@ -387,17 +448,25 @@ EXPECTED_SINK_REFUSALS = {                                # test -> exactly the 
                                         "/evidence[]/subject_id", "/request_id", "/tenant_id")),
     _T + "test_a_former_legacy_path_is_refused_like_any_other": frozenset((
         ("entity_created", "/fields/locality/provenance"), ("entity_created", "/fields/name/value"),
-        ("log_chunk", "/delta/families/anyfamily/templates/{key}"), ("log_ingest_created", "/robots_text"),
+        ("log_chunk", "/delta/families/anyfamily/templates/{key}"),
+        ("log_chunk", "/delta/families/anyfamily/templates/*"), ("log_ingest_created", "/robots_text"),
         ("log_ingest_finished", "/report/envelope/methodology"), ("prompt_set_version", "/content/brand_terms[]"))),
     _T + "test_commit_refuses_a_non_legacy_value_and_writes_nothing": frozenset(
-        ("job_ran", p) for p in ("/job", "/key", "/mail", "/n", "/note", "/raw", "/x[]/y[]", "/{key}")),
+        ("job_ran", p) for p in ("/job", "/key", "/mail", "/n", "/note", "/raw", "/x[]/y[]", "/{key}", "/*")),   # C2-2c: /* T-3
     _T + "test_commit_refuses_an_evidence_payload_before_any_ledger_event": frozenset((
-        ("job_ran", "/evidence[]/payload/why"),)),
+        ("switch_set", "/evidence[]/payload/why"),)),   # C2-2c-b: only the bad evidence field (T-3 / T-5)
+    # C2-2c-c: no vault key -> model_hmac null, not nullable (T-3, T-5, CL-6; V-2 nothing written)
+    "test_sink_citations.py::test_an_unknown_model_without_a_vault_key_is_the_code_alone": frozenset((
+        ("engine_calls_reserved", "/model_hmac"), ("engine_run_settled", "/model_hmac"))),
     _T + "test_properties_hold_unmutated": frozenset((("job_ran", "/note"), ("ledger:audit_requested", "/note"))),
     _T + "test_the_ledger_recorder_refuses_payloads_and_anchors_itself": frozenset((
         ("ledger:audit_requested", "/note"), ("ledger:audit_requested", "/{key}"), ("ledger:log_anchor", "/line_shaN"),
-        ("ledger:log_anchor", "/raw"))),
+        ("ledger:log_anchor", "/raw"), ("ledger:audit_requested", "/*"))),   # C2-2c: /* T-3
     _T + "test_the_reason_code_is_in_the_catalogue_and_the_api_answers_it": frozenset((("tenant_created", "/x"),)),
+    # C2-3b2 (T-5 / lead ruling 17:50 PT F4-0): an unknown seo_log kind refused at enforce, on purpose
+    _T + "test_an_unknown_seo_log_kind_is_refused_at_enforce": frozenset((("c23b2_unknown_kind", ""),)),
+    "test_t4_type_decisions.py::test_t4_recorder_flags_exactly_the_planted_undecided_paths":
+        frozenset((("t4_planted_kind", ""),)),
     # review 98b76cde: the e-mail host rules put back on purpose (the 503 of a mailbox provider's sub-domain)
     "test_review_98b76cde.py::test_mutation_with_the_e_mail_host_rules_back_the_same_tenant_is_refused_at_the_sink":
         frozenset((("audit_requested", "/domain"),)),
@@ -411,6 +480,16 @@ EXPECTED_SINK_REFUSALS = {                                # test -> exactly the 
     _R + "test_mutation_without_the_ruling_class_the_digit_heavy_id_stops_paid_runs": frozenset(
         (k, p) for k in ("audit_requested", "schedule_created")
         for p in ("/evidence[]/payload/ruling_id", "/invoice_verification/compliance/ruling_id")),
+    # C2-6c, lead ruling 22:50 PT F6b-2 (T-7 closed list, Wave-1 D-07 pattern): C2-14b's T-2 tests refuse on purpose
+    # - the string outside a kind with T-2 fields keeps the strict check (an untyped kind and its /span are refused)
+    "test_sink_guard_t2_ref.py::test_same_string_in_a_kind_without_t2_fields_keeps_the_strict_check": frozenset((
+        ("not_a_typed_kind", ""), ("not_a_typed_kind", "/span"))),
+    # - a secret-shaped string in a T-2 field that does not match the ref grammar is refused (event and its ledger)
+    "test_sink_guard_t2_ref.py::test_secret_shaped_string_in_a_t2_field_not_matching_the_grammar_is_refused":
+        frozenset((("ledger:span_revealed", "/span"), ("span_reveal", "/span"))),
+    # C2-6c, ruling 22:50 PT F6b-3: "<name>/" with an empty version is refused at enforce (SINK_REFUSED), not raised
+    "test_sink_guard_code_shape.py::test_a_named_version_with_an_empty_version_is_refused_never_raised":
+        frozenset((("job_ran", "/job"),)),
 }
 # The only tests that may replace a guard entry point (``conftest.GUARD_ENTRY_POINTS``): each is a mutation test
 # that shows what the guard, or the observer's record of a mutated service, is for. Test -> exactly the names.
@@ -862,7 +941,9 @@ def prop_whitespace_refused(tmp_path):
 
 def prop_key_shapes_refused(tmp_path):
     for value in ("sk" + "-" + rnd(40), rnd(32), "acct-" + rnd(10, string.digits)):
-        assert sg.classify(value) is None
+        # C2-6b: refused AS A SECRET by the strict check (the open-code shape rule would refuse these shapes too;
+        # pinning the reason keeps this mutant - strict check skipped - detected)
+        assert sg.classify(value) is None and sg._judge(value)[1] == "secret"
 
 
 def prop_host_keys_refused(tmp_path):
@@ -886,8 +967,10 @@ def test_the_host_token_threshold_is_exact_on_both_sides():
     assert sum(1 for h in below if sg.classify(h) != "hostname") == 0
     assert sum(1 for h in at if sg.host_refusal(h) != "token") == 0
     assert sum(1 for h in at if sg.classify(h) is not None) == 0
-    assert all(sg.violations("job_ran", {"host": h}) == [("/host", "host")] for h in at[:200])
-    assert all(sg.violations("job_ran", {"host": h}) == [] for h in below[:200])
+    # C2-2c (CL-5; T-5): pinned on a TYPED hostname field (audit_requested /domain) instead of a synthetic one
+    assert all(sg.violations("audit_requested", {"domain": h}) == [("/domain", "field_type"), ("/domain", "host")]
+               for h in at[:200])
+    assert all(sg.violations("audit_requested", {"domain": h}) == [] for h in below[:200])
 
 
 def prop_digit_hex_refused(tmp_path):
@@ -972,10 +1055,13 @@ def test_mutation_bites(name, tmp_path, monkeypatch):
     sg._KEYS.clear()
     patch(monkeypatch)
     try:
-        for i, prop in enumerate(props):
-            with pytest.raises(BaseException) as caught:
-                prop(tmp_path / f"m{i}")
-            assert caught.type in (AssertionError, pytest.fail.Exception), (name, prop.__name__, caught.type)
+        # FCL-UND: the guard is mutated (gate off), so its synthetic job_ran / audit_requested {"note"} writes are not
+        # recorded as production's (T-4; rulings F2b-5 / F9-4, same pause as FCL-REC). Assertions unchanged.
+        with t4_recorder.paused():
+            for i, prop in enumerate(props):
+                with pytest.raises(BaseException) as caught:
+                    prop(tmp_path / f"m{i}")
+                assert caught.type in (AssertionError, pytest.fail.Exception), (name, prop.__name__, caught.type)
     finally:
         monkeypatch.undo()
         sg._CACHE.clear()

@@ -12,6 +12,7 @@ import pytest
 import test_review_cbdf5e78 as cbd
 import test_review_cd0a6c7d as cd
 from conformance import core_matrix as M
+from conformance import evidence as E
 
 pytestmark = pytest.mark.conformance
 JOINERS = ("\u200d", "\u200c", "\u200b", "\u00ad", "\u2060")
@@ -84,5 +85,15 @@ def test_core_O_4_PIN_pinned_collisions(sg, name):
             if name != "arabic_s2" and sg.check(f"{t}{sep}{v}") == "a_label":
                 valued.setdefault(i, []).append("strict")
     print(f"O-4 PIN {name}: texts={len(texts)} read bare={len(bare)} read with a value={len(valued)}")
-    assert not bare, list(bare.items())[:5]
-    assert not valued, list(valued.items())[:5]
+    # ST-2 / ST-3 re-pin (core-spec/2 ST-3: the O-4 PIN STRICT column is reported, not judged; section 6: O-4 PIN in the
+    # URL / HOST lanes stays a PASS row "0 read bare"; C2-11b; G-7: re-pinned to "reported" with the item named): the
+    # strict reads (bare and with a value) go to the evidence file; every other lane keeps its assertion.
+    E.report(f"O-4 PIN {name} STRICT (reported, ST-3)",
+             {"texts": len(texts), "strict_bare": sum("strict" in v for v in bare.values()),
+              "strict_valued": sum("strict" in v for v in valued.values())})
+    bare_j = {i: [x for x in v if x != "strict"] for i, v in bare.items()}
+    valued_j = {i: [x for x in v if x != "strict"] for i, v in valued.items()}
+    bare_j = {i: v for i, v in bare_j.items() if v}
+    valued_j = {i: v for i, v in valued_j.items() if v}
+    assert not bare_j, list(bare_j.items())[:5]
+    assert not valued_j, list(valued_j.items())[:5]

@@ -29,6 +29,7 @@ from store import LOCK_NAME, DataDirBusy, DataDirLock, StoreCorrupt
 KNOWN_CALLERS = ("dashboard", "seo_agent", "scheduler", "hub", "finance_31", "compliance_38")
 _PRINTABLE = re.compile(r"[\x21-\x7e]{32,512}")
 TENANT_ID = re.compile(r"[a-z][a-z0-9-]{1,39}")
+TENANT_KINDS = ("own", "client")   # C2-6a2: moved from svc_tenants (re-exported there; sink_fields binds it)
 CAPABILITY_SWITCHES = ("fetch", "render", "ai_probe", "audit", "entity_write", "prompt_sets", "logs", "schedules",
                        "reports")
 PROVIDER_SWITCHES = ("web", "openai", "anthropic", "google", "perplexity", "gsc")
@@ -173,6 +174,7 @@ class Settings:
     # "unavailable", "timeout_s", "attempts", "budget", "max_searches"}; every engine OFF by default
     answer_engines: dict = field(default_factory=dict, repr=False)
     callum_resolve_urls: bool = False
+    cv_allowlist: bool = False                   # C2-15b (AL-1): catalog allowlist wiring, default OFF
     callum_resolve_max: int = 40
     report_branding: object = field(default_factory=lambda: _default_branding())   # client_report.Branding
     vault_key: Optional[object] = field(default=None, repr=False)    # vault.VaultKey (redacted repr; ADR 0051)
@@ -607,6 +609,7 @@ def _answer_engines(env, s: "Settings") -> None:
     for name in ("openai", "anthropic", "google"):
         s.answer_engines[name] = _answer_engine(env, s, name)
     s.callum_resolve_urls = _flag(env, "SEO_CALLUM_RESOLVE_URLS")
+    s.cv_allowlist = _flag(env, "SEO_CV_ALLOWLIST")
     s.callum_resolve_max = _int(env, "SEO_CALLUM_RESOLVE_MAX", 40, 1, 200)
 
 

@@ -59,6 +59,7 @@ _CODE = re.compile(r"[A-Z][A-Z0-9_]{1,63}")
 _HOST = re.compile(r"(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)(\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+")
 _DOMAIN = re.compile(r"[a-z0-9.-]{4,253}")
 _REQ_PATH = re.compile(r"/[\x21-\x7e]{0,500}")
+REQ_SCHEMES = ("http", "https")
 _ACCENT = re.compile(r"#[0-9a-fA-F]{6}")
 _BRAND = re.compile(r"[A-Za-z0-9 .,&'()-]{1,60}")
 _SHA = re.compile(r"[0-9a-f]{64}")
@@ -767,7 +768,7 @@ def build(audit: dict, tenant_id: str, branding: Branding = DEFAULT_BRANDING, pr
     if not isinstance(aid, str) or not _ID.fullmatch(aid):
         raise ReportInputError("audit id malformed")
     domain, scheme, paths = report.get("domain"), report.get("scheme"), report.get("paths")
-    if not isinstance(domain, str) or not _DOMAIN.fullmatch(domain) or scheme not in ("http", "https") \
+    if not isinstance(domain, str) or not _DOMAIN.fullmatch(domain) or scheme not in REQ_SCHEMES \
             or not isinstance(paths, list) or not paths \
             or not all(isinstance(p, str) and _REQ_PATH.fullmatch(p) for p in paths):
         raise ReportInputError("target malformed")

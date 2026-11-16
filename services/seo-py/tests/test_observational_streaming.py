@@ -2,13 +2,20 @@
 import builtins
 from pathlib import Path
 import pytest
+import sink_guard
 from helpers import Harness
 
 @pytest.fixture
-def large(tmp_path):
+def large(tmp_path,monkeypatch):
+    monkeypatch.setattr(sink_guard,'_REGISTERED',set(sink_guard._REGISTERED))   # C2-6h: fixture-local registry
     h=Harness(tmp_path,data_dir=str(tmp_path/'data'))
     try:
-        h.svc._commit('tenant_created',{'tenant_id':'large','kind':'own','padding':[7]*(65536+9)},'seo')
+        # C2-6h (ruling 02:15 PT F6f3-1, T-7): this fixture writes tenant_created itself (not via create_tenant), so it
+        # registers the tenant first, in create_tenant's order; the unregistered-id refusal is unchanged
+        sink_guard.register_tenant('large')
+        # C2-2e re-pin (CL-5, T-3): the large line uses typed fields (tenant_created has no /padding[] field)
+        h.svc._commit('tenant_created',{'tenant_id':'large','kind':'own'},'seo')
+        h.svc._commit('tenant_domains_set',{'tenant_id':'large','domains':['site.test']*12000},'seo')
         assert max(map(len,h.svc.log._lines))>2*65536
         yield h
     finally:h.client.close();h.svc.close()

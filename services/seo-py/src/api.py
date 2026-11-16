@@ -29,12 +29,16 @@ from typing import Any, Callable, Optional
 
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 from starlette.concurrency import run_in_threadpool
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import config as config_mod
 import models as m
+import reasons
+import sink_fields
 from errors import Forbidden, Invalid, NotFound, SeoError
 from founder import HEADER as FOUNDER_HEADER
 from founder import FounderGate
@@ -54,7 +58,6 @@ BODY_READ_TIMEOUT_S = 30.0
 MAX_JSON_DEPTH = 32
 MAX_JSON_MEMBERS = 20_000
 ERROR_MAX_ERRORS = 20
-ERROR_MAX_STR = 120
 
 ROUTE_LIMITS: list[tuple[re.Pattern, int]] = []
 DEFAULT_ROUTE_LIMIT = 128 * 1024
@@ -97,8 +100,15 @@ def route_limit(path: str) -> int:
     return DEFAULT_ROUTE_LIMIT
 
 
-def _plain(status_code: int, detail: str, **extra) -> JSONResponse:
-    return JSONResponse(status_code=status_code, content={"detail": detail, **extra})
+# C2-3b3 (lead ruling 18:20 PT F3b2-2, T-1): each input-limit refusal answers one closed reason code, no prose
+LIMIT_CODES = {414: R("URI_TOO_LONG"), 431: R("HEADERS_TOO_LARGE"), 413: R("BODY_TOO_LARGE"), 400: R("BAD_REQUEST"),
+               415: R("UNSUPPORTED_MEDIA_TYPE"), 408: R("REQUEST_TIMEOUT"), 422: R("BODY_REFUSED")}
+AUTH_MISSING = R("AUTH_MISSING")    # C2-3b3 (lead ruling 18:20 PT F3b2-1)
+AUTH_INVALID = R("AUTH_INVALID")
+
+
+def _plain(status_code: int) -> JSONResponse:
+    return JSONResponse(status_code=status_code, content={"detail": LIMIT_CODES[status_code]})
 
 
 def json_shape_problem(body: bytes) -> Optional[str]:
@@ -153,19 +163,19 @@ class InputLimits:
         path = scope.get("path", "")
         target = len(scope.get("raw_path") or path.encode("utf-8", "surrogatepass")) + len(scope.get("query_string") or b"")
         if target > MAX_TARGET_BYTES:
-            return await _plain(414, f"request target longer than {MAX_TARGET_BYTES} bytes; refused")(scope, receive, send)
+            return await _plain(414)(scope, receive, send)
         headers = scope.get("headers") or ()
         if target + sum(len(k) + len(v) + 4 for k, v in headers) > MAX_HEAD_BYTES:
-            return await _plain(431, f"request head larger than {MAX_HEAD_BYTES} bytes; refused")(scope, receive, send)
+            return await _plain(431)(scope, receive, send)
         limit = min(route_limit(path), MAX_BODY_BYTES)
-        too_large = _plain(413, f"request body larger than {limit} bytes for this route; refused")
+        too_large = _plain(413)
         ctype = None
         declared = None
         chunked = False
         for name, value in headers:
             if name == b"content-length":
                 if not value.isdigit():
-                    return await _plain(400, "invalid Content-Length")(scope, receive, send)
+                    return await _plain(400)(scope, receive, send)
                 declared = int(value)
                 if declared > limit:
                     return await too_large(scope, receive, send)
@@ -174,14 +184,14 @@ class InputLimits:
             elif name == b"transfer-encoding" and b"chunked" in value.lower():
                 chunked = True
         if (declared or chunked) and not is_json_content_type(ctype):
-            return await _plain(415, "request bodies must be application/json")(scope, receive, send)
+            return await _plain(415)(scope, receive, send)
         chunks, size = [], 0
         deadline = time.monotonic() + BODY_READ_TIMEOUT_S
         while True:
             try:
                 message = await asyncio.wait_for(receive(), max(0.0, deadline - time.monotonic()))
             except asyncio.TimeoutError:
-                return await _plain(408, "request body not received in time; refused")(scope, receive, send)
+                return await _plain(408)(scope, receive, send)
             if message["type"] != "http.request":
                 return
             chunk = message.get("body") or b""
@@ -194,10 +204,10 @@ class InputLimits:
         body = b"".join(chunks)
         if body:
             if not is_json_content_type(ctype):
-                return await _plain(415, "request bodies must be application/json")(scope, receive, send)
+                return await _plain(415)(scope, receive, send)
             problem = await run_in_threadpool(json_shape_problem, body)
             if problem:
-                return await _plain(422, f"request body refused: {problem}")(scope, receive, send)
+                return await _plain(422)(scope, receive, send)
         replayed = False
 
         async def replay():
@@ -215,7 +225,7 @@ def make_require_auth(required_token: str, on_failure: Callable[[], None] = lamb
         if authorization is None or not authorization.startswith("Bearer "):
             on_failure()
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
-                                detail="missing or malformed Authorization header (expected: Bearer <token>)",
+                                detail=AUTH_MISSING,
                                 headers={"WWW-Authenticate": "Bearer"})
         supplied = authorization.removeprefix("Bearer ")
         try:
@@ -224,7 +234,7 @@ def make_require_auth(required_token: str, on_failure: Callable[[], None] = lamb
             valid = False  # non-ASCII token: invalid (401), never a 500
         if not valid:
             on_failure()
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token",
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=AUTH_INVALID,
                                 headers={"WWW-Authenticate": "Bearer"})
 
     return require_auth
@@ -259,26 +269,27 @@ def _model_field_names() -> frozenset:
 
 # Sink job D: an error body is reason codes and machine values only; nothing the caller sent comes back. A ``loc``
 # element is an index, or a name from this closed set (the request models' fields, the parameter names of the
-# routes, the forbidden-key catalogue); any other element (a key the caller invented) is "*".
+# routes, the forbidden-key catalogue); any other element (a key the caller invented) is ERROR_LOC_UNKNOWN.
+# C2-3b2 (lead ruling 15:32 PT F3b-1, T-1): the v1 constant "*" is not a T-1 value; the code `unknown_key` is.
+ERROR_LOC_UNKNOWN = "unknown_key"
 ERROR_LOC_NAMES = frozenset(("body", "query", "path", "header", "cookie", "tid", "eid", "psid", "aid", "cid", "iid",
                              "sid", "agent", "name", "against", "since", "limit", "offset", "event_type",
                              "authorization")) | _model_field_names() | FORBIDDEN_KEYS
-# validation error types whose message is built from the schema alone (a pattern, a bound, the allowed literals)
-ERROR_TYPES_WITH_MESSAGE = frozenset((
-    "missing", "forbidden_field", "extra_forbidden", "string_type", "string_pattern_mismatch", "string_too_short",
-    "string_too_long", "int_type", "bool_type", "literal_error", "list_type", "dict_type", "too_short", "too_long",
-    "greater_than_equal", "less_than_equal", "greater_than", "less_than", "model_type", "model_attributes_type",
-    "int_parsing", "bool_parsing", "none_required", "float_type", "finite_number"))
-ERROR_MESSAGE_WITHHELD = "invalid value"
+# C2-6a2: the validation msg_code constants moved verbatim to reasons.py (sink_fields binds ERROR_MSG_CODES;
+# api imports sink_fields, so the constant cannot live here); re-exported under the same names
+from reasons import ERROR_MSG_CODES, ERROR_MSG_WITHHELD, ERROR_TYPES_WITH_MESSAGE   # noqa: E402,F401
+ERROR_REFUSED: dict = {}    # C2-3b (F3-6): (reason, refusal) -> count of domain bodies sent as {"detail"} only
+ERROR_INTERNAL = R("INTERNAL_ERROR")    # C2-3b2 (F3b-2 / F3b-3)
+ERROR_FRAMEWORK = {404: R("NOT_FOUND"), 405: R("METHOD_NOT_ALLOWED")}   # C2-3b2 (F4-1)
 _ERROR_TYPE = re.compile(r"[a-z][a-z0-9_.]{0,63}")
 
 
 def _loc_item(x):
     if isinstance(x, bool) or not isinstance(x, (int, str)):
-        return "*"
+        return ERROR_LOC_UNKNOWN
     if isinstance(x, int):
-        return x if 0 <= x < 10 ** 8 else "*"
-    return x if x in ERROR_LOC_NAMES else "*"
+        return x if 0 <= x < 10 ** 8 else ERROR_LOC_UNKNOWN
+    return x if x in ERROR_LOC_NAMES else ERROR_LOC_UNKNOWN
 
 
 def _sanitize(errors: list[dict]) -> dict:
@@ -287,8 +298,8 @@ def _sanitize(errors: list[dict]) -> dict:
         loc = [_loc_item(x) for x in list(e.get("loc", ()))[:8]]
         kind = e.get("type")
         kind = kind if isinstance(kind, str) and _ERROR_TYPE.fullmatch(kind) else "invalid"
-        msg = str(e.get("msg", ""))[:ERROR_MAX_STR] if kind in ERROR_TYPES_WITH_MESSAGE else ERROR_MESSAGE_WITHHELD
-        out.append({"loc": loc, "msg": msg, "type": kind})
+        msg_code = kind if kind in ERROR_TYPES_WITH_MESSAGE else ERROR_MSG_WITHHELD
+        out.append({"loc": loc, "msg_code": msg_code, "type": kind})
     return {"detail": out, "errors_total": len(errors)}
 
 
@@ -421,12 +432,33 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
 
     @app.exception_handler(SeoError)
     def _domain(_: Request, exc: SeoError):
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.reason, **exc.body})
+        if exc.reason not in reasons.CODES:
+            # C2-3b2 (lead ruling 15:32 PT F3b-3): a reason outside the catalogue (only by bypassing R()) is never sent
+            ERROR_REFUSED[(ERROR_INTERNAL, "unknown_reason")] = ERROR_REFUSED.get((ERROR_INTERNAL, "unknown_reason"), 0) + 1
+            # C2-3b3 (lead ruling 18:20 PT F3b2-3): an unknown reason is a code bug -> 500, not the exception's status
+            return JSONResponse(status_code=500, content={"detail": ERROR_INTERNAL})
+        content, refused = sink_fields.error_body(exc.reason, exc.body)
+        if refused is not None:
+            ERROR_REFUSED[(exc.reason, refused)] = ERROR_REFUSED.get((exc.reason, refused), 0) + 1
+        return JSONResponse(status_code=exc.status_code, content=content)
 
     @app.exception_handler(Exception)
     def _unexpected(_: Request, exc: Exception):
         log.error("unexpected %s", type(exc).__name__)
-        return JSONResponse(status_code=500, content={"detail": "internal error"})
+        return JSONResponse(status_code=500, content={"detail": ERROR_INTERNAL})   # C2-3b2 (F3b-2)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def _framework(request: Request, exc: StarletteHTTPException):
+        # C2-3b2 (lead ruling 17:50 PT F4-1): the framework's default 404 / 405 bodies carry a closed reason code
+        # C2-3b3 (F3b3-1): async, so the default handler's coroutine is awaited (a sync handler returned it un-awaited
+        # -> TypeError -> every other HTTPException, the 401s included, answered 500); a catalogue detail (the 401
+        # AUTH_MISSING / AUTH_INVALID of lead ruling 18:20 PT F3b2-1) is sent as that code, headers kept
+        code = ERROR_FRAMEWORK.get(exc.status_code)
+        if code is None and isinstance(exc.detail, str) and exc.detail in reasons.CODES:
+            code = exc.detail
+        if code is None:
+            return await http_exception_handler(request, exc)
+        return JSONResponse(status_code=exc.status_code, content={"detail": code}, headers=exc.headers)
 
     P = "/seo/v1"
 
@@ -550,6 +582,18 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
     # ------------------------------------------------------------------ Callum's citation-source runs (ADR 0046)
 
     CITATION_READERS = ("dashboard", "seo_agent", "hub", "compliance_38")
+    # core-spec/2 V-4 (C2-10b, lead ruling 09:10 PT, F10-1): the run document and its MNC list are opened from the
+    # vault; V-4 says never decrypt for a Compliance (38) view and no frozen spec line grants Compliance this read,
+    # so compliance_38 is refused (403 CALLER_NOT_ALLOWED) by the caller check, before any read. The run list
+    # (citation_runs_view: no vault read) keeps its readers.
+    CITATION_DOC_READERS = tuple(c for c in CITATION_READERS if c != "compliance_38")
+    # core-spec/2 V-4 / D-02h (C2-10d, lead ruling 10:05 PT, F10b-1): the vault is opened ONLY for the owner caller
+    # with tenant authentication (hub + its tenant token; ``scoped`` has checked the token against the path).
+    # dashboard / seo_agent (no tenant authentication) get the code-only view: ids, codes, counts; no decrypt.
+    # An operator who needs the text authenticates as that tenant's owner.
+
+    def tenant_authenticated(scope: tuple) -> bool:
+        return scope[0] == "hub"
 
     @app.post(P + "/tenants/{tid}/citation-runs", dependencies=auth, status_code=201)
     def request_citation_run(request: Request, req: dict = Depends(body(m.CitationRunCreate)),
@@ -561,13 +605,26 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
         return svc.citation_runs_view(scope[1])
 
     @app.get(P + "/tenants/{tid}/citation-runs/{cid}", dependencies=auth)
-    def citation_run(cid: str, scope: tuple = Depends(scoped(*CITATION_READERS))) -> dict:
-        return svc.citation_run_view(scope[1], _id(cid))
+    def citation_run(cid: str, scope: tuple = Depends(scoped(*CITATION_DOC_READERS))) -> dict:
+        return svc.citation_run_view(scope[1], _id(cid), full=tenant_authenticated(scope))
 
     @app.get(P + "/tenants/{tid}/citation-runs/{cid}/mnc-priority", dependencies=auth)
-    def citation_mnc_priority(cid: str, scope: tuple = Depends(scoped(*CITATION_READERS))) -> dict:
+    def citation_mnc_priority(cid: str, scope: tuple = Depends(scoped(*CITATION_DOC_READERS))) -> dict:
         """Callum's Mentioned-Not-Cited priority list: the callum.mnc_priority/2 contract Roman and Adaeze read."""
-        return svc.mnc_priority_view(scope[1], _id(cid))
+        return svc.mnc_priority_view(scope[1], _id(cid), full=tenant_authenticated(scope))
+
+    class RevealBody(BaseModel):
+        model_config = {"extra": "forbid"}
+        surface: str
+        run_id: str
+        span: str
+
+    @app.post(P + "/tenants/{tid}/reveals", dependencies=auth)
+    def reveal(req: dict = Depends(body(RevealBody)), scope: tuple = Depends(scoped("hub"))) -> dict:
+        """core-spec/2 RV-1..RV-3 (card C2-14): ONE masked span of the tenant's OWN text, for the owner caller with
+        tenant authentication only (hub + its tenant token, Wave-1 D-02h); audited BEFORE the value is returned;
+        no-store (NoStore); never Finance / Compliance / any other caller (403 / 404 by ``scoped``)."""
+        return svc.reveal_span(scope[0], scope[1], req["surface"], req["run_id"], req["span"])
 
     # ------------------------------------------------------------------ first-party log ingests (Wave 2)
 

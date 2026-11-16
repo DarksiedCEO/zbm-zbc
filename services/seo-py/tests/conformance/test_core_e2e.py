@@ -62,7 +62,7 @@ def run(tmp_path) -> dict:
     run = h.ok(h.post("/tenants/zbm/citation-runs", {"request_id": rid(), "domain": vw.DOMAIN, "prompt_set_id": psid}),
                201)
     assert run["status"] == "completed" and port.asked >= len(forms)
-    view = h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}", caller="dashboard"))
+    view = h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}", caller="hub", tenant="zbm"))
     shown_blob = json.dumps(view, ensure_ascii=False) + json.dumps(view)
     disk = vw.written(h)
     out = {"forms": len(forms), "cv_r_forms": sum(1 for _s, _e, cv, _v in values if cv == "R"),

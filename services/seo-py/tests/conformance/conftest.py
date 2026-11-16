@@ -21,13 +21,17 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 def pytest_configure(config):
     config.addinivalue_line("markers", "conformance: core-spec/1 conformance suite, CI lane")
     config.addinivalue_line("markers", "conformance_heavy: core-spec/1 conformance suite, heavy lane (lead gate)")
+    config.addinivalue_line("markers", "core2_ci: core-spec/2 G-2 CI lane (lanes_core2.CI; see LANES_CORE2.md)")
 
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(session, config, items):
     heavy_on = os.environ.get("CONFORMANCE_HEAVY") == "1"
     skip = pytest.mark.skip(reason="heavy conformance lane: set CONFORMANCE_HEAVY=1 (lead gate)")
+    from conformance import lanes_core2
     for it in items:
+        if lanes_core2.is_ci(it.fspath):
+            it.add_marker(pytest.mark.core2_ci)
         if not str(it.fspath).startswith(HERE):
             continue
         it.add_marker(pytest.mark.conformance)

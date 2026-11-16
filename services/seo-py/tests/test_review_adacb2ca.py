@@ -350,6 +350,13 @@ def test_each_client_gap_rule_is_load_bearing(monkeypatch, attr, value, cls):
     assert probes and all(sg.client_view_findings(p) for p in probes), attr
     monkeypatch.setattr(sg, attr, value)
     monkeypatch.setattr(sg, "_cv_labelled_phone", lambda m: False)     # c0c09bd1: MUST 8 also reads labelled phones
+    if attr == "_CV_BEARER":
+        # C2-CL2b re-point (G-7; core-spec/2 CV-3, ST-2): the v1 bearer finding is lost on every probe (report), the
+        # label-independent value shape (CV-3) still masks the bearer value, and with the VS rule removed too (both
+        # entry points, r6.no_vs) every probe is shown again
+        lost, shown, shown_no_vs = r6.vs_carries(monkeypatch, probes)
+        assert (lost, shown, shown_no_vs) == (len(probes), 0, len(probes)), (attr, lost, shown, shown_no_vs)
+        return
     assert all(not sg.client_view_findings(p) for p in probes), attr
 
 
@@ -361,8 +368,14 @@ def test_client_url_rules_are_load_bearing(monkeypatch):
     monkeypatch.setattr(sg, "_cv_seg_findings", sg.client_view_findings)
     assert all(sg.client_view_url(u)[1] is None for u in urls["jsessionid"])
     monkeypatch.undo()
+    seg = urls["bracketed_email_path"][0].split("/u/")[1].split("/")[0]
+    assert set(sg.client_view_findings(seg)) - r6.V2_ONLY                # the v1 e-mail finding, before the mutation
     monkeypatch.setattr(sg, "_CV_DOT", re.compile(r"(?i) ?[\[\(\{<] ?dot ?[\]\)\}>] ?| dot |\s?\.\s?"))
-    assert sg.client_view_findings(urls["bracketed_email_path"][0].split("/u/")[1].split("/")[0]) == []
+    # C2-CL2b re-point (G-7; core-spec/2 CV-3, CV-7): under the mutation the v1 e-mail finding is gone (the bite) and
+    # only the label-independent value shape remains on the path segment; with the VS rule removed too it is shown
+    assert sg.client_view_findings(seg) == ["value_shape"]
+    r6.no_vs(monkeypatch)
+    assert sg.client_view_findings(seg) == []
 
 
 def test_utility_rules_are_load_bearing(monkeypatch):
@@ -447,8 +460,8 @@ def test_a_real_citation_run_writes_none_of_the_new_shapes_and_the_owner_view_ma
     assert all(h is None or " at " not in h for r in logged for h in (r.get("chain") or {}).get("hop_hosts") or [])
     blob = vw.written(h, caplog)
     assert vw.found(blob, _service_blob_values(v)) == []
-    got = h.ok(h.get(f"/tenants/zbm/citation-runs/{cid}"))
-    mp = h.ok(h.get(f"/tenants/zbm/citation-runs/{cid}/mnc-priority"))
+    got = h.ok(h.get(f"/tenants/zbm/citation-runs/{cid}", caller="hub", tenant="zbm"))
+    mp = h.ok(h.get(f"/tenants/zbm/citation-runs/{cid}/mnc-priority", caller="hub", tenant="zbm"))
     shown = json.dumps([got, mp], ensure_ascii=False)
     assert vw.found(shown, v) == []
     ev = [r["evidence"] for r in got["result"]["facts"]["rows"] if r.get("evidence")]
@@ -543,8 +556,8 @@ def test_the_service_lock_is_not_held_while_rows_are_encrypted_or_decrypted(tmp_
         decrypting_locked.append(h.svc.lock._is_owned())
         return real_cv(env, got)
     monkeypatch.setattr(callum, "client_view", cv)
-    h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}"))
-    h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}/mnc-priority"))
+    h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}", caller="hub", tenant="zbm"))
+    h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}/mnc-priority", caller="hub", tenant="zbm"))
     assert decrypting_locked == [False, False]
 
 

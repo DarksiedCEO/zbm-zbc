@@ -22,6 +22,10 @@ from errors import Conflict, Forbidden, Invalid, Unavailable
 from reasons import R
 
 AGENTS = ("selene", "delia", "roman", "entity_check", "callum", "naomi", "osei")
+# C2-6a2: the pseudo-agent an audit failure names when no agent step was running (svc_audits); with AGENTS the
+# closed set of an ``*_interrupted`` record's agent (sink_fields binds RUN_AGENTS)
+REPORT_AGENT = "report"
+RUN_AGENTS = AGENTS + (REPORT_AGENT,)
 # The agent registry (ADR 0046, owner rule: every agent has a human name, ONE job, and an entry with its assignment,
 # inputs and outputs). Shared plumbing (primitives/, answer_adapter.py and the engine adapters, the ports) is not an
 # agent and is not listed. Shown on GET /seo/v1/department.

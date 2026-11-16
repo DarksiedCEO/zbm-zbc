@@ -9,7 +9,7 @@ import logging
 import pytest
 from gsc_fakes import FakeGoogle
 from helpers import rid
-from test_gsc import PROP, W, audit, bind, client, code_of, gsc_harness, section
+from test_gsc import PROP, W, _e_auth_configured_property, audit, bind, client, code_of, gsc_harness, section  # noqa: F401 (C2-3c4 re-pin: E-AUTH fixture)
 
 import gsc_client as g
 from agents import search_performance as sp

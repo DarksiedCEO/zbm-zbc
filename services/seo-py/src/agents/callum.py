@@ -65,7 +65,8 @@ from agents.probes import (
 from agents.prompt_guard import personal_data
 from answer_adapter import PROTOCOL_ERROR_STOP_AFTER, STOP_CODES, EngineError
 from clock import iso
-from envelope import envelope, finding, observed
+import outbound
+from envelope import INTERVAL_WILSON_95, envelope, finding, observed
 from ports import NOT_CONNECTED, ProviderAnswer
 from primitives import Killed
 
@@ -129,7 +130,7 @@ def collect(engine: str, port, prompt_set: dict, n: int, guard: Callable, budget
     protocol_run = 0
     asked = 0
     try:
-        for pi, prompt in enumerate(prompt_set["prompts"]):
+        for pi, prompt in outbound.scoped(prompt_set["prompts"]):   # C2-3c E-LLM
             if stop is not None:
                 break
             asked += 1
@@ -700,7 +701,7 @@ def classify(engines: dict, prompt_set: dict, domain: str, resolver: Resolver, r
 def _rate(k: int, n: int) -> dict:
     """A measured rate with its provenance-independent confidence: n, the 95% Wilson interval, directional."""
     return {"value": None if n == 0 else round(k / n, 4), "k": k, "n": n, "ci95": wilson(k, n),
-            "interval": "wilson_95", "directional": n < MIN_USABLE}
+            "interval": INTERVAL_WILSON_95, "directional": n < MIN_USABLE}
 
 
 def _mnc_rate(mnc: int, low: int, n: int) -> dict:
@@ -1133,6 +1134,11 @@ def _display(name: str, value, logged_flag=None, recorded=None) -> dict | None:
         kind = secret_guard.client_view_kind(found)
         if kind is None:
             out = {"value": value, "alert": False, "reason": None}
+        elif found == ["value_shape"]:
+            # core-spec/2 CV-5: only the VS / JR spans are hidden; each listed as {start, end, code}
+            from agents import cv_shape
+            shown, spans = cv_shape.display(value, MASK["credential"])
+            out = {**_mask("credential", "value_shape"), "value": shown, "spans": spans}
         else:
             out = _mask("credential" if kind == secret_guard.CREDENTIAL else "personal", "+".join(found))
     if name == "excerpt":

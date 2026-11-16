@@ -41,6 +41,7 @@ rows naming per-row vault records) still replays and is served as it was.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import Optional
 
@@ -50,7 +51,7 @@ from agents import callum
 from envelope import sha
 from errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from ledger import derived_id
-from primitives import Killed
+from primitives import Killed, codes
 from reasons import R
 from svc_vaulted import normalised
 
@@ -118,6 +119,9 @@ class CitationsMixin:
         self.check_kill(capability="audit")
         if self.agent_blocked("callum"):
             raise Forbidden(R("AGENT_RESTRICTED"))
+        from svc_tenants import domain_invalid
+        if domain_invalid(body["domain"]):            # C2-2g: a non-hostname is 422 DOMAIN_INVALID, before any write
+            raise Invalid(R("DOMAIN_INVALID"))
         if body["domain"] not in t["domains"]:
             raise Forbidden(R("DOMAIN_NOT_AUTHORIZED"))
         p = self.prompt_sets.get(body["prompt_set_id"])
@@ -304,17 +308,33 @@ class CitationsMixin:
         if not full:
             out["outcome"] = (out.get("facts") or {}).get("outcome")
         elif inline is not None:                         # recorded before sink job C: per-row vault records
-            out["result"] = callum.client_view(inline, lambda x: self._vault_record(tid, x))
+            with self._owner_coding(tid), self._cv_scope(tid):   # V-3 (C2-14d) + C2-15b (AL-1): the OWNER's view
+                out["result"] = callum.client_view(inline, lambda x: self._vault_record(tid, x))
         elif ref is not None:
             doc = _result_document(self._vaulted_open(tid, RESULT_FIELD, ref, mac))
             if doc is None:
                 out["result"], out["vault_unavailable"] = None, True
             else:
                 evidence = doc["evidence"]
-                out["result"] = callum.client_view(doc["result"], lambda x: _evidence_record(evidence, x))
+                with self._owner_coding(tid), self._cv_scope(tid):   # V-3 (C2-14d) + C2-15b (AL-1): owner only
+                    out["result"] = callum.client_view(doc["result"], lambda x: _evidence_record(evidence, x))
         else:
             out["result"] = None
         return out
+
+    def _owner_coding(self, tid: str):
+        """V-3 / CV-5 (C2-14d, ruling 15:25 PT on F14-2 / F18-2): the owner view's span codes are computed under the
+        TENANT's coder (the citation vault's ``coder(tid)``, current key - the same coder the AL-1 allowlist uses), so
+        they are per tenant (B-CD-01) and stable across a restart (the key is durable). The evidence map is a
+        throw-away sink: a code is computed, no raw value is kept. No key (or no coder): no context - nothing is
+        decrypted then either (the view is ``vault_unavailable``)."""
+        if not self.vault.key_configured:
+            return contextlib.nullcontext()
+        try:
+            coder = self.vault.coder(tid)
+        except vault_mod.VaultError:
+            return contextlib.nullcontext()
+        return codes.coding(coder, evidence=DROP_EVIDENCE)
 
     def _vault_record(self, tid: str, ref) -> tuple:
         """A per-row vault record of a result recorded before sink job C: (record, None) for the owning tenant, else
@@ -336,7 +356,22 @@ class CitationsMixin:
                                                                                 r["citation_run_id"]))
                     if r["tenant_id"] == tid][:1000]
 
-    def mnc_priority_view(self, tid: str, cid: str) -> dict:
+    def mnc_priority_view(self, tid: str, cid: str, full: bool = True) -> dict:
+        """``full`` (owner with tenant authentication, V-4 / D-02h): the list, read from the vault. Otherwise the
+        code-only view: no vault read, ``items: None`` (never an empty list). 404 / 409 are decided from the recorded
+        run BEFORE any vault open (C2-10d, F10b-2): no error body is ever built after a decrypt."""
+        with self.lock:
+            r = self.citation_runs.get(cid)
+            if not self._owns(r, tid):
+                raise NotFound(R("CITATION_RUN_NOT_FOUND"))
+            if r["status"] != "completed":
+                raise Conflict(R("CITATION_RUN_NOT_COMPLETED"))
+        if not full:
+            v = self.citation_run_view(tid, cid, full=False)
+            facts = v.get("facts") or {}
+            return {"contract": callum.CONTRACT_MNC, "producer": callum.AGENT, "run_id": cid, "items": None,
+                    "view": "codes_only", "outcome": v["outcome"],
+                    "mentioned_not_cited": facts.get("mentioned_not_cited")}
         v = self.citation_run_view(tid, cid)
         if v["status"] != "completed":
             raise Conflict(R("CITATION_RUN_NOT_COMPLETED"))
@@ -361,6 +396,18 @@ class CitationsMixin:
                 out["interrupted"] += 1
         out["outcomes"] = dict(sorted(out["outcomes"].items()))
         return out
+
+
+class _DropEvidence(codes.EvidenceMap):
+    """The owner view's evidence sink (C2-14d): keeps nothing (the view only needs the codes)."""
+
+    __slots__ = ()
+
+    def add(self, code: str, raw: str) -> None:
+        return None
+
+
+DROP_EVIDENCE = _DropEvidence()                  # ONE object: the reveal span index fingerprint compares it by identity
 
 
 def _code(value) -> str:

@@ -23,6 +23,7 @@ import urllib.parse
 
 import helpers
 import pytest
+import test_review_08eea6e1 as t8
 import test_review_601e328a as r6
 import test_review_c13529af as c13
 import test_vault_wiring as vw
@@ -193,8 +194,9 @@ def test_base64_with_a_glued_suffix_of_six_to_eight_characters_is_read_in_both_l
 def test_the_six_byte_trim_is_load_bearing(monkeypatch):
     cases = _b64_glued(random.Random(SEED + 7))
     monkeypatch.setattr(sg, "DECODE_TRIM", 3)                           # mutation: the c0c09bd1 trim undone
-    missed = [n for n, t in cases.items() if not sg.client_view_findings(t)]
-    assert len(missed) > 0
+    # C2-CL2a re-point (G-7; core-spec/2 CV-3, ST-2): v1 decode finding lost, CV-3 still masks, both removed -> leak
+    lost, shown, shown_no_vs = t8.vs_carries(monkeypatch, list(cases.values()))
+    assert lost > 0 and shown == 0 and shown_no_vs > 0, (lost, shown, shown_no_vs)
 
 
 # ================================================================================================ MUST 5: price scope
@@ -412,8 +414,22 @@ def _codes(rng) -> tuple:
 
 
 def test_a_code_or_model_number_before_the_plain_at_is_prose_in_the_client_view():
+    # core-spec/2 re-pin (G-7; CV-3 / CV-6: coupon and model codes are not exempt; AL-1/RV-1 recover): the plain " at "
+    # stays prose (no v1 finding on any shown text); a code of >= 8 code points is masked by value_shape ONLY, and the
+    # span is exactly the code (12 of 40 at core-v2 C2-CL3); codes < 8 code points are shown.
+    from agents import cv_shape
     shown, masked = _codes(random.Random(SEED + 20))
-    assert sum(1 for t in shown if sg.client_view_findings(t)) == 0
+    vs_masked = 0
+    for t in shown:
+        code = re.search(r"(?:code |The )(\S+) at", t).group(1)
+        found = sg.client_view_findings(t)
+        if len(code) >= 8:
+            assert found == ["value_shape"], (t, found)
+            assert [t[a:b] for a, b in cv_shape.value_spans(t)] == [code], t
+            vs_masked += 1
+        else:
+            assert found == [], (t, found)
+    assert vs_masked == 12, vs_masked
     assert sum(1 for t in masked if "email" not in sg.client_view_findings(t)) == 0
 
 
@@ -922,6 +938,8 @@ def test_a_real_service_run_keeps_no_operator_text_on_disk_and_the_owner_reads_d
     assert h2.svc.entities["ent-acme"]["fields"]["name"]["value"] == f"Acme {v['card']}"
 
 
+# C2-9c (V-1, T-2; lead ruling 17:55 PT F9-4): synthesises 2 of the 105 F2b-2 paths; no current src
+# writer emits them (core-v2/c29c/paths.md), so they stay untyped and refused. Kept, never deleted.
 def test_operator_vaulting_is_load_bearing(tmp_path, monkeypatch, caplog):
     """Mutation (sink job D form): the prompt set's content is written into the log record again. With the sink
     guard in place the commit is refused and nothing is written; without it the scan finds the text."""

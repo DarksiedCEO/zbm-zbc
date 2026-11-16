@@ -36,6 +36,10 @@ SHAPES = {
     "camel_short_tails": lambda n: _rep("userAut ", n),
     "inword_f2_joins": lambda n: _rep("\ub4e4" + KO[:2] + ".:", n),
     "inword_f3_spelled": lambda n: _rep("\u0434\u043e" + " / ".join(RU[:-1]) + " ", n),
+    # core-spec/2 PF-3: three shapes aimed at CV-4 (pieces / fragments / runs; J = cv_shape.J)
+    "cv4_one_char_fragments": lambda n: _rep("1-2.3_4/5:6+7|8,9 0\t", n),
+    "cv4_fragment_word_alternating": lambda n: _rep("x9-house_k7.river/q4:stone+", n),
+    "cv4_24char_fragments": lambda n: _rep("a1b2c3d4e5f6g7h8i9j0k1l2-", n),
 }
 
 

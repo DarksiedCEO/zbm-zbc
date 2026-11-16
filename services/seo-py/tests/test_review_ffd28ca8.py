@@ -41,6 +41,7 @@ import unicodedata
 import pytest
 
 import test_review_2b26d980 as prev
+import test_review_601e328a as r6
 import test_vault_wiring as vw
 from agents import secret_guard as sg
 from helpers import rid
@@ -430,7 +431,9 @@ def e2e_run(tmp_path, r) -> tuple:
     run = h.ok(h.post("/tenants/zbm/citation-runs", {"request_id": rid(), "domain": vw.DOMAIN,
                                                      "prompt_set_id": psid}), 201)
     assert run["status"] == "completed" and port.asked >= len(forms)
-    view = h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}", caller="dashboard"))
+    # C2-10e re-pin (G-7; lead ruling 10:05 PT F10b-1, V-4 D-02h): the run text is read by the owner
+    # caller (hub + tenant token); dashboard now gets the code-only view. Assertions unchanged.
+    view = h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}", caller="hub", tenant="zbm"))
     return forms, values, view
 
 
@@ -459,9 +462,21 @@ def test_a_citation_run_carrying_the_forms_is_read_by_its_owner_with_no_value_sh
 
 
 def test_mutation_with_the_old_tables_the_owner_is_shown_the_reported_values(tmp_path, monkeypatch):
+    # C2-CL2b re-point (G-7; core-spec/2 CV-3, CV-10e): the v2 value shape (CV-3) is label-independent, so the old
+    # label tables alone no longer let a value through (CV-10e: shown 0). The mutation is re-pointed at the v2 rule:
+    # with the VS rule removed (both entry points, r6.no_vs) the current tables still mask every value, and the old
+    # tables then show the three reported forms (the tables' bite, measured with the protection CV-3 now carries off).
+    for d in ("vs_only_off", "old_tables", "both_off"):
+        (tmp_path / d).mkdir()
+    with pytest.MonkeyPatch.context() as mp:
+        r6.no_vs(mp)
+        _forms, values, view = e2e_run(tmp_path / "vs_only_off", random.Random(SEED + 6))
+        assert shown_values(view, values[:9]) == 0             # the current tables carry the v1 lane
     old_tables(monkeypatch)
-    r = random.Random(SEED + 6)
-    _forms, values, view = e2e_run(tmp_path, r)
+    _forms, values, view = e2e_run(tmp_path / "old_tables", random.Random(SEED + 6))
+    assert shown_values(view, values[:9]) == 0                 # CV-3 masks them with the old tables (CV-10e)
+    r6.no_vs(monkeypatch)
+    _forms, values, view = e2e_run(tmp_path / "both_off", random.Random(SEED + 6))
     assert shown_values(view, values[:9]) >= 3                 # the three reported forms lead the list
 
 

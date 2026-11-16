@@ -42,6 +42,7 @@ import pytest
 import test_review_2b26d980 as prev
 import test_vault_wiring as vw
 from agents import callum
+from agents import cv_shape
 from agents import secret_guard as sg
 from helpers import rid
 from ports import ProviderAnswer
@@ -86,6 +87,27 @@ def flagged(text: str) -> bool:
 
 def letters(s: str) -> str:
     return "".join(c for c in s if c.isalpha())
+
+
+def value_only(text: str, val: str) -> bool:
+    """core-spec/2 CV-3 re-pin (G-7). v1 wanted ``client_view_findings(word + sep + value) == []`` because v1 masked a
+    value only after a READ label; CV-3 is label-independent, so the value-shaped value (``value(r)``: 8 code points,
+    letters + digits + an ASCII symbol) is masked whatever precedes it. The protection kept: no label is read (no
+    ``label_value``), the ONLY finding is ``value_shape``, the ONLY masked span is exactly ``val``'s CV-2 core (a
+    trailing ``!`` / ``#`` / ``%`` is sentence punctuation by CV-2, W_T) and the rendered view shows every ordinary
+    word before it unchanged."""
+    s = len(text) - len(val)
+    if not text.endswith(val) or sg.client_view_findings(text) != ["value_shape"]:
+        return False
+    a, b = cv_shape.core_bounds(val)
+    rendered, _spans = cv_shape.display(text, "\x00")
+    return cv_shape.value_spans(text) == [(s + a, s + b)] and rendered == text[:s + a] + "\x00" + text[s + b:]
+
+
+def value_after(prefix: str, r) -> bool:
+    """``value_only`` on ``prefix + value(r)``: the ordinary words of ``prefix`` all shown, only the value masked."""
+    v = value(r)
+    return value_only(prefix + v, v)
 
 
 # ================================================================================================ the embedded words
@@ -839,7 +861,18 @@ def test_the_japanese_loanword_and_its_neighbours_do_not_read_as_the_label():
     assert strip == "".join(c for c in unicodedata.normalize("NFD", JAPANESE) if not unicodedata.combining(c))
     texts = [LOANWORD, f"\u65b0\u3057\u3044{LOANWORD}\u3092\u7d39\u4ecb\u3057\u307e\u3059\u3002", f"{LOANWORD} {value(r)}"]
     assert [sg.check(t) for t in texts] == [None, None, None]
-    assert [sg.client_view_findings(f"{LOANWORD}{sep}{value(r)}") for sep in SEPARATORS] == [[]] * len(SEPARATORS)
+    # CV-3 / G-7 re-pin: the loanword is shown, only the value is masked (was: no finding at all) - for every
+    # separator with a space. The glued "=" (LOANWORD=value is ONE CV-2 token): CV-10a / CV-9 zero tolerance on
+    # value shown outranks CV-3's last sentence (lead ruling 16:45 PT, C2-CL6b; G-7): the WHOLE token is masked
+    # with the value, and still no label is read (only value_shape).
+    def glued_whole(sep: str) -> bool:
+        t = f"{LOANWORD}{sep}{value(r)}"
+        a, b = cv_shape.core_bounds(t)
+        rendered, _spans = cv_shape.display(t, "\x00")
+        return (sg.client_view_findings(t) == ["value_shape"] and cv_shape.value_spans(t) == [(a, b)]
+                and rendered == t[:a] + "\x00" + t[b:])
+    assert [glued_whole(sep) if sep == "=" else value_after(f"{LOANWORD}{sep}", r)
+            for sep in SEPARATORS] == [True] * len(SEPARATORS)
     assert [sg.url_has_secret(u) for u in url_forms(LOANWORD)] == [False] * 4
     host = f"{LOANWORD}.site.test"
     assert sg.check(host) is None and callum.checked_host(host) == {"host": host, "host_withheld": None}
@@ -851,7 +884,7 @@ def test_the_japanese_loanword_and_its_neighbours_do_not_read_as_the_label():
     pairs = [j.split("+") for j in JAPANESE_JOINS]
     assert len(pairs) == 80 and JAPANESE_JOINS_FOUND == (414, 3140)
     bad = [i for i, (a, b) in enumerate(pairs) if sg.check(a + b) is not None or sg.check(f"{a} {b}") is not None
-           or sg.client_view_findings(f"{a}{b}: {value(r)}") or sg.url_has_secret(f"https://site.test/{a}{b}/")]
+           or not value_after(f"{a}{b}: ", r) or sg.url_has_secret(f"https://site.test/{a}{b}/")]  # CV-3 / G-7
     assert bad == []
     # the label itself, in every form the inspection view composes, is still read
     for label in (JAPANESE, unicodedata.normalize("NFD", JAPANESE), "\uff8a\uff9f\uff7d\uff9c\uff70\uff84\uff9e"):
@@ -879,7 +912,7 @@ def test_ordinary_hindi_words_side_by_side_do_not_read_as_the_label():
     assert len(joins) == len(set(joins)) == HINDI_JOINS == 182 and HINDI_PHRASE in joins
     for sep in (" ", "-", "_", "\u00a0", " \u2013 ", "\u0964 "):
         bad = [i for i, (a, b) in enumerate(joins) if sg.check(f"{a}{sep}{b}") is not None
-               or sg.client_view_findings(f"{a}{sep}{b}: {value(r)}")]
+               or not value_after(f"{a}{sep}{b}: ", r)]  # CV-3 / G-7: words shown, only the value masked
         assert bad == [], (sep, len(bad))
     # the residual declared here at cbdf5e78, closed by its review (MUST 2 / S-1, ADR 0051 decision 73): one of the
     # 182 pairs ("response" before "word") read as the label when GLUED, the inspection views dropping the nasal dot
@@ -1078,8 +1111,9 @@ def test_the_client_view_does_not_mask_an_ordinary_word_before_a_separator(name)
     for sep in (": ", " = ", " is ", " - ", " -> "):
         got = [w for i, w in enumerate(ws) if sg.client_view_findings(f"{w}{sep}{ws[(i + 3) % 220]} {ws[(i + 9) % 220]}")]
         assert tuple(got) == known, (sep, len(got))
-    # and before a value-like value: masked for nothing (a label needs to BE a label)
-    assert tuple(w for w in ws if sg.client_view_findings(f"{w}: {value(r)}")) == known
+    # and before a value-like value: no label read and the word shown (a label needs to BE a label); CV-3 / G-7
+    # re-pin: the value itself is masked by its shape, label-independent, and it is the only masked span
+    assert tuple(w for w in ws if not value_after(f"{w}: ", r)) == known
     # none of it comes from the script labels (the lane this round changed; review cbdf5e78: the one pattern of both
     # lanes, on the word view of the inspection view and of the marked view)
     assert [w for w in ws if sg._SCRIPT_SEQ.search(sg._script_word_view(sg.normalise(w)))
@@ -1135,7 +1169,8 @@ def test_an_ordinary_word_with_the_sharp_s_is_not_masked():
              "schlie\u00dfen", "Gru\u00df", "flei\u00dfig", "Engpa\u00df", "Reisepa\u00df", "STRA\u1e9eE", "GRO\u1e9e"]
     for w in words:
         assert sg.check(w) is None and sg.check(f"Die {w} ist neu.") is None
-        assert sg.client_view_findings(f"{w}: {value(r)}") == [] and sg.client_view_findings(f"{w} ist {value(r)}") == []
+        # CV-3 / G-7 re-pin: the word is shown, only the value is masked (was: no finding at all)
+        assert value_after(f"{w}: ", r) and value_after(f"{w} ist ", r)
         assert not sg.url_has_secret(f"https://site.test/{w}/") and not sg.label_only(w)
 
 
@@ -1480,7 +1515,9 @@ def e2e_run(tmp_path, r) -> tuple:
     run = h.ok(h.post("/tenants/zbm/citation-runs", {"request_id": rid(), "domain": vw.DOMAIN,
                                                      "prompt_set_id": psid}), 201)
     assert run["status"] == "completed" and port.asked >= len(forms)
-    view = h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}", caller="dashboard"))
+    # C2-10e re-pin (G-7; lead ruling 10:05 PT F10b-1, V-4 D-02h): the run text is read by the owner
+    # caller (hub + tenant token); dashboard now gets the code-only view. Assertions unchanged.
+    view = h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}", caller="hub", tenant="zbm"))
     return h, forms, values, view
 
 
@@ -1552,7 +1589,9 @@ def e2e_ordinary_summary(tmp_path) -> dict:
         "prompts": ["who recovers marketplace revenue"], "engines": ["openai"]}), 201)["prompt_set_id"]
     run = h.ok(h.post("/tenants/zbm/citation-runs", {"request_id": rid(), "domain": vw.DOMAIN,
                                                      "prompt_set_id": psid}), 201)
-    view = h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}", caller="dashboard"))
+    # C2-10e re-pin (G-7; lead ruling 10:05 PT F10b-1, V-4 D-02h): the run text is read by the owner
+    # caller (hub + tenant token); dashboard now gets the code-only view. Assertions unchanged.
+    view = h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}", caller="hub", tenant="zbm"))
     rows = view["result"]["facts"]["rows"]
     fields = evidence_fields(view)
     cited = [row["evidence"]["cited_url"] for row in rows if row.get("evidence") and row["evidence"].get("cited_url")]

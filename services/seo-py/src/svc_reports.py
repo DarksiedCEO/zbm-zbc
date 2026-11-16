@@ -13,7 +13,11 @@ Rules:
     Search Console breakdowns expired) the replay is refused ``REPORT_CHANGED`` instead of handing out a document that
     differs from the recorded hash;
   - kill switches: global, write, the tenant's and ``capability:reports`` (and ``capability:audit``, the product the
-    report belongs to).
+    report belongs to);
+  - owner display surface (lead ruling 20:15 PT, card C2-OV3; OWNER DECISION 19:20 PT): the document is rendered for
+    the owning tenant from the report through the SAME owner-view routing as the API (``owner_view(doc=AUDIT_REPORT)``:
+    report_fields typed machine fields shown, free text through the client-view masker CV-3 / CV-4 / CV-6 / CV-7), so
+    it never shows crawled free text the owner view hides; client_report's ADR 0017 checks stay as an extra layer.
 """
 
 from __future__ import annotations
@@ -22,6 +26,8 @@ import client_report
 from errors import Conflict
 from ledger import derived_id
 from reasons import R
+from report_fields import AUDIT_REPORT
+from svc_vaulted import owner_view
 
 
 class ReportsMixin:
@@ -37,13 +43,15 @@ class ReportsMixin:
         # ADR 0024: a client's report is delivered only while Compliance's activation is a current ALLOW (asked
         # outside the lock; no override)
         if client is not None:
-            self._verify_compliance(client)
+            self._verify_compliance(client, tid)
         rk = self.rk("client_report", f"{tid}/{aid}", body)
         with self.lock:
             self._report_checks(tid, aid, client)
         # sink job B: the audit report is read from the tenant's vault and the document rendered OUTSIDE the lock; a
         # report that cannot be read refuses VAULT_UNAVAILABLE (nothing is rendered from anything else)
         view = self._audit_recorded(tid, aid)
+        if view.get("report") is not None:
+            view = {**view, "report": owner_view(view["report"], doc=AUDIT_REPORT)}
         try:
             data, model = client_report.render(view, tid, fmt, self.settings.report_branding)
         except client_report.ReportInputError:

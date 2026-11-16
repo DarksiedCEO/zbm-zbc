@@ -529,3 +529,20 @@ def test_google_attributes_an_answer_only_to_the_exact_model_and_fails_closed_wi
     blocked = {"promptFeedback": {"blockReason": "SAFETY"}}
     assert code_of(lambda: gg.parse_response(json.dumps(blocked).encode())) == ("ENGINE_PROTOCOL_ERROR",
                                                                                 "MODEL_UNVERIFIED")
+
+
+class _C23c2AnyPrompt:
+    def __contains__(self, _text) -> bool:
+        return True
+
+
+@pytest.fixture(autouse=True)
+def _c23c2_prompt_scope():
+    """C2-3c2 re-pin (T-5 / E-LLM, owner decision 14:57 PT, lead ruling F3-4, G-7; same pattern as test_perplexity.py):
+    these tests call ``ask()`` directly, outside a probe run, so each test's own prompt counts as its configured prompt
+    set. A probe run binds the tenant's set (agents.probes / agents.callum); unbound or another tenant's text is refused
+    (tests/test_outbound_typed.py)."""
+    import outbound
+    token = outbound._PROMPTS.set(_C23c2AnyPrompt())
+    yield
+    outbound._PROMPTS.reset(token)

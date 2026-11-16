@@ -3803,7 +3803,7 @@ def guard_record(obj):
 # ADR 0051 decision 13).
 
 CLIENT_HIDDEN = "{hidden}"
-CV_PERSONAL = frozenset(("card", "ssn", "phone", "email"))
+CV_PERSONAL = frozenset(("card", "ssn", "phone", "email", "url_personal"))  # url_personal: CV-7
 CV_NUMBER_KINDS = ("card", "ssn", "phone")
 CV_GROUPS_MAX = 2048                     # digit groups read per view; more: the field is masked (fail closed)
 CV_URL_PARTS_MAX = 256                   # query pairs read per URL; more: the whole URL is masked (fail closed)
@@ -3853,8 +3853,48 @@ def _cv_valueish(val: str) -> bool:
     """After a natural-language separator beyond the listed ones (`` was ``, `` would be ``, `` remains ``...) the
     value must look like one: a digit or a symbol in it, or a capital after its first letter (``the password would be
     reset`` is prose). After the listed separators (``:`` ``=`` `` is `` `` - `` an arrow, JSON) any value of 4+
-    characters counts."""
-    return not val.isalpha() or any(c.isupper() for c in val[1:])
+    characters counts. A combining mark (Unicode M*: a Thai / Devanagari vowel sign, an NFD accent) is part of its
+    letter, not a symbol (C2-16b: a BL prose word of those scripts after `` was `` is prose, BL-2). The letters must
+    be of ONE script (``_SCRIPT_TAG``): a word gluing two scripts (Latin + Devanagari) is value-ish (C2-16c, review
+    ffd28ca8)."""
+    return not _cv_one_script_word(val) or any(c.isupper() for c in val[1:])
+
+
+def _cv_one_script_word(val: str) -> bool:
+    """True when ``val`` is letters of ONE script, each with its combining / spacing marks, and at least one letter."""
+    tags = set(val.translate(_SCRIPT_TAG))
+    tags.discard("m")
+    if " " in tags or not tags:
+        return False
+    if len(tags) > 1:
+        # Japanese writes one word in kanji and kana together: Han + hiragana + katakana (and the iteration mark)
+        # count as one script here. Any other letter in the word (a Latin one glued on) still makes it mixed.
+        ja = {_SCRIPT_TAG.names.get(n) for n in _CV_JA_SCRIPTS}
+        if tags <= ja:
+            return True
+        # Latin + ONE script the lookalikes table reads as Latin letters (Greek, Cyrillic...): the marked view writes
+        # that script's lookalike letters as Latin, so a word of it reads Latin + it there (C2-16e: a Greek / Cyrillic
+        # BL prose word after `` was `` is prose, BL-2). Latin + a script without Latin lookalikes stays mixed.
+        if len(tags) == 2 and "L" in tags:
+            return bool(tags & {_SCRIPT_TAG.names.get(n) for n in _cv_lookalike_scripts()})
+        return False
+    return True
+
+
+# the script names (``_first_name``) that make up written Japanese, read as ONE script by ``_cv_one_script_word``
+_CV_JA_SCRIPTS = ("CJK", "HIRAGANA", "KATAKANA", "IDEOGRAPHIC")
+_CV_LOOKALIKE: list = []
+
+
+def _cv_lookalike_scripts() -> frozenset:
+    """The script names (``_first_name``) of every non-Latin letter the lookalikes table (``_FOLD``) reads as ASCII
+    letters: the scripts the confusable fold / marked view can write as Latin (built once, from the table)."""
+    if not _CV_LOOKALIKE:
+        _CV_LOOKALIKE.append(frozenset(
+            n for k, m in _FOLD.mapping.items()
+            if len(k) == 1 and not k.isascii() and k.isalpha() and m and m.isascii() and m.isalpha()
+            for n in (_first_name(k),) if n != "LATIN"))
+    return _CV_LOOKALIKE[0]
 
 
 # The sharp s: NFKD does not decompose it and ``lookalikes`` reads it by case folding (``ss``), which the client
@@ -4647,7 +4687,9 @@ def _cv_findings(text: str) -> set:
     found ``cap`` (fail closed: masked whatever else is in it) is not read further."""
     found: set = set()
     marked = False
-    _CV_MEMO.prefix = {}
+    own = getattr(_CV_MEMO, "prefix", None) is None      # C2-CL4: client_view_findings may hold the memo for the call
+    if own:
+        _CV_MEMO.prefix = {}
     try:
         for v, folded in _tagged_views(text):
             if not v:
@@ -4670,7 +4712,8 @@ def _cv_findings(text: str) -> set:
             if "cap" in found:
                 break
     finally:
-        _CV_MEMO.prefix = None
+        if own:
+            _CV_MEMO.prefix = None
         _CV_MEMO.folded = False
     return found
 
@@ -4688,10 +4731,28 @@ def client_view_findings(text) -> list:
         return []
     if len(text) > MAX_INPUT:
         return ["cap"]
+    own = getattr(_CV_MEMO, "prefix", None) is None
+    if own:
+        _CV_MEMO.prefix = {}                               # C2-CL4: one memo for the whole call (v1 rules + CV-3)
     try:
-        return sorted(_cv_findings(text))
+        found = _cv_findings(text)
+        if "cap" not in found and not getattr(_CV_MEMO, "url", False):
+            # core-spec/2 CV-1..CV-4: value shape, label-independent; never inside the URL lane (CV-7: CV-3 / CV-4
+            # never mask a token the URL lane rendered), and every URL token of a text is judged by that lane (U-1)
+            from agents import cv_shape
+            spans, urls = cv_shape.spans_and_urls(text)
+            if spans:
+                found.add("value_shape")
+            for u in urls:
+                _shown, k = client_view_url(u)
+                if k is not None:
+                    found.add("url_personal" if k == PERSONAL else "url_credential")
+        return sorted(found)
     except Exception:  # noqa: BLE001 - fail closed: a field the checks cannot read is masked
         return ["error"]
+    finally:
+        if own:
+            _CV_MEMO.prefix = None
 
 
 def client_view_kind(findings) -> str | None:

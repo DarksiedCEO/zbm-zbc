@@ -40,12 +40,24 @@ from reasons import R
 import sink_guard
 import vault as vault_mod
 from svc_entity import unreadable as entity_unreadable
+from svc_manager import REPORT_AGENT
 from svc_optext import path_view, text_view, url_flag
+from report_fields import AUDIT_REPORT, DRIFT_REPORT
 from svc_vaulted import PROMPT_SET_FIELD, REPORT_FIELD, SECTION_FIELD, canonical, normalised, owner_view
 
 log = logging.getLogger("seo.audits")
 REPORT_VERSION = "seo-audit-report/1"
 _PATH_OK = re.compile(r"/[\x21-\x7e]{0,500}")
+# the code-authored methodology strings svc_audits writes into envelopes; report_fields reads them as one closed
+# code_text set (lead ruling 20:35 PT OV3-2, card C2-OV3b). Constants only: no behaviour change.
+M_NO_FETCHER = "no fetcher is wired"
+M_NO_ENTITY = "not run: the canonical entity record cannot be read from the vault"
+M_HYGIENE = ("every quarantined input with reason, size and SHA-256; every observation with its time and "
+             "refresh tier")
+M_RESTRICTED = "not run: the department manager has restricted this agent"
+M_KILLED = "not run: a kill switch is engaged"
+M_NO_ROBOTS = "not run: robots.txt was not read"
+METHODOLOGIES = (M_NO_FETCHER, M_NO_ENTITY, M_HYGIENE, M_RESTRICTED, M_KILLED, M_NO_ROBOTS)
 GLOBAL_LIMITS = [
     "Wave 1 reads public pages only. First-party truth (Bing Webmaster Tools, analytics, CRM; Search Console unless "
     "the search_performance section says it was read) is NOT_CONNECTED, so nothing here is paired with qualified "
@@ -118,6 +130,9 @@ def _strict_prompt_set(body: dict) -> None:
             raise Invalid(R("PROMPT_PERSONAL_DATA" if name in _PERSONAL_CHECKS else "PROMPT_SECRET"))
     if isinstance(body.get("name"), str) and globals()["_identifier_refused"](body["name"]):
         raise Invalid(R("IDENTIFIER_WITHHELD"))
+    from svc_tenants import domain_invalid
+    if any(domain_invalid(d) for d in list(body.get("competitor_domains") or [])):   # C2-2g: a hostname, or 422
+        raise Invalid(R("DOMAIN_INVALID"))
     for d in list(body.get("competitor_domains") or []):
         if isinstance(d, str) and globals()["_domain_refused"](d):
             raise Invalid(R("IDENTIFIER_WITHHELD"))
@@ -436,7 +451,7 @@ class AuditsMixin:
                     # else) instead of answering 500 and leaving it "running" until the interrupted-audits job.
                     # AEGIS SEO Wave 3 L2: which step failed and where (module:function:line inside this service),
                     # never the exception's message (it could quote crawled content)
-                    agent = getattr(exc, "seo_agent", None) or "report"
+                    agent = getattr(exc, "seo_agent", None) or REPORT_AGENT
                     where = where_code(exc)
                     log.error("audit run failed: %s in %s at %s", type(exc).__name__, agent, where)
                     failure = {"agent": agent, "where": where, "error_type": _error_type(exc)}
@@ -530,7 +545,7 @@ class AuditsMixin:
                          paths=list(body["paths"]))
         envs, pages = [], {}
         if self.ports.fetcher is None:
-            envs.append(envelope("selene", "crawlability", "NOT_CONNECTED", [], methodology="no fetcher is wired",
+            envs.append(envelope("selene", "crawlability", "NOT_CONNECTED", [], methodology=M_NO_FETCHER,
                                  not_connected={"fetch"}, reason="the web fetcher port is not connected"))
         else:
             s_env = _step(ctx, "selene", "crawlability", lambda: selene.run(ctx))
@@ -546,7 +561,7 @@ class AuditsMixin:
                 # sink job D: a canonical value that cannot be read from the vault is never compared (fail closed)
                 return envelope("entity_check", "on_site_entity_consistency", "BLOCKED", [],
                                 reason=R("VAULT_UNAVAILABLE"),
-                                methodology="not run: the canonical entity record cannot be read from the vault")
+                                methodology=M_NO_ENTITY)
             return entity_check.run(ctx, pages, ent)
         envs.append(_step(ctx, "entity_check", "on_site_entity_consistency", entity_step))
         envs.append(_step(ctx, "callum", "citation_sources",
@@ -564,8 +579,7 @@ class AuditsMixin:
         # quarantine of malformed input still applies (refusing bad input is not Osei's judgement).
         envs.append(_step(ctx, "osei", "data_hygiene", lambda: envelope(
             "osei", "data_hygiene", "OK", [], facts=o.summary(), limitations=[],
-            methodology="every quarantined input with reason, size and SHA-256; every observation with its time and "
-                        "refresh tier")))
+            methodology=M_HYGIENE)))
         return self._report(aid, tid, body, ps, envs, o, started, pages, gsc_box)
 
     def _report(self, aid, tid, body, ps, envs, o, started, pages, gsc_box=None) -> dict:
@@ -622,7 +636,7 @@ class AuditsMixin:
                 if report is None:
                     out["vault_unavailable"] = True       # never served from anywhere else; dependants refuse
             report = self.gsc_retained(report, done)
-            out["report"] = owner_view(report) if masked and report is not None else report
+            out["report"] = owner_view(report, doc=AUDIT_REPORT) if masked and report is not None else report
         return out
 
     def _audit_recorded(self, tid: str, aid: str) -> dict:
@@ -647,7 +661,7 @@ class AuditsMixin:
         x, y = self._audit_recorded(tid, aid), self._audit_recorded(tid, against)
         a, b = sorted((x, y), key=lambda r: order[r["audit_id"]])
         try:
-            return owner_view(drift.compare(a["report"], b["report"]))
+            return owner_view(drift.compare(a["report"], b["report"]), doc=DRIFT_REPORT)
         except drift.NotComparable:
             raise Conflict(R("DRIFT_NOT_COMPARABLE")) from None
 
@@ -690,8 +704,8 @@ def _step(ctx, agent: str, task: str, fn):
     except Killed as k:
         if k.code == "AGENT_RESTRICTED":
             return envelope(agent, task, "RESTRICTED", [], reason="AGENT_RESTRICTED",
-                            methodology="not run: the department manager has restricted this agent")
-        return envelope(agent, task, "KILLED", [], reason=k.code, methodology="not run: a kill switch is engaged")
+                            methodology=M_RESTRICTED)
+        return envelope(agent, task, "KILLED", [], reason=k.code, methodology=M_KILLED)
     try:
         return fn()
     except Exception as exc:
@@ -729,7 +743,7 @@ def _error_type(exc: BaseException) -> str:
 
 def _vault_failure(exc: BaseException) -> dict:
     """The report could not be stored in the vault: machine codes only."""
-    out = {"agent": "report", "where": "vault", "error_type": _error_type(exc)}
+    out = {"agent": REPORT_AGENT, "where": "vault", "error_type": _error_type(exc)}
     if isinstance(exc, vault_mod.VaultUnavailable):
         out["code"] = R("VAULT_UNAVAILABLE")
     return out
@@ -766,6 +780,9 @@ def _authorize(t: dict, body: dict, andre: bool) -> None:
     """Who may run what on whose site: the tenant's own registered domain; a client's run needs a Finance (31) invoice
     id AND Andre; an own-properties run refuses an invoice id. Checked before Finance is asked anything, so nobody
     but Andre can make this service look an invoice up (W3-2)."""
+    from svc_tenants import domain_invalid
+    if domain_invalid(body["domain"]):                # C2-2g: a non-hostname is 422 DOMAIN_INVALID, before any write
+        raise Invalid(R("DOMAIN_INVALID"))
     if body["domain"] not in t["domains"]:
         raise Forbidden(R("DOMAIN_NOT_AUTHORIZED"))
     if t["kind"] == "client":
@@ -777,11 +794,19 @@ def _authorize(t: dict, body: dict, andre: bool) -> None:
         raise Invalid(R("INVOICE_NOT_FOR_OWN_TENANT"))
 
 
+def request_path_ok(p) -> bool:
+    """The request-time shape of one audit path (the API's own check; report_fields types the recorded /paths[] with
+    it, lead ruling 20:35 PT OV3-1). ``path_refused`` is applied on top at request time."""
+    return isinstance(p, str) and _PATH_OK.fullmatch(p) is not None and not p.startswith("//") and "#" not in p \
+        and "\\" not in p
+
+
 def _check_paths(paths: list, max_pages: int, scheme: str = "https", domain: str = "site.invalid") -> None:
+    if not isinstance(paths, (list, tuple)) or any(not isinstance(p, str) for p in paths):
+        raise Invalid(R("PAGES_INVALID"))         # FCL-PATHS (lead 21:05 PT): [["/"]] was a TypeError (500) in set()
     if len(paths) > max_pages:
         raise Invalid(R("AUDIT_TOO_LARGE"))
-    if not paths or len(set(paths)) != len(paths) or any(
-            not _PATH_OK.fullmatch(p) or p.startswith("//") or "#" in p or "\\" in p for p in paths):
+    if not paths or len(set(paths)) != len(paths) or any(not request_path_ok(p) for p in paths):
         raise Invalid(R("PAGES_INVALID"))
     if any(path_refused(scheme, domain, p) for p in paths):
         raise Invalid(R("PATH_WITHHELD"))         # review c0c09bd1: only a key / PEM / user info / credential query
@@ -789,5 +814,5 @@ def _check_paths(paths: list, max_pages: int, scheme: str = "https", domain: str
 
 def _skipped(agent: str, task: str, selene_env: dict) -> dict:
     outcome = "KILLED" if selene_env["outcome"] == "KILLED" else "INSUFFICIENT_EVIDENCE"
-    return envelope(agent, task, outcome, [], methodology="not run: robots.txt was not read",
+    return envelope(agent, task, outcome, [], methodology=M_NO_ROBOTS,
                     reason=selene_env.get("reason") or "robots.txt not read")

@@ -28,6 +28,7 @@ from datetime import timedelta
 
 from agents import search_performance as sp
 from agents import secret_guard
+import outbound
 from clock import parse_iso
 from envelope import envelope, sha
 from errors import Conflict, Invalid, Unavailable
@@ -233,7 +234,8 @@ class GscMixin:
             box["read_started"] = True
         rd = port.open_read(lambda: guard(provider="gsc"))
         try:
-            section = sp.read_aggregates(rd, prop, start, end, hosts, brands)
+            with outbound.configured(gsc_property=prop):       # C2-3c4 E-AUTH: the tenant's configured property
+                section = sp.read_aggregates(rd, prop, start, end, hosts, brands)
         except GscError as e:
             outcome = "KILLED" if e.code == "GSC_KILLED" else "BLOCKED" if e.code in BLOCKED else "FAILED"
             return env(outcome, e.code, {"state": e.code, "detail": e.detail, "requests": rd.requests,

@@ -343,6 +343,8 @@ def test_a_real_audit_with_an_entity_and_a_prompt_set_keeps_nothing_raw(tmp_path
     assert again == json.loads(shown) and h2.svc.audits[aid]["report"] is None
 
 
+# C2-9c (V-1, T-2; lead ruling 17:55 PT F9-4): synthesises 39 of the 105 F2b-2 paths; no current src
+# writer emits them (core-v2/c29c/paths.md), so they stay untyped and refused. Kept, never deleted.
 def test_mutation_the_report_written_inline_again_is_refused_and_nothing_is_written(tmp_path, srv, monkeypatch):
     monkeypatch.setattr(sg, "OBSERVER", None)               # this test's refused records are not the suite's
     h = harness(tmp_path, srv)
@@ -702,7 +704,10 @@ def test_an_old_format_audit_line_replays_and_every_view_works(tmp_path, srv, mo
         assert a["report_ref"] is None and a["report_hmac"] is None
         assert a["facts"] == svc_audits.report_facts(old_report)
         v = hh.ok(hh.get(f"/tenants/zbm/audits/{old_aid}"))
-        assert v["report"] == svc_vaulted.owner_view(old_report) and v["report_sha256"] == sha(old_report)
+        # C2-14c re-pin (G-7, owner decision 19:20 PT card C2-OV): the API owner view is owner_view(doc=AUDIT_REPORT)
+        # (svc_audits); the expected value is computed through the SAME routing. Equality unchanged.
+        assert v["report"] == svc_vaulted.owner_view(old_report, doc=svc_audits.AUDIT_REPORT) \
+            and v["report_sha256"] == sha(old_report)
         assert "vault_unavailable" not in v and v["report"]["audit_id"] == old_aid
         rows = hh.ok(hh.get("/tenants/zbm/audits"))
         assert {r["audit_id"] for r in rows} == {old_aid, new["audit_id"]} and all("report" not in r for r in rows)
@@ -837,7 +842,8 @@ def test_mutation_no_owner_masking_is_caught(tmp_path, srv, monkeypatch):
     def shown(mutated: bool) -> str:
         with monkeypatch.context() as m:
             if mutated:
-                m.setattr(svc_audits, "owner_view", lambda obj, memo=None: obj)
+                # C2-14c (C2-OV signature owner_view(obj, memo, doc=...)): the mutant takes the same args
+                m.setattr(svc_audits, "owner_view", lambda obj, memo=None, **_kw: obj)
             h = harness(tmp_path / ("m" if mutated else "u"), srv, data=False, own=False)
             plant_site(srv, v)
             ps = plant_tenant(h, v)

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import logging
 import os
 import random
@@ -82,6 +83,8 @@ def client(h, v: dict) -> dict:
 
 # ================================================================================================ no legacy list
 
+# C2-9c (V-1, T-2; lead ruling 17:55 PT F9-4): synthesises 20 of the 105 F2b-2 paths; no current src
+# writer emits them (core-v2/c29c/paths.md), so they stay untyped and refused. Kept, never deleted.
 def test_the_guard_has_no_exceptions():
     assert not any(hasattr(sg, n) for n in ("LEGACY_PROSE_PATHS", "LEGACY_ROWS", "LEGACY_COUNTS", "_legacy"))
     text = "plain words here"
@@ -171,6 +174,13 @@ def test_a_lost_entity_blob_fails_closed_everywhere(tmp_path, srv):
     assert view["vault_unavailable"] is True
     assert {f["value"] for f in view["fields"].values()} == {None} and set(view["fields"]) == set(created["fields"])
     assert svc_entity.unreadable(h2.svc.entity_for_tenant("acme", raw=True))
+    # C2-6g3 (OWNER DECISION 2026-11-15 02:00 PT (E-COMP), lead ruling 02:40 PT, G-7): the removed operator vault also held the finance client record, so the Compliance check
+    # fails closed (no raw value anywhere) until Andre binds the client again; then the audit runs
+    h2.refused(h2.post("/tenants/acme/audits", {"request_id": rid(), "domain": DOMAIN, "scheme": "http",
+                                                "paths": ["/"], "invoice_id": helpers.invoice_id(3)},
+                       caller="dashboard", andre=True), 503, "VAULT_UNAVAILABLE")
+    h2.ok(h2.post("/tenants/acme/finance-client", {"request_id": rid(), "finance_client_id": "acme-party-1"},
+                  andre=True))
     # the audit's entity check does not run against a record it cannot read (never a comparison with None)
     a = h2.ok(h2.post("/tenants/acme/audits", {"request_id": rid(), "domain": DOMAIN, "scheme": "http",
                                                 "paths": ["/"], "invoice_id": helpers.invoice_id(3)},
@@ -503,17 +513,24 @@ def test_an_identifier_the_sink_would_refuse_is_refused_by_its_route(tmp_path):
     for domains in ([ssn_label], ["acme.test", ssn_label]):
         h.refused(h.post("/tenants/acme/domains", {"request_id": rid(), "domains": domains}, andre=True), 422,
                   "IDENTIFIER_WITHHELD")
-    h.refused(h.post("/tenants/acme/finance-client", {"request_id": rid(), "finance_client_id": "2026-10.7"},
-                     andre=True), 422, "IDENTIFIER_WITHHELD")
-    # review 2b26d980 SHOULD 2: the request model's pattern is what the guard can write (at most 64 characters), so
-    # a longer id is refused by the schema (still 422, still nothing written; it used to be IDENTIFIER_WITHHELD)
-    for cid in ("c" * 65, "a" + "b" * 99):
+    # C2-6g6 (G-7; ruling 03:55 PT F6g4-2, O-4 I): the schema cap = the declared reference grammar {1,100}: a
+    # 101-character id is refused by the schema (422, nothing written); 65 and 100 characters are taken below
+    for cid in ("c" * 101, "a" + "b" * 100):
         r = h.refused(h.post("/tenants/acme/finance-client", {"request_id": rid(), "finance_client_id": cid},
                              andre=True), 422)
         assert [e["type"] for e in r["detail"]] == ["string_pattern_mismatch"]
     assert len(h.svc.log) == n
-    h.ok(h.post("/tenants/acme/finance-client", {"request_id": rid(), "finance_client_id": "Acme_Party.7-b"},
-                andre=True))
+    for cid in ("c" * 65, "a" + "b" * 99):
+        h.ok(h.post("/tenants/acme/finance-client", {"request_id": rid(), "finance_client_id": cid}, andre=True))
+        assert re.fullmatch(r"c:text:[0-9a-f]{16}", h.svc.tenants["acme"]["finance_client_id"])
+        assert cid not in json.dumps([r["data"] for r in h.svc.log.iter_records(1)])
+    # C2-6g4 (G-7; lead ruling 2026-11-15 03:20 PT F6g3-1; OWNER DECISION 02:00 PT E-COMP; O-4 I): a Finance client
+    # reference is judged by its own grammar, not by the sink rule (it never reaches a sink: its T-2 code does), so a
+    # date-like reference is taken (it was IDENTIFIER_WITHHELD) and stored as its code
+    for cid in ("2026-10.7", "Acme_Party.7-b"):
+        h.ok(h.post("/tenants/acme/finance-client", {"request_id": rid(), "finance_client_id": cid}, andre=True))
+        assert re.fullmatch(r"c:text:[0-9a-f]{16}", h.svc.tenants["acme"]["finance_client_id"])
+        assert cid not in json.dumps([r["data"] for r in h.svc.log.iter_records(1)])
     h.ok(h.post("/tenants/acme/domains", {"request_id": rid(), "domains": ["acme.test", "shop-2.acme.test"]},
                 andre=True))
 
@@ -563,7 +580,9 @@ def test_the_logging_sink_keeps_literal_templates_and_machine_arguments_only(tmp
     root.addHandler(handler)
     try:
         log = logging.getLogger("seo.test")
-        log.error("audit run failed: %s in %s at %s", "ValueError", "selene", "svc_audits:_run_audit:12")
+        # C2-3a re-pin (T-5, lead ruling F3-1): an own logger with its listed literal template and typed args
+        logging.getLogger("seo.audits").error("audit run failed: %s in %s at %s", "ValueError", "selene",
+                                              "svc_audits:_run_audit:12")
         log.warning("counts %d and %s", 12, "seo-aud-" + "a" * 40)
         log.error("user said %s", v["prose"])
         log.error("contact %s id %s", v["email"], v["digits"])
@@ -589,14 +608,16 @@ def test_the_logging_sink_keeps_literal_templates_and_machine_arguments_only(tmp
         handler.close()
     text = path.read_text() + caplog.text + "\n".join(r.getMessage() for r in caplog.records)
     assert sa.found(text, v) == []
-    for kept in ("audit run failed: ValueError in selene at svc_audits:_run_audit:12", "counts 12 and seo-aud-aaaa",
-                 "user said WITHHELD", "contact WITHHELD id WITHHELD", "a number %d [arguments WITHHELD]",
-                 "object {'k': 'WITHHELD'}", "mapping WITHHELD", 'WITHHELD - "GET WITHHELD HTTP/1.1" 200',
-                 "it failed for WITHHELD [ValueError@", "Exception in ASGI application", "[ValueError@",
-                 "Executing WITHHELD took 0.250 seconds"):
+    # C2-3a re-pin (core-spec/2 T-5 "never rewritten"; lead ruling F3-1; G-7): the v1 WITHHELD substitution is gone.
+    # seo.test has no typed table: each of its 9 records is NOT written and becomes the typed `log_refused` record;
+    # uvicorn.error likewise; uvicorn.access / httpx / asyncio lines are not emitted at all (Wave-1 D-04).
+    for kept in ("audit run failed: ValueError in selene at svc_audits:_run_audit:12",
+                 "log_refused logger=uvicorn.error reason=untyped", "log_refused logger=x reason=untyped"):
         assert kept in text, kept
+    for gone in ("WITHHELD", "127.0.0.1", "HTTP Request", "HTTP/1.1", "Executing", "ValueError@", "counts 12"):
+        assert gone not in text, gone
     assert "Traceback" not in text and "raise ValueError" not in text
-    assert text.count("ERROR seo.test WITHHELD") == 2                           # the two messages built at run time
+    assert path.read_text().count(" log_refused log_refused logger=seo.test reason=untyped") == 9   # 8 ERROR + 1 WARNING
     # the filter is on the root logger, the named loggers and the handler of last resort
     for name in log_sink.LOGGERS:
         assert log_sink.FILTER in logging.getLogger(name).filters, name
@@ -644,19 +665,22 @@ def test_an_error_body_repeats_nothing_the_caller_sent(tmp_path):
     # a key the caller invented, at the top and nested under invented keys
     e = take(h.post("/tenants", {"request_id": rid(), "tenant_id": "acme", "kind": "client", v["prose"]: 1},
                     andre=True), 422)
-    assert e["detail"][0]["loc"] == ["body", "*"] and e["detail"][0]["type"] == "extra_forbidden"
+    # C2-3b2 re-pin (T-1 / lead ruling 15:32 PT F3b-1): an invented key's loc is the code unknown_key, not "*"
+    assert e["detail"][0]["loc"] == ["body", "unknown_key"] and e["detail"][0]["type"] == "extra_forbidden"
     e = take(h.post("/tenants", {"request_id": rid(), v["email"]: {v["term"]: {"IP-Address": v["digits"]}}},
                     andre=True), 422)
-    assert e["detail"] == [{"loc": ["body", "ip_address"], "msg": e["detail"][0]["msg"], "type": "forbidden_field"}]
+    # C2-3b re-pin (T-1 / lead ruling F3-2): msg prose -> msg_code
+    assert e["detail"] == [{"loc": ["body", "ip_address"], "msg_code": "forbidden_field", "type": "forbidden_field"}]
     # a value that fails a pattern, a literal, a type, a length
     e = take(h.post("/tenants", {"request_id": v["prose"], "tenant_id": v["email"], "kind": v["term"]}, andre=True),
              422)
     assert [x["loc"] for x in e["detail"]] == [["body", "request_id"], ["body", "tenant_id"], ["body", "kind"]]
-    assert all(set(x) == {"loc", "msg", "type"} for x in e["detail"])
+    assert all(set(x) == {"loc", "msg_code", "type"} for x in e["detail"])   # C2-3b re-pin (T-1 / lead ruling F3-2): msg prose -> msg_code
     e = take(h.post("/tenants/zbm/entity", {"request_id": rid(), "fields": [{"field": "name", "value": v["prose"],
                                                                             v["term"]: v["email"]}]}, andre=True),
              422)
-    assert ["body", "fields", 0, "*"] in [x["loc"] for x in e["detail"]]
+    # C2-3b2 re-pin (T-1 / lead ruling 15:32 PT F3b-1): an invented key's loc is the code unknown_key, not "*"
+    assert ["body", "fields", 0, "unknown_key"] in [x["loc"] for x in e["detail"]]
     # query and path parameters
     take(h.get("/audit/export", params={"since": v["prose"], "limit": v["digits"]}), 422)
     take(h.get("/audit/evidence", params={"event_type": v["email"]}), 422)
@@ -668,16 +692,16 @@ def test_an_error_body_repeats_nothing_the_caller_sent(tmp_path):
     take(h.client.post("/seo/v1/tenants", content=b'{"request_id": "' + v["prose"].encode() + b'", ',
                        headers={**h.headers("dashboard", andre=True), "content-type": "application/json"}), 422)
     assert sa.found("\n".join(bodies), v) == []
-    # a message is kept only for the error types whose text comes from the schema
+    # C2-3b re-pin (T-1 / lead ruling F3-2): msg prose -> msg_code: the msg_code is the type for the error types whose v1 text came from the schema, else "invalid"
     out = api._sanitize([{"loc": ("body", "x", 3, v["prose"]), "msg": "Value error, " + v["prose"],
                           "type": "value_error", "input": v["email"], "ctx": {"error": v["term"]}},
                          {"loc": ("query", "limit"), "msg": "Input should be a valid integer", "type": "int_parsing",
                           "input": v["digits"]},
                          {"loc": ("body", 10 ** 9), "msg": v["prose"], "type": v["email"]}])
-    assert out == {"detail": [{"loc": ["body", "*", 3, "*"], "msg": "invalid value", "type": "value_error"},
-                              {"loc": ["query", "limit"], "msg": "Input should be a valid integer",
-                               "type": "int_parsing"},
-                              {"loc": ["body", "*"], "msg": "invalid value", "type": "invalid"}], "errors_total": 3}
+    # C2-3b2 re-pin (T-1 / lead ruling 15:32 PT F3b-1): an invented key's loc is the code unknown_key, not "*"
+    assert out == {"detail": [{"loc": ["body", "unknown_key", 3, "unknown_key"], "msg_code": "invalid", "type": "value_error"},
+                              {"loc": ["query", "limit"], "msg_code": "int_parsing", "type": "int_parsing"},
+                              {"loc": ["body", "unknown_key"], "msg_code": "invalid", "type": "invalid"}], "errors_total": 3}
 
 
 def test_finance_sees_billing_facts_and_no_audited_path(tmp_path, srv):

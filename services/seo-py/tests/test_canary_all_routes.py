@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import base64
 import collections
+import contextlib
 import json
 import logging
 import os
@@ -38,6 +39,7 @@ import api
 import config as config_mod
 import helpers
 import log_sink
+import t4_recorder
 import sink_guard as sg
 import test_sink_audits as sa
 from fixture_server import home_html
@@ -69,7 +71,8 @@ EXEMPT: dict = {}
 KNOWN_LIMIT = frozenset((
     "POST /seo/v1/tenants body:tenant_id",
     "POST /seo/v1/tenants/{tid}/domains body:domains[]",
-    "POST /seo/v1/tenants/{tid}/finance-client body:finance_client_id",
+    # C2-6h re-pin (G-7, T-6 R-kl may only shrink; OWNER DECISION 2026-11-15 02:00 PT (E-COMP)): the finance-client
+    # body field is stored only as its T-2 code c:text:<16hex>, so it no longer reaches any sink raw: pair removed
 ))
 
 
@@ -621,6 +624,16 @@ class World:
                                           "expected_state": cur, "reason": "QUALITY_REVIEW"}, andre=True)
         if key == f"POST {P}/jobs/{{name}}/run":
             return s({"name": "interrupted-audits"}, dict(r), caller="scheduler")
+        if key == f"POST {P}/tenants/{{tid}}/reveals":
+            # Lead ruling 01:20 PT (D) / G-7: the reveals route (core-spec/2 RV-1..RV-4) joins the canary route table.
+            # RevealBody is surface / run_id / span (extra=forbid, no request_id); owner caller = hub + its tenant
+            # token. Live wiring stays at its production default (settings.reveal absent = OFF): the route refuses
+            # before anything is read or audited (503), so planted canaries reach only the error body and the logs.
+            # The span is a synthetic brace-wrapped T-2 reference; no real value is involved.
+            out = s(A, {"surface": "citation_run", "run_id": ids["cid"],
+                        "span": "{c:text:" + f"{self.calls:016x}" + "}"}, caller="hub", expect=503)
+            out["tenant"] = "acme"
+            return out
         raise KeyError(key)
 
     def send(self, key: str, spec: dict, headers=None):
@@ -869,7 +882,7 @@ def test_every_route_and_every_string_field_with_canaries_leaves_nothing_but_the
     accepted = {f"{route} {field}" for route, field, _family in found}
     assert accepted == set(KNOWN_LIMIT), (sorted(accepted - set(KNOWN_LIMIT)), sorted(set(KNOWN_LIMIT) - accepted))
     # review 98b76cde: the host name with an ``at`` label is found exactly in the DOMAIN pair, a short token in
-    # the three pairs, and no other family anywhere
+    # the two pairs (C2-6h: E-COMP), and no other family anywhere
     by_family = collections.defaultdict(set)
     for route, field, family in found:
         by_family[family].add(f"{route} {field}")
@@ -956,10 +969,15 @@ def _mutated(name, patch, tmp_path, srv, caplog, monkeypatch, **kw):
     monkeypatch.setattr(sg, "OBSERVER", None)               # a mutated service's records are not the suite's
     sg._CACHE.clear()
     sg._KEYS.clear()
+    gates0 = (sg.violations, api._sanitize, log_sink._STATE["enabled"])
     patch(monkeypatch)
+    # FCL-REC (G-7): a patch that turns a write gate OFF (guard / error sanitiser / log judging) writes only
+    # test-synthetic records; the T-4 recorder pauses for it. A patch leaving the gates on (_inline alone) is recorded.
+    gate_off = (sg.violations, api._sanitize, log_sink._STATE["enabled"]) != gates0
     try:
         try:
-            res = scenario(tmp_path, srv, caplog, seed=5, quick=True, **kw)
+            with t4_recorder.paused() if gate_off else contextlib.nullcontext():
+                res = scenario(tmp_path, srv, caplog, seed=5, quick=True, **kw)
         except (AssertionError, pytest.fail.Exception):
             return "failed", None
         return "ran", stray_of(summarise(res["hits"]))
@@ -985,6 +1003,8 @@ def test_with_the_guard_off_and_nothing_inlined_the_scan_is_clean(tmp_path, srv,
     assert how == "ran" and not stray, (how, sorted(stray or {}))
 
 
+# C2-9c (V-1, T-2; lead ruling 17:55 PT F9-4): synthesises 20 of the 105 F2b-2 paths; no current src
+# writer emits them (core-v2/c29c/paths.md), so they stay untyped and refused. Kept, never deleted.
 @pytest.mark.local_http
 @pytest.mark.parametrize("kind", MIGRATED)
 def test_re_inlining_a_migrated_kind_is_refused_by_the_guard_and_found_by_the_scan(kind, tmp_path, srv, caplog,

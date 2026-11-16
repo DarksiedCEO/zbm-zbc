@@ -51,6 +51,7 @@ from urllib.parse import urlsplit
 import httpcore
 import httpx
 
+import outbound
 from ports import NOT_CONNECTED, ProviderAnswer
 
 MAX_RESPONSE_BYTES = 512 * 1024
@@ -383,6 +384,10 @@ class HttpAnswerEngine:
     def _body(self, model: str, prompt: str) -> bytes:
         raise NotImplementedError
 
+    def _outbound_kind(self) -> str:
+        """The (outbound, kind) of this engine's request body in sink_fields (C2-3c)."""
+        return self.name
+
     def _parse(self, raw: bytes, model: str) -> ProviderAnswer:
         raise NotImplementedError
 
@@ -406,6 +411,10 @@ class HttpAnswerEngine:
         if model not in self.models or not isinstance(prompt, str) or not 1 <= len(prompt) <= self.MAX_PROMPT_CHARS:
             raise EngineError("ENGINE_PROTOCOL_ERROR", "REQUEST_REFUSED")
         body = self._body(model, prompt)
+        if not allowed_url(self.BASE_URL + self._path(model), self.ALLOWED_HOSTS):
+            raise EngineError("ENGINE_NOT_CONNECTED", "HOST_NOT_ALLOWED")      # egress allow-list first (unchanged code)
+        if outbound.check(self._outbound_kind(), self.BASE_URL + self._path(model), body) is not None:
+            raise EngineError("ENGINE_PROTOCOL_ERROR", "REQUEST_REFUSED")   # C2-3c T-5 / E-LLM: refused, never sent
         end = self._mono() + self.timeout_s
         last = "ENGINE_UNAVAILABLE"
         for attempt in range(self.attempts):

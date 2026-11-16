@@ -23,14 +23,14 @@ import re
 from typing import Optional
 
 from agents import domain_match, secret_guard
-from config import CAPABILITY_SWITCHES, PROVIDER_SWITCHES, TENANT_ID
+from config import CAPABILITY_SWITCHES, PROVIDER_SWITCHES, TENANT_ID, TENANT_KINDS   # C2-6a2: kinds moved
 from errors import Conflict, Forbidden, Invalid, NotFound, Unavailable
 from primitives import Killed
 from reasons import R
 import sink_guard
+from finance_client import CLIENT_ID as FINANCE_CLIENT_REF   # C2-6g4: the declared grammar
 from svc_optext import url_view
 
-TENANT_KINDS = ("own", "client")
 # review 2b26d980 SHOULD 1: a punycode TLD (``xn--p1ai``) is a TLD too (an IDN domain is registered as A-labels)
 DOMAIN = re.compile(r"(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+(?:[a-z]{2,63}|xn--[a-z0-9-]{1,58}[a-z0-9])")
 DOMAINS_MAX = 20
@@ -45,19 +45,31 @@ def valid_domain(d) -> bool:
         and not domain_match.is_public_suffix(d)
 
 
-def identifier_refused(x, prose: bool = False) -> bool:
-    """Review c0c09bd1: an identifier (tenant id, Finance client id) holding a key, a 9+ digit run, an e-mail form
-    (review 2b26d980: also one written without its "@"), or failing the strict check (secret_guard.identifier_refusal).
-    ``prose`` (a tenant id, a Finance client id): also prose folded with hyphens / dots (secret_guard.folded_prose)."""
-    if secret_guard.identifier_refusal(x) is not None:
-        return True
-    if prose and secret_guard.folded_prose(x):
-        return True
-    # sink job D: an identifier is LOGGED, so it must be a machine value of the sink guard (a host name the host rule
-    # takes, a code of at most 64 characters holding a letter, a small number). One that is not is
-    # refused here (422 IDENTIFIER_WITHHELD) instead of being accepted and then refused at the sink (503)
-    return sink_guard.classify(x) is None
+def domain_invalid(d) -> bool:
+    """C2-2g (lead ruling F2f-3, core-spec/2 H rules, T-3): a domain entering from the API (a registered domain, a
+    competitor domain, the domain of an audit / schedule / citation run / log ingest) must be a host name in the
+    grammar the sink guard's host rule uses (``sink_guard.host_shaped``: dotted labels, no leading / trailing
+    hyphen, a letter or ``xn--`` IDNA TLD; and no ``syntax`` / ``tld`` / ``idna`` refusal of ``host_refusal``).
+    Anything else (``-0231``, ``0.154``, ``000778``) is refused 422 DOMAIN_INVALID before any write; a host name the
+    host rule refuses for its content (key- or number-shaped labels) stays IDENTIFIER_WITHHELD (domain_refused)."""
+    return not sink_guard.host_shaped(d) or sink_guard.host_refusal(d) in ("syntax", "tld", "idna")
 
+
+# C2-6i (lead ruling 07:40 PT): the predicate lives in sink_guard (cycle-free: it needs only secret_guard and the
+# sink's classify) so the sink's own-id check calls the SAME function; this module-level name is that function
+identifier_refused = sink_guard.identifier_refused
+
+
+def finance_ref_refused(x) -> bool:
+    """C2-6g4 (lead ruling 2026-11-15 03:20 PT, F6g3-1; OWNER DECISION 02:00 PT E-COMP; spec O-4 I, T-2): since E-COMP
+    the raw Finance client reference never reaches a sink (every sink holds its T-2 code), so the route does NOT judge
+    it with ``sink_guard.classify`` (a sink rule). It is validated by its own exact declared grammar
+    (``finance_client.CLIENT_ID``, ``[A-Za-z0-9._-]{1,100}``) after the unchanged identifier checks
+    (``secret_guard.identifier_refusal``, ``secret_guard.folded_prose``). The sink still refuses a raw reference in
+    its T-2 fields. Other identifier kinds keep ``identifier_refused``."""
+    if not isinstance(x, str) or secret_guard.identifier_refusal(x) is not None or secret_guard.folded_prose(x):
+        return True
+    return FINANCE_CLIENT_REF.fullmatch(x) is None
 
 def domain_refused(d) -> bool:
     """Review 2b26d980 SHOULD 1: a DOMAIN field (a tenant's domain, a competitor domain) is judged as a host name by
@@ -203,6 +215,7 @@ class TenantsMixin:
     def _seed(self) -> None:
         if OWN_TENANT not in self.tenants:
             data = {"tenant_id": OWN_TENANT, "kind": "own"}
+            sink_guard.register_tenant(OWN_TENANT)        # F6f3-1 (ruling 02:15 PT): registered before any sink write
             self._commit("tenant_created", data, "seo",
                          evidence=("tenant_created", f"tenant:{OWN_TENANT}", data, ("seed", OWN_TENANT)))
         self._seed_entity()
@@ -222,11 +235,13 @@ class TenantsMixin:
             if tid in self.tenants:
                 raise Conflict(R("TENANT_EXISTS"))
             data = {"tenant_id": tid, "kind": kind}
+            sink_guard.register_tenant(tid)               # F6f3-1 (ruling 02:15 PT): registered before any sink write
             self._commit("tenant_created", self._req(data, "andre", rk, body, tid), "andre",
                          evidence=("tenant_created", f"tenant:{tid}", data, ("andre", rk)))
             return self.tenant_view(tid)
 
     def _a_tenant_created(self, d, at):
+        sink_guard.register_tenant(d["tenant_id"])        # F6f3-1: replay / restart re-registers every tenant
         self.tenants[d["tenant_id"]] = {"tenant_id": d["tenant_id"], "kind": d["kind"], "domains": [],
                                         "killed": False, "created_at": at, "finance_client_id": None,
                                         "gsc_property": None}
@@ -235,7 +250,7 @@ class TenantsMixin:
         domains = body["domains"]
         if len(domains) > DOMAINS_MAX:
             raise Invalid(R("DOMAIN_LIMIT"))
-        if not all(valid_domain(d) for d in domains) or len(set(domains)) != len(domains):
+        if not all(valid_domain(d) and not domain_invalid(d) for d in domains) or len(set(domains)) != len(domains):
             raise Invalid(R("DOMAIN_INVALID"))
         if any(domain_refused(d) for d in domains):       # review c0c09bd1: a registrable host name, not prose
             raise Invalid(R("IDENTIFIER_WITHHELD"))
@@ -264,24 +279,115 @@ class TenantsMixin:
         """Andre binds a client tenant to its Finance (31) client id (Legal's party reference at Finance), so a paid
         run can check that the invoice is this client's (ADR 0017 W3-2). Re-binding is allowed and recorded; the
         id is never read from a page, an invoice or a caller other than Andre."""
-        if identifier_refused(body["finance_client_id"], prose=True):  # review c0c09bd1: an identifier, not prose
+        if finance_ref_refused(body["finance_client_id"]):   # C2-6g4 ruling 03:20 PT: its own grammar (O-4 I)
             raise Invalid(R("IDENTIFIER_WITHHELD"))
         with self.lock:
             self._gate()
             self.check_kill(tenant=tid, write=True)
             t = self._get(self.tenants, tid, "TENANT_NOT_FOUND")
             rk = self.rk("finance_client", tid, body)
-            if self._idem("andre", rk, body):
+            # C2-6g2 E-COMP (owner decision 2026-11-15 02:00 PT): every sink (ledger, seo_log, idempotency hash) and
+            # the runtime binding hold ONLY the T-2 reference c:text:<16hex>; the raw reference is in the tenant vault
+            code = self._fc_code(tid, body["finance_client_id"])
+            hbody = {**body, "finance_client_id": code}
+            if self._idem("andre", rk, hbody):
                 return self.tenant_view(tid)
             if t["kind"] != "client":
                 raise Invalid(R("TENANT_KIND_INVALID"))
-            data = {"tenant_id": tid, "finance_client_id": body["finance_client_id"]}
-            self._commit("tenant_finance_client_set", self._req(data, "andre", rk, body, tid), "andre",
-                         evidence=("tenant_finance_client_set", f"tenant:{tid}", data, ("andre", rk)))
+            vid = self._fc_seal(tid, code, body["finance_client_id"])
+            data = {"tenant_id": tid, "finance_client_id": code}
+            try:
+                self._commit("tenant_finance_client_set", self._req(data, "andre", rk, hbody, tid), "andre",
+                             evidence=("tenant_finance_client_set", f"tenant:{tid}", data, ("andre", rk)))
+            except BaseException:
+                self.optext_vault.note_orphans(1)
+                raise
+            self._fc_vids()[(tid, code)] = vid
             return self.tenant_view(tid)
 
     def _a_tenant_finance_client_set(self, d, at):
-        self.tenants[d["tenant_id"]]["finance_client_id"] = d["finance_client_id"]
+        tid, ref = d["tenant_id"], d["finance_client_id"]
+        if not (isinstance(ref, str) and self._FC_T2.match(ref)):
+            ref = self._fc_legacy(tid, ref)
+        self.tenants[tid]["finance_client_id"] = ref   # the T-2 code (E-COMP)
+
+    # C2-10c3 (OWNER DECISION 2026-11-15 ~15:40 PT "count and contain", V-6 exception): a line written by ffd28ca8 /
+    # cbdf5e78 / 3120f0b0 holds the RAW party id. The line stays untouched (append-only; counted by
+    # legacy_prose_lines, withheld by sink_guard.withhold in audit_export: C2-10c4); the replay binds the T-2 code
+    # and keeps the raw value only in the tenant's vault (sealed once, the first start that finds it unsealed;
+    # never in a new log line or ledger event)
+    _FC_T2 = re.compile(r"c:text:[0-9a-f]{16}\Z")
+
+    def _fc_legacy(self, tid, raw):
+        if not (isinstance(tid, str) and isinstance(raw, str)):
+            return None
+        try:
+            code = self._fc_code(tid, raw)
+        except Exception:  # noqa: BLE001 - no key / store error: fail closed (no binding; paid runs refuse)
+            return None
+        if self._fc_open(tid, code) is None and not getattr(self, "_observe_only", False):
+            try:
+                self._fc_vids()[(tid, code)] = self._fc_seal(tid, code, raw)
+            except Exception:  # noqa: BLE001 - not sealed: the binding stays, E-COMP opens nothing (fail closed)
+                pass
+        return code
+
+    # C2-6g2 E-COMP: the finance client reference in the tenant's operator text vault, {code -> raw}
+    FC_KIND = "finance_client/v1"
+
+    def _fc_vids(self) -> dict:
+        m = getattr(self, "_fc_vid_map", None)
+        if m is None:
+            m = self._fc_vid_map = {}
+        return m
+
+    def _fc_code(self, tid: str, raw: str) -> str:
+        """The T-2 reference of ``raw`` for ``tid`` (B-CD-01 kind ``text``). No key: VAULT_UNAVAILABLE."""
+        import vault as vault_mod
+        from errors import Unavailable
+        try:
+            return "c:text:" + self.optext_vault.coder(tid).code("text", raw)
+        except vault_mod.VaultUnavailable:
+            raise Unavailable(R("VAULT_UNAVAILABLE")) from None
+        except vault_mod.VaultError:
+            raise Unavailable(R("STORE_UNAVAILABLE")) from None
+
+    def _fc_code_or_none(self, tid, raw):
+        """``_fc_code`` for a comparison (Finance's answer): None when it cannot be coded (never equal)."""
+        try:
+            return self._fc_code(tid, raw) if isinstance(raw, str) and isinstance(tid, str) else None
+        except Exception:  # noqa: BLE001 - fail closed: no code, no match
+            return None
+
+    def _fc_seal(self, tid: str, code: str, raw: str) -> str:
+        import vault as vault_mod
+        from errors import Unavailable
+        try:
+            return self.optext_vault.put(tid, {"kind": self.FC_KIND, "code": code, "ref": raw})
+        except vault_mod.VaultUnavailable:
+            raise Unavailable(R("VAULT_UNAVAILABLE")) from None
+        except vault_mod.VaultError:
+            raise Unavailable(R("STORE_UNAVAILABLE")) from None
+
+    def _fc_open(self, tid, code):
+        """E-COMP: the raw reference behind ``code`` from ``tid``'s OWN vault, or None (no key, lost, another
+        tenant's record: AES-GCM is bound to the tenant). Used ONLY to build the Compliance activation request."""
+        import vault as vault_mod
+        if not isinstance(tid, str) or not isinstance(code, str):
+            return None
+        vids = self._fc_vids()
+        vid = vids.get((tid, code))
+        cands = [vid] if vid is not None else list(reversed(list(getattr(self.optext_vault, "_index", {}))))
+        for v in cands:
+            try:
+                rec = self.optext_vault.get(tid, v)
+            except vault_mod.VaultError:
+                continue
+            if isinstance(rec, dict) and rec.get("kind") == self.FC_KIND and rec.get("code") == code \
+                    and isinstance(rec.get("ref"), str):
+                vids[(tid, code)] = v
+                return rec["ref"]
+        return None
 
     def tenant_view(self, tid: str) -> dict:
         with self.lock:

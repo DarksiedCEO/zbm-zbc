@@ -45,10 +45,29 @@ def test_core_R_matrix_residual_sizes(sg, item, sp, lane):
 
 def test_core_R_c_hindi_written_as_two_words(sg):
     a, b = S["S19"][:3], S["S19"][3:]
-    texts = [f"{a}{s}{b}: {VALUE}" for s in (" ", "-", "_")]
-    read = sum(1 for t in texts if sg.check(t) == "a_label" or sg.client_view_findings(t))
-    print(f"R-c: forms={len(texts)} read={read}")
+    # FCL-CVR re-pin (core-spec/2 section 8: residual c "closed BY DESIGN for valueish values (CV-3 masks whatever the
+    # label)", lead ruling 20:40 PT, G-7, STRONGER than v1): per form the label stays UNREAD (strict not "a_label", no
+    # client-view label_value finding) AND UNMASKED (no CV span starts inside the label), while the VALUE IS masked (a
+    # CV span covers it). Judged CV lane bar: CV-8 (test_core_cv8; full pass lead 21:15 PT).
+    from agents import cv_shape as V
+    forms = []
+    for s in (" ", "-", "_"):
+        label = f"{a}{s}{b}"
+        t = f"{label}: {VALUE}"
+        spans = V.spans_and_urls(t)[0]
+        v0 = len(label) + 2
+        forms.append({"strict_label": sg.check(t) == "a_label",
+                      "cv_label_value": "label_value" in sg.client_view_findings(t),
+                      "label_masked": any(sp[0] < len(label) for sp in spans),
+                      "value_masked": any(sp[0] <= v0 and sp[1] >= v0 + len(VALUE) for sp in spans),
+                      "cv_findings": sorted(sg.client_view_findings(t))})
+    read = sum(1 for f in forms if f["strict_label"] or f["cv_label_value"] or f["label_masked"])
+    masked = sum(1 for f in forms if f["value_masked"])
+    print(f"R-c: forms={len(forms)} label read or masked={read} value masked={masked} "
+          f"findings={[f['cv_findings'] for f in forms]}")
     assert read == 0                                  # (and O-4 PIN pins the 182 pairs N)
+    assert masked == len(forms)
+    assert all(f["cv_findings"] == ["value_shape"] for f in forms)
 
 
 def test_core_R_d1_bare_key_not_masked(sg):

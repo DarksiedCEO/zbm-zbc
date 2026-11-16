@@ -24,6 +24,7 @@ import utility_corpus_v2 as uc
 import svc_citations
 import vault
 from agents import callum
+from agents import cv_shape
 from agents import prompt_guard
 from agents import secret_guard as sg
 from ports import ProviderAnswer
@@ -487,6 +488,37 @@ BITES = {
 }
 
 
+# C2-CL2b re-point (G-7; core-spec/2 CV-3, ST-2): under v2 the label-independent value-shape rule (CV-3) still masks
+# these probes when the v1 client rule is removed, so "client leaks" is re-pointed at a measurable bite: the v1 finding
+# is lost (report), the value shape still masks every probe (shown 0), and with the v1 rule AND the VS rule removed the
+# value is shown again (the v2 rule carries the protection). Same pattern as C2-CL2a (test_review_08eea6e1.vs_carries).
+V2_ONLY = frozenset({"value_shape", "url_personal", "url_credential"})
+VS_CARRIED = frozenset({"cv_double_dash", "cv_nospace_label", "decoded_pct_rounds"})
+
+
+def no_vs(mp) -> None:
+    """Remove the v2 VS rule (CV-3 spans) at BOTH entry points (value_spans; spans_and_urls since C2-CL4); the URL
+    lane (CV-7) is kept as is."""
+    if hasattr(cv_shape, "spans_and_urls"):
+        both = cv_shape.spans_and_urls
+        mp.setattr(cv_shape, "spans_and_urls", lambda text: ([], both(text)[1]))
+    mp.setattr(cv_shape, "value_spans", lambda text: [])
+
+
+def vs_carries(mp, probes) -> tuple:
+    """(v1 lost, shown with the v1 rule removed, shown with the v1 rule AND the VS rule removed)."""
+    lost = sum(1 for p in probes if not (set(sg.client_view_findings(p)) - V2_ONLY))
+    shown = sum(1 for p in probes if not sg.client_view_findings(p))
+    saved = {n: getattr(cv_shape, n) for n in ("value_spans", "spans_and_urls") if hasattr(cv_shape, n)}
+    no_vs(mp)
+    try:
+        shown_no_vs = sum(1 for p in probes if not sg.client_view_findings(p))
+    finally:
+        for n, f in saved.items():
+            mp.setattr(cv_shape, n, f)
+    return lost, shown, shown_no_vs
+
+
 def _probes(where):
     lane, cls = where
     return (strict_cases() if lane == "strict" else client_cases())[cls]
@@ -503,7 +535,12 @@ def test_each_new_rule_is_load_bearing(monkeypatch, name):
     client_leaks = sum(1 for p in cv_probes if not sg.client_view_findings(p))
     if lane in ("both", "strict"):
         assert strict_leaks > 0, (name, "strict: removing this rule broke nothing")
-    if lane in ("both", "client"):
+    if lane in ("both", "client") and name in VS_CARRIED:            # C2-CL2b re-point (CV-3, ST-2, G-7)
+        lost, shown, shown_no_vs = vs_carries(monkeypatch, cv_probes)
+        assert lost > 0, (name, "client: removing this rule lost no v1 finding")
+        assert shown == 0 == client_leaks, (name, "CV-3 value shape must still mask every case")
+        assert shown_no_vs > 0, (name, "client: removing this rule and the VS rule broke nothing")
+    elif lane in ("both", "client"):
         assert client_leaks > 0, (name, "client: removing this rule broke nothing")
 
 
@@ -659,7 +696,7 @@ def test_a_real_citation_run_writes_none_of_the_new_shapes_and_the_owner_view_ma
     leaks = vw.found(vw.written(h, caplog), _secret_values(v))
     assert leaks == [], leaks                                          # names only
     assert len(h.svc.vault) >= 1                                       # the full evidence went to the vault
-    got = h.ok(h.get(f"/tenants/zbm/citation-runs/{cid}"))
+    got = h.ok(h.get(f"/tenants/zbm/citation-runs/{cid}", caller="hub", tenant="zbm"))
     shown = vw.found(json.dumps(got, ensure_ascii=False), _secret_values(v))
     assert shown == [], shown
     ev = [r["evidence"] for r in got["result"]["facts"]["rows"] if r.get("evidence")]
@@ -675,7 +712,7 @@ def _md_only_run(tmp_path, caplog) -> tuple:
     h.ports.engines["openai"] = _Port([a])
     h.ok(h.post("/tenants/zbm/domains", {"request_id": vw.rid(), "domains": [vw.DOMAIN]}, andre=True))
     run = vw.citation_run(h)
-    got = json.dumps(h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}")), ensure_ascii=False)
+    got = json.dumps(h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}", caller="hub", tenant="zbm")), ensure_ascii=False)
     vals = {"md_email_local": v["md_email_local"]}
     return vw.found(vw.written(h, caplog), vals), vw.found(got, vals)
 
@@ -685,7 +722,17 @@ def test_the_real_run_mutation_on_the_markdown_view_is_caught(tmp_path, caplog, 
     (tmp_path / "b").mkdir()
     assert _md_only_run(tmp_path / "a", caplog) == ([], [])
     monkeypatch.setattr(sg, "_strip_md", lambda t: t)
+    # C2-CL2b re-point (G-7; CV-3, CV-10e): without the markdown view the v1 e-mail finding is lost (the bite, measured
+    # on the answer text), but the v2 VS / K-5 rule still masks the local part end to end (CV-10e: shown 0); with the
+    # VS rule removed too the owner view shows it again.
+    v = _service_values()
+    md_text = f"Z Best Media support: write to {v['md_email']} today."
+    assert not (set(sg.client_view_findings(md_text)) - V2_ONLY)        # the v1 finding is gone (report)
     _written, shown = _md_only_run(tmp_path / "b", caplog)
+    assert shown == []                                                  # CV-3 / K-5 carry it (CV-10e)
+    (tmp_path / "c").mkdir()
+    no_vs(monkeypatch)
+    _written, shown = _md_only_run(tmp_path / "c", caplog)
     assert shown == ["md_email_local"]                       # the owner view shows it without the markdown view
 
 
@@ -757,7 +804,7 @@ def test_a_torn_final_vault_line_is_cut_at_start_and_recorded_with_counts_only(t
     evs = h2.ledger.of_type("citation_vault_tail_repaired")
     assert len(evs) == 1 and set(evs[0]["_payload"]) >= {"torn_lines", "bytes_removed", "records_kept"}
     assert "AAAAAAAAAAA" not in json.dumps(evs)
-    b = h2.ok(h2.get(f"/tenants/zbm/citation-runs/{a['citation_run_id']}"))
+    b = h2.ok(h2.get(f"/tenants/zbm/citation-runs/{a['citation_run_id']}", caller="hub", tenant="zbm"))
     assert b["result"] == a["result"]                                  # every record still reads
 
 
@@ -829,15 +876,26 @@ def test_utility_of_both_lanes_on_prices_years_and_quantities():
     assert withheld <= STRICT_SHOP_NUMBERS_WITHHELD, withheld
 
 
+# core-spec/2 re-pin (G-7; owner decision 4 + lead ruling F7b-1, judged by CV-8): the 5% bar applies to masks from v1
+# findings; value_shape-only masks (CV-3/CV-5) are counted and pinned to the measured disclosure (23 / 312 at core-v2
+# C2-CL3, the same corpus and the same 23 as test_vault_wiring). Any change of this count must be explained.
+CV8_DISCLOSED_REPO_EXCERPT_VS = 23
+
+
 def test_utility_of_the_client_view_on_the_repo_corpora_stays_under_the_bars():
     ex = uc.excerpts()
-    masked = 0
+    masked = vs_only = 0
     for i, b, e in ex:
         raw = callum._raw_excerpt(uc.ANSWERS[i], [b] if b else [])
         found = callum._excerpt_view_findings(uc.ANSWERS[i], [b] if b else [])
         d = callum._display("excerpt", raw, e["withheld"], found)
-        masked += bool(d and d["alert"])
+        if d and d["alert"]:
+            if set(sg.client_view_findings(raw)) | set(found) <= {"value_shape"}:
+                vs_only += 1                                                   # CV-3 value shape only: disclosed
+            else:
+                masked += 1                                                    # a v1 finding: under the bar
     assert masked / len(ex) <= 0.05, masked
+    assert vs_only == CV8_DISCLOSED_REPO_EXCERPT_VS, vs_only
     assert sum(1 for _i, _b, e in ex if e["withheld"]) == 22                    # the strict lane: unchanged
     urls = [u for _, u in uc.urls()]
     assert sum(1 for u in urls if sg.client_view_url(u)[1]) / len(urls) <= 0.025

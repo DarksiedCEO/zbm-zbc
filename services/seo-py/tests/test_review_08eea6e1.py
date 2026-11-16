@@ -27,7 +27,7 @@ import test_vault_wiring as vw
 import utility_corpus_v2 as uc
 
 import vault
-from agents import callum
+from agents import callum, cv_shape
 from agents import secret_guard as sg
 from ports import ProviderAnswer
 
@@ -243,6 +243,33 @@ def _no_trim_old_offsets(mp):
     mp.setattr(sg, "B64_OFFSETS", 4)
 
 
+# C2-CL2a re-point (G-7; core-spec/2 CV-3, ST-2): under v2 the label-independent value-shape rule (CV-3) still masks a
+# case a removed v1 decode rule no longer reads, so "the client view leaks" is no longer the bite. A load-bearing b64
+# test now asserts (1) the v1 bite: the v1 finding is lost (report), (2) the value stays masked with the v1 rule removed
+# (protection carried by CV-3), (3) removing BOTH the v1 rule and the v2 VS rule leaks (v2 carries the protection).
+V2_ONLY = frozenset({"value_shape", "url_personal", "url_credential"})
+VS_CARRIED = frozenset({"b64_offsets_and_trim_prefix", "b64_trim_suffix"})
+
+
+def vs_carries(mp, probes, want=None) -> tuple:
+    """(v1 lost, shown with the v1 rule removed, shown with the v1 rule AND cv_shape.value_spans removed)."""
+    def v1_lost(f):
+        return (want not in f) if want is not None else not (set(f) - V2_ONLY)
+    lost = sum(1 for p in probes if v1_lost(sg.client_view_findings(p)))
+    shown = sum(1 for p in probes if not sg.client_view_findings(p))
+    saved = {n: getattr(cv_shape, n) for n in ("value_spans", "spans_and_urls") if hasattr(cv_shape, n)}
+    mp.setattr(cv_shape, "value_spans", lambda text: [])                # the v2 VS rule removed (CV-3 spans only;
+    if "spans_and_urls" in saved:                                       # the URL lane, CV-7, is kept as is)
+        both = saved["spans_and_urls"]
+        mp.setattr(cv_shape, "spans_and_urls", lambda text: ([], both(text)[1]))
+    try:
+        shown_no_vs = sum(1 for p in probes if not sg.client_view_findings(p))
+    finally:
+        for n, f in saved.items():
+            mp.setattr(cv_shape, n, f)
+    return lost, shown, shown_no_vs
+
+
 def _old_ssn_sep(mp):
     mp.setattr(sg, "_cv_ssn_sep", lambda x: sg._cv_sep(x, " "))
 
@@ -284,7 +311,12 @@ def test_each_new_rule_is_load_bearing(monkeypatch, name):
     patch(monkeypatch)
     if "strict" in lanes:
         assert sum(1 for p in probes if sg.check(p) is None) > 0, (name, "strict: removing this rule broke nothing")
-    if "client" in lanes:
+    if "client" in lanes and name in VS_CARRIED:                       # C2-CL2a re-point (CV-3, ST-2, G-7)
+        lost, shown, shown_no_vs = vs_carries(monkeypatch, probes, CLASS_OF.get(cls))
+        assert lost > 0, (name, "client: removing this rule lost no v1 finding")
+        assert shown == 0, (name, "CV-3 value shape must still mask every case")
+        assert shown_no_vs > 0, (name, "client: removing this rule and the VS rule broke nothing")
+    elif "client" in lanes:
         want = CLASS_OF.get(cls)
         leaks = sum(1 for p in probes if (not sg.client_view_findings(p) if want is None
                                           else want not in sg.client_view_findings(p)))
@@ -296,7 +328,8 @@ def test_offsets_4_7_alone_read_aligned_prefixes(monkeypatch):
     monkeypatch.setattr(sg, "DECODE_TRIM", 0)                          # offsets alone (no trim) still read them
     assert sum(1 for p in probes if not sg.client_view_findings(p)) == 0
     monkeypatch.setattr(sg, "B64_OFFSETS", 4)
-    assert sum(1 for p in probes if not sg.client_view_findings(p)) > 0
+    lost, shown, shown_no_vs = vs_carries(monkeypatch, probes)        # C2-CL2a re-point (CV-3, ST-2, G-7)
+    assert lost > 0 and shown == 0 and shown_no_vs > 0, (lost, shown, shown_no_vs)
 
 
 def test_decoding_stays_bounded_per_run():
@@ -410,14 +443,26 @@ def test_client_view_utility_on_generated_shop_prose_is_under_the_bar():
     assert sum(1 for t in texts if sg.check(t) is not None) / len(texts) <= STRICT_SHOP_PROSE_WITHHELD
 
 
+# core-spec/2 re-pin (G-7; owner decision 4 + lead ruling F7b-1, judged by CV-8): the 5% bar applies to masks from v1
+# findings; value_shape-only masks (CV-3/CV-5) are counted and pinned to the measured disclosure (23 / 312 at core-v2
+# C2-CL3, the same corpus and the same 23 as test_vault_wiring). Any change of this count must be explained.
+CV8_DISCLOSED_REPO_EXCERPT_VS = 23
+
+
 def test_client_view_utility_on_the_repo_corpora_is_unchanged():
     ex = uc.excerpts()
-    masked = 0
+    masked = vs_only = 0
     for i, b, e in ex:
-        d = callum._display("excerpt", callum._raw_excerpt(uc.ANSWERS[i], [b] if b else []), e["withheld"],
-                            callum._excerpt_view_findings(uc.ANSWERS[i], [b] if b else []))
-        masked += bool(d and d["alert"])
-    assert masked / len(ex) <= 0.05
+        raw = callum._raw_excerpt(uc.ANSWERS[i], [b] if b else [])
+        found = callum._excerpt_view_findings(uc.ANSWERS[i], [b] if b else [])
+        d = callum._display("excerpt", raw, e["withheld"], found)
+        if d and d["alert"]:
+            if set(sg.client_view_findings(raw)) | set(found) <= {"value_shape"}:
+                vs_only += 1                                                   # CV-3 value shape only: disclosed
+            else:
+                masked += 1                                                    # a v1 finding: under the bar
+    assert masked / len(ex) <= 0.05, masked
+    assert vs_only == CV8_DISCLOSED_REPO_EXCERPT_VS, vs_only
     assert sum(1 for _i, _b, e in ex if e["withheld"]) == 22                    # the strict lane: unchanged
     urls = [u for _, u in uc.urls()]
     assert sum(1 for u in urls if sg.client_view_url(u)[1]) / len(urls) <= 0.025
@@ -565,7 +610,7 @@ def test_a_real_citation_run_writes_none_of_the_new_shapes_and_the_owner_view_ma
     leaks = vw.found(vw.written(h, caplog), secrets_)
     assert leaks == [], leaks                                          # names only: data dir, ledger, logs
     assert len(h.svc.vault) >= 1
-    got = h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}"))
+    got = h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}", caller="hub", tenant="zbm"))
     shown = vw.found(json.dumps(got, ensure_ascii=False), secrets_)
     assert shown == [], shown                                          # the owner view masks every class
     ev = [r["evidence"] for r in got["result"]["facts"]["rows"] if r.get("evidence")]

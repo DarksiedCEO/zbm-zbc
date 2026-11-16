@@ -15,6 +15,23 @@ from helpers import Harness, PassingCompliance, base_env, derived, rid, ruling_i
 from ports import Ports
 from test_invoice_verification import CLIENT, FakeFinance, client_tenant, harness, paid_audit, schedule, tick
 
+
+@pytest.fixture(autouse=True)
+def _e_auth_configured_client_id():
+    """C2-3c4 re-pin (lead ruling 17:15 PT F3c3-1, G-7; nothing deleted, no assertion changed): a direct
+    ComplianceClient.activation call outside svc_invoices binds this suite's CLIENT as the configured client id
+    (svc_invoices binds the run's own client id itself).
+    C2-6g3 re-pin (OWNER DECISION 2026-11-15 02:00 PT (E-COMP), lead ruling 02:40 PT, G-7; no assertion changed): the Compliance path rule is ``ecomp``, so a direct call binds
+    this suite's CLIENT by its T-2 code, a tenant coder and the configured Compliance host (BASE's host)."""
+    from urllib.parse import urlsplit
+
+    import outbound
+    import vault as vault_mod
+    coder = vault_mod.Coder(vault_mod.ephemeral_vault_key(), "acme")
+    with outbound.configured(compliance_client_id=CLIENT), \
+            outbound.e_comp("c:text:" + coder.code("text", CLIENT), coder, urlsplit(BASE).hostname):
+        yield
+
 pytestmark = pytest.mark.local_http
 
 BASE = "http://compliance.railway.internal:8380"
@@ -116,12 +133,15 @@ def test_settings_come_as_a_set_and_wire_the_client():
 
 # --- the paid-run gate ----------------------------------------------------------------------------------------------
 
-def test_compliance_down_refuses_a_paid_audit_even_with_andre_s_override(tmp_path, srv):
+def test_compliance_down_refuses_a_paid_audit_even_with_andre_s_override(tmp_path, srv, monkeypatch):
     f = FakeFinance()
     h = harness(tmp_path, srv, f)
     cmp_ = FakeCompliance()
     cmp_.mode = "down"
     h.ports.compliance = cmp_.client()
+    # C2-6g3 harness re-pin (OWNER DECISION 2026-11-15 02:00 PT (E-COMP), lead ruling 02:40 PT, G-7): the configured Compliance host is the one this client talks to (the
+    # ecomp rule admits the activation request only to that exact host)
+    monkeypatch.setattr(h.svc.settings, "compliance_url", BASE)
     client_tenant(h)
     iid = f.add()
     r = h.refused(paid_audit(h, invoice_id=iid), 503, "COMPLIANCE_UNAVAILABLE")

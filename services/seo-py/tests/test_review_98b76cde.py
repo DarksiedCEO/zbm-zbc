@@ -293,7 +293,9 @@ def writes(h, psid: str, n: int) -> None:
     run = h.ok(h.post("/tenants/acme/citation-runs", {"request_id": rid(), "domain": DOMAINS[1], "prompt_set_id": psid,
                                                       "engines": ["openai"]}, caller="dashboard", andre=True), 201)
     assert run["status"] == "completed"
-    view = h.ok(h.get(f"/tenants/acme/citation-runs/{run['citation_run_id']}", caller="dashboard"))
+    # C2-10e re-pin (G-7; lead ruling 10:05 PT F10b-1, V-4 D-02h): the run text is read by the owner
+    # caller (hub + tenant token); dashboard now gets the code-only view. Assertions unchanged.
+    view = h.ok(h.get(f"/tenants/acme/citation-runs/{run['citation_run_id']}", caller="hub", tenant="acme"))
     kept, withheld, hosts = host_rows(view)
     assert len(CITED) >= 100 and hosts >= set(CITED) and kept >= len(CITED) and withheld == 0, (kept, withheld)
     h.ok(h.post("/tenants/acme/schedules", {

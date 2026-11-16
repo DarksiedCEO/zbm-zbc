@@ -45,6 +45,7 @@ from primitives import Killed
 from primitives import robots as robots_mod
 from reasons import R
 import sink_guard
+from report_fields import LOG_REPORT
 from svc_vaulted import INGEST_INPUTS_FIELD, LOG_DELTA_FIELD, LOG_REPORT_FIELD, normalised, owner_view
 
 CHUNK_MAX = 90_000
@@ -133,6 +134,9 @@ class LogsMixin:
             prev = self._idem(actor, rk, body)
             if prev:
                 return self.log_ingest_view(tid, prev[1])
+            from svc_tenants import domain_invalid
+            if domain_invalid(body["domain"]):        # C2-2g: a non-hostname is 422 DOMAIN_INVALID, before any write
+                raise Invalid(R("DOMAIN_INVALID"))
             if body["domain"] not in t["domains"]:
                 raise Forbidden(R("DOMAIN_NOT_AUTHORIZED"))
             self._check_log_caps(tid, new_ingest=True)
@@ -549,7 +553,7 @@ class LogsMixin:
             if report is None:
                 out["vault_unavailable"] = True            # never served from anywhere else
             else:
-                report = owner_view(report)
+                report = owner_view(report, doc=LOG_REPORT)
         out["report"] = report if full else None
         return out
 

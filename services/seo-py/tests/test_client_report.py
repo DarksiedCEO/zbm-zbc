@@ -29,6 +29,8 @@ import report_fixtures as fx
 from fixture_server import install_site
 from helpers import ANDRE, CALLERS, SERVICE_TOKEN, Harness, base_env, rid
 from ports import Ports, ProviderAnswer
+from report_fields import AUDIT_REPORT
+from svc_vaulted import owner_view
 
 GOLDEN = Path(__file__).resolve().parent / "golden" / "client_report"
 UPDATE = os.environ.get("UPDATE_GOLDEN") == "1"
@@ -396,9 +398,14 @@ def test_route_renders_a_real_audit_recorded_first_with_its_hash(tmp_path, srv):
     assert "content" not in json.dumps(p) and "site.test" not in json.dumps(p)
     st = {(e["event_type"], e["status"]) for e in h.ok(h.get("/audit/evidence", caller="compliance_38"))["evidence"]}
     assert ("client_report_rendered", "committed") in st
-    # the service's document is exactly the deterministic render of the stored audit view
+    # OWNER DECISION 19:20 PT / lead ruling 20:15 PT (card C2-OV3; replaces the C2-OV2 pin): the client document is an
+    # owner display surface rendered through the SAME owner-view routing as the API: the API owner view is the
+    # recorded report THROUGH owner_view (same CV on free text, typed machine fields incl. code_text shown), and the
+    # service's document is byte for byte the render of that view. The document hash check above is unchanged.
+    rec = h.svc._audit_recorded("zbm", a["audit_id"])
     view = h.ok(h.get(f"/tenants/zbm/audits/{a['audit_id']}"))
-    assert cr.render(view, "zbm", "html")[0] == data
+    through = json.loads(json.dumps({**rec, "report": owner_view(rec["report"], doc=AUDIT_REPORT)}))
+    assert view == through and cr.render(view, "zbm", "html")[0] == cr.render(through, "zbm", "html")[0] == data
     md = h.ok(_report(h, "zbm", a["audit_id"], fmt="markdown"))
     assert md["content"].startswith("# SEO technical audit: ` site.test `")
     listed = h.ok(h.get(f"/tenants/zbm/audits/{a['audit_id']}/client-reports"))
@@ -1039,7 +1046,11 @@ def test_historical_view_replays_recorded_renderer_two_without_backfill(h, monke
     events = len(h.ledger.of_type('client_report_rendered'))
     second = h.svc.render_client_report('acme', legacy['audit_id'], req)
     assert first == second and first['renderer_version'] == 'seo-client-report/2'
-    assert first['document_sha256'] == hashlib.sha256(cr.render(legacy, 'acme', 'html')[0]).hexdigest()
+    # lead rulings 20:15 / 20:35 PT (C2-OV3 / C2-OV3b): the document renders the report THROUGH owner_view
+    # (the owner's request /paths[] typed and shown; free text through the CV); hash check kept
+    through = {**legacy, 'report': owner_view(legacy['report'], doc=AUDIT_REPORT)}
+    assert first['document_sha256'] == hashlib.sha256(cr.render(through, 'acme', 'html')[0]).hexdigest()
+    assert through['report']['paths'] == legacy['report']['paths']
     assert len(h.ledger.of_type('client_report_rendered')) == events == 1
     assert legacy == original
     entity = next(e for e in legacy['report']['agents'] if e['agent']=='entity_check')

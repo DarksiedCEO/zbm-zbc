@@ -2166,3 +2166,29 @@ time.
 - Losing the key loses the vault's contents; the key needs to be kept (in the platform's secret store and an offline
   copy Andre controls).
 - `get` reads one line by offset from an in-memory index built at open, so open time is linear in the file size.
+
+### Note (core-spec/2 C2-3b, 2026-11-14): error bodies are a typed sink (T-3 / T-5; lead rulings F3-2, F3-6)
+- API contract tightening (owner informed, like DOMAIN_INVALID): a 422 validation body item is now
+  `{loc, msg_code, type}`; the pydantic `msg` prose is no longer sent. `msg_code` is the error type when it is one of
+  `api.ERROR_TYPES_WITH_MESSAGE` (whose v1 text came from the schema alone), else `invalid` (`api.ERROR_MSG_CODES`).
+- A domain error body is `{"detail": <reason code>}` plus a CLOSED set of kwargs per reason (`sink_fields` sink
+  `error`, kind = reason code): `field` (enum engines / path / reason) on INVALID only; `override_allowed` (boolean)
+  on the Finance / Compliance / VAULT_UNAVAILABLE reasons. An unknown or ill-typed kwarg is refused: the body is sent
+  as `{"detail": <reason>}` only and counted in `api.ERROR_REFUSED` (never rewritten).
+
+- C2-3b2 (2026-11-14, lead rulings 15:32 PT F3b-1..F3b-3 and 17:50 PT F4-1): API contract tightening, informational. A 422 `loc` element for a key the caller invented is the code `unknown_key` (was "*"). The 500 body is {"detail": "INTERNAL_ERROR"} (was "internal error"); a domain error whose reason is outside the catalogue answers INTERNAL_ERROR (counted). The framework default 404 / 405 bodies are {"detail": "NOT_FOUND"} / {"detail": "METHOD_NOT_ALLOWED"}. Reason catalogue += INTERNAL_ERROR, NOT_FOUND, METHOD_NOT_ALLOWED.
+
+- C2-3b3 (2026-11-14, lead rulings 18:20 PT F3b2-1..F3b2-3): API contract tightening, informational. A 401 body is
+  `{"detail": "AUTH_MISSING"}` (no / malformed Authorization header) or `{"detail": "AUTH_INVALID"}` (token invalid),
+  `WWW-Authenticate: Bearer` kept. The input-limit refusals answer one closed code each, no prose: 414 URI_TOO_LONG,
+  431 HEADERS_TOO_LARGE, 413 BODY_TOO_LARGE, 400 BAD_REQUEST, 415 UNSUPPORTED_MEDIA_TYPE, 408 REQUEST_TIMEOUT,
+  422 BODY_REFUSED. A SeoError whose reason is not in the catalogue answers 500 INTERNAL_ERROR (was the exception's
+  status). Catalogue additions in reasons.CODES (code-base constants, not a spec change).
+
+## Correction 2026-11-15 (core-spec/2 G-8, finding F-1) - decision 76 headline
+
+Decision 76's headline "every R cell of the spec read in its lanes" is UNTRUE at 3120f0b0: the rv-sink9 review's
+FINDING F-1 (Greek UPPER label split after the inner sigma; core-spec/2 CV-10b) is a set of R cells that 3120f0b0's
+lanes do not read, so a value after such a label was shown. Decision 76 is kept above exactly as written (history is
+not rewritten). Under core-spec/2 that cell class is closed by the label-independent client view (CV-3: a valueish
+value is masked whatever precedes it), pinned by the CV-10b named tests built by construction; see ADR 0052.

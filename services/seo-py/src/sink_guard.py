@@ -62,11 +62,13 @@ its strong-key prefix table (agents.secret_guard) are asked about one value or o
 
 from __future__ import annotations
 
+import functools
+import re
 import unicodedata
 from typing import Callable, Optional
 
 from agents import secret_guard
-from config import KNOWN_CALLERS
+from config import KNOWN_CALLERS, TENANT_ID
 from reasons import CODES
 
 MAX_LEN = 160
@@ -83,7 +85,8 @@ CLASSES = ("empty", "service_id", "scoped_id", "invoice_id", "finance_id", "ruli
            "amount",
            "request_key", "hash", "timestamp", "date", "number", "version", "boolean", "actor", "hostname", "code",
            "model_id")
-REASONS = ("type", "key_type", "long", "space", "at", "charset", "shape", "secret", "host", "depth", "kind", "float")
+REASONS = ("type", "key_type", "long", "space", "at", "charset", "shape", "secret", "host", "depth", "kind", "float",
+           "untyped", "field_type")     # the last two: core-spec/2 T-3 / T-5 per-field typing (sink_fields, card C2-2c)
 LEDGER = "ledger:"                       # the sink name of a ledger event: ``ledger:<event_type>``
 # a hex value of digits only is not a hash anywhere (it reads as a long number), except under these keys, where the
 # service itself derives it: the log epoch (the first 16 hex of a line's SHA-256), a raw vault id (128 random bits)
@@ -156,6 +159,54 @@ def _check(value: str) -> Optional[str]:
     if name == "a_label" and secret_guard.label_only(value):
         return None
     return name
+
+
+# core-spec/2 T-1 / T-5, step (3) of lead ruling 21:25 PT (card C2-6b; F6-1, ruling 22:00 PT): the CLOSED shape rule
+# of the `code` strict check, for an open code (no closed constant). A code is split at its separators [_.:-]; it is
+# refused (reason ``shape``) when
+#   (1) it holds upper AND lower letters AND a digit (a code is written in ONE case style; digits stay in snake /
+#       UPPER codes: ``api_401``, ``HTTP_404``, ``sha256``);
+#   (2) a piece is a run of 6+ digits that is not a compact calendar date YYYYMMDD (a number or an id fragment:
+#       those have their own T-1 classes; a dated name ``web_search_20250305`` keeps its date);
+#   (3) a piece is a run of 6+ lower hex characters (an id / hash fragment: ``hash`` / ``scoped_id`` hold those);
+#   (4) a piece mixing upper and lower case is not a camel word: lower or Capitalized words of 2+ letters and
+#       acronym runs of 2+ capitals (``rateLimitExceeded``, ``OpenAIEngine``, ``ChatGPT``, ``ValueError``);
+#   (5) a single-case piece with digits has them in one run, at its end (``http2``, ``seo_02``) or at its start
+#       before at most 2 letters (``2nd``, ``5xx``, ``0x``).
+# It runs after the strict check (a credential keeps reason ``secret``) and only on the code alphabet (the charset
+# gate keeps "@" / whitespace). The service's own catalogues (``CODES``, ``SERVICE_WORDS``) and enum fields (exact
+# membership) are not judged by it.
+# No threshold, no score: each rule is a grammar. ADR text: C2-19.
+_CODE_SEPARATORS = re.compile(r"[_.:\-]")
+_CAMEL_WORD = re.compile(r"(?:[a-z]{2,}|[A-Z][a-z]+|[A-Z]{2,}(?=[A-Z][a-z]|$))"
+                         r"(?:[A-Z][a-z]+|[A-Z]{2,}(?=[A-Z][a-z]|$))*")
+_DIGIT_UNIT = re.compile(r"[a-z]+[0-9]+|[A-Z]+[0-9]+|[0-9]+[a-z]{1,2}|[0-9]+[A-Z]{1,2}")
+_HEX_RUN = re.compile(r"[0-9a-f]{6,}")
+_DATE8 = re.compile(r"(?:19|20)[0-9]{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12][0-9]|3[01])")
+
+
+def code_shape_refusal(s: str) -> Optional[str]:
+    """The rule (1)-(5) above that refuses ``s`` as an open code, or None. Linear in ``len(s)`` (<= ``CODE_MAX``)."""
+    if s.strip(_CODE_CHARS):
+        return None                                         # not in the code alphabet: the charset gate's verdict
+    lower, upper = s != s.upper(), s != s.lower()
+    if lower and upper and not _only(s, _LOWER + _UPPER + "_.:-"):
+        return "mixed_case_digits"
+    for piece in _CODE_SEPARATORS.split(s):
+        if not piece:
+            continue
+        if piece.isdigit():
+            if len(piece) >= 6 and not _DATE8.fullmatch(piece):
+                return "digit_run"
+            continue
+        if _HEX_RUN.fullmatch(piece):    # C2-6f: narrowing (ruling 01:20 PT (B)) REVERTED - T-5 rose (HANDOFF 2bh)
+            return "hex_run"
+        if piece != piece.upper() and piece != piece.lower():
+            if not _CAMEL_WORD.fullmatch(piece):
+                return "case"
+        elif not _only(piece, _LOWER + _UPPER) and not _DIGIT_UNIT.fullmatch(piece):
+            return "inner_digits"
+    return None
 
 
 # ------------------------------------------------------------------------------------------------ host names
@@ -512,6 +563,8 @@ def _is_hash(s: str, digits_ok: bool = False) -> bool:
 
 def _is_version(s: str) -> bool:
     """``[v]N.N[.N[.N]]`` or a dated revision ``YYYY-MM-DD.N``."""
+    if not s:       # C2-6c (ruling 22:50 PT F6b-3): "name/" (empty version) is no version -> refused, never IndexError
+        return False
     if len(s) > 10 and s[10] == "." and _is_date(s[:10]):
         return 0 < len(s) - 11 <= 4 and _only(s[11:], _DIGITS)
     body = s[1:] if s[0] == "v" else s
@@ -580,7 +633,11 @@ def _plain(s: str) -> tuple:
                 return "scoped_id", None
     if len(s) > CODE_MAX or _only(s, _DIGITS + "_.:-"):
         return None, "shape"                                # too long for a code, or no letter in it
-    return ("code", None) if _check(s) is None else (None, "secret")
+    if _check(s) is not None:
+        return None, "secret"
+    if code_shape_refusal(s) is not None:
+        return None, "shape"                                # C2-6b: the open-code shape rule (T-5, F6-1)
+    return "code", None
 
 
 def _request_key(s: str) -> bool:
@@ -691,7 +748,8 @@ def violations(kind: str, data, stored: bool = False) -> list:
                         continue                            # the commonest unique value: a SHA-256 / HMAC hex
                     reason = _judge(v)[1]
                     if reason is not None and not (k in DIGIT_HEX_KEYS and _is_hash(v, True)) \
-                            and not (k in KEY_ID_KEYS and _key_id_ok(v, stored)):
+                            and not (k in KEY_ID_KEYS and _key_id_ok(v, stored)) \
+                            and not _t2_ref_ok(kind, path + "/" + seg, v, reason):
                         out.add((path + "/" + seg, reason))
                 elif tv in _SCALARS:
                     if tv is float and v - v != 0:          # nan / inf: not a machine value (JSON cannot carry it)
@@ -711,7 +769,7 @@ def violations(kind: str, data, stored: bool = False) -> list:
                     if len(v) == 64 and not v.strip(hexa) and v.strip(digits):
                         continue
                     reason = _judge(v)[1]
-                    if reason is not None:
+                    if reason is not None and not _t2_ref_ok(kind, sub, v, reason):
                         out.add((sub, reason))
                 elif tv in _SCALARS:
                     if tv is float and v - v != 0:
@@ -726,12 +784,163 @@ def violations(kind: str, data, stored: bool = False) -> list:
             out.add((path, "type"))
         elif type(obj) is float and obj - obj != 0:
             out.add((path, "float"))
+    out.update(_typed(kind, data, stored))
     return sorted(out)
+
+
+_FIELDS = None                           # sink_fields, imported on first use (it imports this module)
+
+
+def _t2_ref_ok(kind, path: str, value: str, reason=None) -> bool:
+    """core-spec/2 T-2 (lead ruling 21:45 PT, card C2-14b): ``value`` sits in a field DECLARED a T-2 vault reference
+    (``sink_fields`` ``F("code", ref=True)``) of a typed sink record AND matches the exact brace-less B-CD-01 grammar
+    ``c:(<codes.KINDS>):[0-9a-f]{16}``. Only then is the strict value-class verdict waived (the 16 random hex of a
+    code look like a token). The same string in any other field, or a non-matching value in a T-2 field, keeps the
+    strict check; there is no global exemption."""
+    typed = _typed_kinds()                   # F6f3-2 (ruling 02:15 PT): load the field table BEFORE the kind test
+    if not isinstance(kind, str) or not (kind.startswith(LEDGER) or kind in typed):
+        return False
+    if reason in ("secret", "shape") and _own_id(kind, path, value):   # F6f3-1 (ruling 02:15 PT): registered only
+        return True
+    sink, rkind = _FIELDS.sink_of(kind)
+    field = _FIELDS.SINK_FIELDS.get((sink, rkind, path))
+    if field is not None and field.grammar is not None:     # C2-6f (ruling 01:20 PT (B)): an exact code-base
+        return reason == "shape" and _FIELDS.matches(field, value)   # grammar waives the SHAPE verdict only
+    return field is not None and field.ref and _FIELDS.is_ref(value)
+
+
+def _typed_kinds() -> frozenset:
+    _typed("", None, False)                    # imports sink_fields on first use
+    return _FIELDS.LOG_KINDS
+
+
+def _typed(kind, data, stored: bool) -> list:
+    """core-spec/2 T-3 / T-5 (card C2-2c): for a record of a typed sink (a ``ledger:<event_type>`` payload, or a
+    seo_log line of a kind in ``sink_fields.SINK_FIELDS``), every path with no type decision (``untyped``) or whose
+    value does not match its field's type (``field_type``). Other kinds (not a C2-2 sink; C2-3 adds the rest) are
+    value-class checked only, as before. Refuses, never rewrites."""
+    global _FIELDS
+    if _FIELDS is None:
+        import sink_fields as _FIELDS_MOD      # noqa: PLC0415 - circular at import time
+        _FIELDS = _FIELDS_MOD
+    if not isinstance(kind, str) or not (kind.startswith(LEDGER) or kind in _FIELDS.LOG_KINDS):
+        return []
+    out = _FIELDS.field_violations(kind, data, stored)
+    out = [v for v in out if not (v[1] == "field_type" and _own_ids_at(kind, v[0], data))]      # F6f3-1
+    have = {v[0] for v in out}
+    out += [(p, "field_type") for p in _own_id_paths(kind)
+            if p not in have and any(not _own_id(kind, p, v) for v in _values_at(data, p) if _grammar_ok(kind, p, v))]
+    return out
+
+
+# --- F6f3-1 (lead ruling 02:15 PT; FCL-IDS, O-4 I, T-5, T-7): the tenant registry the guard reads. A tenant_id sink
+# field accepts a grammar-valid id (config.TENANT_ID) only when it is a REGISTERED tenant id; an ``ent-`` field
+# (sink_fields.ENTITY_ID_FIELDS) only ``ent-`` + a registered tenant id. The service registers a tenant id BEFORE the
+# first sink write that names it (creation, seed, replay). A closed set at runtime, like an enum; never a heuristic.
+_REGISTERED: set = set()
+_OWN_PATHS: dict = {}
+
+
+def register_tenant(tid) -> None:
+    """Registers a tenant id (exact config.TENANT_ID grammar; anything else is ignored, never registered)."""
+    if type(tid) is str and TENANT_ID.fullmatch(tid):
+        _REGISTERED.add(tid)
+
+
+def _own_rx(kind, path: str):
+    """The own-id grammar of (kind, path): ENTITY_ID_FIELDS' rx, or config.TENANT_ID for a tenant_id code field."""
+    if not isinstance(kind, str) or _FIELDS is None:
+        return None
+    key = (*_FIELDS.sink_of(kind), path)
+    rx = _FIELDS.ENTITY_ID_FIELDS.get(key)
+    if rx is not None:
+        return rx
+    field = _FIELDS.SINK_FIELDS.get(key)
+    if field is None or not path.endswith("/tenant_id") or "code" not in field.types or field.ref:
+        return None
+    return TENANT_ID
+
+
+def _grammar_ok(kind, path: str, value) -> bool:
+    rx = _own_rx(kind, path)
+    return rx is not None and type(value) is str and rx.fullmatch(value) is not None
+
+
+def identifier_refused(x, prose: bool = False) -> bool:
+    """Review c0c09bd1: an identifier (tenant id, Finance client id) holding a key, a 9+ digit run, an e-mail form
+    (review 2b26d980: also one written without its "@"), or failing the strict check (secret_guard.identifier_refusal).
+    ``prose`` (a tenant id, a Finance client id): also prose folded with hyphens / dots (secret_guard.folded_prose).
+    C2-6i (lead ruling 07:40 PT): moved here from svc_tenants (which re-exports this SAME function, cycle-free) so the
+    route's tenant-id check and the sink's own-id check (:func:`_own_id`) are one predicate, never a copy."""
+    if secret_guard.identifier_refusal(x) is not None:
+        return True
+    if prose and secret_guard.folded_prose(x):
+        return True
+    # sink job D: an identifier is LOGGED, so it must be a machine value of the sink guard (a host name the host rule
+    # takes, a code of at most 64 characters holding a letter, a small number). One that is not is
+    # refused here (422 IDENTIFIER_WITHHELD) instead of being accepted and then refused at the sink (503)
+    return classify(x) is None
+
+
+def _own_id(kind, path: str, value) -> bool:
+    """Exact own-id grammar of THIS field AND the tenant id inside it is registered AND (C2-6i, ruling 07:40 PT) the
+    route's own tenant-id check (:func:`identifier_refused` with ``prose=True``, as svc_tenants.create_tenant) does
+    not refuse it; any other field: False. So the sink refuses an invalid id even when the endpoint check is gone."""
+    if not _grammar_ok(kind, path, value):
+        return False
+    tid = value.removeprefix("entity:").removeprefix("ent-") if _own_rx(kind, path) is not TENANT_ID else value
+    return tid in _REGISTERED and not _route_refused(tid)
+
+
+@functools.lru_cache(maxsize=4096)
+def _route_refused(tid: str) -> bool:
+    """:func:`identifier_refused` (``prose=True``) of a REGISTERED tenant id, memoised (a pure function of the
+    string; called once per own-id cell of every write)."""
+    return identifier_refused(tid, prose=True)
+
+
+def _own_id_paths(kind) -> list:
+    if not isinstance(kind, str) or _FIELDS is None:
+        return []
+    sk = _FIELDS.sink_of(kind)
+    if sk not in _OWN_PATHS:
+        _OWN_PATHS[sk] = [k[2] for k in _FIELDS.SINK_FIELDS if k[:2] == sk and _own_rx(kind, k[2]) is not None]
+    return _OWN_PATHS[sk]
+
+
+def _values_at(data, path: str) -> list:
+    """Every value at ``path`` (``[]`` = each list item) of ``data``; absent branches add nothing."""
+    cur = [data]
+    for seg in path.split("/")[1:]:
+        name, many, nxt = seg.removesuffix("[]"), seg.endswith("[]"), []
+        for c in cur:
+            if isinstance(c, dict) and name in c:
+                v = c[name]
+                nxt.extend(v if many and isinstance(v, (list, tuple)) else () if many else (v,))
+        cur = nxt
+    return cur
+
+
+def _own_ids_at(kind, path: str, data) -> bool:
+    """True when every value at ``path`` of ``data`` is a registered :func:`_own_id` (none = False)."""
+    vals = _values_at(data, path)
+    return bool(vals) and all(_own_id(kind, path, v) for v in vals)
+
+
+def _unknown_log_kind(kind) -> bool:
+    """C2-3b2 (lead ruling 17:50 PT F4-0, T-5 fail closed): a seo_log record whose kind has no row in
+    ``sink_fields.SINK_FIELDS`` is refused at write (reason ``kind``), never written untyped."""
+    if isinstance(kind, str) and kind.startswith(LEDGER):
+        return False
+    _typed("", None, False)                    # imports sink_fields on first use
+    return not (isinstance(kind, str) and kind in _FIELDS.LOG_KINDS)
 
 
 def refused(kind: str, data) -> list:
     """The violating paths of ``data`` (sorted). There are no exceptions (sink job D: the legacy list is gone)."""
     found = violations(kind, data)
+    if _unknown_log_kind(kind):
+        found = sorted(set(found) | {("", "kind")})
     bad = sorted({p for p, _ in found})
     if OBSERVER is not None:
         OBSERVER(kind, found, bad)
@@ -765,28 +974,86 @@ def scrub(value):
         return WITHHELD
 
 
-def withhold(data) -> tuple:
+def _t2_ref_field(kind, path: str, value) -> bool:
+    """core-spec/2 T-2 at the served export (lead ruling 03:55 PT F6g4-1, pattern of ruling 21:45 PT): ``value`` sits
+    in a field DECLARED a T-2 vault reference (``F("code", ref=True)``) of the typed sink record ``kind`` AND matches
+    the exact brace-less grammar ``c:(<codes.KINDS>):[0-9a-f]{16}``. Only the T-2 branch: no own-id or open-grammar
+    waiver here, and no global exemption (the same string in an undeclared / other field keeps today's check)."""
+    if not isinstance(kind, str) or not (kind.startswith(LEDGER) or kind in _typed_kinds()):
+        return False
+    field = _FIELDS.SINK_FIELDS.get((*_FIELDS.sink_of(kind), path))
+    return field is not None and field.ref and _FIELDS.is_ref(value)
+
+
+def _ref_sink(kind):
+    """(sink, record kind) of a typed sink record ``kind`` (``ledger:<event_type>`` or a seo_log kind of
+    ``sink_fields.SINK_FIELDS``), else None."""
+    if not isinstance(kind, str) or not (kind.startswith(LEDGER) or kind in _typed_kinds()):
+        return None
+    return _FIELDS.sink_of(kind)
+
+
+@functools.lru_cache(maxsize=256)
+def _ref_paths(ref_sink):
+    """C2-10c6 (F10c5-1): compiled matchers of the DECLARED T-2 reference paths of ``ref_sink`` ((sink, record kind)),
+    shape-tolerant: each declared ``[]`` (a list) also matches no segment or ONE object key, so object-shaped
+    evidence (``/evidence/payload/...`` or ``/evidence/<key>/payload/...``) and nested lists (``[][]``) meet the same
+    field; a leaf nested anywhere under a declared reference field (a list or an object in it) is in that field."""
+    out = []
+    for key, field in _FIELDS.SINK_FIELDS.items():
+        if key[:2] != tuple(ref_sink) or not field.ref:
+            continue
+        parts = [re.escape(x) for x in key[2].split("[]")]
+        out.append(re.compile("(?:/[^/]+)?".join(parts) + "(?:/.*)?"))
+    return tuple(out)
+
+
+def _norm_path(path: str) -> str:
+    return path.replace("[]", "")
+
+
+def withhold(data, kind=None) -> tuple:
     """A copy of a STORED log line's data as it may be served (review 2b26d980 SHOULD 5), and how many leaves were
     replaced: every string (a dict key too), non-finite float or other object that is not a machine value becomes
     the code ``WITHHELD``. A line written since sink job D holds machine values only and comes back unchanged; a
-    line written before it (prose inline) keeps its ids, codes, hashes and numbers and loses its text. Never raises
-    (anything it cannot walk is withheld whole)."""
+    line written before it (prose inline) keeps its ids, codes, hashes and numbers and loses its text. ``kind``: the
+    line's record kind; a leaf is then also judged by its FIELD's declared type (T-1 / T-3; ruling 03:55 PT F6g4-1):
+    a T-2 code in a declared T-2 reference field is served (``_t2_ref_field``). C2-10c4 (F10c3-1): any other
+    non-null leaf in a DECLARED T-2 reference field (``F("code", ref=True)``; e.g. a legacy raw finance_client_id,
+    which has a machine shape) is withheld and counted once, as ``violations(stored=True)`` flags it (field_type):
+    the export and the stored-line guard agree. C2-10c6 (F10c5-1): the same holds when the line nests that field in
+    an OBJECT where a list is declared, in nested lists, or in a list / object inside the field (``_ref_paths``;
+    bounded by MAX_DEPTH like every walk). Never raises (anything it cannot walk is withheld whole)."""
     count = [0]
+    ref_sink = _ref_sink(kind)               # None: not a typed sink record (no declared T-2 reference fields)
 
-    def leaf_ok(k, v) -> bool:
+    def ref_leaf_bad(obj, path) -> bool:
+        if ref_sink is None or obj is None:
+            return False
+        field = _FIELDS.SINK_FIELDS.get((*ref_sink, path))
+        if field is None:                        # C2-10c6: object / nested-list shape of a declared ref field
+            np = _norm_path(path)
+            return any(m.fullmatch(np) for m in _ref_paths(tuple(ref_sink))) and not _FIELDS.is_ref(obj)
+        return field.ref and not _FIELDS.is_ref(obj)
+
+    def leaf_ok(k, v, path) -> bool:
         if v in _CACHE or _judge(v)[1] is None:
             return True
-        return (k in DIGIT_HEX_KEYS and _is_hash(v, True)) or (k in KEY_ID_KEYS and _key_id_ok(v, True))
+        return (k in DIGIT_HEX_KEYS and _is_hash(v, True)) or (k in KEY_ID_KEYS and _key_id_ok(v, True)) \
+            or (kind is not None and _t2_ref_field(kind, path, v))
 
-    def walk(obj, key, depth):
+    def walk(obj, key, depth, path):
         t = type(obj)
+        if t is not dict and t not in (list, tuple) and ref_leaf_bad(obj, path):
+            count[0] += 1
+            return WITHHELD
         if obj is None or t in (int, bool):
             return obj
         if t is float:
             if obj - obj == 0:
                 return obj
         elif t is str:
-            if leaf_ok(key, obj):
+            if leaf_ok(key, obj, path):
                 return obj
         elif t is dict and depth < MAX_DEPTH:
             out: dict = {}
@@ -797,14 +1064,15 @@ def withhold(data) -> tuple:
                     name, n = WITHHELD, 2
                     while name in out:
                         name, n = f"{WITHHELD}.{n}", n + 1
-                out[name] = walk(v, k if type(k) is str else None, depth + 1)
+                seg = _key(k)[0] if type(k) is str else "*"
+                out[name] = walk(v, k if type(k) is str else None, depth + 1, path + "/" + seg)
             return out
         elif t in (list, tuple) and depth < MAX_DEPTH:
-            return [walk(v, None, depth + 1) for v in obj]
+            return [walk(v, None, depth + 1, path + "[]") for v in obj]
         count[0] += 1
         return WITHHELD
 
     try:
-        return walk(data, None, 0), count[0]
+        return walk(data, None, 0, ""), count[0]
     except Exception:  # noqa: BLE001 - fail closed
         return WITHHELD, count[0] + 1

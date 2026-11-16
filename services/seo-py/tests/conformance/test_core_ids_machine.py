@@ -4,6 +4,7 @@ import pytest
 
 from conformance import baseline as B
 from conformance import corpora as C
+from conformance import evidence as E
 
 pytestmark = pytest.mark.conformance
 
@@ -22,11 +23,22 @@ def mods():
 def test_core_O_4_MV_machine_values_no_difference_vs_ffd28ca8(mods):
     items = C.machine()
     base = B.read("machine", "ffd28ca8", C.stream_hash(items))
+    # FCL-CVR re-pin (core-spec/2 section 6 O-4 MV: "SINK lane (0 differences vs ffd28ca8; STRICT and CV columns
+    # reported: CV now masks UUID / SHA by design)", lead ruling 20:40 PT, G-7 never weaken): the SINK class AND the
+    # STRICT verdict stay asserted == ffd28ca8 for every value; only the CV column is REPORTED (evidence file), the CV
+    # lane being judged by CV-8 (test_core_cv8; full pass lead 21:15 PT, cap 2.0%).
     diff: dict = {}
+    cv_diff: dict = {}
     for (cls, v), b in zip(items, base):
-        if B.code(C.lanes_machine(mods, v)) != b:
+        got = B.code(C.lanes_machine(mods, v)).split("|")
+        want = b.split("|")
+        assert len(got) == len(want) == 3, (cls, len(got), len(want))
+        if got[:2] != want[:2]:
             diff[cls] = diff.get(cls, 0) + 1
-    print(f"O-4 MV: values={len(items)} differences vs ffd28ca8={diff}")
+        if got[2] != want[2]:
+            cv_diff[cls] = cv_diff.get(cls, 0) + 1
+    print(f"O-4 MV: values={len(items)} sink+strict differences vs ffd28ca8={diff}")
+    E.report("O-4 MV cv differences vs ffd28ca8 (reported)", {"values": len(items), **cv_diff})
     assert not diff
 
 
@@ -43,6 +55,8 @@ def test_core_O_4_I_ruling_and_invoice_ids_accepted_by_the_sink_guard(mods):
     invoices = [helpers.invoice_id(rng.randrange(1, 10 ** 9)) for _ in range(2000)]
     bad = {"ruling": sum(1 for x in rulings if sink.classify(x) != "ruling_id"),
            "invoice": sum(1 for x in invoices if sink.classify(x) != "invoice_id")}
-    bad["violations"] = sum(1 for x in rulings + invoices if sink.violations("audit_requested", {"id": x}))
+    # C2-2e re-pin (CL-5, T-3): /id is not a field of audit_requested -> exactly the ``untyped`` refusal, no class one
+    bad["violations"] = sum(1 for x in rulings + invoices
+                            if sink.violations("audit_requested", {"id": x}) != [("/id", "untyped")])
     print(f"O-4 I: rulings={len(rulings)} invoices={len(invoices)} refused={bad}")
     assert bad == {"ruling": 0, "invoice": 0, "violations": 0}

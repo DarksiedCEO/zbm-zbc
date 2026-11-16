@@ -30,7 +30,9 @@ from __future__ import annotations
 from typing import Optional
 
 from errors import Conflict, Invalid, Unavailable
+from urllib.parse import urlsplit
 import compliance_client
+import outbound
 import vault as vault_mod
 from finance_client import DEFINITIVE, PAID, FinanceLookupError, assess
 from reasons import R
@@ -81,8 +83,20 @@ class InvoicesMixin:
         characters: the guard's closed ``ruling_id`` class). An id of any other shape the client accepts
         (``compliance_client.RULING_ID``) is never written: the record carries the code ``RULING_ID_HASHED`` and
         ``ruling_id_hmac``, its keyed HMAC bound to the tenant (None without a vault key)."""
+        # C2-6g2 E-COMP (owner decision 2026-11-15 02:00 PT): ``client_id`` is the binding's T-2 code; the tenant's
+        # OWN raw reference is decrypted here only, placed only in the activation request to the configured
+        # Compliance host (outbound ``ecomp``: its code must equal the bound code), never logged or stored
+        raw = self._fc_open(tid, client_id)
+        if raw is None:
+            raise Unavailable(R("VAULT_UNAVAILABLE"), override_allowed=False)
         try:
-            got = compliance_client.check(self.ports.compliance, client_id)
+            coder = self.optext_vault.coder(tid)
+        except vault_mod.VaultError:
+            raise Unavailable(R("VAULT_UNAVAILABLE"), override_allowed=False) from None
+        host = urlsplit(self.settings.compliance_url).hostname if self.settings.compliance_url else None
+        try:
+            with outbound.e_comp(client_id, coder, host):
+                got = compliance_client.check(self.ports.compliance, raw)
         except compliance_client.ComplianceCheckError as exc:
             if exc.code == compliance_client.NOT_ACTIVATED:
                 raise Conflict(R(exc.code), override_allowed=False) from None
@@ -109,7 +123,8 @@ class InvoicesMixin:
         facts = None
         try:
             facts = self.ports.finance.lookup(plan["invoice_id"])
-            code = assess(facts, plan["client_id"] or "")
+            code = assess({**facts, "client_id": self._fc_code_or_none(plan["tenant_id"], facts["client_id"])},
+                          plan["client_id"] or "")            # C2-6g2 E-COMP: code to code
         except FinanceLookupError as exc:
             code = exc.code
         if code == PAID:

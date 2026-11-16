@@ -23,7 +23,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from finance_client import RETRY_STATUSES, FinanceClient, _json, _Retry
+from finance_client import RETRY_STATUSES, FinanceClient, _json, _Retry, outbound_refused
 
 CALLER_NAME_AT_COMPLIANCE = "seo_02"
 CMP_CALLER_HEADER = "X-Compliance-Caller-Token"
@@ -92,6 +92,11 @@ class ComplianceClient(FinanceClient):
     def activation(self, client_id: str) -> dict:
         if not isinstance(client_id, str) or not CLIENT_ID.fullmatch(client_id):
             raise ComplianceCheckError("COMPLIANCE_RESPONSE_INVALID")
+        url = f"{self._base}/compliance/v1/clients/{client_id}/activation"
+        # C2-3c4 (ruling 17:15 PT F3c3-1): client_id must be exactly the tenant's CONFIGURED client id (bound by the
+        # caller with outbound.configured(compliance_client_id=...)); anything else -> refused, never sent, counted
+        if outbound_refused("compliance", url, {"path": {"client_id": client_id}}):
+            raise ComplianceCheckError("COMPLIANCE_RESPONSE_INVALID")
         end = self._mono() + self.deadline_s
         last = "COMPLIANCE_UNAVAILABLE"
         for attempt in range(self.attempts):
@@ -99,8 +104,7 @@ class ComplianceClient(FinanceClient):
             if left <= 0:
                 break
             try:
-                status, body = self._get(f"{self._base}/compliance/v1/clients/{client_id}/activation",
-                                         min(self.timeout_s, left), end)
+                status, body = self._get(url, min(self.timeout_s, left), end)
             except _Retry:
                 last = "COMPLIANCE_UNAVAILABLE"
             else:

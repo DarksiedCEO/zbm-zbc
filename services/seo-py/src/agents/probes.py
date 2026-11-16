@@ -37,6 +37,7 @@ from urllib.parse import urlsplit
 
 from agents import brand_mention, domain_match
 from agents.prompt_guard import personal_data
+import outbound
 from envelope import envelope, finding, observed
 from perplexity import PROTOCOL_ERROR_STOP_AFTER, STOP_CODES, EngineError
 from ports import NOT_CONNECTED, ProviderAnswer
@@ -154,7 +155,7 @@ def probe_engine(engine: str, port, prompt_set: dict, domain: str, n: int, guard
     protocol_run = 0            # ENGINE_PROTOCOL_ERRORs since the last answer, across prompts; other errors (503,
                                 # transport) do not reset it (AEGIS round 2): only an answer does
     try:
-        for pi, prompt in enumerate(prompt_set["prompts"]):
+        for pi, prompt in outbound.scoped(prompt_set["prompts"]):   # C2-3c E-LLM
             if stop is not None:
                 break
             pd = personal_data(prompt)

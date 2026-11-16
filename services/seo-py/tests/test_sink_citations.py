@@ -333,17 +333,17 @@ def test_real_runs_with_planted_values_keep_nothing_raw_and_the_owner_reads_them
     cid = run["citation_run_id"]
     assert run["status"] == "completed" and run["result"]["outcome"] == "OK" and fetcher.fetched > 0
     h.tenant("acme", domains=("other.test",))
-    got = h.ok(h.get(f"/tenants/zbm/citation-runs/{cid}"))
-    mp = h.ok(h.get(f"/tenants/zbm/citation-runs/{cid}/mnc-priority"))
+    got = h.ok(h.get(f"/tenants/zbm/citation-runs/{cid}", caller="hub", tenant="zbm"))
+    mp = h.ok(h.get(f"/tenants/zbm/citation-runs/{cid}/mnc-priority", caller="hub", tenant="zbm"))
     listing = h.ok(h.get("/tenants/zbm/citation-runs"))
     errors = [h.get(f"/tenants/acme/citation-runs/{cid}"), h.get(f"/tenants/acme/citation-runs/{cid}/mnc-priority"),
-              h.get(f"/tenants/zbm/citation-runs/{'seo-cit-' + '0' * 40}"),
+              h.get(f"/tenants/zbm/citation-runs/{'seo-cit-' + '0' * 40}", caller="hub", tenant="zbm"),
               h.post("/tenants/zbm/citation-runs", {"request_id": rid(), "domain": "nope.test",
                                                     "prompt_set_id": run["prompt_set"]["prompt_set_id"]}),
               h.get(f"/tenants/zbm/citation-runs/{cid}", caller="hub", tenant="acme")]
     assert [r.status_code for r in errors] == [404, 404, 404, 403, 404]
     sa._lose(h, run_of(h, cid)["result_ref"])
-    lost = [h.get(f"/tenants/zbm/citation-runs/{cid}/mnc-priority"), h.get(f"/tenants/zbm/citation-runs/{cid}")]
+    lost = [h.get(f"/tenants/zbm/citation-runs/{cid}/mnc-priority", caller="hub", tenant="zbm"), h.get(f"/tenants/zbm/citation-runs/{cid}", caller="hub", tenant="zbm")]
     assert [r.status_code for r in lost] == [503, 200]
     everything = {**v, **p}
     blob = sa.written(h, caplog) + "".join(r.text for r in errors + lost) + json.dumps(listing)
@@ -539,8 +539,8 @@ def test_the_blob_is_sealed_outside_the_service_lock_appended_once_under_it_and_
     held["mask"].clear()                                     # (a prompt set's own view masks its texts)
     run = h.ok(tc.run(h, psid), 201)
     cid = run["citation_run_id"]
-    h.ok(h.get(f"/tenants/zbm/citation-runs/{cid}"))
-    h.ok(h.get(f"/tenants/zbm/citation-runs/{cid}/mnc-priority"))
+    h.ok(h.get(f"/tenants/zbm/citation-runs/{cid}", caller="hub", tenant="zbm"))
+    h.ok(h.get(f"/tenants/zbm/citation-runs/{cid}/mnc-priority", caller="hub", tenant="zbm"))
     opened = len(held["open"])
     h.ok(h.get("/tenants/zbm/citation-runs"))
     assert len(held["open"]) == opened == 3                  # the POST's answer, the GET, the export; never the list
@@ -582,17 +582,17 @@ def test_a_lost_or_changed_blob_shows_vault_unavailable_and_the_export_refuses(t
         run_of(h, cid).update(result_ref=other.ref, result_hmac=other.hmac)
     else:
         h = h.restart(SEO_VAULT_KEY_FILE=None)
-    got = h.ok(h.get(f"/tenants/zbm/citation-runs/{cid}"))
+    got = h.ok(h.get(f"/tenants/zbm/citation-runs/{cid}", caller="hub", tenant="zbm"))
     assert got["status"] == "completed" and got["result"] is None and got["vault_unavailable"] is True
     assert got["facts"]["outcome"] == "OK" and got["facts"]["rows"] > 0 and got["result_hmac"]
-    h.refused(h.get(f"/tenants/zbm/citation-runs/{cid}/mnc-priority"), 503, "VAULT_UNAVAILABLE")
+    h.refused(h.get(f"/tenants/zbm/citation-runs/{cid}/mnc-priority", caller="hub", tenant="zbm"), 503, "VAULT_UNAVAILABLE")
     rows = h.ok(h.get("/tenants/zbm/citation-runs"))
     assert [r["outcome"] for r in rows] == ["OK", "OK"] and not any("vault_unavailable" in r for r in rows)
     card = h.ok(h.get("/department"))["agents"]["callum"]["scorecard"]["citation_runs"]
     assert card["completed"] == 2 and card["outcomes"] == {"OK": 2}
     assert vw.MARK not in json.dumps(got)
     if damage != "no_key":
-        ok = h.ok(h.get(f"/tenants/zbm/citation-runs/{b['citation_run_id']}"))
+        ok = h.ok(h.get(f"/tenants/zbm/citation-runs/{b['citation_run_id']}", caller="hub", tenant="zbm"))
         assert ok["result"] == b["result"] and "vault_unavailable" not in ok
 
 
@@ -621,15 +621,15 @@ def test_the_result_reads_after_a_restart_and_after_a_key_rotation(tmp_path):
     h, v, _port = started(tmp_path)
     a = vw.citation_run(h)
     h2 = h.restart()
-    assert h2.ok(h2.get(f"/tenants/zbm/citation-runs/{a['citation_run_id']}")) == a
+    assert h2.ok(h2.get(f"/tenants/zbm/citation-runs/{a['citation_run_id']}", caller="hub", tenant="zbm")) == a
     old_file = h.env["SEO_VAULT_KEY_FILE"]
     new_file = helpers.write_vault_key(tmp_path / "vault2.key")
     h3 = h2.restart(SEO_VAULT_KEY_FILE=new_file, SEO_VAULT_KEY_ID="k-next", SEO_VAULT_KEY_PREVIOUS_FILE=old_file,
                     SEO_VAULT_KEY_PREVIOUS_ID="k-test")
-    got = h3.ok(h3.get(f"/tenants/zbm/citation-runs/{a['citation_run_id']}"))
+    got = h3.ok(h3.get(f"/tenants/zbm/citation-runs/{a['citation_run_id']}", caller="hub", tenant="zbm"))
     assert got["result"] == a["result"] and "vault_unavailable" not in got
     h4 = h3.restart(SEO_VAULT_KEY_FILE=new_file, SEO_VAULT_KEY_ID="k-next")            # the old key retired
-    gone = h4.ok(h4.get(f"/tenants/zbm/citation-runs/{a['citation_run_id']}"))
+    gone = h4.ok(h4.get(f"/tenants/zbm/citation-runs/{a['citation_run_id']}", caller="hub", tenant="zbm"))
     assert gone["result"] is None and gone["vault_unavailable"] is True
 
 
@@ -641,12 +641,12 @@ def test_the_export_of_a_run_without_a_list_and_of_a_run_that_is_not_completed(t
     assert run["status"] == "completed" and run["result"]["outcome"] == "NOT_CONNECTED"
     assert run["facts"] == {"outcome": "NOT_CONNECTED", "rows": 0, "findings": 0, "usable_answers": None,
                             "mentioned_not_cited": None, "strength_answers": None}
-    mp = h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}/mnc-priority"))
+    mp = h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}/mnc-priority", caller="hub", tenant="zbm"))
     assert mp["items"] == [] and mp["outcome"] == "NOT_CONNECTED"
     (p,) = payloads(h, "citation_run_recorded")
     assert p["rows"] == 0 and p["mentioned_not_cited"] is None
     cid = requested_only(h, monkeypatch, psid)
-    h.refused(h.get(f"/tenants/zbm/citation-runs/{cid}/mnc-priority"), 409, "CITATION_RUN_NOT_COMPLETED")
+    h.refused(h.get(f"/tenants/zbm/citation-runs/{cid}/mnc-priority", caller="hub", tenant="zbm"), 409, "CITATION_RUN_NOT_COMPLETED")
 
 
 # ================================================================================================ where / WITHHELD
@@ -773,10 +773,29 @@ def test_an_unknown_model_is_logged_as_a_code_with_a_keyed_hash(tmp_path, caplog
 
 
 def test_an_unknown_model_without_a_vault_key_is_the_code_alone(tmp_path):
+    # C2-2c-c (CL-5): re-pinned toward core-spec/2. The writer still gives the code alone (model_hmac None) when there is
+    # no vault key, but /model_hmac is typed `hash` and NOT nullable in SINK_FIELDS (T-3; CL-6: null only where the
+    # table says nullable), so such a record is refused at write (T-5) and nothing is written (V-2: no key -> nothing
+    # written). Formerly: violations(...) == [] (the null passed the class-only guard).
     h, port = metered(tmp_path, "x")
+    key = h.svc.vault._key
     h.svc.vault._key = None
-    assert h.svc._engine_model("zbm", unknown_model()) == {"model": "UNKNOWN_MODEL", "model_hmac": None}
-    assert sg.violations("engine_calls_reserved", h.svc._engine_model("zbm", unknown_model())) == []
+    rec = h.svc._engine_model("zbm", unknown_model())
+    assert rec == {"model": "UNKNOWN_MODEL", "model_hmac": None}
+    for kind in ("engine_calls_reserved", "engine_run_settled", "ledger:engine_calls_reserved",
+                 "ledger:engine_run_settled"):
+        assert sg.violations(kind, rec) == [("/model_hmac", "field_type")]
+    before = (len(h.svc.log), len(h.ledger.events))
+    for kind in ("engine_calls_reserved", "engine_run_settled"):
+        with pytest.raises(Exception) as ei:
+            h.svc._commit(kind, {"run_id": derived_id("egr", "x", "openai"), **rec}, "seo")
+        assert getattr(ei.value, "reason", None) == "SINK_REFUSED"
+    assert (len(h.svc.log), len(h.ledger.events)) == before
+    # control: with the key the same unknown model is the code + its keyed HMAC, a typed clean record
+    h.svc.vault._key = key
+    rec = h.svc._engine_model("zbm", unknown_model())
+    assert rec["model"] == "UNKNOWN_MODEL" and sg.classify(rec["model_hmac"]) == "hash"
+    assert sg.violations("engine_calls_reserved", rec) == [] and sg.violations("engine_run_settled", rec) == []
 
 
 def test_mutation_an_unknown_model_written_raw_is_refused_and_nothing_is_asked(tmp_path, monkeypatch, caplog):
@@ -817,7 +836,7 @@ def test_an_old_format_citation_line_replays_and_every_view_works(tmp_path, monk
         assert r["status"] == "completed" and r["result"] == old and r["result_sha256"] == sha(old)
         assert r["result_ref"] is None and r["result_hmac"] is None
         assert r["facts"] == svc_citations.run_facts(old) == {**a["facts"]}
-        got = hh.ok(hh.get(f"/tenants/zbm/citation-runs/{cid}"))
+        got = hh.ok(hh.get(f"/tenants/zbm/citation-runs/{cid}", caller="hub", tenant="zbm"))
         assert got["status"] == "completed" and "vault_unavailable" not in got
         assert got["result_sha256"] == sha(old) and got["result_hmac"] is None
         rows, new_rows = got["result"]["facts"]["rows"], a["result"]["facts"]["rows"]
@@ -827,8 +846,8 @@ def test_an_old_format_citation_line_replays_and_every_view_works(tmp_path, monk
             assert {k: w for k, w in x["evidence"].items() if k != "vault_id"} == \
                 {k: w for k, w in y["evidence"].items() if k != "evidence_id"}
             assert x["url"] == y["url"] and x["engine_hint_unverified"] == y["engine_hint_unverified"]
-        mp = hh.ok(hh.get(f"/tenants/zbm/citation-runs/{cid}/mnc-priority"))
-        new_mp = hh.ok(hh.get(f"/tenants/zbm/citation-runs/{a['citation_run_id']}/mnc-priority"))
+        mp = hh.ok(hh.get(f"/tenants/zbm/citation-runs/{cid}/mnc-priority", caller="hub", tenant="zbm"))
+        new_mp = hh.ok(hh.get(f"/tenants/zbm/citation-runs/{a['citation_run_id']}/mnc-priority", caller="hub", tenant="zbm"))
         assert [[e["excerpt"] for e in it["evidence"]] for it in mp["items"]] == \
             [[e["excerpt"] for e in it["evidence"]] for it in new_mp["items"]]
         assert [[x["url"] for x in it["cited_instead"]] for it in mp["items"]] == \
@@ -867,7 +886,7 @@ def test_old_format_interrupted_and_engine_lines_replay(tmp_path, monkeypatch):
         assert er["model"] == raw_model and er["settled"]["calls"] == 2 and er["reservations"]["0"]["calls"] == 3
         calls, spend = hh.svc.engine_usage("openai", day)
         assert calls == 2 and str(spend) == "0.020000"
-        r = hh.ok(hh.get(f"/tenants/zbm/citation-runs/{cid}"))
+        r = hh.ok(hh.get(f"/tenants/zbm/citation-runs/{cid}", caller="hub", tenant="zbm"))
         assert r["status"] == "interrupted" and r["interrupted_reason"] == "RUN_FAILED"
         assert r["failure"] == {"agent": "callum", "where": where, "error_type": "KeyError"}
         card = hh.ok(hh.get("/department"))["agents"]["callum"]["scorecard"]
@@ -882,6 +901,8 @@ def test_old_format_interrupted_and_engine_lines_replay(tmp_path, monkeypatch):
 
 # ================================================================================================ mutations
 
+# C2-9c (V-1, T-2; lead ruling 17:55 PT F9-4): synthesises 13 of the 105 F2b-2 paths; no current src
+# writer emits them (core-v2/c29c/paths.md), so they stay untyped and refused. Kept, never deleted.
 def test_mutation_the_result_written_inline_again_is_refused_and_nothing_is_written(tmp_path, monkeypatch):
     monkeypatch.setattr(sg, "OBSERVER", None)               # this test's refused records are not the suite's
     h, v, _port = started(tmp_path)
@@ -937,9 +958,9 @@ def _scenario(tmp_path) -> dict:
     out["result_not_on_disk"] = vw.MARK not in blob and "Wilson" not in blob and sa.found(blob, v) == []
     if rec.get("result_ref") and sa.vault_lines(h):
         sa._lose(h, rec["result_ref"])
-    r = h.get(f"/tenants/zbm/citation-runs/{cid}/mnc-priority")
+    r = h.get(f"/tenants/zbm/citation-runs/{cid}/mnc-priority", caller="hub", tenant="zbm")
     out["export_refuses_a_lost_blob"] = r.status_code == 503 and r.json().get("detail") == "VAULT_UNAVAILABLE"
-    g = h.get(f"/tenants/zbm/citation-runs/{cid}").json()
+    g = h.get(f"/tenants/zbm/citation-runs/{cid}", caller="hub", tenant="zbm").json()
     out["view_says_vault_unavailable"] = g.get("result") is None and g.get("vault_unavailable") is True
     return out
 
@@ -1013,6 +1034,8 @@ def test_mutation_no_owner_masking_is_caught(tmp_path, monkeypatch):
     assert got["owner_view_is_masked"] is False and got["result_not_on_disk"] is True
 
 
+# C2-9c (V-1, T-2; lead ruling 17:55 PT F9-4): synthesises 1 of the 105 F2b-2 paths; no current src
+# writer emits them (core-v2/c29c/paths.md), so they stay untyped and refused. Kept, never deleted.
 def test_mutation_evidence_left_in_the_logged_facts_is_refused(tmp_path, monkeypatch):
     monkeypatch.setattr(sg, "OBSERVER", None)
     real = svc_citations.run_facts
@@ -1109,12 +1132,12 @@ def test_a_two_thousand_row_run_keeps_the_log_line_small_and_the_lock_light(tmp_
     assert "competitor3.test" not in blob and "north1." not in blob     # no host of any row in any file
     # generous bounds (the measured numbers are in the job's report): no per-row work under the lock or in the guard
     assert timing["guard"] < 0.05 and timing["record"] < 1.0
-    got = h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}"))
+    got = h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}", caller="hub", tenant="zbm"))
     assert got == run
-    mp = h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}/mnc-priority"))
+    mp = h.ok(h.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}/mnc-priority", caller="hub", tenant="zbm"))
     assert mp["outcome"] == "OK" and len(mp["items"]) > 0
     h2 = h.restart()
-    assert h2.ok(h2.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}"))["result"] == run["result"]
+    assert h2.ok(h2.get(f"/tenants/zbm/citation-runs/{run['citation_run_id']}", caller="hub", tenant="zbm"))["result"] == run["result"]
 
 
 def test_the_helpers_in_this_file_plant_what_they_say():

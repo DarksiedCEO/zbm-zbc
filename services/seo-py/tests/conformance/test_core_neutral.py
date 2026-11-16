@@ -4,6 +4,7 @@ import pytest
 
 from conformance import baseline as B
 from conformance import corpora as C
+from conformance import evidence as E
 
 pytestmark = pytest.mark.conformance
 
@@ -41,4 +42,12 @@ def test_core_O_4_N_neutral_sentences_no_new_read_vs_ffd28ca8(mods):
             elif x == "1" and not g:
                 lost[k] = lost.get(k, 0) + 1
     print(f"O-4 N: sentences={len(items)} new vs ffd28ca8={new} residual (a) Thai={thai} read by ffd28ca8 only={lost}")
-    assert not new
+    # ST-2 / ST-3 re-pin (core-spec/2 ST-3: the O-4 N STRICT column is reported, not judged; C2-11b; G-7: re-pinned to
+    # "reported" with the item named): strict NEW / LOST counts go to the evidence file. The CV column keeps its v1
+    # assertion here (not touched by this card; the CV lane's bar is CV-8).
+    strict_new = {k: v for k, v in new.items() if k.endswith("|strict")}
+    E.report("O-4 N STRICT (reported, ST-3)",
+             {"sentences": len(items), "strict_new": sum(strict_new.values()), **{f"new|{k}": v for k, v in strict_new.items()},
+              "strict_lost": sum(v for k, v in lost.items() if k.endswith("|strict"))})
+    judged = {k: v for k, v in new.items() if not k.endswith("|strict")}
+    assert not judged

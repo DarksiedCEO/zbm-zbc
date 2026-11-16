@@ -19,7 +19,9 @@ values only (sink_guard.py), so:
 
 The owner's view of a document goes through ``owner_view``: every string that is not a machine value passes the
 client-view masker (the same one as the citation evidence and the operator text; a masked value is replaced whole, a
-URL keeps every part but the offending ones).
+URL keeps every part but the offending ones). Owner decision 19:20 PT (card C2-OV): fields our code writes, listed
+in the one report-document type table (report_fields.py), are shown as typed machine values when they match their
+type's grammar; anything else (free text, an unlisted path, a value off its grammar) stays on the masker.
 """
 
 from __future__ import annotations
@@ -27,11 +29,13 @@ from __future__ import annotations
 import json
 from typing import Optional
 
+import report_fields
 import sink_guard
 import vault as vault_mod
 from errors import Unavailable
 from reasons import R
 from svc_optext import text_view, url_view
+from svc_reveal import RevealMixin
 
 REPORT_FIELD = "audit_report"
 DRIFT_FIELD = "drift_report"
@@ -73,25 +77,35 @@ def _shown(text: str, memo: dict) -> str:
     return got
 
 
-def owner_view(obj, memo: Optional[dict] = None):
+def owner_view(obj, memo: Optional[dict] = None, doc: Optional[str] = None, _segs: tuple = (), _ctx=None):
     """The owner's view of a vaulted document: keys and values through the client-view masker. Two keys masked to
-    the same text stay apart (``<mask> (2)``)."""
+    the same text stay apart (``<mask> (2)``). ``doc``: the document kind (report_fields): a value at a path of the
+    ONE report-document type table that matches its type's grammar is shown as a typed machine value (owner decision
+    19:20 PT, card C2-OV); every other value, and every value of an unlisted kind, takes the client-view route."""
     memo = {} if memo is None else memo
+    if doc is not None and _ctx is None:
+        # ruling 20:55 PT (card C2-OV3c): report-bound closed sets (Callum's methodology, entity_check field keys)
+        _ctx = report_fields.report_context(doc, obj)
     if isinstance(obj, str):
+        if doc is not None and report_fields.shown_typed(doc, _segs, obj, _ctx):
+            return obj
         return _shown(obj, memo)
     if isinstance(obj, dict):
         out: dict = {}
         for k, v in obj.items():
-            shown = _shown(k, memo) if isinstance(k, str) else k
+            if isinstance(k, str):
+                shown = k if doc is not None and report_fields.key_shown(doc, _segs, k, _ctx) else _shown(k, memo)
+            else:
+                shown = k
             if shown in out:
                 n = 2
                 while f"{shown} ({n})" in out:
                     n += 1
                 shown = f"{shown} ({n})"
-            out[shown] = owner_view(v, memo)
+            out[shown] = owner_view(v, memo, doc, _segs + (k,), _ctx)
         return out
     if isinstance(obj, (list, tuple)):
-        return [owner_view(v, memo) for v in obj]
+        return [owner_view(v, memo, doc, _segs + ("[]",), _ctx) for v in obj]
     return obj
 
 
@@ -108,7 +122,7 @@ class Sealed:
         self.pending.discard()
 
 
-class VaultedMixin:
+class VaultedMixin(RevealMixin):                  # C2-14 (RV-1): the audited reveal
     def _vaulted_key_check(self) -> None:
         """No vault key: refused up front, nothing written (there is never a plaintext fallback)."""
         if not self.vault.key_configured:

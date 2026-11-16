@@ -381,7 +381,12 @@ def test_audit_on_the_agent_api_cites_with_position_records_cost_and_stores_no_b
     assert p["class"] == "STRENGTH" and p["cited"] == 3 and p["best_position"] == 2
     assert {s["host"] for s in p["other_sources"]} == {"competitor.test", "news.test"}
     assert eng["usage"]["calls"] == 3 and eng["usage"]["spend_usd"] == "0.003909" and eng["usage"]["settled"]
+    # Re-pinned (G-7; owner decision 19:20 PT "Show machine fields", card C2-OV; replaces rulings 16:15 PT / 16:58 PT
+    # F3c-1): a model version is a typed machine field (report_fields model_version grammar) and is shown in the
+    # owner's view; the stored (unmasked) record keeps it too.
     assert eng["model_versions"] == ["perplexity/sonar@fast@2026-10-16.0"]
+    stored = callum(h.svc.audit_view("zbm", v["audit_id"], masked=False))["facts"]["engines"]["perplexity"]
+    assert stored["model_versions"] == ["perplexity/sonar@fast@2026-10-16.0"]
     assert all(r["url"] == "https://api.perplexity.ai/v1/agent" for r in f.requests)
     everything = json.dumps(h.ok(h.get("/audit/export", params={"limit": 1000}))) + json.dumps(h.ledger.events) + \
         json.dumps(v) + json.dumps(h.ok(h.get("/status")))
@@ -643,3 +648,19 @@ def test_l5_the_documented_echoed_settings_are_not_drift():
     for k in ("tools", "temperature", "service_tier", "top_p", "store", "instructions", "metadata", "preset"):
         assert k in fixture("completed.json") or k in px._AGENT_KNOWN_UNREAD
         assert k in px._AGENT_KNOWN_UNREAD
+
+
+class _C23cAnyPrompt:
+    def __contains__(self, _text) -> bool:
+        return True
+
+
+@pytest.fixture(autouse=True)
+def _c23c_prompt_scope():
+    """C2-3c re-pin (T-5 / E-LLM, owner decision 14:57 PT, lead ruling F3-4): these tests call ``ask()`` directly,
+    outside a probe run, so each test's own prompt counts as its configured prompt set. A probe run binds the tenant's
+    set (agents.probes / agents.callum); unbound or another tenant's text is refused (tests/test_outbound_typed.py)."""
+    import outbound
+    token = outbound._PROMPTS.set(_C23cAnyPrompt())
+    yield
+    outbound._PROMPTS.reset(token)

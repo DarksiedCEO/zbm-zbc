@@ -111,6 +111,11 @@ def _install_sink_observer():
     sink_guard.__class__ = WatchedGuard
 
 
+# C2-4 (core-spec/2 T-4 (b)): the T-4 recording sink wraps the write gates BEFORE the observer guard below (the
+# guard's originals are the wrappers; nothing is silenced). Records only with T4_RECORD_OUT=<evidence.json>.
+import t4_recorder  # noqa: E402
+
+t4_recorder.install()
 _install_sink_observer()
 
 

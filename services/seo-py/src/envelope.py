@@ -30,6 +30,9 @@ EFFECT_CLASSES = ("observed", "attributed", "incremental", "causally_supported",
 DECISIONS = ("ACT", "TEST", "WATCH", "DEFER", "STOP", "DO_NOT_BUILD", "DO_NOT_PUBLISH", "DO_NOT_SPEND",
              "INSUFFICIENT_EVIDENCE")
 SEVERITIES = ("critical", "high", "medium", "low", "info")
+# C2-6a2 (F6-1 (1)): the closed confidence-interval methods a measured rate names (agents.callum._rate)
+INTERVAL_WILSON_95 = "wilson_95"
+INTERVALS = (INTERVAL_WILSON_95,)
 # The ten capability areas (P1-P10). Wave 1 builds P1-P5 read-side only (P6 local presence: the canonical entity
 # record and the on-site consistency check only).
 CAPABILITIES = {

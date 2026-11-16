@@ -585,7 +585,7 @@ def test_guard_record_sweeps_the_stored_citation_run_before_commit(tmp_path, mon
     monkeypatch.setattr(callum, "log_row", leaky)
     v = h.ok(run(h, prompt_set(h, engines=("openai",))), 201)
     assert v["status"] == "completed"
-    stored = json.dumps(h.ok(h.get(f"/tenants/zbm/citation-runs/{v['citation_run_id']}")))
+    stored = json.dumps(h.ok(h.get(f"/tenants/zbm/citation-runs/{v['citation_run_id']}", caller="hub", tenant="zbm")))
     logged = json.dumps(citation_document(h, v["citation_run_id"])["result"])
     assert secret not in stored and secret[:12] not in stored and secret not in logged
     assert "[withheld]" in logged
@@ -609,7 +609,7 @@ def test_a_full_run_across_three_engines_is_recorded_first_and_classified(tmp_pa
     rows = res["facts"]["rows"]
     assert {r["engine"] for r in rows} == {"openai", "anthropic", "google"}
     assert all(r["provider"] in ("openai", "anthropic", "google") and r["model"] for r in rows)
-    mp = h.ok(h.get(f"/tenants/zbm/citation-runs/{v['citation_run_id']}/mnc-priority"))
+    mp = h.ok(h.get(f"/tenants/zbm/citation-runs/{v['citation_run_id']}/mnc-priority", caller="hub", tenant="zbm"))
     assert mp["contract"] == "callum.mnc_priority/2" and mp["items"][0]["engines"][0]["engine"] == "anthropic"
     # record-first: the request, then reservations (subject citation_run:...), settlements, then the result
     kinds = [e["event_type"] for e in h.ledger.events if e["event_type"] != "log_anchor"]
@@ -758,7 +758,7 @@ def test_idempotency_replay_after_restart_and_the_interrupted_job(tmp_path):
     assert a == b and len(fakes["openai"].requests) == 3                    # the replay asks nothing
     h.refused(h.post("/tenants/zbm/citation-runs", {**body, "engines": ["openai"]}), 409, "REQUEST_ID_REUSED")
     h2 = h.restart()
-    again = h2.ok(h2.get(f"/tenants/zbm/citation-runs/{a['citation_run_id']}"))
+    again = h2.ok(h2.get(f"/tenants/zbm/citation-runs/{a['citation_run_id']}", caller="hub", tenant="zbm"))
     assert again["result_hmac"] == a["result_hmac"] and a["result_hmac"] and again["result"] == a["result"]
     # a run whose process died is closed by the interrupted-audits job
     with h2.svc.lock:
@@ -768,7 +768,7 @@ def test_idempotency_replay_after_restart_and_the_interrupted_job(tmp_path):
                        "seo_agent")
     out = h2.ok(h2.post("/jobs/interrupted-audits/run", {"request_id": rid()}, caller="scheduler"))
     assert out["interrupted"] == 0 and out["citation_runs_interrupted"] == 1
-    assert h2.ok(h2.get(f"/tenants/zbm/citation-runs/{'seo-cit-' + 'd' * 40}"))["interrupted_reason"] == "PROCESS_LOST"
+    assert h2.ok(h2.get(f"/tenants/zbm/citation-runs/{'seo-cit-' + 'd' * 40}", caller="hub", tenant="zbm"))["interrupted_reason"] == "PROCESS_LOST"
 
 
 def test_a_run_that_raises_is_closed_run_failed_not_left_running(tmp_path, monkeypatch):

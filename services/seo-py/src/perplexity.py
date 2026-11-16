@@ -471,6 +471,9 @@ class PerplexityEngine(HttpAnswerEngine):
     def _auth_headers(self) -> dict:
         return {"Authorization": "Bearer " + self._key.reveal()}
 
+    def _outbound_kind(self) -> str:
+        return ENGINE if self.protocol == AGENT else ENGINE + ".sonar"
+
     def _body(self, model: str, prompt: str) -> bytes:
         return request_body(self.protocol, model, prompt)
 
