@@ -81,3 +81,22 @@ def test_G6S_g_dotted12_frozen_attack40672_case_22600_withheld():
     q = [x for x in row if isinstance(x, str)][-1]
     assert sp.classify_query(q, ["acme"]) == "pii_suspect"
     assert priya.verdict(q, ["acme"], priya.default_vocab(), pt.empty_tenant_vocab(""))[:2] == ("WITHHELD", priya.S2_CODE)
+
+
+def test_G6S_n11_xs_vanity_number_with_expanding_gaps_withheld():
+    """G6-S full replay (JC-2): the survivor n11_xs_no_vanity (vanity rule dropped from the per-character view
+    ``script_view``, round 20 / CP-3) reads 5 frozen PERSONAL rows READABLE (rv20_m20, rv21_cp21, rv21_m21): a
+    1-8xx vanity number whose gaps hold a character NFKC widens (triple prime -> three primes) next to a line or
+    paragraph separator. On the detection form the gap is four characters (over the list's three); one character for
+    one it is two, so only the vanity rule on the per-character view withholds it. Synthetic, built at runtime."""
+    from agents import priya
+    from agents import priya_tenant as pt
+
+    vocab, tenant = priya.default_vocab(), pt.empty_tenant_vocab("")
+    for code in ("800", "888", "877", "855"):
+        for sep in ("\u2028", "\u2029"):
+            gap = "\u2034" + sep
+            q = "rose bouquet 1" + gap + gap.join(code) + gap + "flowers tonight"
+            assert sp._vanity_any(sp.script_view(q))
+            assert sp.classify_query(q, ["acme"]) == "pii_suspect"
+            assert priya.verdict(q, ["acme"], vocab, tenant)[:2] == ("WITHHELD", priya.S2_CODE)

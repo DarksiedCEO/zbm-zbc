@@ -938,6 +938,7 @@ Tree: uncommitted on `33472699`; final code md5: priya.py c95aff3b4e6e23c41318bf
   - **GATE-2f, final full suite x2 on the frozen tree** (includes the G6-S test; `gates/g2f_full_1.txt`, `g2f_full_2.txt`; priya.py, priya_gate.py, test_priya_zraw.py, test_priya_mutants_pinned.py and ADR (pre-fill copy `17d44cdd`) md5 equal at start and end, `gates/g2f_md5_start.txt` = `g2f_md5_end.txt`): pass 3940 / skip 73 / fail 0 and pass 3940 / skip 73 / fail 0; collected 4013 = the `docs/test-counts.md` seo-py row (written by `devtools/hygiene_check.py run --counts write`).
   - **G-4 gitleaks** (condition C5; run by the lead, 2026-11-16 17:12 PT): gitleaks 8.30.1, release sha256 verified, range 63e896a3..a28beb44 plus the tree: 0 findings.
   - G6-S full-corpus confirmation: PENDING (condition C2).
+  - G6-S full replay, JC-2 (condition C2, `priya-v2/g6s/out/`): `n11_xs_no_vanity` is BEHAVIOURAL on the full replay (5 rows: rv20_m20 1, rv21_cp21 1, rv21_m21 3; base WITHHELD S2:pii_suspect, mutant READABLE), not MASKED as on the sample; now killed by `test_G6S_n11_xs_vanity_number_with_expanding_gaps_withheld` (test_priya_mutants_pinned.py); no src change.
 
 **OQ-4 / OQ-DISCLOSE tables** (every case, `p211/oq_table_<corpus>_heavy.json`; columns: class, n, WITHHELD, mandated, not-mandated WITHHELD, reasons of every WITHHELD, not-mandated share, delta vs `33472699` = WITHHELD minus v1 dropped, reasons of the not-mandated WITHHELD; disclosed classes are residual P-r9):
 
