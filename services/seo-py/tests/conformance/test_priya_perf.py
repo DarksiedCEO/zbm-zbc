@@ -1,6 +1,7 @@
 """priya-spec/1 section 7 (PF-1..PF-3). PF-2: 26 adversarial families at 64 / 128 / 256 / 384 / 512 characters, the
 whole Priya path (raw + stored key): CI lane each doubling <= 3.0x (or under a 0.5 ms noise floor) and <= 100 ms at
-512; heavy lane <= 2.5x and <= 50 ms. Over 512 characters a query is dropped whole (a card inside a 600-character
+512; heavy lane (priya-spec/2 section 2.8): <= 50 ms at 512 for every family, <= 2.5x per same-content doubling
+except the named cut-position artefacts, independent-draw ratios reported. Over 512 characters a query is dropped whole (a card inside a 600-character
 query reaches no output). PF-1 (median rise vs the two baselines) is the heavy lane's A/B; PF-3 (one classification
 per row) is pinned in tests/test_query_privacy_r19.py."""
 
@@ -17,13 +18,12 @@ from priya_common import dropped
 from agents import priya
 from agents import search_performance as sp
 
-R = random.Random(26)
-
-
-def _b64(n, layers, chunk):
-    s, t = "x", ""
+def _b64(n, layers, chunk, seed=26):
+    # Lead ruling PF2-R (test version eee2980e): one seeded draw per call (no shared module-level Random), so a
+    # family's string does not depend on how many draws ran before it (test order).
+    r, s, t = random.Random(seed), "x", ""
     while len(t) < n:
-        s += R.choice("abcdefghij .@")
+        s += r.choice("abcdefghij .@")
         t = s.encode()
         for _ in range(layers):
             t = base64.b64encode(t)
@@ -95,9 +95,53 @@ def test_PF2_linear_and_bounded_ci():
     _check(3.0, 0.100)
 
 
+# priya-spec/2 section 2.8: doublings where the cut position itself changes the token class. Named here and in ADR
+# 0047 (priya-spec/2 round entry, PF-2): "to 12 " cut at 64 ends inside the repeated unit, so the 64-char prefix is
+# cheap and 128 is dear (cost is not monotonic in length: 128 > 256 chars). Exempt from the ratio bar ONLY; the
+# 50 ms absolute bar at 512 still holds for these families.
+CUT_POSITION_ARTEFACTS = frozenset({("filler_words", 64, 128), ("filler_words", 256, 512)})
+
+
+def _best(qs: dict, rounds: int) -> dict:
+    ts = {n: 1e9 for n in SIZES}
+    for _ in range(rounds):
+        for n in SIZES:
+            ts[n] = min(ts[n], _t(qs[n]))
+    return ts
+
+
+def _check_heavy(ratio_max: float = 2.5, abs_max: float = 0.050, rounds: int = 15):
+    """priya-spec/2 section 2.8 (owner decision, option B). JUDGED: every family at 512 characters <= ``abs_max``;
+    no runaway growth on SAME-CONTENT prefix cuts of one 512-character string (each doubling <= ``ratio_max`` or
+    under a 0.5 ms noise floor), except the named ``CUT_POSITION_ARTEFACTS``. REPORTED, not judged: the
+    independent-draw doubling ratios (each size drawn on its own, ``f(n)[:n]``). Best of ``rounds`` interleaved
+    rounds, process time."""
+    bad, named, indep, at512 = {}, {}, {}, {}
+    for name, f in FAMILIES.items():
+        full = f(512)[:512]
+        ts = _best({n: full[:n] for n in SIZES}, rounds)
+        row = {f"{n}ms": round(ts[n] * 1e3, 2) for n in SIZES}
+        at512[name] = row["512ms"]
+        for a, b in DOUBLINGS:
+            if ts[b] > ratio_max * ts[a] and ts[b] - ts[a] > 0.0005:
+                if (name, a, b) in CUT_POSITION_ARTEFACTS:
+                    named[f"{name} {a}->{b}"] = round(ts[b] / ts[a], 2)
+                else:
+                    bad[name] = row
+        if ts[512] > abs_max:
+            bad[name] = row
+        ti = _best({n: f(n)[:n] for n in SIZES}, max(3, rounds // 3))
+        indep[name] = max(round(ti[b] / ti[a], 2) for a, b in DOUBLINGS)
+    w = max(at512, key=at512.get)
+    print(f"PF-2 worst at 512 (same-content, judged <= {abs_max * 1e3:.0f} ms): {w} {at512[w]} ms")
+    print(f"PF-2 named cut-position artefacts (ratio, not judged): {named}")
+    print(f"PF-2 independent-draw worst doubling per family (reported, not judged): {indep}")
+    assert bad == {}, f"PF-2 over {ratio_max}x per same-content doubling or {abs_max * 1e3:.0f} ms at 512: {bad}"
+
+
 @pytest.mark.conformance_heavy
 def test_PF2_linear_and_bounded_heavy():
-    _check(2.5, 0.050)
+    _check_heavy(2.5, 0.050)
 
 
 @pytest.mark.conformance
