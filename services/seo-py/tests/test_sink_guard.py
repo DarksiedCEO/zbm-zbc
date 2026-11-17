@@ -436,6 +436,10 @@ _FORMER_LEGACY = ("/content/prompts[]", "/delta/families/*/templates/{key}", "/f
                   "/report/envelope/methodology", "/robots_text")
 _T, _R = "test_sink_guard.py::", "test_review_2b26d980.py::"
 EXPECTED_SINK_REFUSALS = {                                # test -> exactly the (sink, path) pairs it may refuse
+    # C2-R1 F-B4: the direct T-5 test plants exactly these three refusals (never rewritten, nothing committed)
+    "test_sink_fields.py::test_t5_enforce_refuses_at_write_and_never_rewrites": frozenset((
+        ("ledger:agent_lifecycle", "/agent"), ("ledger:agent_lifecycle", "/no_such_field"),
+        ("seo_log_kind_with_no_table_row", ""))),
     "test_canary_all_routes.py::test_every_route_and_every_string_field_with_canaries_leaves_nothing_but_the_"
     "known_limit": _PROBE,
     "test_canary_all_routes.py::test_the_quick_scenario_holds_unmutated": _PROBE,
