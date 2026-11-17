@@ -4,7 +4,8 @@ classifier or Priya (the old text must occur exactly once); a mutant is KILLED w
     python devtools/conformance/mutants.py [--ids a,b] [--jobs 2] [--out report.json] [--check] [--python PY]
 
 Every mutant runs in its own copy of ``services/seo-py`` and ``docs`` (``tar --exclude=.git``; nothing is written
-in the source tree), against the test selection ``TESTS`` in order with ``-x`` (the first failure kills it).
+in the source tree), against the test selection ``TESTS`` in order with ``-x`` (the first failure kills it). A CONTROL run of the
+unmutated copy on the same selection goes first and must pass (else the run stops, exit 2).
 ``PINNED`` mutants must be killed (G-6 list of the spec); every other behavioural mutant must be killed too, or shown
 equivalent in the report of the round. The report holds ids, verdicts and counts only."""
 
@@ -24,13 +25,19 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 SP = "services/seo-py/src/agents/search_performance.py"
 PR = "services/seo-py/src/agents/priya.py"
+PG = "services/seo-py/src/agents/priya_gate.py"
+PT = "services/seo-py/src/agents/priya_tenant.py"
 TESTS = ("tests/test_query_privacy_r21.py", "tests/test_query_privacy_r20.py", "tests/test_query_privacy_r19.py",
          "tests/test_query_privacy_r18.py", "tests/test_query_privacy_r13.py", "tests/test_query_privacy_r14.py",
          "tests/test_query_privacy_r16.py", "tests/conformance/test_priya_mutants_pinned.py",
          "tests/conformance/test_priya_boundary.py", "tests/conformance/test_priya_c2_glue.py",
          "tests/conformance/test_priya_owner_items.py", "tests/conformance/test_priya_ordinary.py",
          "tests/conformance/test_priya_reviewer_corpora.py", "tests/conformance/test_priya_matrix.py",
-         "tests/conformance/test_priya_composed.py", "tests/conformance/test_priya_lost_protection.py")
+         "tests/conformance/test_priya_composed.py", "tests/conformance/test_priya_lost_protection.py",
+         # priya-spec/2 G-6: the gate / tenant / ledger unit tests and the MC suite (the v2 pinned mutants below)
+         "tests/test_priya_gate.py", "tests/test_priya_tenant.py", "tests/test_priya_withheld.py",
+         "tests/test_priya_verdict.py", "tests/test_priya.py", "tests/test_priya_shown.py",
+         "tests/test_priya_codes_rotation.py", "tests/test_priya_service.py", "tests/conformance/test_priya_mc_v2.py")
 
 # (id, pinned, file, old, new)
 MUTANTS = [
@@ -48,6 +55,18 @@ MUTANTS = [
     ("p_card_min14", 1, SP, "    return 13 <= len(d) <= 19 and (card_iin(d)", "    return 14 <= len(d) <= 19 and (card_iin(d)"),
     ("p_uatp_off", 1, SP, '(card_iin(d) or (len(d) == 15 and d[0] == "1")) and _luhn(d)', "card_iin(d) and _luhn(d)"),
     ("p_diners36_off", 1, SP, "2720|3[46789]|30[0-5]", "2720|3[4789]|30[0-5]"),
+    # ---- priya-spec/2 G-6, pinned (must be killed): the gate (OG / V / T) and the WITHHELD ledger
+    ("v2_og1_removed", 1, PG, '        out.append("OG-1")\n', "        pass\n"),
+    ("v2_og4_run_3_to_4", 1, PG, "        if len(run) >= 3 and not known(", "        if len(run) >= 4 and not known("),
+    ("v2_og6_off", 1, PG, '            out.append("OG-6")\n            break', "            break"),
+    ("v2_og2_off", 1, PG, '        out.append("OG-2")\n', "        pass\n"),
+    ("v2_vocab_sha_check_off", 1, PG, "    if sha != expected_sha256 or not text.endswith", "    if not text.endswith"),
+    ("v2_tenant_min_4_to_2", 1, PT, "MIN_LETTERS = 4", "MIN_LETTERS = 2"),
+    ("v2_withheld_row_with_key_text", 1, PR, '    return {"code": code, "reason": e["reason"],',
+     '    return {"code": code, "query": e["norm"], "reason": e["reason"],'),
+    ("v2_withheld_out_of_totals", 1, PR, "    for e in merged.values():\n        part = ",
+     '    for e in [x for x in merged.values() if x["reason"] is None]:\n        part = '),
+    ("v2_withheld_out_of_counters", 1, PR, "            for t in (tot, withheld):\n", "            for t in ():\n"),
     # ---- review rv-priya19's behavioural survivors (round 20 item 7: must be killed)
     ("e_no_reversed_windows", 1, SP,
      "    for s, cut in _enc_windows_cut([t[::-1] for t in reversed(toks)], ok[::-1], plain[::-1]):",
@@ -175,10 +194,11 @@ def run_one(m, python: str, timeout: int) -> dict:
     with tempfile.TemporaryDirectory(prefix="mut_") as tmp:
         d = Path(tmp)
         _copy(d)
-        p = d / f
-        s = p.read_text(encoding="utf-8")
-        assert s.count(old) == 1, mid
-        p.write_text(s.replace(old, new), encoding="utf-8")
+        if f is not None:                                 # f None = the CONTROL: the unmutated copy, same selection
+            p = d / f
+            s = p.read_text(encoding="utf-8")
+            assert s.count(old) == 1, mid
+            p.write_text(s.replace(old, new), encoding="utf-8")
         t0 = time.time()
         try:
             r = subprocess.run([python, "-m", "pytest", "-q", "-x", "-rf", "-p", "no:cacheprovider", *TESTS],
@@ -202,11 +222,22 @@ def main() -> int:
     ap.add_argument("--check", action="store_true")
     ap.add_argument("--python", default=sys.executable)
     ap.add_argument("--timeout", type=int, default=3600)
+    ap.add_argument("--no-control", action="store_true", help="skip the CONTROL run (kills are then not proven)")
+    ap.add_argument("--control-only", action="store_true")
     a = ap.parse_args()
     bad = check()
     if a.check or bad:
         print(json.dumps({"mutants": len(MUTANTS), "not_applicable": bad}))
         return 1 if bad else 0
+    # CONTROL: the copy is not a git checkout (tests that need git history skip there, they must not fail); the
+    # unmutated copy must pass the same selection, else every 'kill' is void.
+    control = None if a.no_control else run_one(("control", 0, None, None, None), a.python, a.timeout)
+    if control is not None:
+        print(json.dumps(control), flush=True)
+        if control["killed"] or a.control_only:
+            if a.out:
+                Path(a.out).write_text(json.dumps({"control": control}, indent=1) + "\n")
+            return 2 if control["killed"] else 0
     ids = set(a.ids.split(",")) - {""}
     todo = [m for m in MUTANTS if not ids or m[0] in ids]
     results = []
@@ -215,7 +246,7 @@ def main() -> int:
             results.append(res)
             print(json.dumps(res), flush=True)
     survived = [r["id"] for r in results if not r["killed"]]
-    report = {"mutants": len(results), "killed": len(results) - len(survived), "survived": survived,
+    report = {"control": control, "mutants": len(results), "killed": len(results) - len(survived), "survived": survived,
               "pinned_survived": [r["id"] for r in results if r["pinned"] and not r["killed"]], "results": results}
     if a.out:
         Path(a.out).write_text(json.dumps(report, indent=1) + "\n")
