@@ -238,3 +238,50 @@ if __name__ == "__main__":                                # lead job: the full B
     res["shown_ids"] = res["shown_ids"][:200]
     res["neg_ids"] = res["neg_ids"][:200]
     print(json.dumps(res, indent=1))
+
+
+# C2-R2: direct, fast cells for the BL prose-value read (``secret_guard._cv_valueish``) after the natural-language
+# separator `` was `` (mutants bl_capital_rule_off, bl_mixed_script_is_prose, bl_lookalike_pair_off). Non-ASCII as
+# escapes only.
+_GREEK = ("\u03ba\u03b1\u03bb\u03b7\u03bc\u03ad\u03c1\u03b1", "\u03bc\u03ae\u03bb\u03bf", "\u03c0\u03cc\u03bb\u03b7")
+_CYRILLIC = ("\u043f\u0440\u0438\u0432\u0435\u0442", "\u043a\u043e\u0448\u043a\u0430", "\u0441\u043e\u0431\u0430\u043a\u0430")
+_DEVANAGARI = "\u0915\u093f\u0924\u093e\u092c"
+_THAI = "\u0e2a\u0e27\u0e31\u0e2a"
+_HEBREW = "\u05e9\u05dc\u05d5\u05dd"
+_ARABIC = "\u0645\u0631\u062d\u0628\u0627"
+_HANGUL = "\ud55c\uad6d"
+
+
+def _was(word: str) -> list:
+    return secret_guard.client_view_findings("the password was " + word)
+
+
+def test_bl_capital_after_the_first_letter_is_a_value():
+    """CV-9: a word with a capital after its first letter is a value, not prose (``reSet``); the lower-case word and
+    the Title-case word stay prose."""
+    assert _was("reset") == []
+    assert _was("Reset") == []
+    assert "label_value" in _was("re" + "Set")
+    assert "label_value" in _was("pass" + "W" + "ord")
+
+
+def test_bl_a_word_mixing_two_scripts_is_a_value():
+    """C2-16c: Latin glued to Devanagari (not the Japanese group, not Latin + a lookalike script) is value-ish and
+    masked after a BL label; the plain Devanagari word stays prose."""
+    assert _was(_DEVANAGARI) == []
+    assert "label_value" in _was("ab" + _DEVANAGARI)
+    assert "label_value" in _was(_DEVANAGARI + "cd")
+    # two (or three) scripts with no Latin pair at all: Devanagari + Thai, Hebrew + Arabic, Hangul + Devanagari,
+    # Latin + Devanagari + Thai. Each part alone is a one-script word; glued, the word is a value.
+    for w in (_DEVANAGARI + _THAI, _HEBREW + _ARABIC, _HANGUL + _DEVANAGARI, "ab" + _DEVANAGARI + _THAI):
+        assert "label_value" in _was(w), ascii(w)
+    for w in (_THAI, _HEBREW, _ARABIC, _HANGUL):
+        assert _was(w) == [], ascii(w)
+
+
+def test_bl_greek_and_cyrillic_prose_words_are_not_masked():
+    """C2-16e: Latin + ONE lookalike script (Greek, Cyrillic) reads as one script, so an ordinary Greek or Cyrillic
+    word after a BL label is prose: masked 0, bare and inside a sentence."""
+    for w in _GREEK + _CYRILLIC:
+        assert _was(w) == [], ascii(w)
+        assert secret_guard.client_view_findings("The password was " + w + " today.") == [], ascii(w)

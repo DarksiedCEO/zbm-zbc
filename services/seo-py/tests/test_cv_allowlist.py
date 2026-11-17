@@ -160,3 +160,18 @@ def test_al1_audit_enums_equal_the_module():
     row = {"tenant_id": TA, "actor": "seo", "at": AT, "source": "shopify", "count": 1, "previous_count": 0,
            "requested_count": 1, "outcome": "applied", "token": "AB12CD34EF"}
     assert ("/token", "untyped") in sink_guard.violations(al.AUDIT_KIND, row)
+
+
+def test_al2_never_reads_each_token_of_a_merged_span(two):
+    """AL-1 (C2-R2, mutant al_never_whole_span_only): a listed merged span is never exempt when ONE of its token cores
+    is K-5, even where the whole view text reads as no K-5 (the comma and the trailing digits bridge the SSN into a
+    longer number there). A listed merged span of plain tokens is still shown (control)."""
+    store, _rows = _store()
+    ssn = "-".join(("123", "45", "6789"))
+    merged = ssn + ", 12"
+    plain = "AB12CD34, EF56GH78"
+    store.replace(TA, [merged, plain], actor="seo", source="shopify", integration_tenant=TA, at=AT)
+    with al.scope(store, TA):
+        assert al.shown(plain, plain) is True
+        assert al.shown(merged, merged) is False
+        assert al.shown(ssn, ssn) is False
