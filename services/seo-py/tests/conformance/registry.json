@@ -1,0 +1,455 @@
+{
+ "floor": 156,
+ "items": {
+  "G-1": [
+   "gate:tools/gate.sh"
+  ],
+  "G-2": [
+   "test_registry.py::test_core_G_7_every_spec_item_has_a_test",
+   "test_registry.py::test_core_G_7_registered_tests_exist_and_the_suite_only_grows",
+   "gate:tools/gate.sh"
+  ],
+  "G-3": [
+   "gate:tools/gate.sh"
+  ],
+  "G-4": [
+   "gate:tools/gate.sh"
+  ],
+  "G-5": [
+   "gate:tools/gate.sh"
+  ],
+  "G-6": [
+   "test_core_protection_pins.py::test_core_P_6a_digits_between_spelled_units",
+   "test_core_protection_pins.py::test_core_P_6b_arabic_proclitic_with_an_f2_join",
+   "test_core_protection_pins.py::test_core_P_6c_the_join_limit",
+   "test_core_protection_pins.py::test_core_P_6d_the_value_minimum_after_a_gap",
+   "test_core_protection_pins.py::test_core_P_6e_two_unit_label_start_guard",
+   "test_core_protection_pins.py::test_core_P_6f_two_unit_label_end_guard"
+  ],
+  "G-7": [
+   "test_core_matrix.py::test_core_manifest_ci_stream_is_frozen",
+   "test_registry.py::test_core_G_7_every_spec_item_has_a_test",
+   "test_registry.py::test_core_G_7_registered_tests_exist_and_the_suite_only_grows"
+  ],
+  "G-8": [
+   "test_core_residuals.py::test_core_G_8_adr_corrections"
+  ],
+  "G-9": [
+   "gate:tools/gate.sh"
+  ],
+  "H-1": [
+   "test_core_hosts.py::test_core_H_1_a_unicode_label_holding_a_script_label_is_refused",
+   "test_core_hosts.py::test_core_H_1_hash_labels_and_credential_words_are_names",
+   "test_core_hosts.py::test_core_H_1_p2_shapes_refused_at_registration"
+  ],
+  "IM-1": [
+   "test_core_import.py::test_core_IM_1_api_imports_and_the_service_constructs",
+   "test_core_import.py::test_core_IM_1_every_interpreter_compiles_the_module[/usr/bin/python3.11]",
+   "test_core_import.py::test_core_IM_1_every_interpreter_compiles_the_module[/usr/bin/python3.12]",
+   "test_core_import.py::test_core_IM_1_every_interpreter_compiles_the_module[/usr/local/bin/python3.13]",
+   "test_core_import.py::test_core_IM_1_no_backslash_inside_an_f_string_expression"
+  ],
+  "IM-2": [
+   "test_core_import.py::test_core_IM_2_every_combination_on_every_interpreter[/usr/bin/python3.11]",
+   "test_core_import.py::test_core_IM_2_every_combination_on_every_interpreter[/usr/bin/python3.12]",
+   "test_core_import.py::test_core_IM_2_every_combination_on_every_interpreter[/usr/local/bin/python3.13]",
+   "test_core_import.py::test_core_IM_2_the_import_checks_read_module_constants_only",
+   "test_core_import.py::test_core_IM_2_twelve_environment_combinations"
+  ],
+  "K-1": [
+   "test_core_strong_keys.py::test_core_K_1_K_2_K_3_K_4_N_1_every_case_withheld_by_the_strict_lane",
+   "test_core_strong_keys.py::test_core_K_1_the_26_strong_key_families",
+   "test_core_strong_keys.py::test_core_K_1_the_client_view_masks_every_strong_key"
+  ],
+  "K-2": [
+   "test_core_strong_keys.py::test_core_K_1_K_2_K_3_K_4_N_1_every_case_withheld_by_the_strict_lane"
+  ],
+  "K-3": [
+   "test_core_strong_keys.py::test_core_K_1_K_2_K_3_K_4_N_1_every_case_withheld_by_the_strict_lane"
+  ],
+  "K-4": [
+   "test_core_strong_keys.py::test_core_K_1_K_2_K_3_K_4_N_1_every_case_withheld_by_the_strict_lane"
+  ],
+  "K-5": [
+   "test_core_cv_other.py::test_core_K_5_fail_closed",
+   "test_core_cv_other.py::test_core_K_5_internal_error_masks",
+   "test_core_cv_other.py::test_core_K_5_personal_values_are_masked_in_the_client_view"
+  ],
+  "L-1": [
+   "test_core_labels_closed.py::test_core_L_1_the_lists_are_closed"
+  ],
+  "L-2": [
+   "test_core_labels_closed.py::test_core_L_2_joined_44"
+  ],
+  "L-3": [
+   "test_core_labels_closed.py::test_core_L_3_pieces_27"
+  ],
+  "L-4": [
+   "test_core_labels_closed.py::test_core_L_4_script_23_and_declared_forms"
+  ],
+  "L-5": [
+   "test_core_labels_closed.py::test_core_L_5_full_forms_matched_whole_by_both_lanes"
+  ],
+  "L-6": [
+   "test_core_labels_closed.py::test_core_L_6_the_matrix_entry_set_is_101"
+  ],
+  "L-7": [
+   "test_core_labels_closed.py::test_core_L_7_a_particle_outside_the_list_is_no_declared_form",
+   "test_core_labels_closed.py::test_core_L_7_declared_sub_lists_are_closed"
+  ],
+  "L-8": [
+   "test_core_labels_closed.py::test_core_L_8_not_entries"
+  ],
+  "M-1": [
+   "test_core_matrix.py::test_core_M_1_every_row_applies_where_meaningful"
+  ],
+  "M-2": [
+   "test_core_matrix.py::test_core_M_2_bare_label_words"
+  ],
+  "M-3": [
+   "test_core_matrix_url.py::test_core_M_3_heavy_every_strict_r_cell",
+   "test_core_matrix_url.py::test_core_M_3_strict_r_cells_in_a_url_are_not_fetched"
+  ],
+  "M-4": [
+   "test_core_matrix.py::test_core_M_4_ci_sample_is_stratified",
+   "test_core_matrix.py::test_core_manifest_ci_stream_is_frozen"
+  ],
+  "M-5": [
+   "test_core_matrix.py::test_core_M_5_verdicts_are_stated_by_rule"
+  ],
+  "M-6": [
+   "test_core_matrix.py::test_core_M_6_P_1_P_3_zero_misses_in_the_whole_sample"
+  ],
+  "N-1": [
+   "test_core_strong_keys.py::test_core_K_1_K_2_K_3_K_4_N_1_every_case_withheld_by_the_strict_lane"
+  ],
+  "N-2": [
+   "test_core_strong_keys.py::test_core_N_2_caps",
+   "test_core_strong_keys.py::test_core_N_2_guard_record_fails_closed"
+  ],
+  "O-1": [
+   "test_core_overtight_words.py::test_core_O_1_O_4_W_derived_joins_no_new_read"
+  ],
+  "O-2": [
+   "test_core_oracle.py::test_core_O_2_the_oracle_holds_every_listed_spelling",
+   "test_core_oracle.py::test_core_O_2_the_oracle_holds_no_pinned_collision",
+   "test_core_oracle.py::test_core_O_2_the_oracle_is_independent_of_the_guard"
+  ],
+  "O-3": [
+   "test_core_overtight_words.py::test_core_O_3_side_b_is_reported"
+  ],
+  "O-4 F": [
+   "test_core_fuzz.py::test_core_O_4_F_fuzz_no_new_read_without_a_label_token"
+  ],
+  "O-4 H": [
+   "test_core_hosts.py::test_core_O_4_H_no_host_newly_refused[hosts-2b26d980]",
+   "test_core_hosts.py::test_core_O_4_H_no_host_newly_refused[hosts-ffd28ca8]",
+   "test_core_hosts.py::test_core_O_4_H_no_host_newly_refused[real_hosts-2b26d980]",
+   "test_core_hosts.py::test_core_O_4_H_no_host_newly_refused[real_hosts-ffd28ca8]"
+  ],
+  "O-4 I": [
+   "test_core_ids_machine.py::test_core_O_4_I_ruling_and_invoice_ids_accepted_by_the_sink_guard"
+  ],
+  "O-4 MV": [
+   "test_core_ids_machine.py::test_core_O_4_MV_machine_values_no_difference_vs_ffd28ca8"
+  ],
+  "O-4 N": [
+   "test_core_neutral.py::test_core_O_4_N_neutral_sentences_no_new_read_vs_ffd28ca8"
+  ],
+  "O-4 PIN": [
+   "test_core_pinned_collisions.py::test_core_O_4_PIN_pinned_collisions[arabic_s2]",
+   "test_core_pinned_collisions.py::test_core_O_4_PIN_pinned_collisions[greek_code_to_bas]",
+   "test_core_pinned_collisions.py::test_core_O_4_PIN_pinned_collisions[greek_derivatives]",
+   "test_core_pinned_collisions.py::test_core_O_4_PIN_pinned_collisions[hindi_joins]",
+   "test_core_pinned_collisions.py::test_core_O_4_PIN_pinned_collisions[hormuz_bare]",
+   "test_core_pinned_collisions.py::test_core_O_4_PIN_pinned_collisions[loanword]",
+   "test_core_pinned_collisions.py::test_core_O_4_PIN_pinned_collisions[thai_joins]"
+  ],
+  "O-4 U": [
+   "test_core_urls.py::test_core_O_4_U_ordinary_urls_none_newly_unfetched"
+  ],
+  "O-4 UP": [
+   "test_core_upgrade.py::test_core_O_4_UP_directories_written_by_a_release_start_on_the_build[cbdf5e78]",
+   "test_core_upgrade.py::test_core_O_4_UP_directories_written_by_a_release_start_on_the_build[ffd28ca8]"
+  ],
+  "O-4 W": [
+   "test_core_overtight_words.py::test_core_O_1_O_4_W_derived_joins_no_new_read",
+   "test_core_overtight_words.py::test_core_O_4_W_full_corpus"
+  ],
+  "P-1": [
+   "test_core_matrix.py::test_core_M_6_P_1_P_3_zero_misses_in_the_whole_sample"
+  ],
+  "P-2": [
+   "test_core_residuals.py::test_core_R_measured_elsewhere[R-new]"
+  ],
+  "P-3": [
+   "test_core_matrix.py::test_core_M_6_P_1_P_3_zero_misses_in_the_whole_sample"
+  ],
+  "P-4": [
+   "test_core_e2e.py::test_core_P_4_end_to_end_no_cv_r_value_shown_and_nothing_on_disk"
+  ],
+  "P-5": [
+   "test_core_protection_pins.py::test_core_P_5_must_classes_closed[P-5.SP-24-24-None]",
+   "test_core_protection_pins.py::test_core_P_5_must_classes_closed[P-5.SP-25-25-60]",
+   "test_core_protection_pins.py::test_core_P_5_must_classes_closed[P-5.SP-29-29-60]",
+   "test_core_protection_pins.py::test_core_P_5_must_classes_closed[P-5.SP-34-34-None]",
+   "test_core_protection_pins.py::test_core_P_5_must_classes_closed[P-5.SP-35-35-None]"
+  ],
+  "P-6a": [
+   "test_core_protection_pins.py::test_core_P_6a_digits_between_spelled_units"
+  ],
+  "P-6b": [
+   "test_core_protection_pins.py::test_core_P_6b_arabic_proclitic_with_an_f2_join"
+  ],
+  "P-6c": [
+   "test_core_protection_pins.py::test_core_P_6c_the_join_limit"
+  ],
+  "P-6d": [
+   "test_core_protection_pins.py::test_core_P_6d_the_value_minimum_after_a_gap"
+  ],
+  "P-6e": [
+   "test_core_protection_pins.py::test_core_P_6e_two_unit_label_start_guard"
+  ],
+  "P-6f": [
+   "test_core_protection_pins.py::test_core_P_6f_two_unit_label_end_guard"
+  ],
+  "PF-1": [
+   "test_core_perf.py::test_core_PF_1_per_language_cost_vs_ffd28ca8"
+  ],
+  "PF-2": [
+   "test_core_perf.py::test_core_PF_2_cold_start"
+  ],
+  "PF-3": [
+   "test_core_perf.py::test_core_PF_3_linearity_smoke",
+   "test_core_perf.py::test_core_PF_3_linearity_to_64k"
+  ],
+  "PF-4": [
+   "test_core_perf.py::test_core_PF_4_the_perf_test_file_is_in_the_suite"
+  ],
+  "R-71": [
+   "test_core_residuals.py::test_core_R_matrix_residual_sizes[R-71-33-cv]",
+   "test_core_residuals.py::test_core_R_matrix_residual_sizes[R-71-33-strict]"
+  ],
+  "R-a": [
+   "test_core_residuals.py::test_core_R_a_thai_glued_joins_as_written"
+  ],
+  "R-b": [
+   "test_core_residuals.py::test_core_R_matrix_residual_sizes[R-b-12-cv]",
+   "test_core_residuals.py::test_core_R_matrix_residual_sizes[R-b-12-strict]"
+  ],
+  "R-c": [
+   "test_core_residuals.py::test_core_R_c_hindi_written_as_two_words"
+  ],
+  "R-d1": [
+   "test_core_residuals.py::test_core_R_d1_bare_key_not_masked"
+  ],
+  "R-d2": [
+   "test_core_residuals.py::test_core_R_d2_all_caps_polish_prose_as_a_strong_key"
+  ],
+  "R-d3": [
+   "test_core_residuals.py::test_core_R_matrix_residual_sizes[R-d3-6-strict]"
+  ],
+  "R-d4": [
+   "test_core_residuals.py::test_core_R_measured_elsewhere[R-d4]"
+  ],
+  "R-d5": [
+   "test_core_residuals.py::test_core_R_matrix_residual_sizes[R-d5-21-strict]"
+  ],
+  "R-d6": [
+   "test_core_residuals.py::test_core_R_matrix_residual_sizes[R-d6-16-cv]"
+  ],
+  "R-d7": [
+   "test_core_residuals.py::test_core_R_d7_leetspeak_not_read"
+  ],
+  "R-d8": [
+   "test_core_residuals.py::test_core_R_d8_percent_encoded_long_words_as_tokens"
+  ],
+  "R-g": [
+   "test_core_residuals.py::test_core_R_measured_elsewhere[R-g]"
+  ],
+  "R-h": [
+   "test_core_residuals.py::test_core_R_measured_elsewhere[R-h]"
+  ],
+  "R-hg": [
+   "test_core_residuals.py::test_core_R_matrix_residual_sizes[R-hg-37-cv]"
+  ],
+  "R-hi": [
+   "test_core_residuals.py::test_core_R_matrix_residual_sizes[R-hi-30-cv]",
+   "test_core_residuals.py::test_core_R_matrix_residual_sizes[R-hi-30-strict]"
+  ],
+  "R-kl": [
+   "test_core_residuals.py::test_core_R_measured_elsewhere[R-kl]"
+  ],
+  "R-new": [
+   "test_core_residuals.py::test_core_R_measured_elsewhere[R-new]"
+  ],
+  "R-o3": [
+   "test_core_residuals.py::test_core_R_measured_elsewhere[R-o3]"
+  ],
+  "R-o4": [
+   "test_core_residuals.py::test_core_R_measured_elsewhere[R-o4]"
+  ],
+  "R-o5": [
+   "test_core_residuals.py::test_core_R_measured_elsewhere[R-o5]"
+  ],
+  "R-p": [
+   "test_core_residuals.py::test_core_R_p_unlabelled_tokens_shown_in_the_client_view"
+  ],
+  "R-sigma": [
+   "test_core_residuals.py::test_core_R_sigma_medial_sigma_written_final_inside_a_glued_word_stays_unread"
+  ],
+  "S-1": [
+   "test_core_ids_machine.py::test_core_O_4_I_ruling_and_invoice_ids_accepted_by_the_sink_guard",
+   "test_core_ids_machine.py::test_core_O_4_MV_machine_values_no_difference_vs_ffd28ca8"
+  ],
+  "SEP-1": [
+   "test_core_matrix.py::test_core_SEP_separator_read_as_required_ci[SEP-1]"
+  ],
+  "SEP-2": [
+   "test_core_matrix.py::test_core_SEP_separator_read_as_required_ci[SEP-2]"
+  ],
+  "SEP-3a": [
+   "test_core_matrix.py::test_core_SEP_separator_read_as_required_ci[SEP-3a]"
+  ],
+  "SEP-3b": [
+   "test_core_matrix.py::test_core_SEP_separator_read_as_required_ci[SEP-3b]"
+  ],
+  "SEP-4": [
+   "test_core_matrix.py::test_core_SEP_separator_read_as_required_ci[SEP-4]"
+  ],
+  "SEP-4b": [
+   "test_core_matrix.py::test_core_SEP_separator_read_as_required_ci[SEP-4b]"
+  ],
+  "SEP-5": [
+   "test_core_matrix.py::test_core_SEP_5_glued_value_is_open"
+  ],
+  "SP-01": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-01]"
+  ],
+  "SP-02": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-02]"
+  ],
+  "SP-03": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-03]"
+  ],
+  "SP-04": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-04]"
+  ],
+  "SP-05": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-05]"
+  ],
+  "SP-06": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-06]"
+  ],
+  "SP-07": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-07]"
+  ],
+  "SP-08": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-08]"
+  ],
+  "SP-09": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-09]"
+  ],
+  "SP-10": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-10]"
+  ],
+  "SP-11": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-11]"
+  ],
+  "SP-12": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-12]"
+  ],
+  "SP-13": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-13]"
+  ],
+  "SP-14": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-14]"
+  ],
+  "SP-15": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-15]"
+  ],
+  "SP-16": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-16]"
+  ],
+  "SP-17": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-17]"
+  ],
+  "SP-18": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-18]"
+  ],
+  "SP-19": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-19]"
+  ],
+  "SP-20": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-20]"
+  ],
+  "SP-21": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-21]"
+  ],
+  "SP-22": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-22]"
+  ],
+  "SP-23": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-23]"
+  ],
+  "SP-24": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-24]"
+  ],
+  "SP-25": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-25]"
+  ],
+  "SP-26": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-26]"
+  ],
+  "SP-27": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-27]"
+  ],
+  "SP-28": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-28]"
+  ],
+  "SP-29": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-29]"
+  ],
+  "SP-30": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-30]"
+  ],
+  "SP-31": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-31]"
+  ],
+  "SP-32": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-32]"
+  ],
+  "SP-33": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-33]"
+  ],
+  "SP-34": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-34]"
+  ],
+  "SP-35": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-35]"
+  ],
+  "SP-36": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-36]"
+  ],
+  "SP-37": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-37]"
+  ],
+  "SP-38": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-38]"
+  ],
+  "SP-39": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-39]"
+  ],
+  "SP-40": [
+   "test_core_matrix.py::test_core_SP_class_read_as_required_ci[SP-40]"
+  ],
+  "U-1": [
+   "test_core_urls.py::test_core_O_4_U_ordinary_urls_none_newly_unfetched"
+  ],
+  "U-2": [
+   "test_core_matrix_url.py::test_core_M_3_heavy_every_strict_r_cell",
+   "test_core_matrix_url.py::test_core_M_3_strict_r_cells_in_a_url_are_not_fetched"
+  ]
+ },
+ "spec": "core-spec/1"
+}

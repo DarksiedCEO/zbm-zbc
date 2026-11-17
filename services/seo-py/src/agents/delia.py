@@ -47,6 +47,12 @@ _W3C = re.compile(r"\d{4}(-\d{2}(-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2
 _LLMS_LINK = re.compile(r"^\s*[-*]\s*\[([^\]]+)\]\(([^)\s]+)\)(?::\s*(.*))?$")
 
 
+def methodology_text() -> str:
+    """The methodology this agent writes (its METHODOLOGY template filled with code constants only); report_fields
+    reads it to build the closed ``code_text`` set (lead ruling 20:15 PT, card C2-OV3)."""
+    return METHODOLOGY.format(c=MAX_CHILDREN, s=BLOCK_SAMPLE)
+
+
 def _parse_lastmod(v: str) -> Optional[datetime]:
     if not _W3C.fullmatch(v):
         return None
@@ -95,11 +101,11 @@ def run(ctx) -> dict:
         findings += _sitemaps(ctx, facts)
         findings += _llms(ctx, facts)
     except Killed as k:
-        return envelope(AGENT, TASK, "KILLED", [], methodology=METHODOLOGY.format(c=MAX_CHILDREN, s=BLOCK_SAMPLE),
+        return envelope(AGENT, TASK, "KILLED", [], methodology=methodology_text(),
                         limitations=LIMITS, reason=k.code, facts=facts)
     read_any = facts.get("sitemaps_read", 0) > 0 or facts.get("llms_txt", {}).get("state") in ("present", "absent")
     outcome = "OK" if read_any and not facts.get("sitemap_fetch_failures") else ("PARTIAL" if read_any else "FAILED")
-    return envelope(AGENT, TASK, outcome, findings, methodology=METHODOLOGY.format(c=MAX_CHILDREN, s=BLOCK_SAMPLE),
+    return envelope(AGENT, TASK, outcome, findings, methodology=methodology_text(),
                     limitations=LIMITS, not_connected=not_connected, facts=facts)
 
 

@@ -19,29 +19,33 @@ from __future__ import annotations
 from startup_profile import existing_store_profile
 existing_store_profile()  # Refuse invalid profile before eager construction/configuration.
 
-import asyncio
-import hashlib
-import hmac
-import logging
-import re
-import time
-from typing import Any, Callable, Optional
+import asyncio  # noqa: E402 - after the startup profile check
+import hashlib  # noqa: E402 - after the startup profile check
+import hmac  # noqa: E402 - after the startup profile check
+import logging  # noqa: E402 - after the startup profile check
+import re  # noqa: E402 - after the startup profile check
+import time  # noqa: E402 - after the startup profile check
+from typing import Any, Callable, Optional  # noqa: E402 - after the startup profile check
 
-from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request, status
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ValidationError
-from starlette.concurrency import run_in_threadpool
+from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query, Request, status  # noqa: E402 - after the startup profile check
+from fastapi.exceptions import RequestValidationError  # noqa: E402 - after the startup profile check
+from fastapi.exception_handlers import http_exception_handler  # noqa: E402 - after the startup profile check
+from fastapi.responses import JSONResponse  # noqa: E402 - after the startup profile check
+from pydantic import BaseModel, ValidationError  # noqa: E402 - after the startup profile check
+from starlette.concurrency import run_in_threadpool  # noqa: E402 - after the startup profile check
+from starlette.exceptions import HTTPException as StarletteHTTPException  # noqa: E402 - after the startup profile check
 
-import config as config_mod
-import models as m
-from errors import Forbidden, Invalid, NotFound, SeoError
-from founder import HEADER as FOUNDER_HEADER
-from founder import FounderGate
-from ledger import HttpLedgerClient, Recorder, UnconfiguredLedgerClient
-from reasons import R
-from service import JOBS, SeoService
-from store import RecordLog
+import config as config_mod  # noqa: E402 - after the startup profile check
+import models as m  # noqa: E402 - after the startup profile check
+import reasons  # noqa: E402 - after the startup profile check
+import sink_fields  # noqa: E402 - after the startup profile check
+from errors import Forbidden, Invalid, NotFound, SeoError  # noqa: E402 - after the startup profile check
+from founder import HEADER as FOUNDER_HEADER  # noqa: E402 - after the startup profile check
+from founder import FounderGate  # noqa: E402 - after the startup profile check
+from ledger import HttpLedgerClient, Recorder, UnconfiguredLedgerClient  # noqa: E402 - after the startup profile check
+from reasons import R  # noqa: E402 - after the startup profile check
+from service import JOBS, SeoService  # noqa: E402 - after the startup profile check
+from store import RecordLog  # noqa: E402 - after the startup profile check
 
 log = logging.getLogger("seo.api")
 
@@ -54,7 +58,6 @@ BODY_READ_TIMEOUT_S = 30.0
 MAX_JSON_DEPTH = 32
 MAX_JSON_MEMBERS = 20_000
 ERROR_MAX_ERRORS = 20
-ERROR_MAX_STR = 120
 
 ROUTE_LIMITS: list[tuple[re.Pattern, int]] = []
 DEFAULT_ROUTE_LIMIT = 128 * 1024
@@ -73,18 +76,20 @@ FORBIDDEN_KEYS = frozenset({
 
 
 def forbidden_keys(obj: Any, path: str = "", depth: int = 0) -> list[str]:
+    """The forbidden keys found in a body, each as its NORMALISED name from ``FORBIDDEN_KEYS`` (sink job D: an
+    error body never repeats a key the caller wrote, nor the path of client keys that led to it)."""
     out: list[str] = []
     if depth > 40:
         return out
     if isinstance(obj, dict):
         for k, v in obj.items():
-            p = f"{path}.{k}" if path else str(k)
-            if str(k).lower().replace("-", "_") in FORBIDDEN_KEYS:
-                out.append(p[:120])
-            out += forbidden_keys(v, p, depth + 1)
+            name = str(k).lower().replace("-", "_")
+            if name in FORBIDDEN_KEYS:
+                out.append(name)
+            out += forbidden_keys(v, "", depth + 1)
     elif isinstance(obj, list):
         for v in obj[:10_000]:
-            out += forbidden_keys(v, path, depth + 1)
+            out += forbidden_keys(v, "", depth + 1)
     return out
 
 
@@ -95,8 +100,15 @@ def route_limit(path: str) -> int:
     return DEFAULT_ROUTE_LIMIT
 
 
-def _plain(status_code: int, detail: str, **extra) -> JSONResponse:
-    return JSONResponse(status_code=status_code, content={"detail": detail, **extra})
+# C2-3b3 (lead ruling 18:20 PT F3b2-2, T-1): each input-limit refusal answers one closed reason code, no prose
+LIMIT_CODES = {414: R("URI_TOO_LONG"), 431: R("HEADERS_TOO_LARGE"), 413: R("BODY_TOO_LARGE"), 400: R("BAD_REQUEST"),
+               415: R("UNSUPPORTED_MEDIA_TYPE"), 408: R("REQUEST_TIMEOUT"), 422: R("BODY_REFUSED")}
+AUTH_MISSING = R("AUTH_MISSING")    # C2-3b3 (lead ruling 18:20 PT F3b2-1)
+AUTH_INVALID = R("AUTH_INVALID")
+
+
+def _plain(status_code: int) -> JSONResponse:
+    return JSONResponse(status_code=status_code, content={"detail": LIMIT_CODES[status_code]})
 
 
 def json_shape_problem(body: bytes) -> Optional[str]:
@@ -151,19 +163,19 @@ class InputLimits:
         path = scope.get("path", "")
         target = len(scope.get("raw_path") or path.encode("utf-8", "surrogatepass")) + len(scope.get("query_string") or b"")
         if target > MAX_TARGET_BYTES:
-            return await _plain(414, f"request target longer than {MAX_TARGET_BYTES} bytes; refused")(scope, receive, send)
+            return await _plain(414)(scope, receive, send)
         headers = scope.get("headers") or ()
         if target + sum(len(k) + len(v) + 4 for k, v in headers) > MAX_HEAD_BYTES:
-            return await _plain(431, f"request head larger than {MAX_HEAD_BYTES} bytes; refused")(scope, receive, send)
+            return await _plain(431)(scope, receive, send)
         limit = min(route_limit(path), MAX_BODY_BYTES)
-        too_large = _plain(413, f"request body larger than {limit} bytes for this route; refused")
+        too_large = _plain(413)
         ctype = None
         declared = None
         chunked = False
         for name, value in headers:
             if name == b"content-length":
                 if not value.isdigit():
-                    return await _plain(400, "invalid Content-Length")(scope, receive, send)
+                    return await _plain(400)(scope, receive, send)
                 declared = int(value)
                 if declared > limit:
                     return await too_large(scope, receive, send)
@@ -172,14 +184,14 @@ class InputLimits:
             elif name == b"transfer-encoding" and b"chunked" in value.lower():
                 chunked = True
         if (declared or chunked) and not is_json_content_type(ctype):
-            return await _plain(415, "request bodies must be application/json")(scope, receive, send)
+            return await _plain(415)(scope, receive, send)
         chunks, size = [], 0
         deadline = time.monotonic() + BODY_READ_TIMEOUT_S
         while True:
             try:
                 message = await asyncio.wait_for(receive(), max(0.0, deadline - time.monotonic()))
             except asyncio.TimeoutError:
-                return await _plain(408, "request body not received in time; refused")(scope, receive, send)
+                return await _plain(408)(scope, receive, send)
             if message["type"] != "http.request":
                 return
             chunk = message.get("body") or b""
@@ -192,10 +204,10 @@ class InputLimits:
         body = b"".join(chunks)
         if body:
             if not is_json_content_type(ctype):
-                return await _plain(415, "request bodies must be application/json")(scope, receive, send)
+                return await _plain(415)(scope, receive, send)
             problem = await run_in_threadpool(json_shape_problem, body)
             if problem:
-                return await _plain(422, f"request body refused: {problem}")(scope, receive, send)
+                return await _plain(422)(scope, receive, send)
         replayed = False
 
         async def replay():
@@ -213,7 +225,7 @@ def make_require_auth(required_token: str, on_failure: Callable[[], None] = lamb
         if authorization is None or not authorization.startswith("Bearer "):
             on_failure()
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,
-                                detail="missing or malformed Authorization header (expected: Bearer <token>)",
+                                detail=AUTH_MISSING,
                                 headers={"WWW-Authenticate": "Bearer"})
         supplied = authorization.removeprefix("Bearer ")
         try:
@@ -222,7 +234,7 @@ def make_require_auth(required_token: str, on_failure: Callable[[], None] = lamb
             valid = False  # non-ASCII token: invalid (401), never a 500
         if not valid:
             on_failure()
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid token",
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=AUTH_INVALID,
                                 headers={"WWW-Authenticate": "Bearer"})
 
     return require_auth
@@ -247,11 +259,47 @@ class Callers:
         return found
 
 
+def _model_field_names() -> frozenset:
+    names: set = set()
+    for obj in vars(m).values():
+        if isinstance(obj, type) and issubclass(obj, BaseModel):
+            names.update(obj.model_fields)
+    return frozenset(names)
+
+
+# Sink job D: an error body is reason codes and machine values only; nothing the caller sent comes back. A ``loc``
+# element is an index, or a name from this closed set (the request models' fields, the parameter names of the
+# routes, the forbidden-key catalogue); any other element (a key the caller invented) is ERROR_LOC_UNKNOWN.
+# C2-3b2 (lead ruling 15:32 PT F3b-1, T-1): the v1 constant "*" is not a T-1 value; the code `unknown_key` is.
+ERROR_LOC_UNKNOWN = "unknown_key"
+ERROR_LOC_NAMES = frozenset(("body", "query", "path", "header", "cookie", "tid", "eid", "psid", "aid", "cid", "iid",
+                             "sid", "agent", "name", "against", "since", "limit", "offset", "event_type",
+                             "authorization")) | _model_field_names() | FORBIDDEN_KEYS
+# C2-6a2: the validation msg_code constants moved verbatim to reasons.py (sink_fields binds ERROR_MSG_CODES;
+# api imports sink_fields, so the constant cannot live here); re-exported under the same names
+from reasons import ERROR_MSG_CODES, ERROR_MSG_WITHHELD, ERROR_TYPES_WITH_MESSAGE   # noqa: E402,F401
+ERROR_REFUSED: dict = {}    # C2-3b (F3-6): (reason, refusal) -> count of domain bodies sent as {"detail"} only
+ERROR_INTERNAL = R("INTERNAL_ERROR")    # C2-3b2 (F3b-2 / F3b-3)
+ERROR_FRAMEWORK = {404: R("NOT_FOUND"), 405: R("METHOD_NOT_ALLOWED")}   # C2-3b2 (F4-1)
+_ERROR_TYPE = re.compile(r"[a-z][a-z0-9_.]{0,63}")
+
+
+def _loc_item(x):
+    if isinstance(x, bool) or not isinstance(x, (int, str)):
+        return ERROR_LOC_UNKNOWN
+    if isinstance(x, int):
+        return x if 0 <= x < 10 ** 8 else ERROR_LOC_UNKNOWN
+    return x if x in ERROR_LOC_NAMES else ERROR_LOC_UNKNOWN
+
+
 def _sanitize(errors: list[dict]) -> dict:
     out = []
     for e in errors[:ERROR_MAX_ERRORS]:
-        loc = [str(x)[:ERROR_MAX_STR] if isinstance(x, str) else x for x in list(e.get("loc", ()))[:8]]
-        out.append({"loc": loc, "msg": str(e.get("msg", ""))[:ERROR_MAX_STR], "type": e.get("type")})
+        loc = [_loc_item(x) for x in list(e.get("loc", ()))[:8]]
+        kind = e.get("type")
+        kind = kind if isinstance(kind, str) and _ERROR_TYPE.fullmatch(kind) else "invalid"
+        msg_code = kind if kind in ERROR_TYPES_WITH_MESSAGE else ERROR_MSG_WITHHELD
+        out.append({"loc": loc, "msg_code": msg_code, "type": kind})
     return {"detail": out, "errors_total": len(errors)}
 
 
@@ -290,6 +338,14 @@ def _id(value: str, rx: re.Pattern = SEO_ID) -> str:
     return value
 
 
+def _billing_view(audit: dict) -> dict:
+    """Finance (31)'s view of an audit (sink job D): the billing facts only. The audited paths are the operator's
+    text (they can carry a query); Finance gets their count, never the paths."""
+    out = {k: v for k, v in audit.items() if k != "paths"}
+    out["paths_count"] = len(audit.get("paths") or [])
+    return out
+
+
 def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
     app = FastAPI(title="ZBM/ZBC Search & Answer Intelligence (2)", version="0.1.0", docs_url=None, redoc_url=None,
                   openapi_url=None, description="SEO / AEO / GEO / LLMO, Wave 1: read core, machine readability, "
@@ -302,6 +358,8 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
                              list(settings.caller_tokens.values()) + list(settings.tenant_tokens.values()))
     app.state.service = svc
     app.state.gate = gate
+    import log_sink
+    log_sink.install()                                     # sink job D: Python logging takes machine values only
 
     def caller(*allowed: str) -> Callable:
         def dep(request: Request) -> str:
@@ -374,12 +432,33 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
 
     @app.exception_handler(SeoError)
     def _domain(_: Request, exc: SeoError):
-        return JSONResponse(status_code=exc.status_code, content={"detail": exc.reason, **exc.body})
+        if exc.reason not in reasons.CODES:
+            # C2-3b2 (lead ruling 15:32 PT F3b-3): a reason outside the catalogue (only by bypassing R()) is never sent
+            ERROR_REFUSED[(ERROR_INTERNAL, "unknown_reason")] = ERROR_REFUSED.get((ERROR_INTERNAL, "unknown_reason"), 0) + 1
+            # C2-3b3 (lead ruling 18:20 PT F3b2-3): an unknown reason is a code bug -> 500, not the exception's status
+            return JSONResponse(status_code=500, content={"detail": ERROR_INTERNAL})
+        content, refused = sink_fields.error_body(exc.reason, exc.body)
+        if refused is not None:
+            ERROR_REFUSED[(exc.reason, refused)] = ERROR_REFUSED.get((exc.reason, refused), 0) + 1
+        return JSONResponse(status_code=exc.status_code, content=content)
 
     @app.exception_handler(Exception)
     def _unexpected(_: Request, exc: Exception):
         log.error("unexpected %s", type(exc).__name__)
-        return JSONResponse(status_code=500, content={"detail": "internal error"})
+        return JSONResponse(status_code=500, content={"detail": ERROR_INTERNAL})   # C2-3b2 (F3b-2)
+
+    @app.exception_handler(StarletteHTTPException)
+    async def _framework(request: Request, exc: StarletteHTTPException):
+        # C2-3b2 (lead ruling 17:50 PT F4-1): the framework's default 404 / 405 bodies carry a closed reason code
+        # C2-3b3 (F3b3-1): async, so the default handler's coroutine is awaited (a sync handler returned it un-awaited
+        # -> TypeError -> every other HTTPException, the 401s included, answered 500); a catalogue detail (the 401
+        # AUTH_MISSING / AUTH_INVALID of lead ruling 18:20 PT F3b2-1) is sent as that code, headers kept
+        code = ERROR_FRAMEWORK.get(exc.status_code)
+        if code is None and isinstance(exc.detail, str) and exc.detail in reasons.CODES:
+            code = exc.detail
+        if code is None:
+            return await http_exception_handler(request, exc)
+        return JSONResponse(status_code=exc.status_code, content={"detail": code}, headers=exc.headers)
 
     P = "/seo/v1"
 
@@ -474,7 +553,8 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
 
     @app.get(P + "/tenants/{tid}/audits", dependencies=auth)
     def audits(scope: tuple = Depends(scoped("dashboard", "seo_agent", "hub", "finance_31", "compliance_38"))) -> list:
-        return svc.audits_view(scope[1])
+        rows = svc.audits_view(scope[1])
+        return [_billing_view(a) for a in rows] if scope[0] == "finance_31" else rows
 
     @app.get(P + "/tenants/{tid}/audits/{aid}/drift", dependencies=auth)
     def drift(aid: str, against: str = Query(pattern=r"^seo-aud-[0-9a-f]{40}$"),
@@ -495,7 +575,56 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
     @app.get(P + "/tenants/{tid}/audits/{aid}", dependencies=auth)
     def audit(aid: str, scope: tuple = Depends(scoped("dashboard", "seo_agent", "hub", "finance_31",
                                                       "compliance_38"))) -> dict:
-        return svc.audit_view(scope[1], _id(aid), full=scope[0] != "finance_31")
+        if scope[0] == "finance_31":
+            return _billing_view(svc.audit_view(scope[1], _id(aid), full=False))
+        return svc.audit_view(scope[1], _id(aid))
+
+    # ------------------------------------------------------------------ Callum's citation-source runs (ADR 0046)
+
+    CITATION_READERS = ("dashboard", "seo_agent", "hub", "compliance_38")
+    # core-spec/2 V-4 (C2-10b, lead ruling 09:10 PT, F10-1): the run document and its MNC list are opened from the
+    # vault; V-4 says never decrypt for a Compliance (38) view and no frozen spec line grants Compliance this read,
+    # so compliance_38 is refused (403 CALLER_NOT_ALLOWED) by the caller check, before any read. The run list
+    # (citation_runs_view: no vault read) keeps its readers.
+    CITATION_DOC_READERS = tuple(c for c in CITATION_READERS if c != "compliance_38")
+    # core-spec/2 V-4 / D-02h (C2-10d, lead ruling 10:05 PT, F10b-1): the vault is opened ONLY for the owner caller
+    # with tenant authentication (hub + its tenant token; ``scoped`` has checked the token against the path).
+    # dashboard / seo_agent (no tenant authentication) get the code-only view: ids, codes, counts; no decrypt.
+    # An operator who needs the text authenticates as that tenant's owner.
+
+    def tenant_authenticated(scope: tuple) -> bool:
+        return scope[0] == "hub"
+
+    @app.post(P + "/tenants/{tid}/citation-runs", dependencies=auth, status_code=201)
+    def request_citation_run(request: Request, req: dict = Depends(body(m.CitationRunCreate)),
+                             scope: tuple = Depends(scoped("dashboard", "seo_agent"))) -> dict:
+        return svc.request_citation_run(scope[0], scope[1], req, andre=andre_if_presented(request))
+
+    @app.get(P + "/tenants/{tid}/citation-runs", dependencies=auth)
+    def citation_runs(scope: tuple = Depends(scoped(*CITATION_READERS))) -> list:
+        return svc.citation_runs_view(scope[1])
+
+    @app.get(P + "/tenants/{tid}/citation-runs/{cid}", dependencies=auth)
+    def citation_run(cid: str, scope: tuple = Depends(scoped(*CITATION_DOC_READERS))) -> dict:
+        return svc.citation_run_view(scope[1], _id(cid), full=tenant_authenticated(scope))
+
+    @app.get(P + "/tenants/{tid}/citation-runs/{cid}/mnc-priority", dependencies=auth)
+    def citation_mnc_priority(cid: str, scope: tuple = Depends(scoped(*CITATION_DOC_READERS))) -> dict:
+        """Callum's Mentioned-Not-Cited priority list: the callum.mnc_priority/2 contract Roman and Adaeze read."""
+        return svc.mnc_priority_view(scope[1], _id(cid), full=tenant_authenticated(scope))
+
+    class RevealBody(BaseModel):
+        model_config = {"extra": "forbid"}
+        surface: str
+        run_id: str
+        span: str
+
+    @app.post(P + "/tenants/{tid}/reveals", dependencies=auth)
+    def reveal(req: dict = Depends(body(RevealBody)), scope: tuple = Depends(scoped("hub"))) -> dict:
+        """core-spec/2 RV-1..RV-3 (card C2-14): ONE masked span of the tenant's OWN text, for the owner caller with
+        tenant authentication only (hub + its tenant token, Wave-1 D-02h); audited BEFORE the value is returned;
+        no-store (NoStore); never Finance / Compliance / any other caller (403 / 404 by ``scoped``)."""
+        return svc.reveal_span(scope[0], scope[1], req["surface"], req["run_id"], req["span"])
 
     # ------------------------------------------------------------------ first-party log ingests (Wave 2)
 

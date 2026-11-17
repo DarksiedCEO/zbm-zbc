@@ -41,10 +41,17 @@ _TABLE = lookalikes.Table()
 _DASHES = {cp: "-" for cp in range(sys.maxunicode + 1) if unicodedata.category(chr(cp)) in ("Pd", "Pc")}
 _DASHES[ord("−")] = "-"                                     # the minus sign (Sm) reads as a dash in numbers
 # "@" in any spelling the shared fold reaches, "(at)" / "[at]"; a bare " at " is ordinary prose ("listed at yelp.com")
-_EMAIL = re.compile(r"[a-z0-9._%+-]+\s*(?:@|\(at\)|\[at\])\s*[a-z0-9-]+(?:\s*(?:\.|\(dot\)|\[dot\])\s*[a-z0-9-]+)+",
-                    re.I)
-# spelled out: "john at example dot com" (needs at least one " dot " part, so prose like "listed at yelp.com" passes)
+# Linear (review 601e328a MUST 6): a match starts only at the start of a local-part run (the look-behind is the local
+# part's own class, so a match inside a run implies one at its start: the same accept / reject as the unanchored
+# form) and every part is possessive (no part can give back characters the next part could use).
+_EMAIL = re.compile(r"(?<![a-z0-9._%+-])[a-z0-9._%+-]++\s*+(?:@|\(at\)|\[at\])\s*+[a-z0-9-]++"
+                    r"(?:\s*+(?:\.|\(dot\)|\[dot\])\s*+[a-z0-9-]++)+", re.I)
+# spelled out: "john at example dot com" (needs at least one " dot " part, so prose like "listed at yelp.com" passes).
+# ``_EMAIL_WORDS`` is the specification; ``_email_words`` finds the same matches (same local parts) in linear time.
 _EMAIL_WORDS = re.compile(r"\b(?P<local>[a-z0-9._%+-]+)\s+at\s+[a-z0-9-]+(?:\s+dot\s+[a-z0-9-]+)+\b", re.I)
+_LOCAL_RUN = re.compile(r"[a-z0-9._%+-]++", re.I)
+_WORDS_TAIL = re.compile(r"\s+at\s+[a-z0-9-]+(?:\s+dot\s+[a-z0-9-]+)+\b", re.I)
+_BOUNDARY = re.compile(r"\b")
 # words that prose puts before " at <place>" ("listed at yelp dot com", "reviews at google dot com"): such a word is
 # not taken as the mailbox of a spelled-out address. A real mailbox is a name or an id ("john", "j.doe", "sales1").
 _PROSE_BEFORE_AT = frozenset("""
@@ -58,7 +65,9 @@ _IPV4 = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
 # two or three parts only: a version prefix never hides a dotted quad (AEGIS M-r2-1)
 _VERSION = re.compile(r"(?:\bv|\bver\.?\s*|\bversion\s*|\brelease\s*|\bbuild\s*)(?:\d{1,4}\.){1,2}\d{1,4}(?!\.?\d)",
                       re.I)
-_YEARS = re.compile(r"(?<!\d)(?:19|20)\d\d\s*(?:-|/|\s)\s*(?:19|20)\d\d(?!\d)")
+# ``\s*(?:-|/|\s)\s*`` written as ``\s*+[-/]\s*+|\s++``: the same strings, the same spans, linear (a year followed by a
+# long run of spaces was quadratic)
+_YEARS = re.compile(r"(?<!\d)(?:19|20)\d\d(?:\s*+[-/]\s*+|\s++)(?:19|20)\d\d(?!\d)")
 # a ROUND count: 1-3 digits then only "000" groups, one separator; the caller also requires no other digit within
 # three characters on either side (AEGIS M-r2-1)
 _COUNT = re.compile(r"\d{1,3}(?:(?P<s>[ ,.\u00a0\u202f])000)(?:(?P=s)000)*")
@@ -83,7 +92,26 @@ def _round_counts(t: str) -> str:
 
 
 def _email_words(t: str) -> bool:
-    return any(m.group("local").lower() not in _PROSE_BEFORE_AT for m in _EMAIL_WORDS.finditer(t))
+    """``any(m.group("local").lower() not in _PROSE_BEFORE_AT for m in _EMAIL_WORDS.finditer(t))`` in linear time. A
+    match's local part ends where a run of local-part characters ends (the next character must be a space) and that run
+    must be followed by the " at ... dot ..." tail; it starts at the first word boundary of the run at or after where
+    the previous match ended (the regex scans left to right and resumes after each match). So each run is read once,
+    its tail matched once, and its first boundary found by one bounded search."""
+    pos = 0
+    for r in _LOCAL_RUN.finditer(t):
+        s, e = r.span()
+        if e <= pos:
+            continue
+        tail = _WORDS_TAIL.match(t, e)
+        if tail is None:
+            continue
+        b = _BOUNDARY.search(t, max(s, pos), e)
+        if b is None or b.start() >= e:
+            continue
+        if t[b.start():e].lower() not in _PROSE_BEFORE_AT:
+            return True
+        pos = tail.end()
+    return False
 
 
 def personal_data(text: str) -> Optional[str]:

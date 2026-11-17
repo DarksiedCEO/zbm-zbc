@@ -56,6 +56,7 @@ _WORD = re.compile(r"[A-Za-z]{1,30}")
 _CAMEL = re.compile(r"[a-z][A-Z]")              # JaneSmith, janeSmith: a capital after a small letter
 _WORD_EXT = re.compile(r"([A-Za-z]{1,30})\.([A-Za-z0-9]{1,5})")
 _PLACEHOLDER = re.compile(r"\{(?:email|uuid|number|id|token|slug)\}|\{file\}\.[a-z0-9]{1,5}")
+TIMEZONE = "America/Los_Angeles"            # the window's timezone (report_fields types it, ruling 20:55 F2)
 LAG_DAYS = 3                                  # Google: "Data is typically available after 2-3 days"
 _QUESTION = re.compile(r"^(who|what|when|where|why|how|which|can|could|does|do|is|are|should|will|would)\b|\?$")
 _LOCAL = re.compile(r"\b(near me|nearby|near by|open now|directions|closest|around me)\b")
@@ -75,7 +76,7 @@ def pacific_today(now: datetime) -> date:
     at most one hour in summer, irrelevant behind the 3-day lag)."""
     try:
         from zoneinfo import ZoneInfo
-        tz = ZoneInfo("America/Los_Angeles")
+        tz = ZoneInfo(TIMEZONE)
     except Exception:  # noqa: BLE001 - no tz database: the fixed standard offset
         tz = timezone(timedelta(hours=-8))
     return now.astimezone(tz).date()
@@ -275,7 +276,7 @@ def read_aggregates(rd, prop: str, start: str, end: str, hosts: set, brands: lis
     attributed_i = sum(a.i for a in classes.values())
     return {
         "property": prop,
-        "window": {"start": start, "end": end, "days": days, "timezone": "America/Los_Angeles",
+        "window": {"start": start, "end": end, "days": days, "timezone": TIMEZONE,
                    "data_state": "final", "search_type": "web", "lag_days": LAG_DAYS},
         "totals": {**total.view(), "aggregation": "byProperty",
                    "position_note": "impression-weighted mean of Google's per-date positions (an approximation)"},

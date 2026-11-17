@@ -43,6 +43,12 @@ HTML_TYPES = ("text/html", "application/xhtml+xml")
 CANONICAL_CHECK_MAX = 5
 
 
+def methodology_text() -> str:
+    """The methodology this agent writes (its METHODOLOGY template filled with code constants only); report_fields
+    reads it to build the closed ``code_text`` set (lead ruling 20:15 PT, card C2-OV3)."""
+    return METHODOLOGY.format(v=bots.VERSION)
+
+
 def _noindex(fetch, extract: Optional[dict]) -> bool:
     xr = (fetch.headers.get("x-robots-tag") or "").lower()
     if "noindex" in xr or "none" in [x.strip() for x in xr.split(",")]:
@@ -108,14 +114,14 @@ def run(ctx) -> tuple[dict, dict]:
                                             capability="P2", detail={"signals": ad["signals"]}))
         facts["pages_requested"], facts["pages_fetched"] = len(ctx.paths), fetched
     except Killed as k:
-        return envelope(AGENT, TASK, "KILLED", [], methodology=METHODOLOGY.format(v=bots.VERSION),
+        return envelope(AGENT, TASK, "KILLED", [], methodology=methodology_text(),
                         limitations=LIMITS, reason=k.code, facts=facts), pages
     if fetched == 0:
         outcome = "BLOCKED" if all(p["fetch"].state == "BLOCKED_BY_ROBOTS" for p in pages.values()) else "FAILED"
     else:
         outcome = "OK" if fetched == len(ctx.paths) else "PARTIAL"
     facts["render_states"] = {p: v["render"]["state"] for p, v in pages.items()}
-    return envelope(AGENT, TASK, outcome, findings, methodology=METHODOLOGY.format(v=bots.VERSION),
+    return envelope(AGENT, TASK, outcome, findings, methodology=methodology_text(),
                     limitations=LIMITS, not_connected=not_connected, facts=facts), pages
 
 

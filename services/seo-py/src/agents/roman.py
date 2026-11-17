@@ -39,6 +39,13 @@ LIMITS = ["Heuristic checklist, uncalibrated: passing every check does not mean 
           "Rendering is not connected: markup inserted by JavaScript was not seen."]
 
 
+def methodology_text() -> str:
+    """The methodology this agent writes (its METHODOLOGY template filled with code constants only); report_fields
+    reads it to build the closed ``code_text`` set (lead ruling 20:15 PT, card C2-OV3)."""
+    return METHODOLOGY.format(v=SCHEMA_RULES_VERSION, n=RAW_TEXT_MIN,
+                              bots=", ".join(f"{e}: {t}" for e, t in bots.ENGINE_SEARCH_BOT.items()))
+
+
 def run(ctx, pages: dict) -> dict:
     findings, per_page, readiness = [], {}, {}
     entity_seen = False
@@ -102,8 +109,7 @@ def run(ctx, pages: dict) -> dict:
                                                                  "audited page"}))
     read = sum(1 for p in pages.values() if p.get("extract") is not None)
     outcome = "OK" if read and read == len(pages) else ("PARTIAL" if read else "INSUFFICIENT_EVIDENCE")
-    methodology = METHODOLOGY.format(v=SCHEMA_RULES_VERSION, n=RAW_TEXT_MIN,
-                                     bots=", ".join(f"{e}: {t}" for e, t in bots.ENGINE_SEARCH_BOT.items()))
+    methodology = methodology_text()
     return envelope(AGENT, TASK, outcome, findings, methodology=methodology, limitations=LIMITS,
                     not_connected={"render"}, facts={"pages": per_page, "engine_readiness_heuristic": readiness})
 

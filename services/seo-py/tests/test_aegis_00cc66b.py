@@ -124,7 +124,7 @@ def test_h1_single_gzip_bomb_stops_at_the_decoded_budget(raw):
 
 
 @pytest.mark.parametrize("coding,payload", [
-    (b"gzip", gzip.compress(b"<title>ok</title>")), (b"x-gzip", gzip.compress(b"<title>ok</title>")),
+    (b"gzip", gzip.compress(b"<title>ok</title>", mtime=0)), (b"x-gzip", gzip.compress(b"<title>ok</title>", mtime=0)),
     (b"deflate", zlib.compress(b"<title>ok</title>")),
     (b"deflate", zlib.compress(b"<title>ok</title>")[2:-4]),           # raw deflate, as some servers send
     (b"identity", b"<title>ok</title>")])
