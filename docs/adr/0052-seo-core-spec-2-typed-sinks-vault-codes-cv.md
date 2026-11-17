@@ -306,3 +306,20 @@ owner question; 16:45 G-2 time red -> C2-G2b. Owner (11-16): 12:18 PT PF option 
 - PENDING / not green before this ADR is true by measurement: V-3 rotation confirmation (judge); G-2 time RED
   (C2-G2b); G-3 ruff / gitleaks, IM-1 / IM-2, O rows and the reported job: no final-tree result in
   `core-v2/HANDOFF.md` at 2026-11-16 ~12:40 PT (C2-G3, C2-G8..G10).
+
+## Certification round (2026-11-17) - supersedes the PENDING list above
+
+Independent judge: CERTIFIED WITH RESIDUALS on a0b9cf5d (src unchanged since 71b54a98 except AST-identical
+escapes / noqa).
+- G-1 full suite x2: 5885 passed / 0 failed. G-2 CI lane: 2659 / 0 in 415 s with 2 workers on a 2-core box (bar
+  600 s; under load 822 s, so the bar needs 2 free cores). G-3: ruff 0.15.11 0 new vs 7c254074; 0 non-ASCII
+  added lines. gitleaks 8.30.1 (sha verified) range 97f64805..a0b9cf5d + tree: 0.
+- G-6: 35/35 mutants KILLED with a green CONTROL; the runner now works in a git worktree, refuses to run without
+  a green control, and names the killing test. (Earlier 35/35 claims made without a control were invalid.)
+- G-10 reported SP matrix, 4,877,192 cells per lane: CV lane vs 3120f0b0 lost 0 / new 0. Strict lane vs 3120f0b0
+  lost 146 / new 0. DISCLOSED: all 146 are SP25 / SEP-bare cells of class O or X (0 R cells of 18,907), i.e. cells
+  that should not be read which the old build read; no lost protection (judge addendum 2; LP-1 covers the CV lane).
+- Residuals accepted: edge wrap character shown (CV-2); CV-8 over-mask list (incl. "Covid-19", "9am-5pm", time
+  ranges); label-spam 3.7x 32k->64k in the strict lane (8.6 ms); G-9 items that cite rulings only.
+- Owner items: OJ-1 edge character; OJ-2 time-range exemption; OJ-3 unlabelled random tokens in staff prompt sets;
+  OJ-4 record the three owner rulings that change frozen items as core-spec/2.1.
