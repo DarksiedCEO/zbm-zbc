@@ -19,6 +19,7 @@ sys.dont_write_bytecode = True
 import chaos  # noqa: E402
 import corpus  # noqa: E402
 import engine  # noqa: E402
+import grammar  # noqa: E402
 import invariants  # noqa: E402
 import personas  # noqa: E402
 
@@ -274,6 +275,145 @@ ACTIONS = {"call_out": call_out, "fine": fine}
         self.assertIn("network access attempted", res["a"]["error"])
         self.assertIsNone(res["b"]["error"])
         self.assertEqual(res["b"]["steps"], [{"action": "x", "status": 201, "body": {"ok": True}}])
+
+
+class Generative(unittest.TestCase):
+    """The generative layer (grammar.py): invented cases are a pure function of the seed, their terminals come from
+    the repo, and a failing generated case is saved by itself (memory only grows)."""
+
+    def test_generators_are_deterministic_and_emit_json(self):
+        atoms = {"hosts": ["https://site.test/"], "ssrf": ["http://127.0.0.1:{port}/"], "injection": ["IGNORE"],
+                 "brand_texts": ["Acme cleans rugs."]}
+        for name in grammar.GENERATORS:
+            for seed in range(30):
+                a = grammar.generate(name, random.Random(seed), atoms)
+                self.assertEqual(a, grammar.generate(name, random.Random(seed), atoms), name)
+                self.assertIsInstance(json.loads(a), dict, name)
+        urls = {grammar.citation_url(random.Random(i), atoms) for i in range(400)}
+        self.assertGreater(len(urls), 300)                        # it explores, it does not repeat itself
+        for kind in grammar.HOST_KINDS:
+            self.assertIsInstance(grammar.host_of_kind(random.Random(1), kind, atoms), str, kind)
+
+    def test_a_generated_scenario_is_seeded_from_the_repo_and_rebuilds_by_id(self):
+        lib = engine.load_library("seo-py-callum")
+        a, b, c = engine.generate(lib, 1), engine.generate(lib, 1), engine.generate(lib, 2)
+        gen = [x for x in a if x.get("generated")]
+        self.assertTrue(gen)
+        self.assertEqual(a, b)
+        self.assertNotEqual([x["input"] for x in gen], [x["input"] for x in c if x.get("generated")])
+        self.assertTrue(all(x["case_id"].startswith("seo-py-callum/") for x in a))
+        dept, scenario, idx, variant, seed = engine.parse_case_id(gen[5]["case_id"])
+        again = [x for x in engine.generate(lib, seed, variant) if x["case_id"] == gen[5]["case_id"]]
+        self.assertEqual(again[0]["input"], gen[5]["input"])
+        sc = next(s for s in lib["scenarios"] if s["id"] == "generated-hostile-answers")
+        atoms = engine.scenario_atoms(lib, sc)
+        self.assertIn("IGNORE ALL PREVIOUS INSTRUCTIONS", atoms["injection"][0])     # read from the pinned test
+        self.assertIn("https://sіte.test/", atoms["hosts"])
+
+    def test_a_generated_scenario_without_a_count_or_with_seeds_is_refused(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            saved = engine.SCENARIOS
+            engine.SCENARIOS = Path(tmp)
+            try:
+                lib = {"library": "x", "version": 1, "service": "seo-py", "driver": "seo_py.py", "scenarios": [
+                    {"id": "g", "persona": "p", "input_field": "spec", "steps": [], "invariants": [],
+                     "generator": {"name": "callum_answer"}}]}
+                (Path(tmp) / "x.json").write_text(json.dumps(lib))
+                with self.assertRaises(engine.LibraryError):
+                    engine.load_library("x")
+                lib["scenarios"][0]["generator"] = {"name": "no_such_grammar", "count": 3}
+                (Path(tmp) / "x.json").write_text(json.dumps(lib))
+                with self.assertRaises(engine.LibraryError):
+                    engine.load_library("x")
+            finally:
+                engine.SCENARIOS = saved
+
+    def test_failing_generated_cases_are_saved_automatically_and_only_appended(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            saved = engine.REPLAY
+            engine.REPLAY = Path(tmp)
+            try:
+                fail = engine.judge({**Gate.CASE, "known_failure": None},
+                                    {"steps": [{"action": "a", "status": 500, "body": {}}], "state": {}, "error": None})
+                gen = engine.judge({**Gate.CASE, "case_id": "d/g#000.0@1", "input": {"spec": "{}"},
+                                    "known_failure": None, "generated": True},
+                                   {"steps": [{"action": "a", "status": 500, "body": {}}], "state": {}, "error": None})
+                dry = engine.promote({"d": [fail, gen]}, "2026-11-08", generated_only=True, write=False)
+                self.assertEqual([e["origin"] for e in dry["d"]], ["d/g#000.0@1"])
+                self.assertFalse((Path(tmp) / "d.json").exists())            # CI: the checkout is never written
+                self.assertEqual(engine.promote({"d": [fail, gen]}, "2026-11-08", generated_only=True),
+                                 {"d": ["d/R0001"]})
+                doc = engine.load_replay("d")
+                self.assertEqual(len(doc["cases"]), 1)
+                self.assertIsNone(doc["cases"][0]["known_failure"])           # blocks until triaged
+                self.assertEqual(engine.promote({"d": [gen]}, "2026-11-09", generated_only=True), {})
+            finally:
+                engine.REPLAY = saved
+
+    def test_structural_bound_and_empty_list_predicates(self):
+        obs = {"steps": [], "state": {"n": 3, "cap": 4, "v": [], "w": ["x"]}}
+        self.assertTrue(invariants.state_le(obs, "n", limit=3)[0])
+        self.assertTrue(invariants.state_le(obs, "n", limit_key="cap")[0])
+        self.assertFalse(invariants.state_le(obs, "n", limit=2)[0])
+        self.assertFalse(invariants.state_le(obs, "missing", limit=2)[0])     # not comparable never holds
+        self.assertTrue(invariants.state_empty(obs, "v")[0])
+        self.assertFalse(invariants.state_empty(obs, "w")[0])
+        self.assertFalse(invariants.state_empty(obs, "absent")[0])           # the driver must say what it judged
+
+    def test_the_callum_oracle_reads_hosts_like_a_browser_and_folds_lookalikes(self):
+        import importlib.util
+        from types import SimpleNamespace
+        spec = importlib.util.spec_from_file_location("wr_lk", engine.REPO / "services/service-py/src/lookalikes.py")
+        lk = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(lk)
+        spec = importlib.util.spec_from_file_location("wr_drv", engine.DRIVERS / "seo_py_callum.py")
+        drv = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(drv)
+        drv.SEO = SimpleNamespace(FOLD=lk.Table())
+        want = {"https://site.test/": "CLIENT", "https://WWW.Site.Test./a": "CLIENT", "https://blog.site.test/": "CLIENT",
+                "https://ｓｉｔｅ.test/": "CLIENT", "https://site。test/": "CLIENT",
+                "https://sіte.test/": "LOOKALIKE", "https://xn--ste-jhd.test/": "LOOKALIKE",
+                "https://si\u200bte.test/": "LOOKALIKE", "https://site.test.evil.test/": "OTHER",
+                "https://evilsite.test/": "OTHER", "https://site.test@evil.test/": "OTHER",
+                "https://evil.test\\@site.test/": "OTHER", "https://93.184.215.14/": "OTHER",
+                "https://[::1]/": "OTHER", "javascript://site.test/%0a": "NOT_WEB", "data:text/html,x": "NOT_WEB",
+                "//site.test/": "NOT_WEB", "file://site.test/": "NOT_WEB"}
+        for url, label in want.items():
+            self.assertEqual(drv.oracle_url(url), label, url)
+        import grammar
+        hop = "https://t.co/wr-" + grammar.hexenc("https://sіte.test/wr-" + grammar.hexenc("https://site.test/p"))
+        self.assertEqual(drv.chain_of(hop)[-1], "https://site.test/p")
+        self.assertTrue(drv.tainted(hop, "site.test"))
+        self.assertFalse(drv.creditable(hop, "site.test", True) and not drv.tainted(hop, "site.test"))
+        clean = "https://t.co/wr-" + grammar.hexenc("https://site.test/p")
+        self.assertTrue(drv.creditable(clean, "site.test", True))
+        self.assertFalse(drv.creditable(clean, "site.test", False))     # resolution off: the cited host decides
+
+
+def _service_deps() -> bool:
+    import importlib.util as u
+    return all(u.find_spec(m) is not None for m in ("fastapi", "httpx", "pydantic"))
+
+
+class CallumReplayRegressions(unittest.TestCase):
+    """A replay case must really exercise what its finding names: WR-F014 (a client URL redirecting to a raw-Unicode
+    lookalike) once passed only because the fake web's paths looked secret-shaped and its Location header could not be
+    built, so the redirect was never followed. The replay must show the redirect hop."""
+
+    @unittest.skipUnless(_service_deps(), "needs seo-py's pinned requirements (the warroom CI job installs them)")
+    def test_wr_f014_replay_records_the_redirect_hop(self):
+        lib = engine.load_library("seo-py-callum")
+        case = next(c for c in engine.replay_cases(lib) if c["case_id"] == "seo-py-callum/R0001")
+        self.assertEqual(case["known_failure"] or json.loads((engine.REPLAY / "seo-py-callum.json").read_text(
+            encoding="utf-8"))["cases"][0].get("fixed"), "WR-F014")
+        obs = engine.run_worker(lib, [case], sys.executable)["seo-py-callum/R0001"]
+        self.assertIsNone(obs.get("error"), obs.get("error"))
+        rows = obs["steps"][0]["body"]["result"]["facts"]["rows"]
+        cited = [r for r in rows if r.get("chain") and (r["chain"].get("cited") or {}).get("host") == "acme.com"]
+        self.assertTrue(cited, rows[:3])
+        for r in cited:
+            self.assertTrue(r["chain"]["hop_hosts"], r["chain"])               # the redirect was really followed
+            self.assertNotEqual(r["class"], "STRENGTH_URL", r)
 
 
 class Personas(unittest.TestCase):
