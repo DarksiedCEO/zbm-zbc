@@ -249,6 +249,7 @@ else. Begin the step only with that evidence in hand: a FAIL close stops the run
 
 No production write happened on 2026-11-07; that sitting date is void.
 D12: sitting resumed 2026-11-18 Pacific; part 1 stops before closed-configuration.
+The no-pause block runs in a morning session, with a fresh baseline and re-freeze.
 First due is derived when schedule-activation completes. D10 RESOLVED as a
 conditional approval: only if COMMISSIONED_CLOSED reports seed bc6d371a… with a
 clean assessment. D14 stays DEFERRED. New D16 (DEFERRED, blocks admission): the

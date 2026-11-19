@@ -126,7 +126,7 @@
         "schedule-activation"
       ],
       "decided_by": "Andre, 2026-11-18",
-      "resolution": "The 2026-11-07 date is void (no production write happened). Sitting resumed Wednesday 2026-11-18 (America/Los_Angeles); part 1 stops before closed-configuration. First due is 11:00 UTC on the calendar day after the America/Los_Angeles date on which schedule-activation completes; the runner re-checks it is in the future."
+      "resolution": "The 2026-11-07 date is void (no production write happened). Sitting resumed Wednesday 2026-11-18 (America/Los_Angeles); part 1 stops before closed-configuration. The no-pause block (closed-configuration through owner-activation) runs in a morning session, together with a fresh baseline and re-freeze. First due is 11:00 UTC on the calendar day after the America/Los_Angeles date on which schedule-activation completes; the runner re-checks it is in the future."
     },
     {
       "id": "D13-backup-schedule-observation",
