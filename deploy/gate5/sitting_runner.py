@@ -25,6 +25,8 @@ SECRETISH = re.compile(r'[0-9a-fA-F]{32,}|(sk|rk|pk|whsec|re)_[A-Za-z0-9_]{8,}|-
 # Public digests are allowed only as values of keys ending in sha256, or as sha256:<hex>.
 DIGEST = re.compile(r'"[a-z_]*sha256"\s*:\s*"[0-9a-f]{64}"|sha256:[0-9a-f]{64}')
 SEED_SHA256 = 'bc6d371aa2703a231e03180b1c09907fc25a20dc09f44cdeb5a82f854df070f5'
+# D16: owner-activation:seo must show these engaged by env in authenticated /seo/v1/status.
+SEO_KILLED = frozenset({'audit', 'fetch', 'render', 'ai_probe'})
 
 class Refused(ValueError):
     pass
@@ -69,8 +71,10 @@ STEPS = [
     step('owner-limits', 'operator', ['routing'], ['Stage approved limits on ledger, legal, finance, seo; read back effective byte limits; approve; commit'],
         'Restore pre-sitting limit settings (recorded at baseline as UNKNOWN unless exposed).', 'staged'),
     *[step('owner-activation:' + o, 'operator', ['owner-limits'] if i == 0 else ['owner-activation:' + OWNER_ORDER[i - 1]],
-           [f'Set BACKUP_LAUNCH_ENABLED=1 on {o}; deploy; native health and control authentication pass before next owner'],
-           f'Set BACKUP_LAUNCH_ENABLED=0 on {o}; redeploy; stop activation order.', 'staged') for i, o in enumerate(OWNER_ORDER)],
+           [f'Set BACKUP_LAUNCH_ENABLED=1 on {o}; deploy; native health and control authentication pass before next owner']
+           + (['D16: authenticated /seo/v1/status kill_switches.capabilities_by_env includes audit, fetch, render, ai_probe'] if o == 'seo' else []),
+           f'Set BACKUP_LAUNCH_ENABLED=0 on {o}; redeploy; stop activation order.',
+           'seo_activation' if o == 'seo' else 'staged') for i, o in enumerate(OWNER_ORDER)],
     step('control-activation', 'operator', ['owner-activation:seo'], ['Enable coordinator, then observer and alerts; authenticated control health; alert delivery receipt'],
         'Disable observer alerts and coordinator launch; redeploy.', 'staged'),
     step('crash-notification', 'operator', ['control-activation'], ['Founder confirms effective notification settings; approved synthetic crash on approved target; matching email received'],
@@ -171,6 +175,11 @@ def verify(kind, ev, d, frozen):
         need(set(ev) == {'staged_services', 'unrelated_staged_changes', 'readback_matches_frozen_plan'}, 'STAGED_SCHEMA')
         need(ev['unrelated_staged_changes'] == 0 and ev['readback_matches_frozen_plan'] is True, 'STAGED_MISMATCH')
         return 'staged/committed services: ' + ','.join(sorted(ev['staged_services']))
+    if kind == 'seo_activation':
+        staged = {k: v for k, v in ev.items() if k != 'seo_capabilities_by_env'}
+        need(set(ev) == {'staged_services', 'unrelated_staged_changes', 'readback_matches_frozen_plan', 'seo_capabilities_by_env'}, 'STAGED_SCHEMA')
+        need(type(ev['seo_capabilities_by_env']) is list and SEO_KILLED <= set(ev['seo_capabilities_by_env']), 'SEO_KILL_SWITCH_NOT_ENGAGED')
+        return verify('staged', staged, d, frozen) + '; seo audits killed by env (D16)'
     if kind == 'commission':
         need('deployment_status' not in ev, 'DEPLOYMENT_STATUS_IS_NOT_PROOF')
         need(ev.get('state') == 'COMMISSIONED_CLOSED' and ev.get('seed_sha256') == SEED_SHA256

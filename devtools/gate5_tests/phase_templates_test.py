@@ -58,3 +58,6 @@ for op in ops:
 portal=next(x for x in p['phases'] if x['name']=='portal')
 assert portal['operations'][-1]['arguments']['targetPort']==8480
 assert any('observer cannot alert on its own failure' in x for x in p['prerequisites'])
+cc=next(x for x in p['phases'] if x['name']=='closed-configuration')['operations']
+kills=[o['arguments']['serviceId'] for o in cc if o['tool']=='set_variables' and o['arguments']['variables'].get('SEO_KILLED_CAPABILITIES')=='audit,fetch,render,ai_probe']
+assert kills==['<service-id:seo>']

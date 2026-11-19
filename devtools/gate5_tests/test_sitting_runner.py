@@ -102,9 +102,23 @@ class Runner(unittest.TestCase):
 
     def test_live_decisions_state(self):
         self.assertEqual(sr.open_blockers('decisions'), [])
-        self.assertEqual(sr.open_blockers('owner-activation:ledger'), ['D10-compliance-seed'])
-        self.assertEqual(sr.open_blockers('admission'), ['D14-audit-price'])
+        self.assertEqual(sr.open_blockers('owner-activation:ledger'), [])
+        self.assertEqual(sr.open_blockers('admission'), ['D14-audit-price', 'D16-seo-robots-fix'])
         self.assertEqual(sr.open_blockers('secret-provision'), [])
+
+    def test_seo_activation_requires_kill_switch(self):
+        self.assertEqual(sr.BY_NAME['owner-activation:seo']['evidence'], 'seo_activation')
+        self.assertEqual(sr.BY_NAME['owner-activation:ledger']['evidence'], 'staged')
+        frozen = json.loads(self.plan.read_text())
+        base = {'staged_services': ['seo'], 'unrelated_staged_changes': 0, 'readback_matches_frozen_plan': True}
+        good = {**base, 'seo_capabilities_by_env': ['audit', 'fetch', 'render', 'ai_probe']}
+        self.assertTrue(sr.verify('seo_activation', good, self.run, frozen))
+        for bad, code in (({**base, 'seo_capabilities_by_env': ['audit', 'fetch', 'render']}, 'SEO_KILL_SWITCH_NOT_ENGAGED'),
+                          ({**base, 'seo_capabilities_by_env': 'audit,fetch,render,ai_probe'}, 'SEO_KILL_SWITCH_NOT_ENGAGED'),
+                          (base, 'STAGED_SCHEMA'),
+                          ({**good, 'unrelated_staged_changes': 1}, 'STAGED_MISMATCH')):
+            with self.assertRaisesRegex(sr.Refused, code):
+                sr.verify('seo_activation', bad, self.run, frozen)
 
     def test_commission_refuses_deployment_status_as_proof(self):
         ev = {'state': 'COMMISSIONED_CLOSED', 'seed_sha256': sr.SEED_SHA256, 'seed_approved': False,

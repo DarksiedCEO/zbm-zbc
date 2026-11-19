@@ -5,6 +5,8 @@ from pathlib import Path
 import credential_plan as custody
 
 ROOT = Path(__file__).parent
+# D16: SEO capabilities killed at start until the certified robots.txt fix ships.
+SEO_KILLED_CAPABILITIES = 'audit,fetch,render,ai_probe'
 
 def templates():
     topology = json.loads((ROOT / 'topology_plan.json').read_text())
@@ -54,6 +56,9 @@ def templates():
         if role in custody.OWNERS:
             values.update(BACKUP_MEMBER=role, BACKUP_VOLUME='/data', BACKUP_RECOVERY_MODE='0', PORT='27001', RAILWAY_RUN_UID='0')
             values['LEDGER_LOG_PATH' if role == 'ledger' else role.upper()+'_DATA_DIR'] = contract['source']
+        if role == 'seo':
+            # D16: pinned image has the robots.txt freeze bug; audits stay off (sticky, start-time) until resolved.
+            values['SEO_KILLED_CAPABILITIES'] = SEO_KILLED_CAPABILITIES
         if role == 'observer':
             values.update(BACKUP_ALERTS_ENABLED='0', BACKUP_FIRST_DUE_UTC_SECONDS='<approved-first-due-unix-seconds>',
                           BACKUP_ALERT_FROM='andre@zbestmedia.com')

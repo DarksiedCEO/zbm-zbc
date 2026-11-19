@@ -244,3 +244,15 @@ The `capacity` runner step now runs after `portal` and gates only `admission`.
 It needs fresh byte counts and measured one-client growth, which exist only after
 the portal is live. A capacity HOLD leaves admission closed and blocks nothing
 else. Begin the step only with that evidence in hand: a FAIL close stops the run.
+
+## Decision update (2026-11-18)
+
+No production write happened on 2026-11-07; that sitting date is void.
+D12: sitting resumed 2026-11-18 Pacific; part 1 stops before closed-configuration.
+First due is derived when schedule-activation completes. D10 RESOLVED as a
+conditional approval: only if COMMISSIONED_CLOSED reports seed bc6d371a… with a
+clean assessment. D14 stays DEFERRED. New D16 (DEFERRED, blocks admission): the
+pinned SEO image has the robots.txt freeze bug. SEO still ships as one of the five
+owners. /health shares the service lock with audits, so SEO audits stay off via a
+start-time kill switch, verified at owner-activation:seo, until the certified fix
+ships as a one-owner image update. That kill-switch variable is not yet in the plan.
