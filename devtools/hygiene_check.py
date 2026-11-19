@@ -14,7 +14,9 @@ Two halves:
                directory (/tmp) during the run (the suite runs with TMPDIR, TMP and TEMP pointing at a fresh private
                directory OUTSIDE /tmp, so anything new in /tmp was written past it; on a shared machine another
                process can create /tmp entries too — the names are printed so a person can tell; on a CI runner the
-               machine is the job's alone);
+               machine is the job's alone, except for the OS itself: a systemd service started during the run gets
+               a PrivateTmp= directory there, which is not counted when it is provably systemd's — see
+               ``systemd_private_tmp``);
   R4 procs     a process the suite started is still alive after the suite's command exited. Tracked by process
                group and session (the suite starts as its own session leader), by an environment marker every
                descendant inherits unless it scrubs its environment, and — on Linux — by being the suite's child
@@ -70,6 +72,7 @@ import re
 import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -130,6 +133,30 @@ def dirty_digests(plain: set[str]) -> dict[str, str]:
 def system_tmp() -> Path:
     # The system temp dir as the OS defines it, not as this process's TMPDIR says.
     return Path("/tmp") if Path("/tmp").is_dir() else Path(tempfile.gettempdir())
+
+
+# systemd's PrivateTmp= directory: "systemd-private-<boot id, 32 hex>-<unit>.service-<6 random>" (systemd
+# src/core/namespace.c, setup_one_tmp_dir). CI run 44622855476 (Nov 19 2026, live:security-py on 3.13) failed R3 on
+# "systemd-private-…-systemd-timedated.service-JgwdsW": the Ubuntu runner started systemd-timedated mid-run.
+SYSTEMD_PRIVATE_TMP = re.compile(r"^systemd-private-[0-9a-f]{32}-([A-Za-z0-9@:._\\-]+\.service)-[A-Za-z0-9]{6}\Z")
+
+
+def systemd_private_tmp(name: str, st: os.stat_result | None, own_uid: int,
+                        platform: str = sys.platform) -> str | None:
+    """The unit name when a new system-temp entry is provably systemd's PrivateTmp= directory, else None.
+
+    All of these must hold, so a suite cannot plant one: Linux; this checker (and so the suite it starts) does NOT
+    run as root; the name has systemd's exact shape; and the entry itself (lstat, not followed) is a directory owned
+    by root with mode 0700, as systemd makes it. A non-root suite cannot create a root-owned directory without
+    privilege escalation (on a CI runner: sudo) — that one gap is stated in docs/ci.md, not closed."""
+    if not platform.startswith("linux") or own_uid == 0 or st is None:
+        return None
+    m = SYSTEMD_PRIVATE_TMP.match(name)
+    if m is None:
+        return None
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != 0 or stat.S_IMODE(st.st_mode) != 0o700:
+        return None
+    return m.group(1)
 
 
 def list_dir(p: Path) -> set[str]:
@@ -523,6 +550,15 @@ def cmd_run(a: argparse.Namespace) -> int:
     ignore_re = [re.compile(x) for x in a.tmp_ignore]
     for name in sorted(list_dir(systmp) - tmp_before):
         if any(r.search(name) for r in ignore_re):
+            continue
+        try:
+            entry_st = os.lstat(systmp / name)
+        except OSError:
+            entry_st = None
+        unit = systemd_private_tmp(name, entry_st, os.getuid())
+        if unit is not None:
+            print(f"hygiene_check: R3 not counted: {systmp / name} is systemd's PrivateTmp directory for {unit} "
+                  "(root-owned, mode 0700; made by the OS, not the suite)", flush=True)
             continue
         problems.append(violation("R3-tmp", suite, f"new entry in {systmp} during the run: {name}"))
 

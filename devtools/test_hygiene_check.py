@@ -163,6 +163,15 @@ class Dynamic(unittest.TestCase):
         finally:
             Path(f"/tmp/{name}").unlink(missing_ok=True)
 
+    def test_r3_a_planted_systemd_private_tmp_lookalike_still_fails(self):
+        # Nov 19 2026 (CI 44622855476): R3 skips systemd's PrivateTmp= directory only when it is root-owned 0700 and
+        # this checker is not root. One the suite makes itself — right name, right mode, its own user — still fails.
+        name = "systemd-private-865c617e91a542a8a348974c3060696d-systemd-timedated.service-JgwdsW"
+        rc, out = self.r.suite(f'mkdir -m 700 "{self.r.systmp}/{name}"')
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"HYGIENE R3-tmp go:probe: new entry in {self.r.systmp} during the run: {name}", out)
+        self.assertNotIn("R3 not counted", out)
+
     def test_r4_a_process_outlives_the_suite(self):
         # double fork + its own session + an empty environment
         rc, out = self.r.suite("env -i /bin/sh -c 'setsid sleep 300 >/dev/null 2>&1 &'")
@@ -748,6 +757,73 @@ class ColdChildContract(unittest.TestCase):
         for addition in (" --counts off", " || true"):
             path.write_text(original + addition)
             self.assertTrue(self.h.cold_child_contract())
+
+
+class SystemdPrivateTmp(unittest.TestCase):
+    """Nov 19 2026 (CI 44622855476, live:security-py 3.13 failed R3 on the runner's systemd-timedated PrivateTmp):
+    the one exception R3 makes, and every way a look-alike is refused."""
+    NAME = "systemd-private-865c617e91a542a8a348974c3060696d-systemd-timedated.service-JgwdsW"
+
+    def setUp(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("sd_hygiene", HERE / "hygiene_check.py")
+        self.h = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.h)
+
+    @staticmethod
+    def st(mode=0o040700, uid=0):
+        return os.stat_result((mode, 1, 1, 2, uid, 0, 4096, 0, 0, 0))
+
+    def check(self, name=None, st="default", own_uid=1001, platform="linux"):
+        return self.h.systemd_private_tmp(self.NAME if name is None else name,
+                                          self.st() if st == "default" else st, own_uid, platform)
+
+    def test_the_runners_directory_is_recognised(self):
+        self.assertEqual(self.check(), "systemd-timedated.service")
+        self.assertEqual(self.check("systemd-private-" + "0" * 32 + "-getty@tty1.service-a1B2c3"),
+                         "getty@tty1.service")
+        self.assertEqual(self.check("systemd-private-" + "f" * 32 + "-dbus\\x2dbroker.service-ZZZZZZ"),
+                         "dbus\\x2dbroker.service")
+
+    def test_not_root_owned_is_refused(self):
+        self.assertIsNone(self.check(st=self.st(uid=1001)))
+
+    def test_any_other_mode_is_refused(self):
+        for mode in (0o040755, 0o040777, 0o041700, 0o040600):
+            with self.subTest(mode=oct(mode)):
+                self.assertIsNone(self.check(st=self.st(mode=mode)))
+
+    def test_a_file_a_symlink_or_an_unreadable_entry_is_refused(self):
+        self.assertIsNone(self.check(st=self.st(mode=0o100700)))
+        self.assertIsNone(self.check(st=self.st(mode=0o120700)))
+        self.assertIsNone(self.check(st=None))
+
+    def test_a_root_checker_never_skips(self):
+        # as root a suite could make a root-owned directory itself
+        self.assertIsNone(self.check(own_uid=0))
+
+    def test_only_on_linux(self):
+        for platform in ("darwin", "win32", "freebsd14"):
+            with self.subTest(platform=platform):
+                self.assertIsNone(self.check(platform=platform))
+
+    def test_names_that_are_not_systemds_shape_are_refused(self):
+        hexid = "865c617e91a542a8a348974c3060696d"
+        for name in (
+            f"systemd-private-{hexid}-x.service-JgwdsWx",      # 7 random characters
+            f"systemd-private-{hexid}-x.service-Jgwds",        # 5
+            f"systemd-private-{hexid[:-1]}-x.service-JgwdsW",  # 31-character boot id
+            f"systemd-private-{hexid.upper()}-x.service-JgwdsW",
+            f"systemd-private-{hexid}-x.socket-JgwdsW",        # not a service
+            f"systemd-private-{hexid}-.service-JgwdsW",        # no unit name
+            f"systemd-private-{hexid}-x/y.service-JgwdsW",
+            f"xsystemd-private-{hexid}-x.service-JgwdsW",
+            f"systemd-private-{hexid}-x.service-JgwdsW.bak",
+            f"systemd-private-{hexid}-x.service-JgwdsW\n",
+            "planted",
+        ):
+            with self.subTest(name=name):
+                self.assertIsNone(self.check(name))
 
 
 if __name__ == "__main__":

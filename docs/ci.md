@@ -215,7 +215,15 @@ the suite's process group AND either scrubbed its environment or is an Apple pla
 whose environment macOS withholds) — the marker is read from every other process of the user through sysctl
 `KERN_PROCARGS2` since fix wave 26b (R26-1; before, ANY orphan that left the group escaped on macOS, delivery-py's
 `start_new_session=True` children included). On a shared machine another process can create `/tmp` entries
-during a run; R3 prints the names (a CI runner is the job's alone).
+during a run; R3 prints the names (a CI runner is the job's alone, except for the OS itself). One OS entry is not
+counted (Nov 19 2026, after CI run 44622855476 failed `live-run (security-py, 3.13)` on
+`systemd-private-…-systemd-timedated.service-JgwdsW`, made when the Ubuntu runner started systemd-timedated
+mid-run): systemd's `PrivateTmp=` directory, and only when all of these hold: Linux, the checker is not root, the
+name is exactly `systemd-private-<32 hex>-<unit>.service-<6 letters/digits>`, and the entry (not followed) is a
+directory owned by root with mode 0700. The run prints `R3 not counted: …` for it. What this cannot see: a suite
+that escalates to root (on a GitHub runner, `sudo` needs no password) can make such a directory itself; no suite
+here calls `sudo`. A look-alike made by the suite's own user still fails (`devtools/test_hygiene_check.py`,
+`SystemdPrivateTmp` and `test_r3_a_planted_systemd_private_tmp_lookalike_still_fails`).
 
 The `live-runs` job runs each department's `devtools/live_run.py` under the same wrapper (`--kind none`). Those
 scripts `mkdtemp` a work directory (ledger and service logs: the run's evidence). Since fix wave 26b (scout C6-2) a
