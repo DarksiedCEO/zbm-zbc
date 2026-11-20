@@ -497,6 +497,18 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
                                                       "compliance_38"))) -> dict:
         return svc.audit_view(scope[1], _id(aid), full=scope[0] != "finance_31")
 
+    # ------------------------------------------------------------------ Priya's keyword ledger (ADR 0047)
+
+    @app.post(P + "/tenants/{tid}/keyword-ledger", dependencies=auth, status_code=201)
+    def keyword_ledger(request: Request, req: dict = Depends(body(m.KeywordLedgerCreate)),  # noqa: B008 (FastAPI)
+                       scope: tuple = Depends(scoped("dashboard", "seo_agent"))) -> dict:
+        """Priya's one task: the tenant's keyword ledger, computed now, handed out once, never stored."""
+        return svc.run_keyword_ledger(scope[0], scope[1], req, andre=andre_if_presented(request))
+
+    @app.get(P + "/tenants/{tid}/keyword-ledger-runs", dependencies=auth)
+    def keyword_ledger_runs(scope: tuple = Depends(scoped("dashboard", "seo_agent", "compliance_38"))) -> list:
+        return svc.keyword_runs_view(scope[1])
+
     # ------------------------------------------------------------------ first-party log ingests (Wave 2)
 
     LOG_CALLERS = ("dashboard", "seo_agent", "hub")

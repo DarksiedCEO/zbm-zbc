@@ -1,0 +1,102 @@
+"""priya-spec/1 G-6 pins: one minimal case per named mutant, each a query the mutant would keep (the mutation runs
+themselves are the lead gate's; these cases make the CI lane kill them)."""
+
+from __future__ import annotations
+
+import base64
+import random
+
+import privacy_r18_corpus as rc
+import pytest
+from priya_common import dropped
+
+from agents import search_performance as sp
+
+pytestmark = pytest.mark.conformance
+R = random.Random(906)
+
+
+def _digits(n):
+    return str(R.randint(1, 9)) + "".join(str(R.randint(0, 9)) for _ in range(n - 1))
+
+
+def test_G6_m09_e164_at_eight_digits():
+    for _ in range(30):
+        d = _digits(8)
+        assert sp.digit_stream_hit("+" + "q".join((d[:2], d[2:5], d[5:])))     # letter gaps: only the stream reads it
+
+
+def test_G6_m10_plus_separated_from_the_first_digit():
+    for _ in range(30):
+        d = _digits(9)
+        assert sp.digit_stream_hit("+kq" + "q".join((d[:3], d[3:6], d[6:])))
+
+
+def test_G6_context_window_check():
+    for phrase in (b"my api key", b"launch code"):
+        b = base64.b64encode(phrase).decode()
+        assert sp.classify_query("rug cleaner " + b, ["acme"]) == "pii_suspect"
+        assert sp._suspicious_windows("rug cleaner " + b)
+
+
+def test_G6_vanity_gap_of_three():
+    for code in ("800", "888", "855"):
+        assert sp._vanity_any(f"1 - {code} - flowers") and sp._vanity_any(f"{code} - f - l - o - w - e - r - s")
+        assert dropped(f"call 1 - {code} - flowers tonight")
+
+
+def test_G6_address_context_of_three_tokens_and_more():
+    for tail in ("open now tonight", "open now tonight please", "a b c d e f g h"):
+        assert dropped(f"17 elm way {tail}") and dropped(f"62 oak lane, {tail}")
+
+
+def test_G6_card_at_thirteen_digits():
+    for _ in range(20):
+        body = "4" + "".join(str(R.randint(0, 9)) for _ in range(11))
+        d = body + rc._luhn_digit(body)
+        assert len(d) == 13 and sp.stream_card(d) and dropped("x".join((d[:4], d[4:8], d[8:])))
+
+
+def test_G6_uatp_on():
+    body = "1" + "".join(str(R.randint(0, 9)) for _ in range(13))
+    d = body + rc._luhn_digit(body)
+    assert sp.stream_card(d) and dropped("q".join((d[:4], d[4:10], d[10:])))
+
+
+def test_G6_diners_36_on():
+    body = "36" + "".join(str(R.randint(0, 9)) for _ in range(11))
+    d = body + rc._luhn_digit(body)
+    assert sp.card_iin(d) and dropped(" ".join((d[:4], d[4:10], d[10:])))
+
+
+def test_G6S_g_dotted12_frozen_attack40672_case_22600_withheld():
+    """G6-S (2026-11-16): the survivor g_dotted12 (dotted-group digit cap 8 -> 12) reads this frozen PERSONAL case
+    (attack40672 #22600, ssn_shape, dot-separated groups, reversed) READABLE; the final code withholds it at stage 2."""
+    import corpora
+
+    from agents import priya
+    from agents import priya_tenant as pt
+
+    row = next(r for i, r in enumerate(corpora.rows("attack40672")) if i == 22600)
+    q = [x for x in row if isinstance(x, str)][-1]
+    assert sp.classify_query(q, ["acme"]) == "pii_suspect"
+    assert priya.verdict(q, ["acme"], priya.default_vocab(), pt.empty_tenant_vocab(""))[:2] == ("WITHHELD", priya.S2_CODE)
+
+
+def test_G6S_n11_xs_vanity_number_with_expanding_gaps_withheld():
+    """G6-S full replay (JC-2): the survivor n11_xs_no_vanity (vanity rule dropped from the per-character view
+    ``script_view``, round 20 / CP-3) reads 5 frozen PERSONAL rows READABLE (rv20_m20, rv21_cp21, rv21_m21): a
+    1-8xx vanity number whose gaps hold a character NFKC widens (triple prime -> three primes) next to a line or
+    paragraph separator. On the detection form the gap is four characters (over the list's three); one character for
+    one it is two, so only the vanity rule on the per-character view withholds it. Synthetic, built at runtime."""
+    from agents import priya
+    from agents import priya_tenant as pt
+
+    vocab, tenant = priya.default_vocab(), pt.empty_tenant_vocab("")
+    for code in ("800", "888", "877", "855"):
+        for sep in ("\u2028", "\u2029"):
+            gap = "\u2034" + sep
+            q = "rose bouquet 1" + gap + gap.join(code) + gap + "flowers tonight"
+            assert sp._vanity_any(sp.script_view(q))
+            assert sp.classify_query(q, ["acme"]) == "pii_suspect"
+            assert priya.verdict(q, ["acme"], vocab, tenant)[:2] == ("WITHHELD", priya.S2_CODE)
