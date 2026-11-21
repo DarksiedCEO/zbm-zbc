@@ -168,6 +168,34 @@ class FakeCompliance:
             return JurisdictionAnswer(False)
         return JurisdictionAnswer(True, self.juris.get(country, "operate"))
 
+    # ADR 0024: a client's current activation (default: ALLOW in California) and the nexus thresholds row
+    activation_available = True
+    activations: Optional[dict] = None
+    nexus_params: Optional[dict] = None
+
+    def client_activation(self, client_id):
+        from ports import ClientActivation
+        self.calls.append(("client_activation", client_id))
+        if not self.activation_available:
+            return ClientActivation(False)
+        a = (self.activations or {}).get(client_id, {"allowed": True, "jurisdiction": "US-CA"})
+        return ClientActivation(True, a["allowed"], a.get("ruling_id", f"cmp-rul-{client_id}"), a.get("jurisdiction"),
+                                tuple(a.get("reasons", ())), sanctions=bool(a.get("sanctions")),
+                                ground=a.get("ground"))
+
+    rule_expiry_answer = None
+
+    def rule_expiry(self):
+        self.calls.append(("rule_expiry",))
+        return self.rule_expiry_answer
+
+    def row_parameters(self, oid):
+        from ports import RegisterParameters
+        if not self.rows_available or self.nexus_params is None:
+            return RegisterParameters(False, oid)
+        return RegisterParameters(True, oid, "unverified", self.nexus_params,
+                                  "https://trykintsugi.com/sales-tax-guides/usa/economic-nexus")
+
 
 class FakeCN:
     def __init__(self):
@@ -190,12 +218,17 @@ class FakeLegal:
         self.available = True
         self.current = True
         self.acceptance = True
+        # Explicit fixture register: an MSA/IO/unknown reference is never a SOW.
+        self.doc_types = {"sow": "sow", "sow_seo_audit": "sow", "sow_revenue_recovery": "sow",
+                          "client_msa": "client_msa", "msa-1": "client_msa", "io-1": "insertion_order"}
+        self.acceptance_via = "client_portal"
 
     def document_status(self, doc_id, version, doc_sha256, acceptance_id, party_ref=None, entity=None):
         self.last = (doc_id, version, doc_sha256, acceptance_id, party_ref, entity)
         if not self.available:
             return LegalAnswer(False)
-        return LegalAnswer(True, self.current, self.acceptance)
+        return LegalAnswer(True, self.current, self.acceptance, doc_type=self.doc_types.get(doc_id),
+                           acceptance_via=self.acceptance_via)
 
 
 class FakeRail:
@@ -345,6 +378,7 @@ class FakePeople:
 
 
 class FakeClientMail:
+    test_only_legacy_receipts = True
     def __init__(self):
         self.sent: list = []
         self.accept = True

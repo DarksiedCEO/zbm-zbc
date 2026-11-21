@@ -111,6 +111,7 @@ class SimStripe:
              "livemode": self.livemode, "status": "open", "payment_status": "unpaid", "payment_intent": None,
              "url": f"https://checkout.stripe.com/c/pay/{sid}#fidkdWxOYHwnPyd1blpxYHZxWjA0",
              "allowed_payment_method_types": methods,
+             "adaptive_pricing": {"enabled": form.get("adaptive_pricing[enabled]") != "false"},
              "metadata": {k[9:-1]: v for k, v in form.items() if k.startswith("metadata[")},
              "_pi_metadata": {k[len("payment_intent_data[metadata]["):-1]: v for k, v in form.items()
                               if k.startswith("payment_intent_data[metadata][")}}

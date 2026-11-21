@@ -57,18 +57,20 @@ def _baselines():
     y = Harness()
     y.approve_seed()
     y.run_controls()
-    it = client_facts(country="IT", region=None, targets=("IT", "GB", "US-NY"), eu_kit_version_acknowledged=1,
-                      msa_eu_clause=True, platforms=("youtube", "tiktok", "x"),
+    # ADR 0024: was an Italian client with the EU kit; Italy is outside the service area now (a Puerto Rico client
+    # targeting PR, Guam and New York, with the same platforms and claims)
+    it = client_facts(country="PR", region=None, targets=("PR", "GU", "US-NY"),
+                      platforms=("youtube", "tiktok", "x"),
                       claims={"claims_present": True, "health_or_earnings_claim": False, "claim_file_id": "cf-1",
                               "claim_file_approved": True})
-    out.append(("client_it", y, lambda h=y, f=it: h.rule("client-it", "client", f)))
+    out.append(("client_pr", y, lambda h=y, f=it: h.rule("client-pr", "client", f)))
 
     z = Harness()
     z.approve_seed()
     z.run_controls()
     z.approve(*[z.memo_supersede(c) for c in ("CQ-01", "CQ-03", "CQ-11")])
     z.activate_creator()
-    z.activate_brand(platforms=("youtube", "tiktok"), targets=("US", "GB", "CA-ON"))
+    z.activate_brand(platforms=("youtube", "tiktok"), targets=("US", "PR"))
     pf = clip_facts(platform="tiktok")
     out.append(("payout", z, lambda h=z, f=pf: h.review("zbc_clip", rid("sub"), f)))
 

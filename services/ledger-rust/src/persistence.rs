@@ -1160,6 +1160,20 @@ impl PersistentLedger {
         HeadCheckpoint::of(&self.ledger).with(&self.provenance)
     }
 
+    /// Consumes the exclusive store after all admitted work has drained.
+    /// A failure must never be reported as a clean shutdown.
+    pub fn close_for_shutdown(mut self) -> io::Result<HeadCheckpoint> {
+        if self.poisoned.is_some() {
+            return Err(io::Error::other("poisoned store"));
+        }
+        self.file.sync_data()?;
+        File::open(head_path_for(&self.path))?.sync_all()?;
+        fsync_dir(&self.path)?;
+        let head = self.head();
+        drop(self); // Releases log descriptor and exclusive store lock before receipt.
+        Ok(head)
+    }
+
     pub fn verify_chain(&self) -> Result<(), LedgerError> {
         self.ledger.verify_chain()
     }

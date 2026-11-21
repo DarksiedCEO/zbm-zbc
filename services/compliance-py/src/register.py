@@ -43,10 +43,11 @@ CHECKS = (
     "likeness_consent", "personal_use_attested", "music_source_declared", "rights_cleared_no_strike",
     "accessibility_pass", "consent_banner", "required_docs_current", "canspam_elements", "sms_consent_artifact",
     "subscription_terms", "chatbot_disclosure", "flag_blocks", "counsel_memo", "control_sla", "threshold_counter",
-    "effective_date_reminder",
+    "effective_date_reminder", "client_sanctions_attested", "client_docs_current",
 )
 # Row parameters that hold jurisdiction lists (HR-05/06/07); their entries must be known codes (AEGIS N14-3).
-JURISDICTION_PARAMS = ("operate", "operate_excludes", "region_required", "conditional", "refuse")
+# ``target_countries`` (HR-05, ADR 0024): bare countries a campaign may target as a whole.
+JURISDICTION_PARAMS = ("operate", "operate_excludes", "region_required", "conditional", "refuse", "target_countries")
 APPLIES_KEYS = ("lanes", "subject_kinds", "asset_types", "platforms", "jurisdictions", "flags_any", "flags_none")
 
 # Shelf life by source_kind (spec B.1). statute/guidance/platform are the

@@ -22,6 +22,9 @@ verification-py's api.py):
 
 from __future__ import annotations
 
+from startup_profile import existing_store_profile
+existing_store_profile()  # Refuse invalid profile before eager construction/configuration.
+
 import asyncio
 import hashlib
 import hmac
@@ -70,7 +73,7 @@ ROUTE_LIMITS: list[tuple[re.Pattern, int]] = [
     (re.compile(r"^/fin/v1/rate-cards/decisions$"), 64 * 1024),
     (re.compile(r"^/fin/v1/bank/events$"), 128 * 1024),
     (re.compile(r"^/fin/v1/rails/[a-z]+/events$"), 64 * 1024),
-    (re.compile(r"^/fin/v1/stripe/events$"), 300 * 1024),          # a raw Stripe event (<= 256 KiB) in JSON
+    (re.compile(r"^/fin/v1/stripe/events$"), 600 * 1024),          # a raw Stripe event (<= 256 KiB), JSON-escaped (RTM-10)
     (re.compile(r"^/fin/v1/invoices$"), 64 * 1024),
     (re.compile(r"^/fin/v1/payout-handoffs$"), 32 * 1024),
     (re.compile(r"^/fin/v1/journal/[a-z]+/corrections$"), 32 * 1024),
@@ -245,9 +248,36 @@ def _sanitize(errors: list[dict]) -> dict:
 
 
 ID_RE = m.ID_RE
-# Callers that reach only routes naming them explicitly (``caller()`` with no names does not admit them).
-NAMED_ONLY = frozenset({"seo_02"})
 SEO_STATUS_ROUTE = re.compile(r"/fin/v1/invoices/[A-Za-z0-9._:-]{1,128}/status")
+STRIPE_EVENTS_ROUTE = re.compile(r"/fin/v1/stripe/events")
+PAYOUT_RAIL_EVENTS_ROUTE = re.compile(r"/fin/v1/rails/(?:%s)/events" % "|".join(config_mod.RAILS))
+# Route allowlist per narrow caller: each reaches EXACTLY these (method, path) pairs, plus GET /health (open to anyone
+# without any token), and nothing else, enforced before any route, dependency or body parsing. ``caller()`` with no
+# names does not admit them, so no route that forgot to name its callers and no Andre-only route can answer them
+# anything but 403.
+#   - seo_02 (AEGIS SEO Wave 3 M2): the narrow invoice status read.
+#   - rail_gateway (ADR 0023, AEGIS A1 M1): the internet-facing stripe-gateway's caller; Stripe webhooks only. It
+#     used to reach every ``caller()`` route (invoices, treasury, breaks, audit export, payables) and the dispute
+#     opener.
+#   - payout_rail_gateway (ADR 0023): payout-rail webhooks (paid/failed/returned/destination_changed, each one
+#     signature-verified by the rail adapter). Split from rail_gateway so the Stripe gateway's token cannot post them;
+#     no deployed service holds it yet.
+NAMED_ROUTES: dict[str, tuple[tuple[str, re.Pattern], ...]] = {
+    "seo_02": (("GET", SEO_STATUS_ROUTE),),
+    "rail_gateway": (("POST", STRIPE_EVENTS_ROUTE),),
+    "payout_rail_gateway": (("POST", PAYOUT_RAIL_EVENTS_ROUTE),),
+    "ops_cron": (("POST", re.compile(r"/fin/v1/jobs/stripe-sessions/run")),),
+    "ops_alerts": (("POST", re.compile(r"/fin/v1/ops/observations/run")),),
+}
+# Callers that reach only routes naming them explicitly.
+NAMED_ONLY = frozenset(NAMED_ROUTES)
+
+
+def named_route_allowed(name: str, method: str, path: str) -> bool:
+    """For a NAMED_ONLY caller: is (method, path) one of its routes (or GET /health)? Exact matches only."""
+    if method == "GET" and path == "/health":
+        return True
+    return any(method == mth and rx.fullmatch(path) for mth, rx in NAMED_ROUTES.get(name, ()))
 _NO_ID = re.compile(r"[^A-Za-z0-9._:-]")
 
 
@@ -278,7 +308,8 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
             if name is None:
                 raise Forbidden("caller token missing or not recognised")
             if name in NAMED_ONLY and name not in allowed:
-                raise Forbidden("this caller reaches only the routes that name it")
+                # worded apart from the middleware's refusal so a test can tell which layer answered (AEGIS L-3)
+                raise Forbidden("this route does not name this caller (route check)")
             if allowed and name not in allowed:
                 raise Forbidden("this caller is not authorized for this route (separation of duties, FIN-19)")
             return name
@@ -292,6 +323,26 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
                 svc.founder_refused(route, exc.reason)
                 raise
             return "andre"
+        return dep
+
+    def andre_or_any_caller(route: str) -> Callable:
+        """AEGIS r6: a read every (general) caller may make, where Andre's token also shows the Compliance sanctions
+        details the others do not see."""
+        def dep(request: Request) -> str:
+            a = request.headers.get(FOUNDER_HEADER)
+            if a is not None:
+                try:
+                    founder.verify(a)
+                except FounderRefused as exc:
+                    svc.founder_refused(route, exc.reason)
+                    raise
+                return "andre"
+            name = callers.identify(request.headers.get(CALLER_HEADER))
+            if name is None:
+                raise Forbidden("caller token missing or not recognised")
+            if name in NAMED_ONLY:
+                raise Forbidden("this caller reaches only the routes that name it")
+            return name
         return dep
 
     def andre_or_caller(route: str, *allowed: str) -> Callable:
@@ -356,15 +407,19 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
             R.item("AMOUNT_OUT_OF_RANGE", str(exc)[:120])]})
 
     @app.middleware("http")
-    async def _seo_allowlist(request: Request, call_next):
-        # AEGIS SEO Wave 3 M2: Search & Answer Intelligence (seo_02) reaches exactly ONE route, the narrow invoice
-        # status read. Enforced before any route, dependency or body parsing, so no route that forgot to name its
-        # callers (``caller()`` admits any caller) and no Andre-only route can answer it anything but 403.
-        # /health is open to anyone without any token (no bearer, no caller), so refusing it to seo_02 would protect
-        # nothing; it answers seo_02 exactly what it answers an anonymous caller (AEGIS SEO Wave 3 round 2)
-        if callers.identify(request.headers.get(CALLER_HEADER)) in NAMED_ONLY and not (
-                request.method == "GET" and (SEO_STATUS_ROUTE.fullmatch(request.url.path)
-                                             or request.url.path == "/health")):
+    async def _named_route_allowlist(request: Request, call_next):
+        # NAMED_ROUTES: seo_02 (AEGIS SEO Wave 3 M2), rail_gateway and payout_rail_gateway (ADR 0023) reach exactly
+        # their routes. Enforced before any route, dependency or body parsing, so no route that forgot to name its
+        # callers (``caller()`` admits any caller) and no Andre-only route can answer them anything but 403.
+        # /health is open to anyone without any token (no bearer, no caller), so refusing it to them would protect
+        # nothing; it answers them exactly what it answers an anonymous caller (AEGIS SEO Wave 3 round 2)
+        # AEGIS edge review L-2: match the path the ROUTER uses (scope["path"]), never request.url.path (rebuilt and
+        # parsed again, so "/fin/v1/stripe/events%3F" looked allowed here and routed elsewhere); and refuse any
+        # percent-encoding at all in a narrow caller's path: none of their routes needs one.
+        name = callers.identify(request.headers.get(CALLER_HEADER))
+        raw_path = request.scope.get("raw_path") or b""
+        if name in NAMED_ONLY and (b"%" in raw_path or "?" in request.scope["path"] or "#" in request.scope["path"]
+                                   or not named_route_allowed(name, request.method, request.scope["path"])):
             return JSONResponse(status_code=403, content={"detail": "this caller reaches only the routes that "
                                                                    "name it"})
         return await call_next(request)
@@ -388,8 +443,11 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         return registry()
 
     @app.get("/fin/v1/integrity", dependencies=auth)
-    def integrity(_: str = Depends(caller())) -> dict:
-        return svc.integrity()
+    def integrity(who: str = Depends(andre_or_any_caller("integrity"))) -> dict:
+        """AEGIS r12 R12-1: Andre's token reads the whole answer; another caller reads the verdict only (no counter:
+        a log-line count moved by a hold's upgrade was a sanctions tell)."""
+        out = svc.integrity()
+        return out if who == "andre" else {"status": out["status"], "checked_at": out["checked_at"]}
 
     # --- protocol routes (§D.1) --------------------------------------------------------------------------------------
 
@@ -475,8 +533,14 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         return svc.put_billing_profile(req.request_id, _id(client_id), dump(req))
 
     @app.get("/fin/v1/clients/{client_id}/billing-readiness", dependencies=auth)
-    def billing_readiness(client_id: str, who: str = Depends(caller("onboarding"))) -> dict:
+    def billing_readiness(client_id: str, who: str = Depends(andre_or_caller("billing-readiness", "onboarding"))) -> dict:
         return svc.billing_readiness(who, _id(client_id))
+
+    @app.get("/fin/v1/readiness/sales-tax-nexus", dependencies=auth)
+    def sales_tax_nexus(_: str = Depends(andre_or_caller("readiness/sales-tax-nexus", "onboarding"))) -> dict:
+        """ADR 0024 (memo MEMO-FIN-CQ-11-2026-10-30): invoiced totals per client state/territory, trailing 12 months
+        and calendar year, flagged at 75% of each economic-nexus threshold (Compliance row US-SALESTAX-NEXUS)."""
+        return svc.sales_tax_nexus()
 
     # --- receivables ------------------------------------------------------------------------------------------------
 
@@ -492,13 +556,18 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         return svc.invoice_status(_id(invoice_id))
 
     @app.get("/fin/v1/invoices/{invoice_id}", dependencies=auth)
-    def invoice_get(invoice_id: str, _: str = Depends(caller())) -> dict:
-        return svc.get_invoice(_id(invoice_id))
+    def invoice_get(invoice_id: str, who: str = Depends(andre_or_any_caller("invoices/get"))) -> dict:
+        return svc.get_invoice(_id(invoice_id), full=who == "andre")
 
     @app.post("/fin/v1/invoices/{invoice_id}/decision", dependencies=auth)
     def invoice_decide(invoice_id: str, _: str = Depends(andre("invoices/decision")),
                        req: m.Decision = Depends(body(m.Decision))) -> dict:
         return svc.decide_invoice(req.request_id, _id(invoice_id), dump(req))
+
+    @app.post("/fin/v1/invoices/{invoice_id}/void", dependencies=auth)
+    def invoice_void(invoice_id: str, _: str = Depends(andre("invoices/void")),
+                     req: m.InvoiceVoid = Depends(body(m.InvoiceVoid))) -> dict:
+        return svc.void_invoice(req.request_id, _id(invoice_id), dump(req))
 
     # --- media buys and client receipts (ADR 0009 amendment, Oct 5 2026) ---------------------------------------------
 
@@ -526,6 +595,21 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
                      req: m.RunRequest = Depends(body(m.RunRequest))) -> dict:
         return svc.cancel_media_buy(req.request_id, _id(buy_id))
 
+    @app.put("/fin/v1/clients/{client_id}/billing-contact", dependencies=auth)
+    def billing_contact(client_id: str, _: str = Depends(andre("billing-contact")),
+                        req: m.BillingContact = Depends(body(m.BillingContact))) -> dict:
+        return svc.put_receipt_contact(req.request_id, _id(client_id), dump(req))
+
+    @app.post("/fin/v1/client-receipts/{client_receipt_id}/delivery-review", dependencies=auth)
+    def receipt_delivery_review(client_receipt_id: str, _: str = Depends(andre("receipt-delivery-review")),
+                                req: m.ReceiptDeliveryReview = Depends(body(m.ReceiptDeliveryReview))) -> dict:
+        return svc.review_receipt_delivery(req.request_id, _id(client_receipt_id), dump(req))
+
+    @app.get("/fin/v1/client-receipts/backlog", dependencies=auth)
+    def receipt_backlog_get(limit: Optional[str] = None, cursor: Optional[str] = None,
+                            _: str = Depends(andre("receipt-backlog"))) -> dict:
+        return svc.get_receipt_backlog(limit, cursor)
+
     @app.get("/fin/v1/client-receipts/{client_receipt_id}", dependencies=auth)
     def client_receipt_get(client_receipt_id: str, _: str = Depends(caller())) -> dict:
         return svc.get_client_receipt(_id(client_receipt_id))
@@ -533,7 +617,11 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
     @app.post("/fin/v1/client-receipts/{client_receipt_id}/send", dependencies=auth)
     def client_receipt_send(client_receipt_id: str, who: str = Depends(caller("scheduler")),
                             req: m.RunRequest = Depends(body(m.RunRequest))) -> dict:
-        return svc.send_client_receipt(who, req.request_id, _id(client_receipt_id))
+        try:
+            return svc.send_client_receipt(who, req.request_id, _id(client_receipt_id))
+        except Unavailable:
+            raise Unavailable("Receipt delivery outcome is unknown; inspect state before another invocation",
+                              took_effect=None, outcome="outcome_unknown") from None
 
     @app.post("/fin/v1/bank/events", dependencies=auth)
     def bank_events(who: str = Depends(caller("bank_feed")), req: m.BankEvents = Depends(body(m.BankEvents))) -> dict:
@@ -550,7 +638,7 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         return svc.deposit_return(who, req.request_id, _id(receipt_id), dump(req))
 
     @app.post("/fin/v1/rails/{rail}/events", dependencies=auth)
-    def rail_events(rail: str, who: str = Depends(caller("rail_gateway")),
+    def rail_events(rail: str, who: str = Depends(caller("payout_rail_gateway")),
                     req: m.RailEvents = Depends(body(m.RailEvents))) -> dict:
         return svc.rail_events(who, req.request_id, _id(rail), [e.model_dump(mode="python") for e in req.events])
 
@@ -582,7 +670,9 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         return svc.stripe_event(who, req.request_id, req.payload, req.signature)
 
     @app.post("/fin/v1/disputes", dependencies=auth, status_code=201)
-    def dispute(who: str = Depends(andre_or_caller("disputes", "rail_gateway")),
+    # Andre only: a card chargeback is never opened by hand (it arrives as a Stripe event), so no caller opens one
+    # (ADR 0023 removed rail_gateway, which the service refused anyway)
+    def dispute(who: str = Depends(andre_or_caller("disputes")),
                 req: m.DisputeOpen = Depends(body(m.DisputeOpen))) -> dict:
         return svc.open_dispute(who, req.request_id, dump(req))
 
@@ -601,16 +691,37 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
                      req: m.RefundRepay = Depends(body(m.RefundRepay))) -> dict:
         return svc.repay_refund(req.request_id, _id(refund_id), dump(req))
 
+    @app.post("/fin/v1/refunds/{refund_id}/cancel", dependencies=auth)
+    def refund_cancel(refund_id: str, _: str = Depends(andre("refunds/cancel")),
+                      req: m.RefundCancel = Depends(body(m.RefundCancel))) -> dict:
+        """AEGIS r11: an approved refund whose payment was refused at execution (no money moved) is cancelled."""
+        return svc.cancel_refund(req.request_id, _id(refund_id), dump(req))
+
     @app.post("/fin/v1/refunds/{refund_id}/decision", dependencies=auth)
     def refund_decide(refund_id: str, _: str = Depends(andre("refunds/decision")),
                       req: m.Decision = Depends(body(m.Decision))) -> dict:
         return svc.decide_refund(req.request_id, _id(refund_id), dump(req))
 
+    @app.post("/fin/v1/ops/observations/run", dependencies=auth)
+    def ops_observations(_: str = Depends(caller("ops_alerts")), req: m.RunRequest = Depends(body(m.RunRequest))) -> dict:
+        # request_id is syntax-validated, not a delivery/idempotency claim: each call observes anew.
+        return svc.observe_ops()
+
     # --- jobs, payouts ----------------------------------------------------------------------------------------------
 
     @app.post("/fin/v1/jobs/{job}/run", dependencies=auth)
-    def job(job: str, who: str = Depends(caller("scheduler")), req: m.RunRequest = Depends(body(m.RunRequest))) -> dict:
-        return svc.run_job(who, req.request_id, job)
+    def job(job: str, who: str = Depends(caller("scheduler", "ops_cron")), req: m.RunRequest = Depends(body(m.RunRequest))) -> dict:
+        if who == "ops_cron" and job != "stripe-sessions":
+            raise Forbidden("this caller is not authorized for this job")
+        try:
+            return svc.run_job(who, req.request_id, job)
+        except Unavailable:
+            if job != "stripe-sessions":
+                raise
+            # Expiry or earlier housekeeping may precede a failed local write, including the final job record.
+            # Conservative even before provider contact: this response never proves an external effect occurred.
+            raise Unavailable("Stripe housekeeping outcome is unknown; inspect state before another invocation",
+                              took_effect=None, outcome="outcome_unknown") from None
 
     @app.post("/fin/v1/payout-runs", dependencies=auth, status_code=201)
     def payout_run(who: str = Depends(caller("scheduler")), req: m.PayoutRun = Depends(body(m.PayoutRun))) -> dict:
@@ -635,8 +746,8 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
                             "alongside Andre's token")
         return svc.decide_batch(req.request_id, _id(batch_id), dump(req))
 
-    @app.post("/fin/v1/payout-batches/{batch_id}/second-approval", dependencies=auth)
-    def batch_second(batch_id: str, request: Request, req: m.Decision = Depends(body(m.Decision))) -> dict:
+    def second_identity(request: Request) -> str:
+        """RTM-11: the second approver's identity, checked BEFORE the body is validated."""
         if request.headers.get(FOUNDER_HEADER) is not None or request.headers.get(CALLER_HEADER) is not None:
             svc.founder_refused("payout-batches/second-approval", "another identity's token on the second approval")
             raise Forbidden("the second approval carries the second approver's token only (one identity per request)")
@@ -645,6 +756,11 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         except FounderRefused as exc:
             svc.founder_refused("payout-batches/second-approval", exc.reason)
             raise
+        return "second"
+
+    @app.post("/fin/v1/payout-batches/{batch_id}/second-approval", dependencies=auth)
+    def batch_second(batch_id: str, _: str = Depends(second_identity),
+                     req: m.Decision = Depends(body(m.Decision))) -> dict:
         return svc.second_approve_batch(req.request_id, _id(batch_id), dump(req))
 
     @app.post("/fin/v1/payout-batches/{batch_id}/release", dependencies=auth)
@@ -675,8 +791,23 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         return svc.run_recon(who, req.request_id)
 
     @app.get("/fin/v1/breaks", dependencies=auth)
-    def breaks(_: str = Depends(caller())) -> dict:
-        return svc.list_breaks()
+    def breaks(who: str = Depends(andre_or_any_caller("breaks/list"))) -> dict:
+        return svc.list_breaks(full=who == "andre")
+
+    @app.get("/fin/v1/invoices/{invoice_id}/compliance-hold", dependencies=auth)
+    def compliance_hold_status(invoice_id: str, _: str = Depends(andre("compliance-hold/status"))) -> dict:
+        return svc.compliance_hold_status(_id(invoice_id))
+
+    @app.post("/fin/v1/invoices/{invoice_id}/compliance-hold/release", dependencies=auth)
+    def compliance_hold_release(invoice_id: str, _: str = Depends(andre("compliance-hold/release")),
+                                req: m.ComplianceHoldRelease = Depends(body(m.ComplianceHoldRelease))) -> dict:
+        return svc.compliance_hold_release(req.request_id, _id(invoice_id), dump(req))
+
+    @app.post("/fin/v1/receipts/{receipt_id}/compliance-hold/release", dependencies=auth)
+    def receipt_hold_release(receipt_id: str, _: str = Depends(andre("receipts/compliance-hold/release")),
+                             req: m.ComplianceHoldRelease = Depends(body(m.ComplianceHoldRelease))) -> dict:
+        """AEGIS r11 R11-2: release the hold on held unapplied money (the invoice release's bases and kinds)."""
+        return svc.receipt_hold_release(req.request_id, _id(receipt_id), dump(req))
 
     @app.post("/fin/v1/breaks/{break_id}/resolution", dependencies=auth)
     def break_resolve(break_id: str, _: str = Depends(andre("breaks/resolution")),
@@ -781,20 +912,23 @@ def create_app(service: Service, settings: config_mod.Settings) -> FastAPI:
         return svc.form_1099("andre", tax_year)
 
     @app.get("/fin/v1/audit/evidence", dependencies=auth)
-    def audit_evidence(who: str = Depends(caller()), limit: int = Query(default=200, ge=1, le=1000),
+    def audit_evidence(who: str = Depends(andre("audit/evidence")),
+                       limit: int = Query(default=200, ge=1, le=1000),
                        offset: int = Query(default=0, ge=0, le=10_000_000),
                        event_type: Optional[str] = Query(default=None, pattern=r"^[a-z_]{1,64}$")) -> dict:
         """Sweep B-F2 (bizdev R6 M1): every Finance evidence event on the ledger, ``committed`` (named by an anchored
         local log line whose seq and request key its payload carries) or ``attempted`` (recorded first, never
-        committed under that id); unanchored evidence = attempted, not done."""
-        return svc.audit_evidence(limit, offset, event_type)
+        committed under that id); unanchored evidence = attempted, not done. AEGIS r11 R11-3: Andre's token only (a
+        row's rk, event id and payload hash let a reader recompute a hold event's real type)."""
+        return svc.audit_evidence(limit, offset, event_type, full=who == "andre")
 
     @app.get("/fin/v1/audit/export", dependencies=auth)
-    def audit(who: str = Depends(caller()), since: Optional[str] = Query(default=None, max_length=40),
+    def audit(who: str = Depends(andre("audit/export")),           # AEGIS r11 R11-3: Andre's token only
+              since: Optional[str] = Query(default=None, max_length=40),
               until: Optional[str] = Query(default=None, max_length=40),
               cursor: int = Query(default=0, ge=0, le=10**12)) -> dict:
         try:
-            return svc.audit_export(who, since, until, cursor)
+            return svc.audit_export(who, since, until, cursor, full=who == "andre")
         except ValueError:
             raise Invalid("since/until must be RFC 3339 timestamps with offset") from None
 
@@ -814,6 +948,10 @@ def build_ports(settings: config_mod.Settings) -> Ports:
     each wired only when all three of its FIN_VI_* / FIN_COMPLIANCE_* / FIN_LEGAL_* settings are present, and Stripe
     incoming when FIN_STRIPE_INCOMING=1."""
     ports = Ports()
+    if settings.receipt_mail_provider == "resend":
+        from receipt_resend_adapter import ResendReceiptMail
+        ports.client_mail = ResendReceiptMail(settings.receipt_mail_profile, settings.receipt_mail_key.reveal(),
+                                              settings.receipt_mail_deadline)
     if settings.vi_url:
         from clients import HttpVerification
         ports.vi = HttpVerification(settings.vi_url, settings.vi_token, settings.vi_caller_token)
@@ -833,7 +971,9 @@ def build_ports(settings: config_mod.Settings) -> Ports:
 
 
 def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, ports: Optional[Ports] = None,
-                  ledger=None) -> Service:
+                  ledger=None, *, require_existing_seed: bool = False) -> Service:
+    if type(require_existing_seed) is not bool:
+        raise ValueError("require_existing_seed must be boolean")
     clock = clock or SystemClock()
     if ledger is None:
         ledger = (HttpLedgerClient(settings.ledger_url, settings.ledger_token)
@@ -846,7 +986,8 @@ def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, 
     token = lock.claim() if lock is not None else None  # claimed BEFORE the log is built (sweep F-3/E-5 backport)
     try:
         return Service(settings, Recorder(ledger), RecordLog(settings.data_dir), seed_bytes, expected,
-                       ports or build_ports(settings), clock, config_mod.PINNED_SEED_SHA256, lock_token=token)
+                       ports or build_ports(settings), clock, config_mod.PINNED_SEED_SHA256, lock_token=token,
+                            require_existing_seed=require_existing_seed)
     except BaseException:
         if lock is not None:
             lock.release_claim(token)
@@ -854,8 +995,9 @@ def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, 
 
 
 def _app_from_env() -> FastAPI:
+    existing = existing_store_profile()
     settings = config_mod.load()
-    return create_app(build_service(settings), settings)
+    return create_app(build_service(settings, require_existing_seed=existing), settings)
 
 
 app = _app_from_env()

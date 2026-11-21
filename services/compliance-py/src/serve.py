@@ -50,6 +50,7 @@ import sys
 import uvicorn
 from uvicorn.protocols.http.h11_impl import H11Protocol
 
+import dual_stack
 import launch_guard
 from graceful_close import DRAIN_MAX_BYTES, DRAIN_TIMEOUT_S, GracefulCloseMixin, drains_max_from_env  # noqa: F401
 
@@ -165,4 +166,7 @@ def run(app, host: str, port: int) -> None:
     # default disposition the process died of it and no atexit handler ran. Inside sigterm_exits() the stop is a
     # normal exit (status 143) and exit handlers run.
     with launch_guard.sigterm_exits():
-        uvicorn.run(app, host=host, port=port, **uvicorn_kwargs())
+        # CI railway-images (PR #10): the IPv6 wildcard (Railway's production bind) is bound dual-stack by
+        # dual_stack.serve (asyncio would bind it IPv6-only, and Docker's IPv4 port mapping was reset); any other host
+        # goes to uvicorn.run unchanged
+        dual_stack.serve(uvicorn, app, host, port, "compliance-py", **uvicorn_kwargs())

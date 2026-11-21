@@ -10,6 +10,11 @@ region + attestation, never IP alone) or a campaign target. Rules, in order:
   4. in HR-05 ``operate`` and not in ``operate_excludes`` -> operate;
   5. in HR-06 ``conditional`` -> conditional;
   6. otherwise refuse (HR-07 ``unlisted: refuse``, default deny).
+ADR 0024 (founder service area, Oct 30, 2026): HR-05 ``operate`` lists the allowed codes one by one (the 50
+states, US-DC, and each inhabited territory as US-PR/PR, US-GU/GU, US-VI/VI, US-AS/AS, US-MP/MP), so a code is operate only when it, or (for a bare country code) the country
+itself, is listed: US-UM is refused although US-CA is operate (``US`` alone is not in the list). A bare-country
+campaign TARGET is operate when HR-05 ``target_countries`` lists it (bare ``US``: the allowed states). A row whose
+status is ``superseded`` (HR-06, the EU kit) contributes no parameters.
 Before any of that, a code that is not on the shipped ISO 3166-1 / 3166-2
 list (``jurisdictions.py``) is REFUSED as unknown (AEGIS N14-3): an alias
 such as ``CA-PQ`` / ``CA-QUE`` for Quebec, or a made-up ``US-XX``, never
@@ -39,12 +44,16 @@ class Params:
     conditional: tuple[str, ...]
     refuse: tuple[str, ...]
     unlisted: str
+    target_countries: tuple[str, ...] = ()
 
     @classmethod
     def from_rows(cls, rows_by_id: dict[str, dict]) -> "Params":
-        hr05 = (rows_by_id.get("HR-05") or {}).get("parameters", {})
-        hr06 = (rows_by_id.get("HR-06") or {}).get("parameters", {})
-        hr07 = (rows_by_id.get("HR-07") or {}).get("parameters", {})
+        def params(oid: str) -> dict:
+            row = rows_by_id.get(oid) or {}
+            # ADR 0024: a superseded row is history; it never widens (or narrows) what the resolver allows
+            return {} if row.get("status") == "superseded" else (row.get("parameters") or {})
+
+        hr05, hr06, hr07 = params("HR-05"), params("HR-06"), params("HR-07")
 
         def tup(d, k):
             v = d.get(k, [])
@@ -53,7 +62,7 @@ class Params:
         unlisted = hr07.get("unlisted", "refuse")
         return cls(tup(hr05, "operate"), tup(hr05, "operate_excludes"), tup(hr05, "region_required"),
                    tup(hr06, "conditional"), tup(hr07, "refuse"),
-                   unlisted if unlisted in ("refuse", "conditional") else "refuse")
+                   unlisted if unlisted in ("refuse", "conditional") else "refuse", tup(hr05, "target_countries"))
 
     @property
     def ofac_codes(self) -> tuple[str, ...]:
@@ -97,6 +106,7 @@ def classify(code: str, p: Params, who: str) -> Resolution:
         if code == "CA-QC":
             cites.append("HR-05")  # operate_excludes names CA-QC too
         return Resolution(who, code, "refuse", "refused jurisdiction", tuple(["HR-07", *cites]))
+    # ADR 0024: HR-05 lists subdivisions one by one (not "US"), so US-UM is not operate because US-CA is
     if (code in p.operate or country in p.operate) and code not in p.operate_excludes:
         return Resolution(who, code, "operate", "operate jurisdiction", ("HR-05", *cites))
     if code in p.operate_excludes:
@@ -135,6 +145,10 @@ def resolve_person(j: Optional[dict], p: Params, who: str, prefix: str = "jurisd
 
 
 def resolve_target(code: str, p: Params, who: str = "target") -> Resolution:
+    if code in p.target_countries and is_known(code) and "-" not in code:
+        # ADR 0024: a bare-country campaign target HR-05 names (US = the allowed states)
+        cites = ["US-OFAC-04"] if code in p.ofac_codes else []
+        return Resolution(who, code, "operate", "bare-country target named by HR-05", ("HR-05", *cites))
     if code == "CA":
         r = classify("CA-QC", p, who)
         return Resolution(who, "CA", r.cls, "bare CA target counts as including Quebec (province-level required)",

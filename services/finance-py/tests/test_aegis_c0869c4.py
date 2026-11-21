@@ -107,7 +107,7 @@ def test_hn1_settled_refund_survives_a_restart(tmp_path):
     h2 = Harness(data_dir=d, ledger=h.ledger, clock=h.clock, fakes=h.f)
     assert h2.svc.db["treasury_ops"][tid]["status"] == "not_moved"
     assert h2.svc.db["refunds"][rf["refund_id"]]["status"] == "payment_not_moved"
-    assert h2.ok(h2.get("/fin/v1/integrity"))["status"] == "green"
+    assert h2.ok(h2.get("/fin/v1/integrity", caller=None, andre=ANDRE_TOKEN))["status"] == "green"
 
 
 def test_hn1_a_legacy_refund_op_without_a_hash_is_settled_by_its_computed_hash(hr):
@@ -289,7 +289,7 @@ def test_m1_a_truncate_that_fails_is_reported_not_silent(tmp_path, monkeypatch):
     monkeypatch.setattr(store_mod.os, "pwrite", real_w)
     monkeypatch.setattr(store_mod.os, "ftruncate", real_t)
     assert h.ok(h.client.get("/health"))["log_write_fault"] is True
-    integ = h.ok(h.get("/fin/v1/integrity"))
+    integ = h.ok(h.get("/fin/v1/integrity", caller=None, andre=ANDRE_TOKEN))
     assert integ["status"] == "red" and any("LOCAL_LOG_WRITE_FAULT" in p for p in integ["problems"])
     r = h.post("/fin/v1/payees", {"request_id": rid(), "payee_id": "clip-u", "kind": "clipper",
                                   "declared_country": "US", "callback_contact_ref": "vault:contact-clip-u"},

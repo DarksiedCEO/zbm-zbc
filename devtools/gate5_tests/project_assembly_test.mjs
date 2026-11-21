@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';
+import {assemble, digest, verifyConservation} from '../../deploy/gate5/project_assembly.mjs';
+const clone=x=>JSON.parse(JSON.stringify(x));
+function baseline() {
+  const names=['ledger','legal','finance','seo','stripe-gateway','orchestrator','detection'];
+  const services=names.map((name,i)=>({service:{id:`service-${i}`,name,state:'live'},environment:{id:'env-test',name:'test'},staged:null,stagedChanges:[],config:{source:{repo:'example/repo',branch:'main'},deploy:{drainingSeconds:15,unknownFutureSetting:{kept:true}}},variableNames:['PORT','SYNTHETIC_TOKEN'],volumes:[],domains:{serviceDomains:[],customDomains:[]},tcpProxies:[],unknownField:{keep:['opaque',null]}}));
+  const environment={project:{id:'project-test',name:'test'},environment:{id:'env-test',name:'test'},staged:null,services:services.map(s=>({...s.service,volumeMounts:[]})),volumes:[],buckets:[],sharedVariableNames:['SHARED_SYNTHETIC_TOKEN']};
+  const v={id:'volume-test',name:'ledger-data',state:'live',region:'us-west2',sizeMB:5000,mountedOn:{serviceId:'service-0',serviceName:'ledger',mountPath:'/data'}};
+  environment.volumes.push(v);environment.services[0].volumeMounts.push({volumeId:v.id,volumeName:v.name,mountPath:'/data'});
+  services[0].volumes.push({id:v.id,name:v.name,mountPath:'/data',sizeMB:5000,region:'us-west2'});services[0].config.volumeMounts={[v.id]:{mountPath:'/data'}};
+  services[4].domains.serviceDomains.push({id:'domain-test',domain:'gateway.example.test',targetPort:8470});
+  return {schema:1,captured_at:'2026-11-07T09:31:40Z',authority:'synthetic',environment,services,limitations:['names only','no SDK graph'],unknownTop:{kept:true}};
+}
+function request(b) {return {schema:'gate5-observed-deltas-v1',status:'HOLD',executable:false,baseline_sha256:digest(b),changes:[{service_name:'ledger',service_id:'service-0',path:['config','deploy','drainingSeconds'],before:{present:true,value:15},after:45}],new_role_intents:[{name:'client-portal',service_id:null,mode:'unprovisioned-proposal-only'}]};}
+let count=0;
+function test(name,fn){fn();count++;console.log('PASS '+name);}
+function refused(fn,code){assert.throws(fn,new RegExp(code));}
+test('lossless observed baseline and explicit delta only',()=>{const b=baseline(),r=request(b),original=clone(b);const out=assemble(b,r);assert.equal(out.status,'HOLD');assert.equal(out.executable,false);assert.deepEqual(out.observed_baseline,b);assert.deepEqual(b,original);assert.equal(out.projected_observations.services[0].config.deploy.drainingSeconds,45);assert.deepEqual(out.projected_observations.services.slice(1),b.services.slice(1));assert.deepEqual(out.projected_observations.services[0].config.deploy.unknownFutureSetting,{kept:true});assert.equal(verifyConservation(b,r,out),true);assert.equal(out.variable_obligations[0].variables[1].observed_kind,'UNKNOWN');});
+test('omitted service description refused',()=>{const b=baseline();b.services.pop();refused(()=>assemble(b,request(b)),'SERVICE_INVENTORY');});
+test('changed baseline binding refused',()=>{const b=baseline(),r=request(b);b.environment.services.pop();b.services.pop();refused(()=>assemble(b,r),'BASELINE_DIGEST');});
+test('conflicting and duplicate identities refused',()=>{for(const change of [b=>b.services[0].service.id='wrong',b=>b.services[1].service.id=b.services[0].service.id,b=>b.environment.services[1].name='ledger']){const b=baseline();change(b);refused(()=>assemble(b,request(b)),'IDENTITY');}});
+test('conflicting volume mount refused',()=>{const b=baseline();b.services[0].config.volumeMounts['volume-test'].mountPath='/other';refused(()=>assemble(b,request(b)),'VOLUME');});
+test('unapproved omission of domain or unknown setting refused by conservation',()=>{for(const change of [o=>o.projected_observations.services[4].domains.serviceDomains=[],o=>delete o.projected_observations.services[0].config.deploy.unknownFutureSetting,o=>o.projected_observations.services.pop()]){const b=baseline(),r=request(b),o=assemble(b,r);change(o);refused(()=>verifyConservation(b,r,o),'CONSERVATION');}});
+test('unapproved delta value refuses',()=>{const b=baseline(),r=request(b),o=assemble(b,r);o.projected_observations.services[0].config.deploy.drainingSeconds=99;refused(()=>verifyConservation(b,r,o),'CONSERVATION');});
+test('identity domains volumes and variable edits refuse',()=>{for(const path of [['service','id'],['domains','serviceDomains'],['config','volumeMounts'],['variableNames'],['config','deploy','unknownFutureSetting']]){const b=baseline(),r=request(b);r.changes[0].path=path;refused(()=>assemble(b,r),'DELTA_PATH');}});
+test('stale before duplicate paths and container replacement refuse',()=>{const b=baseline();let r=request(b);r.changes[0].before.value=14;refused(()=>assemble(b,r),'BEFORE');r=request(b);r.changes.push(clone(r.changes[0]));refused(()=>assemble(b,r),'DUPLICATE_DELTA');r=request(b);r.changes[0].path=['config','deploy'];refused(()=>assemble(b,r),'DELTA_PATH');});
+test('new roles never receive invented or conflicting identity',()=>{for(const entry of [{name:'ledger',service_id:null,mode:'unprovisioned-proposal-only'},{name:'client-portal',service_id:'invented',mode:'unprovisioned-proposal-only'},{name:'other',service_id:null,mode:'unprovisioned-proposal-only'}]){const b=baseline(),r=request(b);r.new_role_intents=[entry];refused(()=>assemble(b,r),'NEW_ROLE');}});
+test('missing observed field is UNKNOWN not a default',()=>{const b=baseline(),r=request(b);r.changes=[{service_name:'ledger',service_id:'service-0',path:['config','deploy','overlapSeconds'],before:{present:false},after:0}];const out=assemble(b,r);assert.equal(out.deltas[0].prior_observation,'NOT_EXPOSED_UNKNOWN');assert.equal(out.observed_baseline.services[0].config.deploy.overlapSeconds,undefined);});
+test('staged input and variable values refuse',()=>{let b=baseline();b.services[0].stagedChanges=[{changed:true}];refused(()=>assemble(b,request(b)),'STAGED');b=baseline();b.services[0].config.variables={TOKEN:'not-a-real-secret'};refused(()=>assemble(b,request(b)),'VARIABLE_VALUES');});
+console.log(`${count} tests passed`);

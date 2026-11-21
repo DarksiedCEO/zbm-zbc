@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { newCorrelationId, type FailureKind, type LoadOutcome } from "./load-outcome.ts";
-import { describeFetchFailure, describeTimeout, parseOrchestratorFailure } from "./orchestrator-error.ts";
+import { describeFetchFailure, describeRateLimited, describeTimeout, parseOrchestratorFailure } from "./orchestrator-error.ts";
 import type { RecordedFindingsResult } from "../types/finding.ts";
 
 // Fix wave 1 (Sep 24 2026): the dashboard used to GET /revenue-recovery/scan
@@ -135,6 +135,10 @@ export async function loadRecordedFindings(
 
   if (!res.ok) {
     const { message, correlationId } = parseOrchestratorFailure(res.status, body);
+    if (res.status === 429) {
+      return fail("upstream_error", describeRateLimited(res.headers.get("Retry-After")), correlationId,
+        `orchestrator returned 429: ${body}`);
+    }
     const kind: FailureKind = res.status === 401 || res.status === 403 ? "upstream_auth" : "upstream_error";
     return fail(kind, message, correlationId, `orchestrator returned ${res.status}: ${body}`);
   }

@@ -173,7 +173,7 @@ def _request(port: int, method: str, path: str, body: bytes | None = None,
 # its wall time, the time the kernel kept the prober and the server's event-loop thread RUNNABLE but not running
 # (/proc/<pid>/task/<tid>/schedstat, field 2) during it; the bound applies to wall minus the larger of those waits — the time the
 # server had the CPU and still had not answered (its GIL waits behind the parse included). Where schedstat is not
-# available (macOS) the waits are reported as 0: plain wall time, as before. Every raw number is printed.
+# available (macOS) the waits are reported as null: latency still uses plain wall time. Raw wall time is retained.
 _PROBER = r"""
 import json, os, socket, sys, time
 port, server_pid, seconds, every = int(sys.argv[1]), int(sys.argv[2]), float(sys.argv[3]), float(sys.argv[4])
@@ -183,7 +183,10 @@ def wait_s(pid, tid):
             return int(fh.read().split()[1]) / 1e9
     except (OSError, IndexError, ValueError):
         return None
+def wait_delta(before, after):
+    return None if before is None or after is None else after - before
 me = os.getpid()
+sample = 0
 end = time.monotonic() + seconds
 while time.monotonic() < end:
     w0, s0, t0 = wait_s(me, me), wait_s(server_pid, server_pid), time.monotonic()
@@ -199,11 +202,13 @@ while time.monotonic() < end:
         status = int(data.split(b" ", 2)[1]) if data else 0
     except OSError as exc:
         status = type(exc).__name__
-    wall = time.monotonic() - t0
+    ended = time.monotonic()
+    wall = ended - t0
     w1, s1 = wait_s(me, me), wait_s(server_pid, server_pid)
-    waits = [b - a for a, b in ((w0, w1), (s0, s1)) if a is not None and b is not None]
-    print(json.dumps({"status": status, "wall": wall, "prober_wait": waits[0] if len(waits) > 0 else 0.0,
-                      "server_wait": waits[1] if len(waits) > 1 else 0.0}), flush=True)
+    print(json.dumps({"status": status, "wall": wall, "prober_wait": wait_delta(w0, w1),
+                      "server_wait": wait_delta(s0, s1), "sample": sample,
+                      "started_monotonic": t0, "ended_monotonic": ended}), flush=True)
+    sample += 1
     time.sleep(every)
 """
 
@@ -232,7 +237,13 @@ def _service_latency(p: dict) -> float:
     """A probe's wall time minus the time the prober or the server's loop was kept off the CPU — the LARGER of the
     two waits only: they can overlap (both runnable, neither running), and subtracting their sum would credit an
     overlap twice (E-A review). Never subtracts more than the wall time one of them spent waiting for a CPU."""
-    return max(0.0, p["wall"] - max(p["prober_wait"], p["server_wait"]))
+    return max(0.0, p["wall"] - max(v if v is not None else 0.0 for v in (p["prober_wait"], p["server_wait"])))
+
+
+def _wait_summary(probes: list[dict], key: str) -> str:
+    values = [p[key] for p in probes if p[key] is not None]
+    count = f"({len(values)}/{len(probes)} samples)"
+    return f"{max(values) * 1000:.0f}ms {count}" if values else f"unavailable {count}"
 
 
 def _order(i: int) -> dict:
@@ -342,8 +353,8 @@ def test_health_latency_bound_under_16_concurrent_worst_case_batches(server):
     walls = sorted(p["wall"] for p in probes)
     print(f"\n/health under 16 concurrent worst-case batches: n={len(latencies)} service latency "
           f"p50={p50 * 1000:.0f}ms max={worst * 1000:.0f}ms (wall p50={walls[len(walls) // 2] * 1000:.0f}ms "
-          f"max={walls[-1] * 1000:.0f}ms; max run-queue waits: prober {max(p['prober_wait'] for p in probes) * 1000:.0f}ms, "
-          f"server loop {max(p['server_wait'] for p in probes) * 1000:.0f}ms); batches: "
+          f"max={walls[-1] * 1000:.0f}ms; max run-queue waits: prober {_wait_summary(probes, 'prober_wait')}, "
+          f"server loop {_wait_summary(probes, 'server_wait')}); batches: "
           f"{sum(r[0] == 200 for r in results)} x 200, {sum(r[0] == 503 for r in results)} x 503")
     assert probes and all(p["status"] == 200 for p in probes), probes[:5]
     p90 = latencies[min(len(latencies) - 1, (len(latencies) * 9) // 10)]

@@ -1,11 +1,12 @@
 """Certification scenarios, spec §H items 1-16 (no network; every port is a fake)."""
 
 
+from unittest.mock import ANY
 import pytest
 
 from fakes import PassingVerification
 from helpers import (ANDRE_TOKEN, NOW, SEED_IDS, Harness, brand_facts, client_facts, clip_facts, creator_facts,
-                     publish_facts, rid, unmet_codes)
+                     publish_facts, rid, unmet_codes, unmet_ids)
 from ports import NotBuiltFinance31, NotBuiltLegal37, NotWiredAccessibilityChecker, NotWiredSanctionsProvider
 
 
@@ -31,14 +32,16 @@ def test_h01_seed_not_approved_blocks_all_three_gates(h):
 
 def test_h02_seed_approved_with_andre_token_is_version_1(h):
     seed = [p for p in h.inbox() if p["kind"] == "seed"][0]
-    assert len(seed["proposed_rows"]) == 118
+    assert len(seed["proposed_rows"]) == 121          # seed v2 (ADR 0024)
     out = h.approve(seed)
     assert out["register_version"] == 1
     body = h.get("/health").json()
     assert body == {"status": "ok", "service": "compliance-py", "register_version_in_force": 1, "in_memory": True,
                     "seed_pinned": True, "production": True,   # AEGIS N14-13
                     "reconcile_mode": False, "reconcile_required": False,   # AEGIS N15-1
-                    "log_write_fault": False}                                # bug sweep C
+                    "log_write_fault": False,                                 # bug sweep C
+                    "scheduler": {"enabled": False},                         # AEGIS F-4
+                    "rules_expiring": ANY}                                   # money red team RTM-06
     assert len(h.ledger.of_type("register_version_published")) == 1
     assert len(h.ledger.of_type("seed_loaded")) == 1
 
@@ -139,9 +142,14 @@ def test_h08_under_18_attestation_is_a_hard_block_and_no_guardian_field_exists()
 # H.9 -------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("country, region, expect_ids", [
-    ("FR", None, {"HR-07", "FR-LOI-2023-451"}),
-    ("CA", "CA-QC", {"HR-07", "HR-05"}),
-    ("CA", None, {"HR-07", "HR-05"}),
+    # ADR 0024: France and Canada (Quebec or not) are outside the service area; FR-LOI-2023-451 and CA-QC-LAW25 are
+    # superseded (history), HR-07 refuses (default deny)
+    ("FR", None, {"HR-07"}),
+    ("CA", "CA-QC", {"HR-07"}),
+    ("CA", None, {"HR-07"}),
+    ("CA", "CA-ON", {"HR-07"}),
+    ("GB", None, {"HR-07"}),
+    ("US", "US-UM", {"HR-07"}),
     ("IR", None, {"HR-07", "US-OFAC-04"}),
     ("UA", "UA-43", {"HR-07", "US-OFAC-04"}),
     ("BR", None, {"HR-07"}),
@@ -153,33 +161,39 @@ def test_h09_refused_jurisdictions(hs, country, region, expect_ids):
     assert expect_ids <= refused, r["unmet_lines"]
 
 
-def test_h09_gb_operates_and_is_allowed(hs):
-    r = hs.rule("client-gb", "client", client_facts(country="GB", region=None, targets=("GB",))).json()
-    assert r["allowed"] is True, r["unmet_lines"]
+def test_h09_puerto_rico_and_guam_operate_and_are_allowed(hs):
+    """ADR 0024 (replaces "GB operates"): PR and GU are in the service area, declared either way."""
+    for subject, country, region, targets in (("client-pr", "PR", None, ("PR",)), ("client-pr2", "US", "US-PR", ("US",)),
+                                              ("client-gu", "GU", None, ("GU",)), ("client-gu2", "US", "US-GU", ("US",))):
+        r = hs.rule(subject, "client", client_facts(country=country, region=region, targets=targets)).json()
+        assert r["allowed"] is True, (subject, r["unmet_lines"])
+    gb = hs.rule("client-gb", "client", client_facts(country="GB", region=None, targets=("GB",))).json()
+    assert gb["allowed"] is False and ("HR-07", "jurisdiction_class") in unmet_codes(gb)
 
 
-def test_h09_italy_with_eu_kit_allowed_and_germany_blocked_by_its_label_row(hs):
-    it = hs.rule("client-it", "client", client_facts(country="IT", region=None, targets=("IT",),
-                                                     eu_kit_version_acknowledged=1, msa_eu_clause=True)).json()
-    assert it["allowed"] is True, it["unmet_lines"]
-    no_kit = hs.rule("client-it2", "client", client_facts(country="IT", region=None, targets=("IT",),
-                                                          eu_kit_version_acknowledged=0, msa_eu_clause=True)).json()
-    assert ("HR-06", "eu_kit") in unmet_codes(no_kit)
-    de = hs.rule("client-de", "client", client_facts(country="DE", region=None, targets=("DE",),
-                                                     eu_kit_version_acknowledged=1, msa_eu_clause=True)).json()
-    assert de["allowed"] is False
-    assert ("DE-UWG-5A", "rule_not_in_force") in unmet_codes(de)
+def test_h09_eu_clients_and_eu_kit_are_gone(hs):
+    """ADR 0024 (replaces the EU-kit scenarios): an Italian client WITH the old EU kit acknowledged, and a German one,
+    are refused by HR-07; HR-06 (superseded) is never evaluated."""
+    for c in ("IT", "DE"):
+        r = hs.rule(f"client-{c}", "client", client_facts(country=c, region=None, targets=(c,),
+                                                          eu_kit_version_acknowledged=1, msa_eu_clause=True)).json()
+        assert r["allowed"] is False and ("HR-07", "jurisdiction_class") in unmet_codes(r)
+        assert "HR-06" not in unmet_ids(r), r["unmet_lines"]
 
 
-def test_h09_italian_clipper_with_eu_kit_activates(hs):
+def test_h09_foreign_clippers_are_refused_and_pr_clippers_are_not_foreign(hs):
+    """ADR 0024: the service area applies to every lane (creators too, fail closed); a Puerto Rico clipper is not a
+    foreign payee (no W-8)."""
     s = hs.screen("clipper-it", country="IT", region=None)
-    ok = hs.rule("clipper-it", "zbc_creator", creator_facts(s["screen_id"], country="IT", region=None,
-                                                            network_country_signal="IT", eu_kit_version_acknowledged=1))
     hs.ports.finance.form_kind = "w8ben"
     r = hs.rule("clipper-it", "zbc_creator", creator_facts(s["screen_id"], country="IT", region=None, tax_form_kind="w8ben",
-                                                           network_country_signal="IT", eu_kit_version_acknowledged=1)).json()
+                                                           network_country_signal="IT")).json()
+    assert r["allowed"] is False and ("HR-07", "jurisdiction_class") in unmet_codes(r)
+    hs.ports.finance.form_kind = "w9"
+    s = hs.screen("clipper-pr", country="PR", region=None)
+    r = hs.rule("clipper-pr", "zbc_creator", creator_facts(s["screen_id"], country="PR", region=None,
+                                                           network_country_signal="PR")).json()
     assert r["allowed"] is True, r["unmet_lines"]
-    assert ok.status_code == 200
 
 
 # H.10 ------------------------------------------------------------------------------------

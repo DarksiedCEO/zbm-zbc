@@ -2,7 +2,8 @@
 """
 Search & Answer Intelligence (2) live run: the REAL ledger-rust binary, seo-py's production entrypoint
 (``cd src && python3 -m api``) and Finance (31)'s production entrypoint (finance-py, the same command) over real HTTP,
-with durable data directories, in production mode.
+with durable data directories, in production mode. Compliance (38), which every client run asks first (ADR 0024),
+is a loopback stand-in answering compliance-py's own activation fields (see ``ComplianceStandIn``).
 
 usage: LEDGER_BIN=/path/to/ledger-rust/target/release/server python3 devtools/live_run.py
 
@@ -78,6 +79,9 @@ FIN_TOKEN = derived("finance service token")
 FIN_ANDRE = derived("finance andre approval token")
 FIN_CALLERS = {c: derived(f"finance caller {c}") for c in ("onboarding", "seo_02")}
 FIN_SRC = SVC.parent / "finance-py" / "src"
+CMP_TOKEN = derived("compliance service token")
+CMP_SEO_CALLER = derived("compliance caller seo_02")
+CMP_SRC = SVC.parent / "compliance-py" / "src"
 PPLX_KEY = "live-only-" + derived("perplexity api key")     # never sent anywhere: no budget, no outbound network
 ACME_PARTY = "acme-party-live"
 OWN_DOMAIN = "zbestmedia-live.test"
@@ -104,6 +108,75 @@ def free_port() -> int:
     port = s.getsockname()[1]
     s.close()
     return port
+
+
+class ComplianceStandIn:
+    """Compliance (38) for this run (ADR 0024: seo asks ``GET /compliance/v1/clients/{id}/activation`` before every
+    client run). A real ALLOW needs compliance-py with Legal (HR-15) and Andre's recorded OFAC search (HR-14), none of
+    which this run starts (compliance-py's own live run proves its gate; seo's tests prove the refusals), so a loopback
+    stand-in answers instead: compliance-py's own response shape (checked against its source below), the service bearer
+    and seo_02's caller token required (401/403 otherwise), ALLOW only for the clients it is told to allow, REFUSE for
+    everyone else. Every request is written down."""
+
+    def __init__(self, allow: set):
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        stand = self
+        self.allow, self.asked = set(allow), []
+
+        class H(BaseHTTPRequestHandler):
+            def log_message(self, *a):            # quiet; the run narrates what matters
+                pass
+
+            def do_GET(self):
+                stand.asked.append(self.path)
+                parts = self.path.split("?", 1)[0].split("/")
+                if self.headers.get("Authorization") != f"Bearer {CMP_TOKEN}":
+                    return self._send(401, {"detail": "unauthorized"})
+                if self.headers.get("X-Compliance-Caller-Token") != CMP_SEO_CALLER:
+                    return self._send(403, {"detail": "forbidden"})
+                if len(parts) != 6 or parts[1:4] != ["compliance", "v1", "clients"] or parts[5] != "activation":
+                    return self._send(404, {"detail": "not found"})
+                return self._send(200, stand.activation(parts[4]))
+
+            def _send(self, code, body):
+                raw = json.dumps(body).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    def activation(self, client_id: str) -> dict:
+        ok = client_id in self.allow
+        return {"client_id": client_id, "lane": "client", "decision": "ALLOW" if ok else "REFUSE", "current": ok,
+                "ruling_id": f"rul-live-{client_id}" if ok else None,
+                "evaluated_at": "2026-10-31T00:00:00Z" if ok else None, "register_version": 2,
+                "jurisdiction": "US-CA" if ok else None, "valid_until": None,
+                "reasons": [] if ok else ["no activation ruling for this client: run the activation gate"],
+                "seed_pinned": True, "sanctions_grounded": False, "sanctions_ground": None}
+
+    def close(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+
+
+def compliance_activation_keys() -> set:
+    """The keys compliance-py's ``activation_status`` answers with (its ``out = {...}`` literal), read from its source."""
+    import ast
+    tree = ast.parse((CMP_SRC / "service.py").read_text())
+    for f in ast.walk(tree):
+        if isinstance(f, ast.FunctionDef) and f.name == "activation_status":
+            for n in ast.walk(f):
+                if isinstance(n, ast.Assign) and [getattr(t, "id", None) for t in n.targets] == ["out"] \
+                        and isinstance(n.value, ast.Dict):
+                    return {k.value for k in n.value.keys if isinstance(k, ast.Constant)}
+    raise RuntimeError("compliance-py activation_status not found")
 
 
 def wait_health(url: str, timeout: float = 25.0) -> dict:
@@ -331,8 +404,11 @@ def _main(work: Path) -> int:
     L, S, F = f"http://127.0.0.1:{pl}", f"http://127.0.0.1:{ps}", f"http://127.0.0.1:{pf}"
     lh = {"Authorization": f"Bearer {LEDGER_TOKEN}"}
     trap_dir, trap_out = _trap(work)
+    cmp_ = ComplianceStandIn({ACME_PARTY})
     env = {**_env(work, ps, L), "SEO_FINANCE_URL": F, "SEO_FINANCE_TOKEN": FIN_TOKEN,
-           "SEO_FINANCE_CALLER_TOKEN": FIN_CALLERS["seo_02"], **_net_guard(work, trap_out)}
+           "SEO_FINANCE_CALLER_TOKEN": FIN_CALLERS["seo_02"], "SEO_COMPLIANCE_URL": cmp_.url,
+           "SEO_COMPLIANCE_TOKEN": CMP_TOKEN, "SEO_COMPLIANCE_CALLER_TOKEN": CMP_SEO_CALLER,
+           **_net_guard(work, trap_out)}
     netlog = work / "outbound.jsonl"
     fenv = _fin_env(work, pf, L)
     data = Path(env["SEO_DATA_DIR"])
@@ -344,6 +420,8 @@ def _main(work: Path) -> int:
               work)
         say(f"ledger health: {wait_health(L + '/health')}")
         fp = start([sys.executable, "-m", "api"], fenv, str(FIN_SRC), "finance", work)
+        check("the Compliance stand-in answers exactly compliance-py's activation_status fields",
+              set(cmp_.activation(ACME_PARTY)) == compliance_activation_keys())
         wait_health(F + "/health")
         fin = Fin(F)
         check("Finance (31) runs from its production entrypoint and Andre approves its rules",
@@ -405,9 +483,10 @@ def _main(work: Path) -> int:
               st["in_memory"] is False and st["non_production"] is False and st["integrity"]["ok"] is True
               and st["andre_approvals_configured"] is True)
         ports = st["ports"]
-        check("only the fetcher and Finance are connected; render, every answer engine and first-party source are not; "
+        check("only the fetcher, Finance and Compliance are connected; render, every answer engine and first-party source are not; "
               "invoices are verified with Finance", ports["fetch"] == "connected" and ports["render"] == "NOT_CONNECTED"
               and ports["finance"] == "connected" and st["invoice_verification"]["mode"] == "finance"
+              and ports["compliance"] == "connected"
               and set(ports["answer_engines"].values()) == {"NOT_CONNECTED"}
               and set(ports["first_party"].values()) == {"NOT_CONNECTED"} and ports["clientfix"] == "NOT_CONNECTED")
         second = subprocess.run([sys.executable, "-m", "api"], env={**os.environ, **env, "SEO_PORT": str(free_port())},
@@ -535,6 +614,9 @@ def _main(work: Path) -> int:
               unpaid.status_code == 409 and unpaid.json() == {"detail": "INVOICE_NOT_PAID", "override_allowed": False}
               and unknown.status_code == 409 and unknown.json()["detail"] == "INVOICE_NOT_FOUND"
               and theirs.status_code == 409 and theirs.json()["detail"] == "INVOICE_TENANT_MISMATCH")
+        asked = [q for q in cmp_.asked if q.endswith(f"/clients/{ACME_PARTY}/activation")]
+        check("each of those client runs asked Compliance (38) for the bound client's activation first",
+              len(asked) >= 3)
         stop(fp, "finance")
         over_iid = invoice_id("acme override")
         down = a.post("/tenants/acme-live/audits", {"request_id": rid(), **body, "invoice_id": over_iid}, andre=True)
@@ -712,6 +794,7 @@ def _main(work: Path) -> int:
         say(f"{len(CHECKS) - len(failed)}/{len(CHECKS)} checks passed" + (f"; FAILED: {failed}" if failed else ""))
         return 0 if not failed else 1
     finally:
+        cmp_.close()
         for p in PROCS:
             if p.poll() is None:
                 p.terminate()

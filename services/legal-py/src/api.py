@@ -22,6 +22,9 @@ Legal returns no free-text answers: every response is records, dates, statuses, 
 
 from __future__ import annotations
 
+from startup_profile import existing_store_profile
+existing_store_profile()  # Refuse invalid profile before eager construction/configuration.
+
 import asyncio
 import hashlib
 import hmac
@@ -48,12 +51,13 @@ from intelligences.i03_acceptance import forbidden_keys
 from ledger import HttpLedgerClient, Recorder, UnconfiguredLedgerClient
 from ports import Ports
 from service import JOBS, LegalService, Seeds
-from store import BlobStore, RecordLog
+from store import BlobStore, RecordLog, StoreReadError
 from textguard import ip_fields, ip_in
 
 log = logging.getLogger("legal.api")
 
 CALLER_HEADER = "X-LEGAL-Caller-Token"
+NARROW_CALLERS = frozenset({"client_portal"})       # ADR 0028: only routes that name them
 FOUNDER_HEADER = "X-Andre-Approval-Token"
 MAX_BODY_BYTES = 7 * 1024 * 1024
 MAX_TARGET_BYTES = 4096
@@ -73,8 +77,17 @@ ROUTE_LIMITS: list[tuple[re.Pattern, int]] = [
     (re.compile(r"^/legal/v1/playbooks/[^/]+/reviews$"), BLOB),
     (re.compile(r"^/legal/v1/playbooks/proposals$"), BLOB),
     (re.compile(r"^/legal/v1/reconcile$"), 1024 * 1024),
+    (re.compile(r"^/legal/v1/portal/acceptances$"), 4 * 1024 * 1024),     # ADR 0028: the page text as shown (base64)
+    (re.compile(r"^/legal/v1/portal/invitations/resolve$"), 1024),
+    (re.compile(r"^/legal/v1/portal/receipts$"), 1024),
 ]
 DEFAULT_ROUTE_LIMIT = 256 * 1024
+
+
+def _founder_audit_route(request: Request) -> str:
+    """Audit the server's route template, never identifiers from the raw target."""
+    template = getattr(request.scope.get("route"), "path", None)
+    return template if isinstance(template, str) and template else "unclassified"
 
 
 def route_limit(path: str) -> int:
@@ -284,11 +297,19 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
         """A recognised caller token (in ``allowed`` when given); with ``andre_ok`` Andre's token also passes."""
         def dep(request: Request) -> str:
             if andre_ok and request.headers.get(FOUNDER_HEADER) is not None:
-                return _andre(route or request.url.path[:64], request.headers.get(FOUNDER_HEADER))
+                return _andre(route or _founder_audit_route(request), request.headers.get(FOUNDER_HEADER))
             name = callers.identify(request.headers.get(CALLER_HEADER))
+            if name is None and allowed and set(allowed) <= set(settings.callers_not_configured):
+                # an optional caller not configured yet (first deploy): its routes answer 503 until its token is set
+                raise Unavailable(f"the {', '.join(allowed)} caller token is not set in LEGAL_CALLER_TOKENS: this route "
+                                  "is closed until it is")
             if name is None:
                 raise Forbidden("caller token missing or not recognised")
             if allowed and name not in allowed:
+                raise Forbidden("this caller is not authorized for this route")
+            if not allowed and name in NARROW_CALLERS:
+                # ADR 0028: the client-portal token (held by the one public-facing service) reaches only the routes
+                # that name it, never the generic reader routes every other caller may use
                 raise Forbidden("this caller is not authorized for this route")
             return name
         return dep
@@ -299,6 +320,23 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
         return dep
 
     reader = caller(andre_ok=True, route="read")
+
+    def portal() -> Callable:
+        """ADR 0028: the client-portal caller. AEGIS M-1: while its token is not set (the first deploy), its routes
+        answer 503 and Legal keeps running."""
+        inner = caller("client_portal")
+
+        def dep(request: Request) -> str:
+            if "client_portal" not in settings.caller_tokens:
+                raise Unavailable("the client_portal caller token is not set in LEGAL_CALLER_TOKENS: the client "
+                                  "acceptance page is closed until it is")
+            return inner(request)
+        return dep
+
+    if settings.callers_not_configured:
+        log.warning("LEGAL_CALLER_TOKENS: %s not set; the routes only it may call answer 503 until it is "
+                    "(docs/deploy/railway.md: ADR 0024 step D for compliance_38, 'Client acceptance page' for "
+                    "client_portal)", ", ".join(settings.callers_not_configured))
 
     def body(model: type[BaseModel]) -> Callable:
         def parse(payload: Any = Body(default=None)) -> Any:
@@ -334,6 +372,13 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
             return JSONResponse(status_code=503, headers={"Retry-After": "1"}, content=content)
         return JSONResponse(status_code=exc.status_code, content=content)
 
+    @app.exception_handler(StoreReadError)
+    def _store_read(_: Request, exc: StoreReadError):
+        # AEGIS r4 N4-L2: a blob that exists but cannot be read now is a 503 (try again), never a 404
+        log.error("store read error: %s", exc)
+        return JSONResponse(status_code=503, headers={"Retry-After": "1"},
+                            content={"detail": "the local store could not be read; try again", "issued": False})
+
     @app.middleware("http")
     async def _unhandled(request: Request, call_next):
         try:
@@ -346,7 +391,13 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict:
-        return svc.health()
+        out = svc.health()
+        if settings.callers_not_configured:
+            # AEGIS r13 R13-3: an optional caller left unset is a half-finished deploy step (railway.md step D): not
+            # "ok", so the heartbeat keeps flagging it; a worse status (degraded, closed) is never softened
+            out = {**out, "status": "warning" if out["status"] == "ok" else out["status"],
+                   "warnings": [f"optional_caller_unset:{c}" for c in settings.callers_not_configured]}
+        return out
 
     @app.get("/legal/v1/intelligences", dependencies=auth)
     def intelligences(_: str = Depends(reader)) -> list[dict]:
@@ -397,6 +448,18 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
         return _echo(req.request_id, svc.decide_version(req.request_id, _id(doc_id, DOC_ID), _id(version, VERSION),
                                                         req.model_dump()))
 
+    @app.get("/legal/v1/documents/{doc_id}/versions/{version}/founder-approval/rationale", dependencies=auth)
+    def doc_founder_rationale(doc_id: str, version: str, _: str = Depends(andre("documents/founder-rationale"))) -> dict:
+        """AEGIS M4: Andre reads back his founder-approval rationale; nobody else can."""
+        return svc.version_rationale(_id(doc_id, DOC_ID), _id(version, VERSION))
+
+    @app.post("/legal/v1/documents/{doc_id}/versions/{version}/founder-approval", dependencies=auth)
+    def doc_founder_approval(doc_id: str, version: str, _: str = Depends(andre("documents/founder-approval")),
+                             req: m.FounderApproval = Depends(body(m.FounderApproval))) -> dict:
+        """LG-20 / ADR 0022: Andre approves a client commercial contract as founder."""
+        return _echo(req.request_id, svc.founder_approve_version(req.request_id, _id(doc_id, DOC_ID),
+                                                                 _id(version, VERSION), req.model_dump()))
+
     # --- acceptances and envelopes -------------------------------------------------------------------------------
 
     @app.post("/legal/v1/acceptances", dependencies=auth, status_code=201)
@@ -404,9 +467,75 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
                    req: m.AcceptanceCreate = Depends(body(m.AcceptanceCreate))) -> dict:
         return _echo(req.request_id, svc.record_acceptance(who, req.request_id, req.model_dump()))
 
+    @app.get("/legal/v1/replay-quarantine", dependencies=auth)
+    def replay_quarantine(_: str = Depends(andre("replay-quarantine"))) -> dict:
+        """AEGIS r11 R11-6 (Andre): log lines the replay did not apply (a failure the caller was told about)."""
+        return svc.quarantine_view()
+
+    @app.post("/legal/v1/replay-quarantine/acknowledgements", dependencies=auth)
+    def replay_quarantine_ack(_: str = Depends(andre("replay-quarantine/ack")),
+                              req: m.QuarantineAck = Depends(body(m.QuarantineAck))) -> dict:
+        return _echo(req.request_id, svc.acknowledge_quarantine(req.request_id, list(req.seqs)))
+
+    @app.post("/legal/v1/acceptance-invitations", dependencies=auth, status_code=201)
+    def acceptance_invitation(_: str = Depends(andre("acceptance-invitations")),
+                              req: m.InvitationCreate = Depends(body(m.InvitationCreate))) -> dict:
+        return _echo(req.request_id, svc.create_invitation(req.request_id, req.model_dump()))
+
+    # --- ADR 0028: the client acceptance page ----------------------------------------------------------------------
+
+    @app.post("/legal/v1/client-acceptance-invitations", dependencies=auth, status_code=201)
+    def client_invitation(_: str = Depends(andre("client-acceptance-invitations")),
+                          req: m.ClientInvitationCreate = Depends(body(m.ClientInvitationCreate))) -> dict:
+        """Andre invites one client to accept these document versions; the answer shows the acceptance token ONCE."""
+        return _echo(req.request_id, svc.create_client_invitation(req.request_id, req.model_dump()))
+
+    @app.get("/legal/v1/client-acceptance-invitations/by-fingerprint/{fp}", dependencies=auth)
+    def client_invitation_by_fingerprint(fp: str,
+                                         _: str = Depends(andre("client-acceptance-invitations/fingerprint"))) -> dict:
+        """AEGIS r3 N3-M1: which link the portal's log line names (8 hex characters)."""
+        if not re.fullmatch(r"[0-9a-f]{8}", fp):
+            raise Invalid("a log fingerprint is 8 lower-case hex characters")
+        return svc.client_invitations_by_fingerprint(fp)
+
+    @app.get("/legal/v1/client-acceptance-invitations/{invitation_id}", dependencies=auth)
+    def client_invitation_get(invitation_id: str,
+                              _: str = Depends(andre("client-acceptance-invitations/read"))) -> dict:
+        return svc.client_invitation_get(_id(invitation_id, LG_ID))
+
+    @app.get("/legal/v1/client-acceptance-invitations/{invitation_id}/evidence", dependencies=auth)
+    def client_invitation_evidence(invitation_id: str,
+                                   _: str = Depends(andre("client-acceptance-invitations/evidence"))) -> dict:
+        """Andre only: the signatory, the page text as shown and the HMACs of a used link."""
+        return svc.client_invitation_evidence(_id(invitation_id, LG_ID))
+
+    @app.post("/legal/v1/client-acceptance-invitations/{invitation_id}/revoke", dependencies=auth)
+    def client_invitation_revoke(invitation_id: str, _: str = Depends(andre("client-acceptance-invitations/revoke")),
+                                 req: m.InvitationRevoke = Depends(body(m.InvitationRevoke))) -> dict:
+        return _echo(req.request_id, svc.revoke_client_invitation(req.request_id, _id(invitation_id, LG_ID),
+                                                                  req.model_dump()))
+
+    @app.post("/legal/v1/portal/invitations/resolve", dependencies=auth)
+    def portal_resolve(_: str = Depends(portal()),
+                       req: m.PortalResolve = Depends(body(m.PortalResolve))) -> dict:
+        """The client-portal service's read of one acceptance link: every unusable token is the same 404."""
+        return svc.portal_resolve(req.token)
+
+    @app.post("/legal/v1/portal/receipts", dependencies=auth)
+    def portal_receipt(_: str = Depends(portal()), req: m.PortalReceipt = Depends(body(m.PortalReceipt))) -> dict:
+        """AEGIS M-2: the receipt of the submission that used a link (same token, same request id); else 404."""
+        return svc.portal_receipt(req.token, req.request_id, req.form_sha256)
+
+    @app.post("/legal/v1/portal/acceptances", dependencies=auth, status_code=201)
+    def portal_acceptance(_: str = Depends(portal()),
+                          req: m.PortalAcceptanceCreate = Depends(body(m.PortalAcceptanceCreate))) -> dict:
+        """The ONLY way a client's acceptance is recorded (ADR 0028)."""
+        return _echo(req.request_id, svc.portal_accept(req.request_id, req.model_dump()))
+
     @app.get("/legal/v1/acceptances/{acceptance_id}", dependencies=auth)
     def acceptance_get(acceptance_id: str, _: str = Depends(caller("clipper_network", "finance_31", "onboarding",
-                                                                   andre_ok=True))) -> dict:
+                                                                   "compliance_38", andre_ok=True, route="acceptances/get"))) -> dict:
+        # compliance_38 (ADR 0024, HR-15): a client's activation needs Legal to confirm the client's own acceptance
         return svc.get_acceptance(_id(acceptance_id, LG_ID))
 
     @app.post("/legal/v1/envelopes", dependencies=auth)
@@ -487,6 +616,17 @@ def create_app(service: LegalService, settings: config_mod.Settings) -> FastAPI:
     def register_row(cq_id: str, _: str = Depends(reader)) -> dict:
         with svc.lock:
             return svc.register_row_view(_id(cq_id, CQ_OR_TARGET))
+
+    @app.get("/legal/v1/register/{cq_id}/founder-determination/rationale", dependencies=auth)
+    def founder_determination_rationale(cq_id: str, _: str = Depends(andre("register/founder-determination/rationale"))
+                                        ) -> dict:
+        return svc.determination_rationale(_id(cq_id, CQ_OR_TARGET))
+
+    @app.post("/legal/v1/register/{cq_id}/founder-determination", dependencies=auth)
+    def founder_determination(cq_id: str, _: str = Depends(andre("register/founder-determination")),
+                              req: m.FounderDetermination = Depends(body(m.FounderDetermination))) -> dict:
+        """LG-20 / ADR 0022: Andre's founder determination on CQ-19 (client commercial contracts only)."""
+        return _echo(req.request_id, svc.founder_determine(req.request_id, _id(cq_id, CQ_OR_TARGET), req.model_dump()))
 
     @app.post("/legal/v1/register/{cq_id}/invalidate", dependencies=auth)
     def invalidate(cq_id: str, _: str = Depends(caller("compliance_38")),
@@ -672,7 +812,9 @@ def build_ports(settings: config_mod.Settings) -> Ports:
 
 
 def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, ports: Optional[Ports] = None,
-                  ledger=None) -> LegalService:
+                  ledger=None, *, require_existing_seed: bool = False) -> LegalService:
+    if type(require_existing_seed) is not bool:
+        raise ValueError("require_existing_seed must be boolean")
     clock = clock or SystemClock()
     if ledger is None:
         ledger = (HttpLedgerClient(settings.ledger_url, settings.ledger_token)
@@ -686,7 +828,8 @@ def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, 
     token = lock.claim() if lock is not None else None   # claimed BEFORE the log is built
     try:
         return LegalService(settings, Recorder(ledger), RecordLog(settings.data_dir), BlobStore(settings.data_dir),
-                            seeds, ports or build_ports(settings), clock, pinned, lock_token=token)
+                            seeds, ports or build_ports(settings), clock, pinned, lock_token=token,
+                            require_existing_seed=require_existing_seed)
     except BaseException:
         if lock is not None:
             lock.release_claim(token)
@@ -694,8 +837,9 @@ def build_service(settings: config_mod.Settings, clock: Optional[Clock] = None, 
 
 
 def _app_from_env() -> FastAPI:
+    existing = existing_store_profile()
     settings = config_mod.load()
-    return create_app(build_service(settings), settings)
+    return create_app(build_service(settings, require_existing_seed=existing), settings)
 
 
 app = _app_from_env()

@@ -149,6 +149,9 @@ class Settings:
     finance_token: Optional[str] = field(default=None, repr=False)
     finance_caller_token: Optional[str] = field(default=None, repr=False)
     finance_timeout_s: int = 5
+    compliance_url: Optional[str] = None                                  # ADR 0024
+    compliance_token: Optional[str] = field(default=None, repr=False)
+    compliance_caller_token: Optional[str] = field(default=None, repr=False)
     gsc_key: object | None = field(default=None, repr=False)     # gsc_client.ServiceAccountKey (redacted repr)
     gsc_window_days: int = 28
     gsc_page_rows: int = 5000
@@ -295,6 +298,31 @@ def _finance(env, s: "Settings") -> None:
     s.finance_url, s.finance_token, s.finance_caller_token = url, token, caller
 
 
+def _compliance(env, s: "Settings") -> None:
+    """ADR 0024. ``SEO_COMPLIANCE_URL``, ``SEO_COMPLIANCE_TOKEN`` (Compliance's service token) and
+    ``SEO_COMPLIANCE_CALLER_TOKEN`` (this service's ``seo_02`` caller token at Compliance) are set together or not at
+    all; unset, every client run and client report is refused COMPLIANCE_NOT_CONFIGURED (no override)."""
+    vals = [(env.get(k) or "").strip() or None for k in ("SEO_COMPLIANCE_URL", "SEO_COMPLIANCE_TOKEN",
+                                                         "SEO_COMPLIANCE_CALLER_TOKEN")]
+    if any(vals) and not all(vals):
+        raise RuntimeError("SEO_COMPLIANCE_URL, SEO_COMPLIANCE_TOKEN and SEO_COMPLIANCE_CALLER_TOKEN must be set "
+                           "together (or none: every client run is then refused COMPLIANCE_NOT_CONFIGURED)")
+    if not all(vals):
+        return
+    url, token, caller = vals
+    if not _FINANCE_URL.fullmatch(url):
+        raise RuntimeError("SEO_COMPLIANCE_URL must be an http(s) base URL without credentials, query or fragment")
+    for name, tok in (("SEO_COMPLIANCE_TOKEN", token), ("SEO_COMPLIANCE_CALLER_TOKEN", caller)):
+        if not _PRINTABLE.fullmatch(tok):
+            raise RuntimeError(f"{name} must be 32..512 printable ASCII characters")
+    ours = {s.service_token, s.andre_token, *s.caller_tokens.values(), *s.tenant_tokens.values(), s.finance_token,
+            s.finance_caller_token}
+    if token == caller or token in ours or caller in ours:
+        raise RuntimeError("SEO_COMPLIANCE_TOKEN and SEO_COMPLIANCE_CALLER_TOKEN must differ from each other and from "
+                           "every other token this service accepts or sends")
+    s.compliance_url, s.compliance_token, s.compliance_caller_token = url, token, caller
+
+
 def gsc_requests_needed(max_pages: int, page_rows: int, max_rows: int) -> int:
     """The most requests one Search Console read sends when every request succeeds first time: the token, the site
     list, the date totals, and for each of the two paginated queries (page, query) at most min(max_pages,
@@ -403,7 +431,7 @@ def _perplexity(env, s: "Settings") -> None:
         raise RuntimeError("the Perplexity API key must be 20..512 printable ASCII characters without spaces") \
             from None
     ours = {s.service_token, s.andre_token, s.ledger_token, s.finance_token, s.finance_caller_token,
-            *s.caller_tokens.values(), *s.tenant_tokens.values()}
+            s.compliance_token, s.compliance_caller_token, *s.caller_tokens.values(), *s.tenant_tokens.values()}
     if value in ours:
         raise RuntimeError("the Perplexity API key must differ from every token this service accepts or sends")
     s.perplexity_key = key
@@ -471,6 +499,7 @@ def load(env: Optional[dict] = None) -> Settings:
     s.schedule_budget_runs = _int(env, "SEO_SCHEDULE_BUDGET_RUNS", 8, 1, 100)
     s.schedule_period_days = _int(env, "SEO_SCHEDULE_PERIOD_DAYS", 30, 1, 365)
     _finance(env, s)
+    _compliance(env, s)
     _gsc(env, s)
     _perplexity(env, s)
     s.report_branding = _branding(env)

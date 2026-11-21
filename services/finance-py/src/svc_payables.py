@@ -58,7 +58,11 @@ class PayablesMixin:
                 t = g.call("clipper_network", "tier", (cert.campaign_id, cert.clipper_id),
                            lambda: cn.tier(cert.campaign_id, cert.clipper_id), TierAnswer(False))
                 tier = t if isinstance(t, TierAnswer) else TierAnswer(False)
-        return {"cert": cert, "ruling": ruling, "rows": rows, "tier": tier}
+        # AEGIS r10 R10-1: Compliance is asked about the brand whose deposit the accrual draws on (generic reasons:
+        # Creative and the scheduler read them)
+        clients = (self._campaign_outflow(g, [cert.campaign_id], full=False)
+                   if cert.available and cert.campaign_id and cert.campaign_id in self.db["profiles"] else {})
+        return {"cert": cert, "ruling": ruling, "rows": rows, "tier": tier, "clients": clients}
 
     # --- evaluate (inside the lock) ----------------------------------------------------------------------------------
 
@@ -81,6 +85,12 @@ class PayablesMixin:
             elif prof["status"] != "funded":
                 reasons.append(R.item("CAMPAIGN_NOT_FUNDED", f"campaign is {prof['status']}, not funded"))
             if prof is not None:
+                # R10-1: no current ALLOW for the brand (or Compliance not asked / unreachable): nothing is accrued
+                asked = got.get("clients") or {}
+                reasons += self._local_hold_reasons(cert.campaign_id)         # AEGIS r11 R11-5: under the lock
+                reasons += asked[cert.campaign_id] if cert.campaign_id in asked else [R.item(
+                    "DEPENDENCY_UNAVAILABLE:compliance_38", "Compliance (38) cannot confirm the client's activation: "
+                                                            "refused")]
                 card = I3.pick_rate_card(self._rc_versions(prof["rate_card_doc_id"]), cert.create_time)
                 if card is None:
                     reasons.append(R.item("RATE_CARD_MISSING", "no published rate card effective at the clip's posting time"))

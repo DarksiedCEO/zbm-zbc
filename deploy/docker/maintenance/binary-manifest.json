@@ -1,0 +1,12 @@
+{
+  "platform": "linux/amd64",
+  "restic_version": "0.19.1",
+  "sha256": {
+    "restic": "20d4142678d0d95ec11a4759def1b73fd9190abc9ca19e4b62d067c0b387e639"
+  },
+  "ledger_source": {
+    "src/bin/server.rs": "945780641d977c1b8b9ac22fe2335ac99e0c044c838277f35d1dac6ef4cab52b",
+    "src/persistence.rs": "6dab04923d1a443878864bf17d93fc3211c007cd5d352881c15f3d40b0ec5c64"
+  },
+  "ledger_binary": "built from this commit by locked Cargo image stage"
+}

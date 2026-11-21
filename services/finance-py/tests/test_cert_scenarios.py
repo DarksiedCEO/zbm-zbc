@@ -186,7 +186,7 @@ def test_s8_refund_of_unspent_deposit_only_without_open_dispute(hr):
 def _zbm_invoice(hr, kind="service", code="creative_services", **extra):
     body = {"request_id": rid(), "entity": "zbm", "client_id": "zbm-client-1", "kind": kind,
             "lines": [{"line_code": code, "quantity": 2, "unit_price": "250.00"}], "payment_methods": ["ach"],
-            "legal_ref": {"doc_id": "msa-1", "version": 1, "doc_sha256": "b" * 64, "acceptance_id": "acc-z"}, **extra}
+            "legal_ref": {"doc_id": "sow", "version": 1, "doc_sha256": "b" * 64, "acceptance_id": "acc-z"}, **extra}
     return hr.post("/fin/v1/invoices", body, caller="onboarding")
 
 
@@ -315,7 +315,7 @@ def test_s14_ten_thousand_random_payables_sum_and_balance():
     """10,000 payables through the real accrual path (service calls, record-first, fakes), one weekly run: the sum
     of the items equals the batch total, the journal balances to zero, every amount is a §1 string."""
     import time
-    hr = Harness().ready()
+    hr = Harness(env={"FIN_MAX_INVOICE_TOTAL": "1000000.00"}).ready()     # large deposits on purpose (RTM-09 knob)
     rnd = random.Random(20260926)
     rates = ["0.01", "0.37", "1.00", "2.35", "3.99"]
     for i, rate in enumerate(rates):

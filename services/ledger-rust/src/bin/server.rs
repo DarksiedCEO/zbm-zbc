@@ -199,7 +199,7 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicI32, AtomicPtr, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicPtr, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -458,6 +458,25 @@ struct Verified {
     hash: String,
 }
 
+// Signal handler only requests shutdown; accounting is ordinary process-local lifetime.
+static STOP_REQUESTED: AtomicI32 = AtomicI32::new(0);
+static ACTIVE_HTTP: AtomicUsize = AtomicUsize::new(0);
+static ACTIVE_BLOCKING: AtomicUsize = AtomicUsize::new(0);
+#[cfg(not(test))]
+const SHUTDOWN_DEADLINE: Duration = Duration::from_secs(30);
+#[cfg(test)]
+const SHUTDOWN_DEADLINE: Duration = Duration::from_millis(750);
+struct Active(&'static AtomicUsize);
+impl Active {
+    fn new(counter: &'static AtomicUsize) -> Self {
+        counter.fetch_add(1, Ordering::SeqCst);
+        Self(counter)
+    }
+}
+impl Drop for Active {
+    fn drop(&mut self) { self.0.fetch_sub(1, Ordering::SeqCst); }
+}
+
 struct App {
     ledger: Mutex<PersistentLedger>,
     gate: WriterPriority,
@@ -620,7 +639,9 @@ where
     F: FnOnce(&App) -> (u16, String) + Send + 'static,
 {
     let app = Arc::clone(app);
-    match tokio::task::spawn_blocking(move || f(&app)).await {
+    // Count before queueing; the closure owns the guard even if its HTTP waiter disappears.
+    let active = Active::new(&ACTIVE_BLOCKING);
+    match tokio::task::spawn_blocking(move || { let _active = active; f(&app) }).await {
         Ok(r) => r,
         Err(e) => {
             ledger_log!("ledger-rust: FATAL — ledger operation panicked ({e}); exiting (fail closed)");
@@ -1107,13 +1128,15 @@ async fn shed(mut stream: TcpStream, drains: Arc<Semaphore>) {
     }
 }
 
-async fn serve(listener: TcpListener, app: Arc<App>, max_connections: usize) {
+async fn serve(listener: TcpListener, app: Arc<App>, max_connections: usize) -> Option<tokio::time::Instant> {
     let slots = Arc::new(Semaphore::new(max_connections));
     let drains = Arc::new(Semaphore::new(DRAINS_MAX));
     loop {
-        let stream = match listener.accept().await {
-            Ok((stream, _)) => stream,
-            Err(e) => {
+        if STOP_REQUESTED.load(Ordering::SeqCst) != 0 { break; }
+        let stream = match tokio::time::timeout(Duration::from_millis(25), listener.accept()).await {
+            Ok(Ok((stream, _))) => stream,
+            Err(_) => continue,
+            Ok(Err(e)) => {
                 // e.g. EMFILE: back off briefly instead of spinning; the
                 // pending connections stay in the kernel backlog.
                 ledger_log!("ledger-rust: accept failed: {e}");
@@ -1121,22 +1144,65 @@ async fn serve(listener: TcpListener, app: Arc<App>, max_connections: usize) {
                 continue;
             }
         };
+        if STOP_REQUESTED.load(Ordering::SeqCst) != 0 { drop(stream); break; }
+        let active = Active::new(&ACTIVE_HTTP);
         let _ = stream.set_nodelay(true);
         match Arc::clone(&slots).try_acquire_owned() {
             Ok(slot) => {
                 let app = Arc::clone(&app);
                 let drains = Arc::clone(&drains);
                 tokio::spawn(async move {
+                    let _active = active;
                     let stream = serve_connection(stream, app).await;
                     drop(slot); // answered: the slot is free before the (bounded) drain
                     close_answered(stream, drains).await;
                 });
             }
             Err(_) => {
-                tokio::spawn(shed(stream, Arc::clone(&drains)));
+                let drains = Arc::clone(&drains);
+                tokio::spawn(async move { let _active = active; shed(stream, drains).await; });
             }
         }
     }
+    drop(listener); // No new accepted work after the ordinary admission cut.
+    let end = tokio::time::Instant::now() + SHUTDOWN_DEADLINE;
+    loop {
+        if ACTIVE_HTTP.load(Ordering::SeqCst) == 0 && ACTIVE_BLOCKING.load(Ordering::SeqCst) == 0 {
+            return Some(end);
+        }
+        if tokio::time::Instant::now() >= end { return None; }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
+fn finish_shutdown(runtime: tokio::runtime::Runtime, app: Arc<App>, clean: Option<tokio::time::Instant>, nonce: &str) {
+    if clean.is_none() {
+        remove_own_port_file();
+        ledger_log!("ledger-rust: shutdown UNKNOWN: accepted HTTP or blocking work exceeded deadline");
+        std::process::exit(2); // Never wait indefinitely on Runtime's blocking-pool destructor.
+    }
+    // Counters are zero, but also prove no task retains a store owner before releasing its lock.
+    let app = match Arc::try_unwrap(app) {
+        Ok(app) => app,
+        Err(_) => { ledger_log!("ledger-rust: shutdown UNKNOWN: retained store owner"); std::process::exit(2); }
+    };
+    let ledger = match app.ledger.into_inner() {
+        Ok(ledger) => ledger,
+        Err(_) => { ledger_log!("ledger-rust: shutdown UNKNOWN: poisoned store"); std::process::exit(2); }
+    };
+    let flushed = runtime.block_on(async {
+        tokio::time::timeout_at(clean.unwrap(),
+            tokio::task::spawn_blocking(move || ledger.close_for_shutdown())).await
+    });
+    let head = match flushed {
+        Ok(Ok(Ok(head))) => head,
+        _ => { ledger_log!("ledger-rust: shutdown UNKNOWN: final store flush failed or timed out"); std::process::exit(2); }
+    };
+    runtime.shutdown_timeout(Duration::from_millis(100));
+    remove_own_port_file();
+    let receipt = serde_json::json!({"pid":std::process::id(),"instance":nonce,"head":head});
+    ledger_log!("ledger-rust: CLEAN_SHUTDOWN {}", receipt);
+
 }
 
 fn bind(addr: &str) -> std::io::Result<TcpListener> {
@@ -1337,15 +1403,10 @@ fn restore_signal_mask(old: &libc::sigset_t) {
 /// directory descriptor (renameat: atomic; a reader never sees a partial number; a link at the destination is
 /// replaced, never followed).
 ///
-/// Fix wave 24 (AEGIS N23-S-2): the stop signals are BLOCKED across the whole publish (so none is handled half
-/// way: one sent meanwhile stays pending and is handled once the port file is in place and armed), and the removal
-/// is armed BEFORE anything is written: the directory, the temp name and the published name are recorded first,
-/// the handlers installed, and the device/inode of the temp file recorded before the rename (the rename keeps the
-/// inode). The handler removes the temp name (while the publish is in progress) and the published name (only if
-/// it is still the file this server wrote). Before, the handlers were installed after the rename: a SIGTERM while
-/// the temp file existed left it behind (AEGIS: 297/300), one between the rename and the handlers left the port
-/// file. Worker threads never take a stop signal (main blocks them before the runtime starts its threads, which
-/// inherit the mask), so blocking them here in the main thread blocks them for the process.
+/// Stop signals are blocked across publication; directory and inode ownership
+/// are armed before rename. The handler now only requests graceful shutdown.
+/// Owned port-file removal happens after drain, or on an explicit unknown exit.
+/// Runtime worker threads inherit the blocked signal mask.
 fn publish_port_file(path: &str, port: u16) -> std::io::Result<PortFileGuard> {
     let (dir, name) = port_file_location(path)?;
     let tmp = c_name(std::ffi::OsStr::new(&format!(".{}.tmp-{}", name.to_string_lossy(), random_hex(8)?)))?;
@@ -1412,8 +1473,7 @@ fn write_and_rename(dir: libc::c_int, tmp: &CString, name: &CString, port: u16) 
 }
 
 /// Removes, in the directory the port file was written in, the temp name while a publish is in progress, and the
-/// port file if it is still the one this server wrote. Called from the signal handler: only async-signal-safe
-/// calls (fstatat, unlinkat).
+/// port file if it is still the one this server wrote, using fstatat/unlinkat.
 fn remove_own_port_file() {
     let dir = PORT_FILE_DIR_FD.load(Ordering::SeqCst);
     if dir < 0 {
@@ -1448,12 +1508,14 @@ fn remove_own_port_file() {
 }
 
 extern "C" fn on_stop_signal(sig: libc::c_int) {
-    remove_own_port_file();
-    // SAFETY: restoring the default disposition and re-raising is async-signal-safe; the process then ends
-    // exactly as it did before a handler existed (killed by `sig`).
+    STOP_REQUESTED.store(sig, Ordering::SeqCst);
+}
+
+fn install_stop_handlers() {
+    // Atomic store only in the handler; cleanup and draining happen outside signal context.
     unsafe {
-        libc::signal(sig, libc::SIG_DFL);
-        libc::raise(sig);
+        let handler = on_stop_signal as extern "C" fn(libc::c_int) as libc::sighandler_t;
+        for sig in STOP_SIGNALS { libc::signal(sig, handler); }
     }
 }
 
@@ -1830,5 +1892,58 @@ fn main() {
         verified: Mutex::new(verified),
         auth,
     });
-    runtime.block_on(serve(listener, app, max_connections));
+    install_stop_handlers(); // Also installed when LEDGER_PORT_FILE is unset.
+    let nonce = random_hex(16).unwrap_or_else(|_| refuse("instance nonce unavailable".into()));
+    ledger_log!("ledger-rust: INSTANCE {} {}", std::process::id(), nonce);
+    let clean = runtime.block_on(serve(listener, Arc::clone(&app), max_connections));
+    finish_shutdown(runtime, app, clean, &nonce);
+}
+
+#[cfg(test)]
+mod cold_tests {
+    use super::*;
+    #[test]
+    #[ignore]
+    fn held_blocking_child() {
+        let dir = PathBuf::from(std::env::var("COLD_FIXTURE").unwrap());
+        let mask = block_stop_signals();
+        let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2)
+            .max_blocking_threads(1).enable_all().build().unwrap();
+        restore_signal_mask(&mask);
+        let ledger = PersistentLedger::open_with(dir.join("ledger.jsonl"), LedgerOpenOptions::default()).unwrap();
+        let head = ledger.head();
+        let app = Arc::new(App { ledger: Mutex::new(ledger), gate: WriterPriority::new(),
+            reads: Semaphore::new(1), verified: Mutex::new(Verified {len:0,hash:head.head_hash}),
+            auth: Auth {shared:Some("synthetic-token-for-cold-fixture-only".into()),callers:None} });
+        let listener = rt.block_on(async {bind("127.0.0.1:0").unwrap()});
+        let _port = publish_port_file(dir.join("port").to_str().unwrap(),listener.local_addr().unwrap().port()).unwrap();
+        let target = Arc::clone(&app); let hold = dir.clone();
+        let task=rt.spawn(async move {
+            on_ledger_write(&target, move |ledger| {
+                std::fs::write(hold.join("entered"), b"ready").unwrap();
+                while !hold.join("release").exists() {std::thread::sleep(Duration::from_millis(5));}
+                let input=serde_json::from_value(serde_json::json!({"event_id":"cold-event", "department":"finance", "event_type":"cold_fixture", "actor":"fixture", "subject_id":"fixture", "payload_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "summary":"Synthetic held write"})).unwrap();
+                ledger.append_event(input).unwrap();
+                (200,"{}".into())
+            }).await;
+        });
+        while !dir.join("entered").exists() {std::thread::sleep(Duration::from_millis(5));}
+        task.abort(); // The blocking effect survives cancellation of its awaiting future.
+        if std::env::var("COLD_QUEUED").is_ok() {
+            let queued_app = Arc::clone(&app);
+            let queued_dir = dir.clone();
+            let queued = rt.spawn(async move {
+                on_blocking(&queued_app, move |_| {
+                    std::fs::write(queued_dir.join("queued_finished"), b"done").unwrap();
+                    (200, "{}".into())
+                }).await;
+            });
+            std::thread::sleep(Duration::from_millis(50));
+            queued.abort();
+        }
+        let nonce = random_hex(16).unwrap();
+        ledger_log!("ledger-rust: INSTANCE {} {}", std::process::id(), nonce);
+        let clean = rt.block_on(serve(listener, Arc::clone(&app), 4));
+        finish_shutdown(rt, app, clean, &nonce);
+    }
 }

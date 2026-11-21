@@ -39,6 +39,9 @@ CATALOG: dict[str, str] = {
     "STRIPE_NOT_ALLOWED": "FIN-31",
     # treasury settlement by Andre (AEGIS 25290ee M-N3)
     "BANK_EVIDENCE_REQUIRED": "FIN-18",
+    # ADR 0024: invoice approval and billing readiness need Compliance's current ALLOW activation for the client
+    # (FIN-08: an absent, stale or stand-in input fails its gate)
+    "COMPLIANCE_NOT_ACTIVATED": "FIN-08",
 }
 MESSAGE_MAX = 200
 LINE_MAX = 400

@@ -220,7 +220,7 @@ def _not_found(tr):
 
 def _held(hr, iid, etype):
     ev = {"event_id": rid("evt"), "type": etype, "signature": fakes.RAIL_SIG, "item_id": iid}
-    r = hr.ok(hr.post("/fin/v1/rails/trolley/events", {"request_id": rid(), "events": [ev]}, caller="rail_gateway"))
+    r = hr.ok(hr.post("/fin/v1/rails/trolley/events", {"request_id": rid(), "events": [ev]}, caller="payout_rail_gateway"))
     assert r["results"][0]["status"] == "held_submitting"
 
 
@@ -302,7 +302,7 @@ def test_m4_held_events_are_found_by_index_not_by_scanning(tmp_path):
     h.release(b["batch_id"])
     h.stripe.paid(h.svc.db["items"][iid]["idempotency_key"])
     ev = {"event_id": "evt-m4", "type": "paid", "signature": fakes.RAIL_SIG, "item_id": iid}
-    h.ok(h.post("/fin/v1/rails/stripe/events", {"request_id": rid(), "events": [ev]}, caller="rail_gateway"))
+    h.ok(h.post("/fin/v1/rails/stripe/events", {"request_id": rid(), "events": [ev]}, caller="payout_rail_gateway"))
     assert h.svc.held_by_item == {iid: {"stripe|evt-m4"}}
     h2 = Harness(data_dir=d, ledger=h.ledger, clock=h.clock, fakes=h.f)           # rebuilt on replay
     assert h2.svc.held_by_item == {iid: {"stripe|evt-m4"}}

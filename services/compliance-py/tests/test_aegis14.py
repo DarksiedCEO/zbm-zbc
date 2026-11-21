@@ -143,12 +143,17 @@ def test_n14_3_unknown_or_refused_codes_refuse(country, region):
     assert a["class"] == "refuse", a
 
 
-@pytest.mark.parametrize("country,region,cls", [("US", "US-CA", "operate"), ("GB", "GB-ENG", "operate"),
-                                                ("CA", "CA-ON", "operate"), ("IT", "IT-RM", "conditional"),
-                                                ("GB", None, "operate"), ("IT", None, "conditional")])
+@pytest.mark.parametrize("country,region,cls", [("US", "US-CA", "operate"), ("GB", "GB-ENG", "refuse"),
+                                                ("CA", "CA-ON", "refuse"), ("IT", "IT-RM", "refuse"),
+                                                ("GB", None, "refuse"), ("IT", None, "refuse"),
+                                                ("US", "US-PR", "operate"), ("GU", None, "operate")])
 def test_n14_3_real_codes_still_resolve(country, region, cls):
+    """ADR 0024: known codes outside the service area are refused as UNLISTED (default deny), not as unknown."""
     h = ready()
-    assert resolve(h, country, region)["class"] == cls
+    a = resolve(h, country, region)
+    assert a["class"] == cls
+    if cls == "refuse":
+        assert "unlisted" in a["reason"], a
 
 
 def test_n14_3_campaign_target_legacy_quebec_code_blocked():
@@ -328,14 +333,15 @@ def test_n14_6_standalone_labels_still_pass(text):
 
 
 def test_n14_6_sweep_negated_local_label_fails():
+    """ADR 0024: Italy is outside the service area (HR-06 and IT-AGCOM superseded), so an Italian target never reaches
+    a payout; the negation rule of the local-label check is kept and tested on the check itself."""
+    from intelligences import i09_disclosure
+    labels = next(r for r in SEED_ROWS if r["id"] == "HR-06")["parameters"]["local_labels"]["IT"]
+    assert i09_disclosure.local_label_present("#ad Pubblicità", labels) is True
+    assert i09_disclosure.local_label_present("#ad non Pubblicità", labels) is False
     h = ready()
-    h.activate_creator()
-    kit = seed_row("HR-06")["parameters"]["eu_kit_version"]
-    h.activate_brand("camp-it", targets=("US", "IT"), eu_kit_version_acknowledged=kit, msa_eu_clause=True)
-    ok = pay(h, campaign="camp-it", disclosure={"in_video_label_text": "#ad Pubblicità"})
-    assert ("IT-AGCOM", "local_label") not in unmet_codes(ok)
-    j = pay(h, campaign="camp-it", disclosure={"in_video_label_text": "#ad non Pubblicità"})
-    assert ("IT-AGCOM", "local_label") in unmet_codes(j)
+    j = h.rule("camp-it", "zbc_brand", brand_facts(targets=("US", "IT"))).json()
+    assert j["allowed"] is False and ("HR-07", "jurisdiction_class") in unmet_codes(j)
 
 
 # ---------------------------------------------------------------- N14-9 weakening proposals

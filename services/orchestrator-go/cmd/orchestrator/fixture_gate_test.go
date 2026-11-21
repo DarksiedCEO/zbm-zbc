@@ -86,7 +86,7 @@ func TestFixtureScansFromEnv(t *testing.T) {
 func TestRealBinaryRefusesFixtureScansByDefault(t *testing.T) {
 	ledger, calls := countingLedger(t)
 	port, _ := startOrchestrator(t, "", "LEDGER_SERVICE_URL="+ledger.URL, "DETECTION_SERVICE_URL="+deadURL(t))
-	code, body := do(t, http.MethodPost, "http://127.0.0.1:"+port+"/revenue-recovery/scan", "test-orchestrator-token")
+	code, body := do(t, http.MethodPost, "http://127.0.0.1:"+port+"/revenue-recovery/scan", bindTestOrchToken)
 	if code != http.StatusForbidden || !strings.Contains(body, "FIXTURE_SCAN_DISABLED") {
 		t.Fatalf("default binary, fixture scan = %d %s; want 403 FIXTURE_SCAN_DISABLED", code, body)
 	}

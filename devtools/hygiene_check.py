@@ -14,7 +14,9 @@ Two halves:
                directory (/tmp) during the run (the suite runs with TMPDIR, TMP and TEMP pointing at a fresh private
                directory OUTSIDE /tmp, so anything new in /tmp was written past it; on a shared machine another
                process can create /tmp entries too — the names are printed so a person can tell; on a CI runner the
-               machine is the job's alone);
+               machine is the job's alone, except for the OS itself: a systemd service started during the run gets
+               a PrivateTmp= directory there, which is not counted when it is provably systemd's — see
+               ``systemd_private_tmp``);
   R4 procs     a process the suite started is still alive after the suite's command exited. Tracked by process
                group and session (the suite starts as its own session leader), by an environment marker every
                descendant inherits unless it scrubs its environment, and — on Linux — by being the suite's child
@@ -70,6 +72,7 @@ import re
 import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -85,7 +88,7 @@ MARKER_ENV = "ZBM_HYGIENE_RUN"
 
 PY_SERVICES = ("detection-py", "fulfillment-py", "onboarding-py", "creative-py", "compliance-py", "verification-py",
                "clipper-network-py", "finance-py", "legal-py", "delivery-py", "security-py",
-               "sales-py", "service-py", "influencer-py", "bizdev-py", "seo-py", "ooh-py")
+               "sales-py", "service-py", "influencer-py", "bizdev-py", "seo-py", "ooh-py", "client-portal-py")
 
 
 def violation(rule: str, where: str, detail: str) -> str:
@@ -130,6 +133,30 @@ def dirty_digests(plain: set[str]) -> dict[str, str]:
 def system_tmp() -> Path:
     # The system temp dir as the OS defines it, not as this process's TMPDIR says.
     return Path("/tmp") if Path("/tmp").is_dir() else Path(tempfile.gettempdir())
+
+
+# systemd's PrivateTmp= directory: "systemd-private-<boot id, 32 hex>-<unit>.service-<6 random>" (systemd
+# src/core/namespace.c, setup_one_tmp_dir). CI run 44622855476 (Nov 19 2026, live:security-py on 3.13) failed R3 on
+# "systemd-private-…-systemd-timedated.service-JgwdsW": the Ubuntu runner started systemd-timedated mid-run.
+SYSTEMD_PRIVATE_TMP = re.compile(r"^systemd-private-[0-9a-f]{32}-([A-Za-z0-9@:._\\-]+\.service)-[A-Za-z0-9]{6}\Z")
+
+
+def systemd_private_tmp(name: str, st: os.stat_result | None, own_uid: int,
+                        platform: str = sys.platform) -> str | None:
+    """The unit name when a new system-temp entry is provably systemd's PrivateTmp= directory, else None.
+
+    All of these must hold, so a suite cannot plant one: Linux; this checker (and so the suite it starts) does NOT
+    run as root; the name has systemd's exact shape; and the entry itself (lstat, not followed) is a directory owned
+    by root with mode 0700, as systemd makes it. A non-root suite cannot create a root-owned directory without
+    privilege escalation (on a CI runner: sudo) — that one gap is stated in docs/ci.md, not closed."""
+    if not platform.startswith("linux") or own_uid == 0 or st is None:
+        return None
+    m = SYSTEMD_PRIVATE_TMP.match(name)
+    if m is None:
+        return None
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != 0 or stat.S_IMODE(st.st_mode) != 0o700:
+        return None
+    return m.group(1)
 
 
 def list_dir(p: Path) -> set[str]:
@@ -325,11 +352,11 @@ def platform_note(entries: list[dict]) -> str:
 
 def _skips_from_output(kind: str, text: str) -> list[dict]:
     if kind == "cargo":
-        out = []
-        for m in re.finditer(r"test result: \w+\. \d+ passed; \d+ failed; (\d+) ignored", text):
-            if int(m.group(1)):
-                out.append({"nodeid": "(cargo)", "kind": "ignored", "reason": f"{m.group(1)} ignored test(s)"})
-        return out
+        names = re.findall(r"^test (\S+) \.\.\. ignored(?:,.*)?$", text, re.M)
+        total = sum(int(x) for x in re.findall(r"test result: \w+\. \d+ passed; \d+ failed; (\d+) ignored", text))
+        if len(names) != total or len(set(names)) != len(names):
+            return [{"nodeid": "(cargo)", "kind": "ignored", "reason": f"{total} ignored test(s); missing or duplicate names"}] if total or names else []
+        return [{"nodeid": n, "kind": "ignored", "reason": "cargo test ignored"} for n in names]
     if kind == "go":
         return [{"nodeid": n, "kind": "skip", "reason": "go test SKIP"} for n in re.findall(r"--- SKIP: (\S+)", text)]
     if kind == "node":
@@ -338,6 +365,45 @@ def _skips_from_output(kind: str, text: str) -> list[dict]:
         return [{"nodeid": "(node)", "kind": "skip", "reason": f"{n} skipped test(s)"}] if n else []
     return []
 
+
+COLD_CHILD = "cold_tests::held_blocking_child"
+COLD_PARENT = "devtools/test_cold_ledger_shutdown.py"
+COLD_METHODS = {"test_held_blocking_write_waits_then_persists", "test_timeout_unknown_and_queued_job", "test_accepted_http_body_drains_before_clean_exit"}
+
+def cold_child_contract(root=None):
+    """Exact source/mandatory CI parent linkage; no aggregate ignored allowance."""
+    root = Path(root) if root is not None else REPO
+    source = root / "services/ledger-rust/src/bin/server.rs"
+    if not source.exists() or "mod cold_tests" not in source.read_text():
+        return ["native child fixture source absent"]
+    text = source.read_text()
+    if not re.search(r"mod cold_tests\s*\{[\s\S]*?#\[test\]\s*#\[ignore\]\s*fn held_blocking_child\(", text):
+        return ["native child fixture declaration changed"]
+    parent = root / COLD_PARENT
+    try:
+        tree = ast.parse(parent.read_text())
+        tests = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test_")}
+        literals = {n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+    except (OSError, SyntaxError):
+        return ["native parent test unavailable"]
+    if tests != COLD_METHODS or COLD_CHILD not in literals or not {"--ignored", "--exact"} <= literals:
+        return ["native parent methods or exact child invocation changed"]
+    workflow = root / ".github/workflows/ci.yml"
+    try: ci = workflow.read_text()
+    except OSError: return ["native parent CI missing"]
+    step = re.search(r"(?m)^      - name: Native Ledger shutdown parent regression\n([\s\S]*?)(?=^      - |^  [^ ]|\Z)", ci)
+    if step is None: return ["mandatory native parent CI step missing"]
+    block = step.group(1)
+    required = ["--suite python:cold-ledger-shutdown --kind pytest", "--allow-ignored services/ledger-rust/target", "python3 -B -m pytest -q -p no:cacheprovider " + COLD_PARENT,
+                "set +e", '2>&1 | tee "$RUNNER_TEMP/cold-ledger.log"', "code=${PIPESTATUS[0]}",
+                'python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/cold-ledger.log" --code "$code" --suite "python:cold-ledger-shutdown"',
+                'exit "$code"']
+    if any(x not in block for x in required) or re.search(r"(?m)^        (?:if|continue-on-error):", block) or "--counts off" in block or "|| true" in block:
+        return ["native parent CI is not mandatory/counted"]
+    return []
+
+def orchestrated_ignore(suite, skipped):
+    return suite == "rust:ledger-rust" and skipped == {"nodeid": COLD_CHILD, "kind": "ignored", "reason": "cargo test ignored"} and not cold_child_contract()
 
 def read_counts_doc() -> dict[str, int]:
     rows = {}
@@ -485,6 +551,15 @@ def cmd_run(a: argparse.Namespace) -> int:
     for name in sorted(list_dir(systmp) - tmp_before):
         if any(r.search(name) for r in ignore_re):
             continue
+        try:
+            entry_st = os.lstat(systmp / name)
+        except OSError:
+            entry_st = None
+        unit = systemd_private_tmp(name, entry_st, os.getuid())
+        if unit is not None:
+            print(f"hygiene_check: R3 not counted: {systmp / name} is systemd's PrivateTmp directory for {unit} "
+                  "(root-owned, mode 0700; made by the OS, not the suite)", flush=True)
+            continue
         problems.append(violation("R3-tmp", suite, f"new entry in {systmp} during the run: {name}"))
 
     # R5 skips and R6 counts
@@ -501,7 +576,7 @@ def cmd_run(a: argparse.Namespace) -> int:
         skips = _skips_from_output(kind, out_text)
     expected = allow.get("expected_skips", {}).get(suite, [])
     for s in skips:
-        if not any(re.search(e["reason_regex"], s["reason"]) for e in expected):
+        if not orchestrated_ignore(suite, s) and not any(re.search(e["reason_regex"], s["reason"]) for e in expected):
             problems.append(violation("R5-skips", suite, f"unexpected {s['kind']}: {s['nodeid']}: {s['reason']}"))
     count_note = ""
     if a.counts != "off" and kind != "none":
@@ -1168,6 +1243,9 @@ def cmd_lint(a: argparse.Namespace) -> int:
             if e.get("rule") in ("L1-wallclock", "L2-ports") and id(e) not in used:
                 problems.append(violation("L9-allowlist", e.get("path", "?"), f"allowlist entry matches nothing: {e}"))
         problems += lint_expected_skips(allow)
+        native_source = REPO / "services/ledger-rust/src/bin/server.rs"
+        if native_source.exists() and "mod cold_tests" in native_source.read_text():
+            problems += [violation("L9-cold-parent", COLD_PARENT, x) for x in cold_child_contract()]
     by_service: dict[str, int] = {}
     for line in problems:
         where = line.split(" ", 3)[2]
@@ -1181,7 +1259,7 @@ def cmd_lint(a: argparse.Namespace) -> int:
     return 1 if problems else 0
 
 
-SUITES = tuple(f"python:{s}" for s in PY_SERVICES) + ("rust:ledger-rust", "go:orchestrator-go", "node:dashboard-ts")
+SUITES = tuple(f"python:{s}" for s in PY_SERVICES) + ("python:cold-ledger-shutdown", "rust:ledger-rust", "go:orchestrator-go", "node:dashboard-ts")
 
 
 def cmd_counts(a: argparse.Namespace) -> int:

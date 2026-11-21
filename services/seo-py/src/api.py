@@ -16,6 +16,9 @@ bearer and caller blocks are bizdev-py's (itself service-py's / security-py's / 
 
 from __future__ import annotations
 
+from startup_profile import existing_store_profile
+existing_store_profile()  # Refuse invalid profile before eager construction/configuration.
+
 import asyncio
 import hashlib
 import hmac
@@ -444,6 +447,10 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
             raise NotFound(R("ENTITY_NOT_FOUND"))
         return e
 
+    @app.post(P + "/tenants/{tid}/entity", dependencies=auth, status_code=201)
+    def create_entity(tid: str, req: dict = Depends(body(m.EntityCreate)), who: str = Depends(andre)) -> dict:
+        return svc.create_entity(_id(tid, TENANT_RX), req)
+
     @app.post(P + "/entities/{eid}/fields", dependencies=auth)
     def entity_field(eid: str, req: dict = Depends(body(m.EntityFieldSet)), who: str = Depends(andre)) -> dict:
         return svc.update_entity_field(_id(eid, ENTITY_ID), req)
@@ -576,9 +583,11 @@ def _wrap(app: FastAPI):
     return InputLimits(NoStore(app))
 
 
-def build(env: Optional[dict] = None):
+def build(env: Optional[dict] = None, *, observe_existing_on_start: bool = False):
     """The production wiring: settings, ledger, log, ports; returns (asgi, service). The only connected port is the
     web fetcher; every other port is NOT_CONNECTED (config.NOT_BUILT refuses start if one is selected)."""
+    if type(observe_existing_on_start) is not bool:
+        raise TypeError("observe_existing_on_start must be a bool")
     settings = config_mod.load(env)
     lock = settings.data_dir_lock              # the flock, taken by config.load before the log is opened
     token = lock.claim() if lock is not None else None   # claimed BEFORE the log is built
@@ -587,7 +596,8 @@ def build(env: Optional[dict] = None):
             ledger = HttpLedgerClient(settings.ledger_url, settings.ledger_token)
         else:
             ledger = UnconfiguredLedgerClient()
-        svc = SeoService(settings, Recorder(ledger), RecordLog(settings.data_dir), lock_token=token)
+        svc = SeoService(settings, Recorder(ledger), RecordLog(settings.data_dir), lock_token=token,
+                         observe_existing_on_start=observe_existing_on_start)
     except BaseException:
         if lock is not None:
             lock.release_claim(token)
@@ -597,7 +607,8 @@ def build(env: Optional[dict] = None):
 
 def main() -> None:
     import serve
-    app, svc = build()
+    existing = existing_store_profile()
+    app, svc = build(observe_existing_on_start=existing)
     serve.run(app, svc.settings.bind_addr, svc.settings.port)
 
 

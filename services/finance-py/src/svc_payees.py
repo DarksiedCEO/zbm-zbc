@@ -422,7 +422,7 @@ class PayeesMixin:
             return {"tax_year": year, "threshold": M.fmt(threshold) if threshold else None, "records": out,
                     "reasons": rows, "reason_lines": R.lines(rows), "ledger_event_ids": g.events}
 
-    # --- rail webhooks (via rail_gateway) ---------------------------------------------------------------------------------
+    # --- rail webhooks (via payout_rail_gateway, ADR 0023)-------------------------------------------------------------
 
     def rail_events(self, principal: str, request_id: str, rail_name: str, events: list[dict]) -> dict:
         if rail_name not in self.cfg.rails:

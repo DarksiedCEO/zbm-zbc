@@ -1,0 +1,256 @@
+"""Bounded health classification imported from c09e5c15 (ADR0039).
+
+The dormant observer uses probe/poll classifications, not notification dispatch. No sender,
+cron or provider activation exists. track/run remain the attributed standalone classifier
+helpers; the observer owns per-source stale/removal semantics rather than track's removal.
+Operation deadlines cannot forcibly cancel an in-flight DNS/OS call. Fixed aliases only.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import time
+import re
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Iterable, Optional
+from urllib.parse import urlsplit
+
+import httpx
+
+DOWN_MIN = 10
+FLAP_WINDOW_MIN = 30
+FLAP_MIN_POLLS = 4
+FLAP_LAST_N, FLAP_LAST_K = 6, 3          # AEGIS round 4 N4-2: non-ok in at least 3 of the last 6 polls ...
+FLAP_PERCENT = 30                      # ... or in more than 30% of at least FLAP_MIN_POLLS polls over 30 minutes
+CATEGORY = "service_unhealthy"
+FLAPPING = "service_flapping"
+UNCONFIGURED = "health_poll_unconfigured"
+REQUIRED = ("compliance", "finance", "ledger", "legal")
+TIMEOUT_S = 5
+POLL_BUDGET_S = 30
+MAX_TARGETS = 16
+MAX_RESPONSE_BYTES = 64 * 1024
+ENV = "FIN_OPS_HEALTH_URLS"
+
+log = logging.getLogger("health_poll")
+# Only these literal operational codes may leave a health response in an email.
+# Syntax validation alone would let a private identifier masquerade as a code.
+_CODES = frozenset({
+    "ok", "starting", "closed", "degraded", "maintenance", "unhealthy", "warning", "optional_caller_unset",
+    "reconcile_mode", "reconcile_required", "divergence", "log_write_fault",
+    "ledger_unreachable", "ledger_write_failing", "pending_unreconciled_writes",
+    "interrupted_write_anchored", "last_append_failed", "disk_low",
+    "ledger_clock_behind_log", "ledger_clock_behind_log_acknowledged",
+    "ledger_anchor_unkeyed", "rotation_expired", "rotation_expired_unpromoted",
+})
+_NAME = re.compile(r"[a-z][a-z0-9-]{0,31}")
+
+
+@dataclass(frozen=True)
+class Reading:
+    name: str
+    ok: bool
+    code: str                    # "ok" or a fixed code (never free text)
+
+
+def _code(value, fallback: str) -> str:
+    return value if isinstance(value, str) and value in _CODES else fallback
+
+
+def targets_from_env(env) -> dict[str, str]:
+    """``{name: base_url}`` from ``OPS_HEALTH_URLS``; raises ValueError on a malformed entry (a deploy-time error)."""
+    raw = (env.get(ENV) or "").strip()
+    out: dict[str, str] = {}
+    if len(raw) > 4096 or any(ord(c) < 32 for c in raw):
+        raise ValueError("invalid health target configuration")
+    if not raw:
+        return out
+    parts = raw.split(",")
+    if len(parts) > MAX_TARGETS:
+        raise ValueError(f"{ENV}: too many targets")
+    for part in parts:
+        name, sep, url = part.strip().partition("=")
+        name, url = name.strip(), url.strip()
+        if not sep or name not in REQUIRED or not _NAME.fullmatch(name) or name in out:
+            raise ValueError(f"{ENV}: each entry is name=url with a unique lowercase name")
+        u = urlsplit(url)
+        if u.scheme not in ("http", "https") or not u.hostname or u.username or u.password or u.query or u.fragment:
+            raise ValueError(f"{ENV}: the URL of {name} must be http(s)://host[:port][/path] without credentials or "
+                             "a query")
+        if u.port is not None and not 1 <= u.port <= 65535:
+            raise ValueError(f"{ENV}: invalid port")
+        out[name] = url.rstrip("/")
+    return out
+
+
+def probe(name: str, base_url: str, transport: Optional[httpx.BaseTransport] = None,
+          deadline: Optional[float] = None) -> Reading:
+    """Bounded unauthenticated /health read: 64 KiB, identity encoding, no redirects/proxy.
+
+    Check a monotonic deadline before/after I/O and every body chunk. HTTPX's per-operation
+    timeout is capped by remaining time; an in-flight OS/network operation is not forcibly killed.
+    """
+    deadline = min(deadline, time.monotonic() + TIMEOUT_S) if deadline is not None else time.monotonic() + TIMEOUT_S
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        return Reading(name, False, "deadline_exceeded")
+    try:
+        with httpx.Client(timeout=httpx.Timeout(min(TIMEOUT_S, remaining)), transport=transport,
+                          follow_redirects=False, trust_env=False) as c:
+            with c.stream("GET", base_url.rstrip("/") + "/health", headers={"Accept-Encoding": "identity"}) as r:
+                if time.monotonic() >= deadline:
+                    return Reading(name, False, "deadline_exceeded")
+                if r.headers.get("content-encoding", "identity").strip().lower() not in ("", "identity"):
+                    return Reading(name, False, "bad_encoding")
+                raw = bytearray()
+                for chunk in r.iter_bytes(chunk_size=8192):
+                    if time.monotonic() >= deadline:
+                        return Reading(name, False, "deadline_exceeded")
+                    if len(raw) + len(chunk) > MAX_RESPONSE_BYTES:
+                        return Reading(name, False, "response_too_large")
+                    raw.extend(chunk)
+                if time.monotonic() >= deadline:
+                    return Reading(name, False, "deadline_exceeded")
+    except (httpx.HTTPError, httpx.InvalidURL):
+        return Reading(name, False, "unreachable")
+    try:
+        body = json.loads(raw)
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        return Reading(name, False, "bad_body")
+    # Validate EVERY recognized field before selecting a definitive reason. A valid reason
+    # must not hide malformed warnings/write status and authorize removal of prior observations.
+    status = body.get("status")
+    if not isinstance(status, str) or status not in _CODES:
+        return Reading(name, False, "bad_status")
+    if "write_ok" in body and type(body["write_ok"]) is not bool:
+        return Reading(name, False, "bad_write_ok")
+    integrity_flags = ("log_write_fault", "reconcile_required", "reconcile_mode")
+    if any(field in body and type(body[field]) is not bool for field in integrity_flags):
+        return Reading(name, False, "bad_body")
+    warnings = body.get("warnings", [])
+    if not isinstance(warnings, list) or len(warnings) > 8:
+        return Reading(name, False, "bad_warning")
+    normalized_warnings = []
+    for warning in warnings:
+        if not isinstance(warning, str):
+            return Reading(name, False, "bad_warning")
+        # Actual Legal /health has this one documented parameterized warning. The caller
+        # suffix is checked only as bounded syntax and discarded; it never leaves this module.
+        if warning.startswith("optional_caller_unset:"):
+            if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", warning.partition(":")[2]):
+                return Reading(name, False, "bad_warning")
+            warning = "optional_caller_unset"
+        if warning not in _CODES:
+            return Reading(name, False, "bad_warning")
+        normalized_warnings.append(warning)
+    warnings = normalized_warnings
+    raw = []
+    for field in ("reasons", "degraded_reasons"):
+        if field in body:
+            if not isinstance(body[field], list) or len(body[field]) > 16:
+                return Reading(name, False, "bad_reason")
+            raw.extend(body[field])
+    if len(raw) > 16 or any(not isinstance(x, str) or x.split(":", 1)[0].strip() not in _CODES for x in raw):
+        return Reading(name, False, "bad_reason")
+    causes = {x.split(":", 1)[0].strip() for x in raw}
+    causes.update(field for field in integrity_flags if body.get(field) is True)
+    if body.get("write_ok") is False:
+        causes.add("write_refused")
+    if causes:
+        return Reading(name, False, ",".join(sorted(causes)))
+    if r.status_code != 200:
+        return Reading(name, False, status if status != "ok" else f"http_{r.status_code}")
+    if status not in ("ok", "warning"):
+        return Reading(name, False, status)
+    if warnings:
+        return Reading(name, False, "warning:" + ",".join(sorted(set(warnings))))
+    return Reading(name, status == "ok", status)
+
+
+def poll(targets: dict[str, str], transport: Optional[httpx.BaseTransport] = None) -> list[Reading]:
+    deadline = time.monotonic() + POLL_BUDGET_S
+    readings = []
+    for name, url in sorted(targets.items()):
+        if time.monotonic() >= deadline:
+            readings.append(Reading(name, False, "poll_budget_exhausted"))
+        else:
+            readings.append(probe(name, url, transport, deadline=deadline))
+    return readings
+
+
+def _parse(s) -> Optional[datetime]:
+    try:
+        value = datetime.fromisoformat(s) if isinstance(s, str) else None
+        return value if value is not None and value.utcoffset() is not None else None
+    except ValueError:
+        return None
+
+
+def track(state: dict, readings: Iterable[Reading], now: datetime, down_min: int = DOWN_MIN) -> list[tuple[str, str, str]]:
+    """Non-ok for ``down_min`` minutes without a break -> ``(CATEGORY, name, code)``; non-ok in more than half of the
+    polls of the last ``FLAP_WINDOW_MIN`` minutes (at least ``FLAP_MIN_POLLS``) -> ``(FLAPPING, name, code)``. Keeps
+    the first non-ok time per service in ``state["health"]`` and the recent polls in ``state["health_hist"]``; a
+    service no longer polled is forgotten."""
+    st = state.get("health")
+    if not isinstance(st, dict):
+        st = state["health"] = {}
+    hist = state.get("health_hist")
+    if not isinstance(hist, dict):
+        hist = state["health_hist"] = {}
+    window = timedelta(minutes=FLAP_WINDOW_MIN)
+    seen = set()
+    out = []
+    for r in readings:
+        seen.add(r.name)
+        prior = hist.get(r.name, [])
+        prior = prior[-(FLAP_LAST_N * 2):] if isinstance(prior, list) else []
+        polls = [p for p in prior if isinstance(p, list) and len(p) == 2 and type(p[1]) is bool
+                 and (t := _parse(p[0])) is not None and timedelta(0) <= now - t < 2 * window]
+        polls.append([now.isoformat(), bool(r.ok)])
+        hist[r.name] = polls
+        if r.ok:
+            st.pop(r.name, None)
+            continue
+        since = _parse(st.get(r.name))
+        if since is None or since > now:
+            st[r.name] = now.isoformat()
+            since = now
+        if now - since >= timedelta(minutes=down_min):
+            out.append((CATEGORY, r.name, r.code))
+        elif _flapping(polls, now, window):
+            out.append((FLAPPING, r.name, r.code))
+    for d in (st, hist):
+        for name in [n for n in d if n not in seen]:
+            d.pop(name, None)
+    return out
+
+
+def _flapping(polls: list, now: datetime, window: timedelta) -> bool:
+    last = polls[-FLAP_LAST_N:]
+    if sum(1 for p in last if not p[1]) >= FLAP_LAST_K:
+        return True
+    recent = [p for p in polls if now - _parse(p[0]) < window]
+    bad = sum(1 for p in recent if not p[1])
+    return len(recent) >= FLAP_MIN_POLLS and bad * 100 > FLAP_PERCENT * len(recent)
+
+
+def run(state: dict, env, now: datetime, transport: Optional[httpx.BaseTransport] = None) -> list[tuple[str, str, str]]:
+    """The whole call site for the ops-alerts job: read ``OPS_HEALTH_URLS``, poll, track. Never raises for a bad
+    configuration: an empty, malformed or incomplete list is a logged warning and a ``health_poll_unconfigured``
+    condition (round 3 N3-8)."""
+    try:
+        targets = targets_from_env(env)
+    except ValueError:
+        log.warning("health poll: %s is malformed; no service is polled", ENV)
+        return [(UNCONFIGURED, "ops-alerts", "malformed")]
+    if not targets:
+        log.warning("health poll: %s is empty; no service is polled", ENV)
+        return [(UNCONFIGURED, "ops-alerts", "no_targets")]
+    out = [(UNCONFIGURED, name, "missing") for name in REQUIRED if name not in targets]
+    if out:
+        log.warning("health poll: %s lacks %s", ENV, ", ".join(n for _, n, _ in out))
+    return out + track(state, poll(targets, transport), now)

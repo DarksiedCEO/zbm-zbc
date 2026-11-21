@@ -42,7 +42,8 @@ FIN_TOKEN = "live-fin-service-token-" + "s" * 16
 ANDRE = "live-fin-andre-approval-token-" + "a" * 12
 CALLERS = {n: f"live-fin-caller-{n}-" + "c" * 24 for n in ("compliance_38", "clipper_network", "verification_integrity",
                                                              "creative_production", "onboarding", "legal_37",
-                                                             "scheduler", "rail_gateway", "bank_feed")}
+                                                             "scheduler", "rail_gateway", "bank_feed",
+                                                             "payout_rail_gateway")}
 LOG: list[str] = []
 PROCS: list[subprocess.Popen] = []
 CHECKS: list[tuple[str, bool]] = []
@@ -328,7 +329,7 @@ def _main(work: Path) -> int:
         B.dev("/devtools/rail/paid", {"rail": "stripe", "idempotency_key": item["idempotency_key"]})
         ev = B.post("/fin/v1/rails/stripe/events", {"request_id": rid(), "events": [
             {"event_id": "evt-live-1", "type": "paid", "item_id": item["item_id"], "signature": "sig-ok-test-only"}]},
-            caller="rail_gateway").json()
+            caller="payout_rail_gateway").json()
         st = B.get(f"/fin/v1/payout-batches/{batch['batch_id']}")
         check("B: rail webhook paid -> F4e, batch settled", ev["results"][0]["status"] == "paid" and st["status"] == "settled")
         B.dev("/devtools/vi/clawback", {"submission_id": "sub-1", "views_delta": -2345})
@@ -371,14 +372,14 @@ def _main(work: Path) -> int:
               fired == 1 and rel2r.status_code == 200 and it2.get("status") == "submitted")
         rk = "fin-je-" + hashlib.sha256(json.dumps(["zbc", f"F4d|{it2.get('item_id')}"], separators=(",", ":"))
                                         .encode()).hexdigest()[:40]
-        ev = B.get("/fin/v1/audit/evidence", event_type="journal_entry_posted", limit=1000)
+        ev = B.get("/fin/v1/audit/evidence", andre=True, event_type="journal_entry_posted", limit=1000)   # r11: Andre
         check("B: /fin/v1/audit/evidence: the F4d booking committed exactly once, the lost try attempted",
               len([e for e in ev["events"] if e["status"] == "committed" and e["rk"] == rk]) == 1
               and ev["counts"]["attempted"] >= 1)
         B.dev("/devtools/rail/paid", {"rail": "stripe", "idempotency_key": it2["idempotency_key"]})
         B.post("/fin/v1/rails/stripe/events", {"request_id": rid(), "events": [
             {"event_id": "evt-live-2", "type": "paid", "item_id": it2["item_id"], "signature": "sig-ok-test-only"}]},
-            caller="rail_gateway")
+            caller="payout_rail_gateway")
         payee = B.get("/fin/v1/payees/clip-a")
         check("B: receivable netted to 0.00 at release (F4b), week-2 batch settled",
               payee["clawback_open"] == "0.00" and B.get(f"/fin/v1/payout-batches/{b2['batch_id']}")["status"] == "settled")
@@ -437,7 +438,8 @@ def _main(work: Path) -> int:
             return B.post("/fin/v1/stripe/events", {"request_id": rid(), **ev}, caller="rail_gateway").json()
 
         rr = B.post("/fin/v1/invoices", {"request_id": rid(), "entity": "zbm", "client_id": "zbm-client-rr",
-                                         "kind": "service", "payment_methods": ["ach", "card"], "legal_ref": io,
+                                         "kind": "service", "payment_methods": ["ach", "card"],
+                                         "legal_ref": {**io, "doc_id": "sow", "acceptance_id": "acc-sow"},
                                          "lines": [{"line_code": "revenue_recovery_services", "quantity": 1,
                                                     "unit_price": "2500.00"}]}, caller="onboarding").json()["invoice"]
         rr = B.post(f"/fin/v1/invoices/{rr['invoice_id']}/decision",
@@ -460,7 +462,11 @@ def _main(work: Path) -> int:
             start([str(gw_bin)], {"STRIPE_GATEWAY_FINANCE_URL": f"http://127.0.0.1:{pfb}",
                                   "STRIPE_GATEWAY_FINANCE_TOKEN": FIN_TOKEN,
                                   "STRIPE_GATEWAY_CALLER_TOKEN": CALLERS["rail_gateway"],
-                                  "STRIPE_GATEWAY_PORT": str(gw_port)}, str(work), "stripe_gateway", work)
+                                  "STRIPE_GATEWAY_PORT": str(gw_port),
+                                  # ADR 0023: no proxy here, so the client address is the TCP peer, and the source
+                                  # allowlist (kept ON) holds the loopback address this run posts from
+                                  "STRIPE_GATEWAY_CLIENT_IP_SOURCE": "remote-addr",
+                                  "STRIPE_GATEWAY_ALLOWED_IPS": "127.0.0.1"}, str(work), "stripe_gateway", work)
             wait_up(f"http://127.0.0.1:{gw_port}/health")
             gurl = f"http://127.0.0.1:{gw_port}/webhooks/stripe"
             forged = httpx.post(gurl, content=ev["payload"].replace("checkout.session", "checkout.sessionX").encode(),
@@ -508,7 +514,9 @@ def _main(work: Path) -> int:
         check("S: reconciliation after Stripe: every leg matched", rs["fc01"])
         tb_before = B.get("/fin/v1/journal/zbc/trial-balance")
         check("B: ZBC trial balance difference 0.00", tb_before["difference"] == "0.00")
-        integ = B.get("/fin/v1/integrity")
+        integ = B.get("/fin/v1/integrity", caller=None, andre=True)   # AEGIS r12 R12-1: the counters are Andre's
+        check("B: integrity for a non-Andre caller is the verdict only (no counters)",
+              set(B.get("/fin/v1/integrity")) == {"status", "checked_at"})
         check("B: integrity green before restart (chain + anchors + /ledger/verify)", integ["status"] == "green")
         say(f"B: journal entries {integ['journal_entries']}, log lines {integ['log_lines']}")
         stop(fb, "finance_b")

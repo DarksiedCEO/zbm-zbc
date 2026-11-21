@@ -39,6 +39,7 @@ import httpx
 from zbm_schema import Order
 
 from . import shopify_models as m
+from .compliance import NotConfiguredCompliance, compliance_from_env
 from .config import ClientCredentialsRef, Connection, StaticTokenRef, load_connections, read_secret_file
 from .ledger import Ledger, LedgerNotRecorded, UnconfiguredLedger
 from .net import DnsGate, system_resolve
@@ -86,7 +87,7 @@ class StoreService:
                  now: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
                  resolve: Callable[[str, int], list] = system_resolve, dns_gate: Optional[DnsGate] = None,
                  sync_deadline_s: float = DEFAULT_SYNC_DEADLINE_S, new_sync_id: Callable[[], str] = None,
-                 max_concurrent_syncs: int = DEFAULT_MAX_CONCURRENT_SYNCS):
+                 max_concurrent_syncs: int = DEFAULT_MAX_CONCURRENT_SYNCS, compliance=None):
         if max_concurrent_syncs < 1:
             raise ValueError("max_concurrent_syncs must be at least 1")
         self._connections_file = connections_file
@@ -106,6 +107,8 @@ class StoreService:
         self._state = threading.Lock()
         self._snapshots: dict[str, Snapshot] = {}
         self._syncs_today: dict[tuple[str, str], int] = {}
+        # ADR 0024: Compliance's current ALLOW before every sync and every snapshot read; unset = refuse every client
+        self._compliance = compliance if compliance is not None else NotConfiguredCompliance()
 
     def __repr__(self) -> str:
         return "StoreService()"
@@ -121,7 +124,7 @@ class StoreService:
             cap = int(env.get("RR_STORE_MAX_CONCURRENT_SYNCS") or DEFAULT_MAX_CONCURRENT_SYNCS)
         except ValueError:
             cap = DEFAULT_MAX_CONCURRENT_SYNCS
-        return cls(max_concurrent_syncs=min(max(cap, 1), 16),
+        return cls(max_concurrent_syncs=min(max(cap, 1), 16), compliance=compliance_from_env(env),
                    connections_file=(env.get("RR_STORE_CONNECTIONS_FILE") or "").strip() or None,
                    kill_file=(env.get("RR_STORE_KILL_SWITCH_FILE") or "").strip() or None,
                    disabled=(env.get("RR_STORE_READS_DISABLED") or "").strip() == "1",
@@ -131,6 +134,15 @@ class StoreService:
 
     def killed(self) -> bool:
         return self._disabled or bool(self._kill_file and os.path.lexists(self._kill_file))
+
+    def _require_activation(self, client_id: str) -> dict:
+        """ADR 0024: Compliance's current ALLOW for the client, or StoreError (no store call is made)."""
+        try:
+            return self._compliance.require_allow(client_id)
+        except StoreError:
+            raise
+        except Exception:  # noqa: BLE001 - any other failure of the port is "unavailable", never a pass
+            raise StoreError("COMPLIANCE_UNAVAILABLE") from None
 
     def _connection(self, client_id: str) -> Connection:
         conns = load_connections(self._connections_file)
@@ -157,6 +169,7 @@ class StoreService:
         if self.killed():
             raise StoreError("STORE_READS_DISABLED")
         conn = self._connection(client_id)
+        self._require_activation(conn.client_id)
         with self._state:
             snap = self._current(client_id, conn)
             if snap is None:
@@ -189,6 +202,7 @@ class StoreService:
         if self.killed():
             raise StoreError("STORE_READS_DISABLED")
         conn = self._connection(client_id)
+        self._require_activation(conn.client_id)
         with self._state:
             lock = self._client_locks.setdefault(conn.client_id, threading.Lock())
         if not lock.acquire(blocking=False):

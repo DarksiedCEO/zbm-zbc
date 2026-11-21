@@ -1,0 +1,6 @@
+# Explicit opt-in wrapper only, built from an approved immutable base image digest.
+# Normal service Dockerfiles remain USER10001; default runtime is never elevated.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+USER 0:0
+ENV BACKUP_LAUNCH_ENABLED=0

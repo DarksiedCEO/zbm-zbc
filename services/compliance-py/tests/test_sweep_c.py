@@ -59,7 +59,7 @@ def test_r6_internal_controls_retried_after_the_clock_moved_is_not_a_lasting_409
     hs.clock.advance(minutes=1)
     r = hs.post("/compliance/v1/controls/internal/run", {"request_id": fixed}, caller="scheduler")
     assert r.status_code == 200, r.text
-    ev = hs.get("/compliance/v1/audit/evidence", event_type="control_result_recorded").json()
+    ev = hs.get("/compliance/v1/audit/evidence", andre=ANDRE_TOKEN, event_type="control_result_recorded").json()
     assert ev["counts"]["committed"] >= 1 and ev["counts"]["attempted"] >= 1
     for e in hs.ledger.of_type("control_result_recorded"):
         assert "rk" in e["payload"] and "seq" in e["payload"]
@@ -68,6 +68,7 @@ def test_r6_internal_controls_retried_after_the_clock_moved_is_not_a_lasting_409
 def test_r6_a_hold_release_retried_with_a_corrected_reason_is_not_a_lasting_409(hs):
     s = hs.screen("clipper-1")
     r = hs.rule("clipper-1", "zbc_creator", creator_facts(s["screen_id"], network_country_signal="RU")).json()
+    r = hs.svc.ruling_view(hs.svc.rulings[r["ruling_id"]])        # AEGIS r10 R9-4: Andre's record names the hold
     hid = [u for u in r["unmet"] if u["code"].startswith("hold_open:")][0]["code"].split(":", 1)[1]
     _fail_once(hs, lambda t: t == "local_log_appended")
     assert hs.post(f"/compliance/v1/holds/{hid}/release", {"request_id": rid(), "reason": "VPN"},

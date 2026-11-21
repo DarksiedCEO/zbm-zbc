@@ -191,6 +191,8 @@ class LogsMixin:
             rk = self.rk("log_chunk", iid, body)
             if self._idem(actor, rk, body):
                 return self.log_ingest_view(tid, iid)
+            log_hash_key = self.settings.log_hash_key
+            self._check_log_key(g, log_hash_key)
             self._chunk_ok(g, body, nbytes)
             fmt = g["format"]
             cache = self._log_verify_cache.setdefault(iid, {})
@@ -201,7 +203,7 @@ class LogsMixin:
             self.guard(tid, run="logs")(capability="logs", agent="selene")
         except Killed as k:
             raise _refusal(k) from None
-        delta = logs_mod.process_chunk(fmt, data, self.settings.log_hash_key, self.ports.bot_verifier.verify, cache,
+        delta = logs_mod.process_chunk(fmt, data, log_hash_key, self.ports.bot_verifier.verify, cache,
                                        budget, robots, sample)
         del data
         with self.lock:
@@ -209,6 +211,8 @@ class LogsMixin:
             g = self._ingest(tid, iid)
             self.check_kill(tenant=tid, capability="logs", write=True)
             self._selene_ok()
+            self._check_log_key(g, log_hash_key)           # the key that produced this delta
+            self._check_log_key(g, self.settings.log_hash_key)
             self._chunk_ok(g, body, nbytes)                # nothing moved while the lock was released
             payload = {"ingest_id": iid, "seq": body["seq"], "lines": delta["lines"], "delta_sha256": sha(delta)}
             self._commit("log_chunk", self._req({"ingest_id": iid, "seq": body["seq"], "last": body["last"],
@@ -223,6 +227,11 @@ class LogsMixin:
         if rb is None:
             rb = self._log_robots[g["ingest_id"]] = robots_mod.parse(g["robots_text"])
         return rb
+
+    def _check_log_key(self, g: dict, key: bytes) -> None:
+        # Missing historical binding is not permission to mix a new key into an existing sketch.
+        if g.get("key_fp") != hashlib.sha256(key).hexdigest()[:16]:
+            raise Conflict(R("LOG_HASH_KEY_MISMATCH"))
 
     def _chunk_ok(self, g: dict, body: dict, nbytes: int) -> None:
         if g["status"] != "open" or g["last_seen"] or g.get("evicted") or self._ingest_expired(g):

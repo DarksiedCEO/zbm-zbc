@@ -104,9 +104,33 @@ def base_env(**over) -> dict:
     return env
 
 
+class PassingCompliance:
+    """TEST-ONLY (ADR 0024): Compliance answers a current ALLOW for every client unless told otherwise. The default
+    harness installs it in place of the production stand-in (NotConnectedCompliance refuses every client run), as
+    the passing fakes of the other ports do; tests of the gate itself pass ``real_compliance=True`` or set
+    ``refuse`` / ``error``."""
+
+    connected = True
+
+    def __init__(self):
+        self.refuse: set = set()
+        self.error: Optional[str] = None
+        self.asked: list = []
+
+    def activation(self, client_id):
+        import compliance_client as cc
+        self.asked.append(client_id)
+        if self.error:
+            raise cc.ComplianceCheckError(self.error)
+        if client_id in self.refuse:
+            raise cc.ComplianceCheckError(cc.NOT_ACTIVATED)
+        return {"verdict": cc.ALLOW, "ruling_id": f"cmp-rul-{client_id}", "jurisdiction": "US-CA"}
+
+
 class Harness:
     def __init__(self, tmp, data_dir: Optional[str] = None, ledger: Optional[FakeLedger] = None,
-                 clock: Optional[FixedClock] = None, ports: Optional[Ports] = None, **env_over):
+                 clock: Optional[FixedClock] = None, ports: Optional[Ports] = None, real_compliance: bool = False,
+                 **env_over):
         self.tmp = tmp
         if data_dir and "SEO_LOG_HASH_KEY_FILE" not in env_over:
             env_over["SEO_LOG_HASH_KEY_FILE"] = write_key(tmp / "log.key")
@@ -115,6 +139,9 @@ class Harness:
         self.ledger = ledger or FakeLedger()
         self.clock = clock or FixedClock(T0)
         self.ports = ports or Ports.default(self.settings)
+        if not real_compliance and type(self.ports.compliance).__name__ in ("NotConnectedCompliance", "NoneType"):
+            self.ports.compliance = PassingCompliance()
+        self.real_compliance = real_compliance
         lock = self.settings.data_dir_lock
         token = lock.claim() if lock is not None else None
         try:
@@ -128,7 +155,8 @@ class Harness:
 
     def restart(self, **env_over) -> "Harness":
         self.svc.close()
-        return Harness(self.tmp, self.settings.data_dir, self.ledger, self.clock, self.ports, **env_over)
+        return Harness(self.tmp, self.settings.data_dir, self.ledger, self.clock, self.ports,
+                       real_compliance=self.real_compliance, **env_over)
 
     def headers(self, caller: Optional[str] = "dashboard", andre: bool = False, tenant: Optional[str] = None) -> dict:
         h = {"Authorization": f"Bearer {SERVICE_TOKEN}"}

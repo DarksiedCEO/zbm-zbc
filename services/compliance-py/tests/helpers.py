@@ -84,8 +84,8 @@ class Harness:
     def post(self, path, body, caller=None, andre=None, bearer=SERVICE_TOKEN):
         return self.client.post(path, json=body, headers=self.headers(caller, andre, bearer))
 
-    def get(self, path, caller="scheduler", **params):
-        return self.client.get(path, headers=self.headers(caller), params=params)
+    def get(self, path, caller="scheduler", andre=None, **params):
+        return self.client.get(path, headers=self.headers(caller, andre), params=params)
 
     # --- register ------------------------------------------------------------------
     def inbox(self):
@@ -148,7 +148,7 @@ class Harness:
         assert r.status_code == 200, r.text
         return r.json()
 
-    def activate_client_for_publish(self, client="client-1", targets=("US", "CA-ON"),
+    def activate_client_for_publish(self, client="client-1", targets=("US", "PR"),
                                     platforms=("web", "youtube", "email", "sms")):
         """AEGIS N14-2: every publish needs the client's current, allowed activation covering its targets
         and platforms (publish_facts defaults: US, web)."""

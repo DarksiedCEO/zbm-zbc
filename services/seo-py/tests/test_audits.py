@@ -84,6 +84,7 @@ def test_paid_client_audit_needs_invoice_and_andre(tmp_path, srv):
     install_site(srv)
     h = harness(tmp_path, srv)
     h.tenant("acme", domains=("site.test",))
+    h.ok(h.post("/tenants/acme/finance-client", {"request_id": rid(), "finance_client_id": "acme-party-1"}, andre=True))  # ADR 0024
     h.refused(audit(h, "acme"), 409, "INVOICE_REQUIRED")
     h.refused(audit(h, "acme", invoice_id=invoice_id()), 403, "ANDRE_APPROVAL_REQUIRED")
     assert audit(h, "acme", invoice_id="fin-inv-123").status_code == 422          # not a Finance invoice id
@@ -227,6 +228,7 @@ def test_audit_with_prompt_set_and_not_connected_engines(tmp_path, srv):
     assert cal["outcome"] == "NOT_CONNECTED" and cal["findings"] == []
     assert r["prompt_set"]["version"] == 1
     h.tenant("acme", domains=("other.test",))
+    h.ok(h.post("/tenants/acme/finance-client", {"request_id": rid(), "finance_client_id": "acme-party-1"}, andre=True))  # ADR 0024
     h.refused(audit(h, "acme", caller="dashboard", andre=True, invoice_id=invoice_id(), domain="other.test",
                     prompt_set_id=ps["prompt_set_id"]), 404, "PROMPT_SET_NOT_FOUND")
 

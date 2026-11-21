@@ -47,7 +47,7 @@ def test_mismatch_and_missing_fields(srv, h):
     assert mm[0]["detail"]["canonical_source"] == "founder_statement" and mm[0]["decision"] == "ACT"
     assert any(f["code"] == "ENTITY_FIELD_MISSING_IN_MARKUP" and f["detail"]["field"] == "telephone"
                for f in env["findings"])
-    assert any(f["code"] == "PHONE_NOT_IN_VISIBLE_TEXT" for f in env["findings"])
+    assert any(f["code"] == "HOMEPAGE_PHONE_NOT_IN_TEXT_SAMPLE" for f in env["findings"])
 
 
 def test_no_markup_and_no_record(srv, h):

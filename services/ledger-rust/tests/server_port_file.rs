@@ -168,7 +168,7 @@ fn a_stale_port_file_is_replaced_the_new_one_is_0600_and_sigterm_removes_it() {
     assert!(left.iter().all(|n| !n.contains(".tmp")), "{left:?}");
     term(child);
     let st = wait_exit(child, Duration::from_secs(10)).expect("SIGTERM did not stop the server");
-    assert!(!st.success());                                    // killed by the signal, as before
+    assert_eq!(st.code(), Some(0)); // native shutdown drains accepted work before clean exit
     assert!(!pf.0.exists(), "the port file outlived the server");
 }
 
@@ -267,7 +267,7 @@ fn sighup_and_sigquit_remove_the_port_file_as_sigterm_does() {
         let ok = Command::new("kill").arg(sig).arg(child.id().to_string()).status().unwrap();
         assert!(ok.success());
         let st = wait_exit(child, Duration::from_secs(10)).unwrap_or_else(|| panic!("{sig} did not stop the server"));
-        assert!(!st.success(), "{sig}: {st}");                 // still killed by the signal (default disposition re-raised)
+        assert_eq!(st.code(), Some(0), "{sig}: {st}"); // native shutdown drains before clean exit
         assert!(!pf.0.exists(), "{sig}: the port file outlived the server");
     }
 }

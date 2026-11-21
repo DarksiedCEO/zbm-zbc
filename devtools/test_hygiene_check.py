@@ -163,6 +163,15 @@ class Dynamic(unittest.TestCase):
         finally:
             Path(f"/tmp/{name}").unlink(missing_ok=True)
 
+    def test_r3_a_planted_systemd_private_tmp_lookalike_still_fails(self):
+        # Nov 19 2026 (CI 44622855476): R3 skips systemd's PrivateTmp= directory only when it is root-owned 0700 and
+        # this checker is not root. One the suite makes itself — right name, right mode, its own user — still fails.
+        name = "systemd-private-865c617e91a542a8a348974c3060696d-systemd-timedated.service-JgwdsW"
+        rc, out = self.r.suite(f'mkdir -m 700 "{self.r.systmp}/{name}"')
+        self.assertEqual(rc, 1, out)
+        self.assertIn(f"HYGIENE R3-tmp go:probe: new entry in {self.r.systmp} during the run: {name}", out)
+        self.assertNotIn("R3 not counted", out)
+
     def test_r4_a_process_outlives_the_suite(self):
         # double fork + its own session + an empty environment
         rc, out = self.r.suite("env -i /bin/sh -c 'setsid sleep 300 >/dev/null 2>&1 &'")
@@ -683,6 +692,138 @@ class Static(unittest.TestCase):
         self.assertIn("L4-shared services/b-py/src/launch_guard.py: not identical to services/a-py/src/launch_guard.py"
                       " (shared file launch_guard.py)", out)
         self.assertNotIn("services/c-py/src/zbm_c/launch_guard.py", out)
+
+
+class ColdChildContract(unittest.TestCase):
+    def setUp(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("cold_hygiene", HERE / "hygiene_check.py")
+        self.h = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.h)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.h.REPO = self.root
+        def put(name, text):
+            path = self.root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        put("services/ledger-rust/src/bin/server.rs", "mod cold_tests { #[test] #[ignore] fn held_blocking_child() {} }")
+        put(self.h.COLD_PARENT, "CHILD='cold_tests::held_blocking_child'\nARGS=['--ignored','--exact']\n" +
+            "\n".join("def " + name + "(): pass" for name in sorted(self.h.COLD_METHODS)))
+        put(".github/workflows/ci.yml", "      - name: Native Ledger shutdown parent regression\n"
+            "        run: |\n          set +e\n"
+            "          python3 devtools/hygiene_check.py run --suite python:cold-ledger-shutdown --kind pytest "
+            "--allow-ignored services/ledger-rust/target -- python3 -B -m pytest -q -p no:cacheprovider " + self.h.COLD_PARENT + ' 2>&1 | tee "$RUNNER_TEMP/cold-ledger.log"\n'
+            '          code=${PIPESTATUS[0]}\n'
+            '          python3 devtools/ci_annotate.py --log "$RUNNER_TEMP/cold-ledger.log" --code "$code" --suite "python:cold-ledger-shutdown"\n'
+            '          exit "$code"\n')
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def output(self, name):
+        return f"test {name} ... ignored\ntest result: ok. 0 passed; 0 failed; 1 ignored\n"
+
+    def test_exact_named_child_requires_mandatory_parent(self):
+        self.assertEqual(self.h.cold_child_contract(), [])
+        skip = self.h._skips_from_output("cargo", self.output(self.h.COLD_CHILD))[0]
+        self.assertTrue(self.h.orchestrated_ignore("rust:ledger-rust", skip))
+        self.assertFalse(self.h.orchestrated_ignore("rust:other", skip))
+        (self.root / self.h.COLD_PARENT).unlink()
+        self.assertFalse(self.h.orchestrated_ignore("rust:ledger-rust", skip))
+
+    def test_unrelated_aggregate_duplicate_ignores_are_not_exempt(self):
+        outputs = [self.output("unrelated"), "test result: ok. 0 passed; 0 failed; 1 ignored\n",
+                   self.output(self.h.COLD_CHILD) * 2]
+        for output in outputs:
+            skips = self.h._skips_from_output("cargo", output)
+            self.assertTrue(skips)
+            self.assertTrue(all(not self.h.orchestrated_ignore("rust:ledger-rust", x) for x in skips))
+
+    def test_missing_parent_method_refused(self):
+        path = self.root / self.h.COLD_PARENT
+        path.write_text(path.read_text().replace("test_timeout_unknown_and_queued_job", "not_a_test"))
+        self.assertTrue(self.h.cold_child_contract())
+
+    def test_optional_or_uncounted_ci_refused(self):
+        path = self.root / ".github/workflows/ci.yml"
+        original = path.read_text()
+        for injection in ("        if: false\n", "        continue-on-error: true\n"):
+            path.write_text(original.replace("        run:", injection + "        run:"))
+            self.assertTrue(self.h.cold_child_contract())
+        for required in ('set +e', 'code=${PIPESTATUS[0]}', 'exit "$code"', 'python3 devtools/ci_annotate.py'):
+            path.write_text(original.replace(required, '# removed required wiring'))
+            self.assertTrue(self.h.cold_child_contract())
+        for addition in (" --counts off", " || true"):
+            path.write_text(original + addition)
+            self.assertTrue(self.h.cold_child_contract())
+
+
+class SystemdPrivateTmp(unittest.TestCase):
+    """Nov 19 2026 (CI 44622855476, live:security-py 3.13 failed R3 on the runner's systemd-timedated PrivateTmp):
+    the one exception R3 makes, and every way a look-alike is refused."""
+    NAME = "systemd-private-865c617e91a542a8a348974c3060696d-systemd-timedated.service-JgwdsW"
+
+    def setUp(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("sd_hygiene", HERE / "hygiene_check.py")
+        self.h = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.h)
+
+    @staticmethod
+    def st(mode=0o040700, uid=0):
+        return os.stat_result((mode, 1, 1, 2, uid, 0, 4096, 0, 0, 0))
+
+    def check(self, name=None, st="default", own_uid=1001, platform="linux"):
+        return self.h.systemd_private_tmp(self.NAME if name is None else name,
+                                          self.st() if st == "default" else st, own_uid, platform)
+
+    def test_the_runners_directory_is_recognised(self):
+        self.assertEqual(self.check(), "systemd-timedated.service")
+        self.assertEqual(self.check("systemd-private-" + "0" * 32 + "-getty@tty1.service-a1B2c3"),
+                         "getty@tty1.service")
+        self.assertEqual(self.check("systemd-private-" + "f" * 32 + "-dbus\\x2dbroker.service-ZZZZZZ"),
+                         "dbus\\x2dbroker.service")
+
+    def test_not_root_owned_is_refused(self):
+        self.assertIsNone(self.check(st=self.st(uid=1001)))
+
+    def test_any_other_mode_is_refused(self):
+        for mode in (0o040755, 0o040777, 0o041700, 0o040600):
+            with self.subTest(mode=oct(mode)):
+                self.assertIsNone(self.check(st=self.st(mode=mode)))
+
+    def test_a_file_a_symlink_or_an_unreadable_entry_is_refused(self):
+        self.assertIsNone(self.check(st=self.st(mode=0o100700)))
+        self.assertIsNone(self.check(st=self.st(mode=0o120700)))
+        self.assertIsNone(self.check(st=None))
+
+    def test_a_root_checker_never_skips(self):
+        # as root a suite could make a root-owned directory itself
+        self.assertIsNone(self.check(own_uid=0))
+
+    def test_only_on_linux(self):
+        for platform in ("darwin", "win32", "freebsd14"):
+            with self.subTest(platform=platform):
+                self.assertIsNone(self.check(platform=platform))
+
+    def test_names_that_are_not_systemds_shape_are_refused(self):
+        hexid = "865c617e91a542a8a348974c3060696d"
+        for name in (
+            f"systemd-private-{hexid}-x.service-JgwdsWx",      # 7 random characters
+            f"systemd-private-{hexid}-x.service-Jgwds",        # 5
+            f"systemd-private-{hexid[:-1]}-x.service-JgwdsW",  # 31-character boot id
+            f"systemd-private-{hexid.upper()}-x.service-JgwdsW",
+            f"systemd-private-{hexid}-x.socket-JgwdsW",        # not a service
+            f"systemd-private-{hexid}-.service-JgwdsW",        # no unit name
+            f"systemd-private-{hexid}-x/y.service-JgwdsW",
+            f"xsystemd-private-{hexid}-x.service-JgwdsW",
+            f"systemd-private-{hexid}-x.service-JgwdsW.bak",
+            f"systemd-private-{hexid}-x.service-JgwdsW\n",
+            "planted",
+        ):
+            with self.subTest(name=name):
+                self.assertIsNone(self.check(name))
 
 
 if __name__ == "__main__":

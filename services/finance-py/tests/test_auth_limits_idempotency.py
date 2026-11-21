@@ -93,7 +93,7 @@ CALLER_ROUTES = [
     ("GET", "/fin/v1/clients/client-1/billing-readiness", {"onboarding"}),
     ("POST", "/fin/v1/invoices", {"onboarding", "scheduler"}),
     ("POST", "/fin/v1/bank/events", {"bank_feed"}),
-    ("POST", "/fin/v1/rails/stripe/events", {"rail_gateway"}),
+    ("POST", "/fin/v1/rails/stripe/events", {"payout_rail_gateway"}),
     ("POST", "/fin/v1/refunds/camp-1", {"scheduler"}),
     ("POST", "/fin/v1/jobs/accrual/run", {"scheduler"}),
     ("POST", "/fin/v1/payout-runs", {"scheduler"}),

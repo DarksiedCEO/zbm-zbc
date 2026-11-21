@@ -21,7 +21,7 @@ from helpers import ANDRE_TOKEN, NOW, Harness, rid
 from intelligences import i01_journal as J
 from stripe_incoming import API_VERSION, StripeIncoming
 from stripe_sim import TEST_KEY, TEST_WHSEC, SimStripe
-from test_media_billing import LEGAL, buy, create, issue, pay_vendor
+from test_media_billing import LEGAL, SERVICE_LEGAL, buy, create, issue, pay_vendor
 
 SUCCESS, CANCEL = "https://zbestmedia.com/pay/thanks", "https://zbestmedia.com/pay/cancelled"
 
@@ -57,7 +57,7 @@ def st(keys):
 def rr_invoice(hr, price="1200.00", methods=("ach", "card"), codes=("revenue_recovery_services",)):
     body = {"request_id": rid(), "entity": "zbm", "client_id": "zbm-client-7", "kind": "service",
             "lines": [{"line_code": c, "quantity": 1, "unit_price": price} for c in codes],
-            "payment_methods": list(methods), "legal_ref": LEGAL}
+            "payment_methods": list(methods), "legal_ref": SERVICE_LEGAL}
     inv = hr.ok(hr.post("/fin/v1/invoices", body, caller="onboarding"), 201)["invoice"]
     return issue(hr, inv)
 
@@ -662,7 +662,9 @@ def test_aegis_m2_daily_job_closes_pages_that_should_no_longer_take_money(st):
     c = rr_invoice(st, "800.00", methods=("ach",))
     pc = st.ok(checkout(st, c["invoice_id"]))["checkout"]                # still right: stays open
     out = st.ok(st.post("/fin/v1/jobs/stripe-sessions/run", {"request_id": rid()}, caller="scheduler"))
-    assert out["summary"] == {"closed": 2, "failed": 0, "checked": 2}
+    assert out["summary"] == {"closed": 2, "failed": 0, "checked": 2, "refused_clients": 0,
+                              "activation_unknown": 0, "activation_checked": 1, "holds_released": 0,
+                              "holds_changed": 0}
     assert st.sim.sessions[pa["session_id"]]["status"] == "expired"
     assert st.sim.sessions[pb["session_id"]]["status"] == "expired"
     assert st.sim.sessions[pc["session_id"]]["status"] == "open"

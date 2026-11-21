@@ -17,6 +17,8 @@ package main
 // the ledger-rust integration tests do for the equivalent Rust binary.
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -89,6 +91,12 @@ func buildOrchestratorBinary(t *testing.T) string {
 // C2-1): the kernel picks the port, the child writes the port it bound, and the harness trusts that port only while
 // ITS child is alive — no pick-close-then-bind race, no fixed range, and a server some other run left on a port can
 // never be the one under test. The child is killed and reaped in t.Cleanup.
+// bindTestOrchToken passes the start-up token hygiene (ADR 0023): 64 hex characters, like `openssl rand -hex 32`.
+var bindTestOrchToken = func() string {
+	sum := sha256.Sum256([]byte("orchestrator-go main_bind_test token"))
+	return hex.EncodeToString(sum[:])
+}()
+
 func startOrchestrator(t *testing.T, bindAddr string, extraEnv ...string) (port string, waitForExit func()) {
 	t.Helper()
 	port, err := tryStartOrchestrator(t, bindAddr, extraEnv...)
@@ -106,10 +114,16 @@ func tryStartOrchestrator(t *testing.T, bindAddr string, extraEnv ...string) (st
 	cmd := exec.Command(binPath)
 	cmd.Env = append(os.Environ(),
 		"DETECTION_SERVICE_TOKEN=test-detection-token",
-		"ORCHESTRATOR_SERVICE_TOKEN=test-orchestrator-token",
+		"ORCHESTRATOR_SERVICE_TOKEN="+bindTestOrchToken,
 		"LEDGER_SERVICE_TOKEN=test-ledger-token",
 		"ORCHESTRATOR_PORT=0",
 		"ORCHESTRATOR_PORT_FILE="+portFile,
+		// ADR 0023: the harness talks to the binary directly (no Railway edge, so no X-Real-IP): the client address
+		// is the TCP peer. The x-real-ip default is covered by TestRealBinaryDefaultRefusesWithoutXRealIP.
+		"ORCHESTRATOR_CLIENT_IP_SOURCE=remote-addr",
+		// every harness request comes from 127.0.0.1, and the slow-client tests poll /health in a loop: the per-client
+		// limit (covered by edge_test.go) is raised to its maximum here so it never decides those tests
+		"ORCHESTRATOR_RATE_PER_MIN=6000", "ORCHESTRATOR_RATE_BURST=6000",
 	)
 	if bindAddr != "" {
 		cmd.Env = append(cmd.Env, "ORCHESTRATOR_BIND_ADDR="+bindAddr)
@@ -236,7 +250,7 @@ func TestPortFileNamesTheBoundPortAndIsRemovedOnSIGTERM(t *testing.T) {
 	binPath := buildOrchestratorBinary(t)
 	portFile := filepath.Join(t.TempDir(), "o.port")
 	cmd := exec.Command(binPath)
-	cmd.Env = append(os.Environ(), "DETECTION_SERVICE_TOKEN=d", "ORCHESTRATOR_SERVICE_TOKEN=o", "LEDGER_SERVICE_TOKEN=l",
+	cmd.Env = append(os.Environ(), "DETECTION_SERVICE_TOKEN=d", "ORCHESTRATOR_SERVICE_TOKEN="+bindTestOrchToken, "LEDGER_SERVICE_TOKEN=l",
 		"ORCHESTRATOR_PORT=0", "ORCHESTRATOR_PORT_FILE="+portFile)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)

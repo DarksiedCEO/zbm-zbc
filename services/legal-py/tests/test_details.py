@@ -376,10 +376,10 @@ def test_fills_keep_using_the_template_after_an_instance_is_approved_and_old_ins
                     "memo_id": memo["memo_id"], "memo_sha256": memo["memo_sha256"]}))
     he.ok(he.apost("/legal/v1/documents/client_msa/versions/1.2/decision",
                    {"request_id": rid(), "decision": "approve", "version_sha256": b["sha256"]}))
-    a2 = he.clickwrap("client_msa", "1.1", fill["sha256"], party="client:acme", caller="onboarding")
+    a2 = he.client_page_accept("client_msa", "1.1", fill["sha256"], party="client:acme")
     assert a2["evidence_sufficient"] is True                        # 1.1 is still approved and in force
-    a3 = he.clickwrap("client_msa", "1.2", b["sha256"], party="client:beta", caller="onboarding")
+    a3 = he.client_page_accept("client_msa", "1.2", b["sha256"], party="client:beta")
     assert a3["evidence_sufficient"] is True
     # fix 18 (AEGIS N17-4): acme's instance is acme's; another client accepting it is refused (before: sufficient)
-    r = he.clickwrap("client_msa", "1.1", fill["sha256"], party="client:acme2", caller="onboarding", code=409)
+    r = he.client_page_accept("client_msa", "1.1", fill["sha256"], party="client:acme2", code=409)
     assert r["detail"] == "INSTANCE_NOT_BOUND"

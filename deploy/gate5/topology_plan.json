@@ -1,0 +1,374 @@
+{
+  "schema": "gate5-topology-plan-v1",
+  "executable": false,
+  "source_sha": null,
+  "roles": {
+    "ledger": {
+      "contract": {
+        "entrypoint": [
+          "/usr/local/bin/zbm-entrypoint"
+        ],
+        "handoff": [
+          "/usr/local/bin/python3",
+          "-I",
+          "/opt/zbm-maintenance/launcher.py",
+          "/usr/local/bin/ledger-server"
+        ],
+        "mount": "/data",
+        "source": "/data/ledger/ledger.jsonl",
+        "control": "/data/control",
+        "backup": "/data/backup",
+        "ports": {
+          "native_loopback": 27000,
+          "business_private": 27001,
+          "control_private": 27002,
+          "dependency_private": 27003
+        },
+        "root_supervisor": true,
+        "variable_names": [
+          "BACKUP_LAUNCH_ENABLED",
+          "BACKUP_MEMBER",
+          "BACKUP_VOLUME",
+          "BACKUP_RECOVERY_MODE",
+          "BACKUP_COORD_TOKEN",
+          "BACKUP_RESTIC_PASSWORD",
+          "BACKUP_B2_KEY_ID",
+          "BACKUP_B2_APPLICATION_KEY",
+          "BACKUP_CAPACITY_POLICY",
+          "PORT",
+          "RAILWAY_RUN_UID",
+          "LEDGER_LOG_PATH"
+        ],
+        "public_domain": false
+      },
+      "image_digest": null,
+      "volume_id": null,
+      "resources": null
+    },
+    "legal": {
+      "contract": {
+        "entrypoint": [
+          "/usr/local/bin/zbm-entrypoint"
+        ],
+        "handoff": [
+          "/usr/local/bin/python3",
+          "-I",
+          "/opt/zbm-maintenance/launcher.py",
+          "/opt/venv/bin/python",
+          "-m",
+          "api"
+        ],
+        "mount": "/data",
+        "source": "/data/legal",
+        "control": "/data/control",
+        "backup": "/data/backup",
+        "ports": {
+          "native_loopback": 27000,
+          "business_private": 27001,
+          "control_private": 27002,
+          "dependency_private": 27003
+        },
+        "root_supervisor": true,
+        "variable_names": [
+          "BACKUP_LAUNCH_ENABLED",
+          "BACKUP_MEMBER",
+          "BACKUP_VOLUME",
+          "BACKUP_RECOVERY_MODE",
+          "BACKUP_COORD_TOKEN",
+          "BACKUP_RESTIC_PASSWORD",
+          "BACKUP_B2_KEY_ID",
+          "BACKUP_B2_APPLICATION_KEY",
+          "BACKUP_CAPACITY_POLICY",
+          "PORT",
+          "RAILWAY_RUN_UID",
+          "LEGAL_DATA_DIR"
+        ],
+        "public_domain": false
+      },
+      "image_digest": null,
+      "volume_id": null,
+      "resources": null
+    },
+    "compliance": {
+      "contract": {
+        "entrypoint": [
+          "/usr/local/bin/zbm-entrypoint"
+        ],
+        "handoff": [
+          "/usr/local/bin/python3",
+          "-I",
+          "/opt/zbm-maintenance/launcher.py",
+          "/opt/venv/bin/python",
+          "-m",
+          "api"
+        ],
+        "mount": "/data",
+        "source": "/data/compliance",
+        "control": "/data/control",
+        "backup": "/data/backup",
+        "ports": {
+          "native_loopback": 27000,
+          "business_private": 27001,
+          "control_private": 27002,
+          "dependency_private": 27003
+        },
+        "root_supervisor": true,
+        "variable_names": [
+          "BACKUP_LAUNCH_ENABLED",
+          "BACKUP_MEMBER",
+          "BACKUP_VOLUME",
+          "BACKUP_RECOVERY_MODE",
+          "BACKUP_COORD_TOKEN",
+          "BACKUP_RESTIC_PASSWORD",
+          "BACKUP_B2_KEY_ID",
+          "BACKUP_B2_APPLICATION_KEY",
+          "BACKUP_CAPACITY_POLICY",
+          "PORT",
+          "RAILWAY_RUN_UID",
+          "COMPLIANCE_DATA_DIR"
+        ],
+        "public_domain": false
+      },
+      "image_digest": null,
+      "volume_id": null,
+      "resources": null
+    },
+    "finance": {
+      "contract": {
+        "entrypoint": [
+          "/usr/local/bin/zbm-entrypoint"
+        ],
+        "handoff": [
+          "/usr/local/bin/python3",
+          "-I",
+          "/opt/zbm-maintenance/launcher.py",
+          "/opt/venv/bin/python",
+          "-m",
+          "api"
+        ],
+        "mount": "/data",
+        "source": "/data/finance",
+        "control": "/data/control",
+        "backup": "/data/backup",
+        "ports": {
+          "native_loopback": 27000,
+          "business_private": 27001,
+          "control_private": 27002,
+          "dependency_private": 27003
+        },
+        "root_supervisor": true,
+        "variable_names": [
+          "BACKUP_LAUNCH_ENABLED",
+          "BACKUP_MEMBER",
+          "BACKUP_VOLUME",
+          "BACKUP_RECOVERY_MODE",
+          "BACKUP_COORD_TOKEN",
+          "BACKUP_RESTIC_PASSWORD",
+          "BACKUP_B2_KEY_ID",
+          "BACKUP_B2_APPLICATION_KEY",
+          "BACKUP_CAPACITY_POLICY",
+          "PORT",
+          "RAILWAY_RUN_UID",
+          "FIN_DATA_DIR"
+        ],
+        "public_domain": false
+      },
+      "image_digest": null,
+      "volume_id": null,
+      "resources": null
+    },
+    "seo": {
+      "contract": {
+        "entrypoint": [
+          "/usr/local/bin/zbm-entrypoint"
+        ],
+        "handoff": [
+          "/usr/local/bin/python3",
+          "-I",
+          "/opt/zbm-maintenance/launcher.py",
+          "/opt/venv/bin/python",
+          "-m",
+          "api"
+        ],
+        "mount": "/data",
+        "source": "/data/seo",
+        "control": "/data/control",
+        "backup": "/data/backup",
+        "ports": {
+          "native_loopback": 27000,
+          "business_private": 27001,
+          "control_private": 27002,
+          "dependency_private": 27003
+        },
+        "root_supervisor": true,
+        "variable_names": [
+          "BACKUP_LAUNCH_ENABLED",
+          "BACKUP_MEMBER",
+          "BACKUP_VOLUME",
+          "BACKUP_RECOVERY_MODE",
+          "BACKUP_COORD_TOKEN",
+          "BACKUP_RESTIC_PASSWORD",
+          "BACKUP_B2_KEY_ID",
+          "BACKUP_B2_APPLICATION_KEY",
+          "BACKUP_CAPACITY_POLICY",
+          "PORT",
+          "RAILWAY_RUN_UID",
+          "SEO_DATA_DIR"
+        ],
+        "public_domain": false
+      },
+      "image_digest": null,
+      "volume_id": null,
+      "resources": null
+    },
+    "coordinator": {
+      "contract": {
+        "entrypoint": [
+          "/opt/venv/bin/python",
+          "-I",
+          "-B",
+          "/opt/zbm-maintenance/admin_launcher.py",
+          "coordinator"
+        ],
+        "handoff": null,
+        "mount": "/volume",
+        "source": null,
+        "control": "/volume/control",
+        "backup": "/volume/backup",
+        "ports": {
+          "business_private": 27001,
+          "control_private": 27002
+        },
+        "root_supervisor": true,
+        "variable_names": [
+          "BACKUP_LAUNCH_ENABLED",
+          "BACKUP_COORD_TOKEN",
+          "BACKUP_RESTIC_PASSWORD",
+          "BACKUP_B2_KEY_ID",
+          "BACKUP_B2_APPLICATION_KEY",
+          "BACKUP_CAPACITY_POLICY"
+        ],
+        "public_domain": false
+      },
+      "image_digest": null,
+      "volume_id": null,
+      "resources": null
+    },
+    "observer": {
+      "contract": {
+        "entrypoint": [
+          "/opt/venv/bin/python",
+          "-I",
+          "-B",
+          "/opt/zbm-maintenance/admin_launcher.py",
+          "observer"
+        ],
+        "handoff": null,
+        "mount": "/volume",
+        "source": null,
+        "control": "/volume/control",
+        "backup": "/volume/backup",
+        "ports": {
+          "monitor_private": 27003
+        },
+        "root_supervisor": true,
+        "variable_names": [
+          "BACKUP_LAUNCH_ENABLED",
+          "BACKUP_COORD_TOKEN",
+          "BACKUP_FIRST_DUE_UTC_SECONDS",
+          "BACKUP_ALERTS_ENABLED",
+          "BACKUP_RESEND_API_KEY",
+          "BACKUP_ALERT_FROM"
+        ],
+        "public_domain": false
+      },
+      "image_digest": null,
+      "volume_id": null,
+      "resources": null
+    },
+    "backup-trigger": {
+      "contract": {
+        "entrypoint": [
+          "/opt/venv/bin/python",
+          "-I",
+          "-B",
+          "/opt/zbm-maintenance/admin_launcher.py",
+          "trigger"
+        ],
+        "handoff": null,
+        "mount": null,
+        "source": null,
+        "control": null,
+        "backup": null,
+        "ports": {},
+        "root_supervisor": false,
+        "variable_names": [
+          "BACKUP_LAUNCH_ENABLED",
+          "BACKUP_COORD_TOKEN"
+        ],
+        "public_domain": false
+      },
+      "image_digest": null,
+      "volume_id": null,
+      "resources": null
+    }
+  },
+  "start_order": [
+    "ledger",
+    "legal",
+    "compliance",
+    "finance",
+    "seo"
+  ],
+  "stop_order": [
+    "seo",
+    "finance",
+    "compliance",
+    "legal",
+    "ledger"
+  ],
+  "routing": {
+    "client-portal": {
+      "PORTAL_LEGAL_URL": "http://coordinator.railway.internal:27001"
+    },
+    "stripe-gateway": {
+      "STRIPE_GATEWAY_FINANCE_URL": "http://coordinator.railway.internal:27001"
+    },
+    "orchestrator": {
+      "LEDGER_SERVICE_URL": "http://coordinator.railway.internal:27001"
+    },
+    "detection": {
+      "DETECTION_LEDGER_URL": "http://coordinator.railway.internal:27001",
+      "DETECTION_COMPLIANCE_URL": "http://coordinator.railway.internal:27001"
+    }
+  },
+  "stripe_private_name": "coordinator",
+  "external_inventory_complete": false,
+  "external_inventory_evidence": null,
+  "additional_external_consumers": [],
+  "coordination": {
+    "new_dedicated_token": true,
+    "distribution": "direct-service-local-copies",
+    "secret_references": false,
+    "reference_kind": "non-secret-URLs-only"
+  },
+  "schedule": {
+    "policy": "fixed-UTC-no-DST-adjustment",
+    "timezone": "UTC",
+    "cadence_seconds": 86400,
+    "grace_seconds": 900,
+    "cron_utc": null,
+    "first_due_utc_seconds": null
+  },
+  "capture_limits": null,
+  "evidence": {
+    "source_review": null,
+    "resources_approval": null,
+    "volume_bindings": null,
+    "compliance_initialized": null,
+    "dns_connectivity": null,
+    "routing": null,
+    "schedule": null,
+    "no_directory_collisions": null
+  }
+}

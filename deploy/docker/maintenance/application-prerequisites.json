@@ -1,0 +1,498 @@
+{
+  "finance": [
+    {
+      "path": "svc_recon.py",
+      "sha256": "c9bb70d3ae32d9d9758304a4e0888d9fafd493211402be87060debb24d88ae5a"
+    },
+    {
+      "path": "resend_receipts.py",
+      "sha256": "30d85f8de210c83f04e1ef1d433fea38b8c6995b49bc5ba86b076230d389c509"
+    },
+    {
+      "path": "stripe_incoming.py",
+      "sha256": "b686de327459a9c796b4e0a9c4e25931aaa510d097ed385ac6576e16f39e1adf"
+    },
+    {
+      "path": "store.py",
+      "sha256": "4a20fe620886340f35b9ac8f9bf15916a72fe900e85a9629ace9827638c008f3"
+    },
+    {
+      "path": "svc_payouts.py",
+      "sha256": "35903c38b22371aa202a956e99e36f9a22bc7a852b78d5092f52b18fb596c2df"
+    },
+    {
+      "path": "service.py",
+      "sha256": "7cea0b5058da1c153a08a5e1f32b488c3bdc347edbfbccc2aadcf16851be482e"
+    },
+    {
+      "path": "config.py",
+      "sha256": "485c61408dd02999ebbf95d7307bf779b219327dfe4f90c4862a549d4e77ecba"
+    },
+    {
+      "path": "stripe_webhooks.py",
+      "sha256": "3719df4a401c2168e53ebca16d1a957928783a1f9e17254aa512ce8d7c5a54be"
+    },
+    {
+      "path": "receipt_resend_adapter.py",
+      "sha256": "1f137776b52e179366dcdf8884825d0fb4f971e181276afe5692f11770a7953e"
+    },
+    {
+      "path": "svc_payables.py",
+      "sha256": "133b0703ed3951863938311da5c9c95e63e25f5f013f0dc1764ea3285f29b32e"
+    },
+    {
+      "path": "models.py",
+      "sha256": "3ce6c8854982bf1a3e63df4de16e6d35d575c55744aeb5d3bd42c71e86a22b7c"
+    },
+    {
+      "path": "reasons.py",
+      "sha256": "c225aa428d778dda782dad422dadbfd3a7afa76e6de9ecff1c51fb43bedbf3f3"
+    },
+    {
+      "path": "clock.py",
+      "sha256": "3327a1ac1c15526ebae6d1f7f1e4189e776e13e3bbb7d66a70cb7da8b4ceeeb7"
+    },
+    {
+      "path": "ports.py",
+      "sha256": "09e379eef281d4265cc92908737c32edfdf97d0a27ae871f77daf06f3ad44ea4"
+    },
+    {
+      "path": "recovery_inventory.py",
+      "sha256": "0786eae081393d11d2f9ba72abc370c4c5f00ef868a270e13cc660eed7696a78"
+    },
+    {
+      "path": "ledger.py",
+      "sha256": "96e319c9d0874c999c54c526c7680254929029f27afb9c734f24b31db490d760"
+    },
+    {
+      "path": "svc_stripe.py",
+      "sha256": "9d13f83d94e5ec7a2e4354001af3c6696c3db2937acd9d3764447379574d11e1"
+    },
+    {
+      "path": "serve.py",
+      "sha256": "490729f3c8249d4540ff6f9e8daf6c9e1f8ac6f5a414766871abe80c269ee1b1"
+    },
+    {
+      "path": "rules.py",
+      "sha256": "2bc0a30fcf3d5bf724792dc12a920909a12c4643377ef123c3d2e74f91b93ad9"
+    },
+    {
+      "path": "chart.py",
+      "sha256": "330360891fb56166c9eb007cc79666d10b6babb2c2ccf5af3aea012a584a183f"
+    },
+    {
+      "path": "graceful_close.py",
+      "sha256": "3df4e0258c48b4a9c9476d2528531bb5b0487292e0fe6bbb99b459dd36a2d17a"
+    },
+    {
+      "path": "textguard.py",
+      "sha256": "82ea236f85693155e8e59b8e68fa04a7b536568b96cd24fafc7dd641ddd31abd"
+    },
+    {
+      "path": "money.py",
+      "sha256": "b1db53457a9706c9ccff1e5a0199f6f29e7cdfbf8113ec624d4f5b53570440a7"
+    },
+    {
+      "path": "svc_payees.py",
+      "sha256": "c7264feec169f2ffcbe917ff1cb41a4a546090249e35584ca62e95e844f679fb"
+    },
+    {
+      "path": "health_poll.py",
+      "sha256": "96432e3271390210ef8368a42b4b642d624246bdde5394582208cdb11c453e2d"
+    },
+    {
+      "path": "answers.py",
+      "sha256": "6e80f1991cc2c8e350d6fd3b2bd8da2eb943bd878ab49b997819e55006d0bbb4"
+    },
+    {
+      "path": "api.py",
+      "sha256": "40147463cf1bcf9d617895c1ad32ac700533d3499fb82dffb83d8b08bf3d84c0"
+    },
+    {
+      "path": "housekeeping_runner.py",
+      "sha256": "c32c01cadbc0c10fce0abfa69bd66b39ea71e7c4a450ab873fa315a2cdc58efd"
+    },
+    {
+      "path": "founder.py",
+      "sha256": "bf7f2f44218e0d62a76d410024d7e4e649c1ee9090a309eb9b853c7c90cf3b7b"
+    },
+    {
+      "path": "ops_observer.py",
+      "sha256": "2f22aa0eddf198f6a89e0475ad883c4d4a249687624a700bf173e2facc2a15a8"
+    },
+    {
+      "path": "receipt_backlog.py",
+      "sha256": "680c56895728dd7f3742e2c7a79072605925d4f31e97f5f4b6194e901904da6d"
+    },
+    {
+      "path": "clients.py",
+      "sha256": "93752cc3f7d0c5ef70c14417fa4bdc1cb3ce47c2674c2b3ea36f272d4ee925b9"
+    },
+    {
+      "path": "dual_stack.py",
+      "sha256": "9dd1030d17bfa5eacbf8b3e96ddc155584a38c7ec13fbd4b8f5e8d5d7be2ebeb"
+    },
+    {
+      "path": "startup_profile.py",
+      "sha256": "847bba12844ecf6fb12beb071c3dc85b3b057d4e33ac0f497b9416b5d6775f50"
+    },
+    {
+      "path": "svc_books.py",
+      "sha256": "297c9b5981ffbb35a103179a34d5c2237943f5330197ea969578f761007bce29"
+    },
+    {
+      "path": "svc_alerts.py",
+      "sha256": "823b4e7c47cdab6a6a9d2662b48f85b165559f5687af71ab3f770b3496fb0388"
+    },
+    {
+      "path": "errors.py",
+      "sha256": "7737ba66d4b37c80048e5c8561303109889af976bd50a7712732e968563144a8"
+    },
+    {
+      "path": "receipt_delivery.py",
+      "sha256": "a2cb9e7f2c583102044ac717a5ce532b516c42660b89e4c327445806fc53d127"
+    },
+    {
+      "path": "svc_media.py",
+      "sha256": "bfac99cce130499fc22410b630059e8e33a83bb94a2e567b6b8dc132a458e0ab"
+    },
+    {
+      "path": "receipt_compatibility.py",
+      "sha256": "7a708c3edb98626fa3d11062959c41bc22aebe9a946f6c047b96dd9e7e5eac39"
+    },
+    {
+      "path": "launch_guard.py",
+      "sha256": "d8fa90f8e6238dd848e4e1f67e380ca8ab985d95029c1c9d3b5b14d9c95bfc10"
+    }
+  ],
+  "legal": [
+    {
+      "path": "store.py",
+      "sha256": "b7bf39b16f28d38dcbc3434ca55fb039564c121cee3febe465bedc9c517ace8d"
+    },
+    {
+      "path": "service.py",
+      "sha256": "beb5bd5ae7d4e97fe3a2262648b07a9e07be82891e0e920e295455d880209bf3"
+    },
+    {
+      "path": "advice.py",
+      "sha256": "16ea910a2baff588b8a7a2d86527d7420b71758d7c5e26e858ed2095a5394cc2"
+    },
+    {
+      "path": "config.py",
+      "sha256": "05abb20cd60545a98a626a43e209feba68808aec40290a4289078b64f83de565"
+    },
+    {
+      "path": "models.py",
+      "sha256": "a23c7b899f105c21995e5adfc449968f9bba9bd0f411c720f2edaaf033e33768"
+    },
+    {
+      "path": "link_tag.py",
+      "sha256": "23a59c1034bdbf2d61099fa860f5f0a6c2d4265ec233ead9f8ac0d3d7cbb7d8b"
+    },
+    {
+      "path": "reasons.py",
+      "sha256": "db0e59d1fe0bf6fed3290a6566711feac2b80b238ac7adada5495c2705ad8399"
+    },
+    {
+      "path": "clock.py",
+      "sha256": "3327a1ac1c15526ebae6d1f7f1e4189e776e13e3bbb7d66a70cb7da8b4ceeeb7"
+    },
+    {
+      "path": "ports.py",
+      "sha256": "26c2532709833445665e5d3c15cb4b524b63cec095e2f16f320a64fb55d2fbce"
+    },
+    {
+      "path": "ledger.py",
+      "sha256": "f3eba565150625be627d079b57dc02f12fd847c277ee42ae5439ff585c81d255"
+    },
+    {
+      "path": "serve.py",
+      "sha256": "86e80490a0a76485b243ca638ba3e709f73448da29e815194badff639ce7deb6"
+    },
+    {
+      "path": "rules.py",
+      "sha256": "493cc98a773df0c2d0b86eb3469a3008d2cdb104a491eabbe948ea6527f00173"
+    },
+    {
+      "path": "graceful_close.py",
+      "sha256": "3df4e0258c48b4a9c9476d2528531bb5b0487292e0fe6bbb99b459dd36a2d17a"
+    },
+    {
+      "path": "textguard.py",
+      "sha256": "e78278599f1104a5cee2e38a4408dea79f24e9619d0f57546cfe388963fbc9b5"
+    },
+    {
+      "path": "clickwrap_page.py",
+      "sha256": "8fa7efa383fe20c3bd9459878f6dec877dc21cda0607123638fb819e1243fa9d"
+    },
+    {
+      "path": "answers.py",
+      "sha256": "25003134ff9856ea3f4ded4a184f203331590cbcc7653b50539724c4ab16c64d"
+    },
+    {
+      "path": "api.py",
+      "sha256": "3cf1605e516330039f9aa24e701798a6eb9ac5a136c8f35b651b6c63a44d657f"
+    },
+    {
+      "path": "founder.py",
+      "sha256": "ffbf20b4f801e51958b7de63cc6eca6d46a82873b40b8d972aad8af0e2c655ec"
+    },
+    {
+      "path": "dual_stack.py",
+      "sha256": "9dd1030d17bfa5eacbf8b3e96ddc155584a38c7ec13fbd4b8f5e8d5d7be2ebeb"
+    },
+    {
+      "path": "startup_profile.py",
+      "sha256": "847bba12844ecf6fb12beb071c3dc85b3b057d4e33ac0f497b9416b5d6775f50"
+    },
+    {
+      "path": "errors.py",
+      "sha256": "a3f962171f5a0cb5e8e649e6009941e2ef5af39f00ec6b0936de2ed85c0cdce8"
+    },
+    {
+      "path": "compliance_client.py",
+      "sha256": "af6e85cec34965c1bbbaeacccf44a1c4998bbf9b9de3ec8b3c7839a9b038e471"
+    },
+    {
+      "path": "bizdays.py",
+      "sha256": "fc837034ef142b8297cdd9f3d610c4db1cc2697199d43ecc1978f3e2114604ce"
+    },
+    {
+      "path": "launch_guard.py",
+      "sha256": "d8fa90f8e6238dd848e4e1f67e380ca8ab985d95029c1c9d3b5b14d9c95bfc10"
+    }
+  ],
+  "compliance": [
+    {
+      "path": "store.py",
+      "sha256": "eaca5234cbda289c3bbc6bd725ffc474e1f38c067d54b936ebafced03a7b0d69"
+    },
+    {
+      "path": "service.py",
+      "sha256": "7e1416718a82e1c42352326d2b9dc4228b7643befdc56bb65c583b3d27d8d846"
+    },
+    {
+      "path": "controls.py",
+      "sha256": "3150332a27b5a6466765639f39471fd8f99639915aeb8b11420e74629635ba8c"
+    },
+    {
+      "path": "facts.py",
+      "sha256": "7c5683c74c5a4516faa6aceca4f39272b13f1a622927aa441b9a45ff9a6341cb"
+    },
+    {
+      "path": "config.py",
+      "sha256": "771e273e31656c233da60a377ab14976b8bff90f50257d99ef2671bfb405e1c9"
+    },
+    {
+      "path": "models.py",
+      "sha256": "6cc45b0f93484d629354cfb9eb0407c1cf49098c7152e0a8f800028d8f6ab5a8"
+    },
+    {
+      "path": "legal_client.py",
+      "sha256": "24f11124627ed0cdcf48a1bd4fee4503f7664e708bdb3f30e78607c9798415ee"
+    },
+    {
+      "path": "register.py",
+      "sha256": "94b4e75dfdb21253a5c9d0b7f50d27c6e324fa9b54b1361bde1c6f49023a19e5"
+    },
+    {
+      "path": "clock.py",
+      "sha256": "3327a1ac1c15526ebae6d1f7f1e4189e776e13e3bbb7d66a70cb7da8b4ceeeb7"
+    },
+    {
+      "path": "ports.py",
+      "sha256": "5205add3f07fa46cd74af77c834aab8fc4a7343cd738c1f3e9a5d758755ac18f"
+    },
+    {
+      "path": "ledger.py",
+      "sha256": "019c510f07685b86dab54f9ed7e196bc0c7231bb7bd09431e4372629c084554d"
+    },
+    {
+      "path": "serve.py",
+      "sha256": "b5b0948a6c24e7e2290fae67fa66d69b7d346d5f914be6f68decdc26f4b9b524"
+    },
+    {
+      "path": "graceful_close.py",
+      "sha256": "3df4e0258c48b4a9c9476d2528531bb5b0487292e0fe6bbb99b459dd36a2d17a"
+    },
+    {
+      "path": "textguard.py",
+      "sha256": "879f196b4b3e8db701f4d41c9ca5e78900476c19b8ce6787a5646b850a0af6fc"
+    },
+    {
+      "path": "api.py",
+      "sha256": "b6aeb5c1f8acee523b8ccdd5bea0ceb6c6b75b084d66feaa9c952299b1e2f5ab"
+    },
+    {
+      "path": "founder.py",
+      "sha256": "677d72808551f49d33f2961084d9394007a345cc1a24007c2a0316444663bcfd"
+    },
+    {
+      "path": "dual_stack.py",
+      "sha256": "9dd1030d17bfa5eacbf8b3e96ddc155584a38c7ec13fbd4b8f5e8d5d7be2ebeb"
+    },
+    {
+      "path": "startup_profile.py",
+      "sha256": "847bba12844ecf6fb12beb071c3dc85b3b057d4e33ac0f497b9416b5d6775f50"
+    },
+    {
+      "path": "scheduler.py",
+      "sha256": "a73a12376bc2ec8bfb97dd36e92463df94a7824bc1d0f0e5c7a399d96fc6d00f"
+    },
+    {
+      "path": "errors.py",
+      "sha256": "cf5017577ddc158ffb38f190e78f6c1edeb1b0a38df9907d76f853675e529eb9"
+    },
+    {
+      "path": "readiness.py",
+      "sha256": "65c39053efc34c3952d3de9b61ed30d83602a245f7a951200327d0e90b606a48"
+    },
+    {
+      "path": "jurisdictions.py",
+      "sha256": "6fd9850444466c5fa3c2306abeabed655cb4ac40eba1bf499019f1b4ba914448"
+    },
+    {
+      "path": "fetcher.py",
+      "sha256": "8ded22932aa5c1998d8ce3722f60dfd098ddf1a97319dd228959766e99636bd3"
+    },
+    {
+      "path": "launch_guard.py",
+      "sha256": "d8fa90f8e6238dd848e4e1f67e380ca8ab985d95029c1c9d3b5b14d9c95bfc10"
+    }
+  ],
+  "seo": [
+    {
+      "path": "gsc_client.py",
+      "sha256": "73b0ff6b43414099d17d9255969fe09637d5175a18fe40f5efe193fc017d1250"
+    },
+    {
+      "path": "svc_engines.py",
+      "sha256": "837c3f69d567e69b3286e7f36d493c96ccb65514db8121b01311c3d6d7766d99"
+    },
+    {
+      "path": "svc_entity.py",
+      "sha256": "91eb30f6d04c929ed7f0f1588f5ba937862827a049344e5d194a5360c62de0f8"
+    },
+    {
+      "path": "store.py",
+      "sha256": "6f99495f77cf4c562e3b5899c23ca671678a149cd914db23e6170ee62cf00871"
+    },
+    {
+      "path": "service.py",
+      "sha256": "609922ca9e9ea86589d9a0c36178316084c4f6fa4bfb81938c0b45f3070987f5"
+    },
+    {
+      "path": "config.py",
+      "sha256": "f22e42a5b86e9e507bd2615acf8f4dc8e4987bb37c4be8a6e7074236774123aa"
+    },
+    {
+      "path": "models.py",
+      "sha256": "a29a1869b6b937ed1b30e8d9db9397d3120343320bb8f03eafc9688f423c1f37"
+    },
+    {
+      "path": "lookalikes.py",
+      "sha256": "aa8fd5408a15e55a3d2db69843447dc7059da6a98f98ae640a1d4b361dea49fa"
+    },
+    {
+      "path": "reasons.py",
+      "sha256": "182ff2916a180859bbfddbf5e0262c641753d0169f9ea2b30f58f68659e6337b"
+    },
+    {
+      "path": "client_report.py",
+      "sha256": "bc285328917455d8fc03195c578b6aff8a146e53ed70857ec3c29d622834997e"
+    },
+    {
+      "path": "svc_invoices.py",
+      "sha256": "5bf6d890e03219970da3ce15bb053bf9caada7b3021a57e16d170e1feabe2d53"
+    },
+    {
+      "path": "clock.py",
+      "sha256": "3327a1ac1c15526ebae6d1f7f1e4189e776e13e3bbb7d66a70cb7da8b4ceeeb7"
+    },
+    {
+      "path": "ports.py",
+      "sha256": "692f41e611c4b298ebc7f5e0414fb1f5e37bb3a14a499bc1c3b892ca7f729e2f"
+    },
+    {
+      "path": "ledger.py",
+      "sha256": "48f83fd86d3e0055a9a3a3ba4e3103185dbff06fbc0a2613a9f5c6863e81a61b"
+    },
+    {
+      "path": "perplexity.py",
+      "sha256": "1613d58a0054359238b3f114a2cb2699a88fb3cd53b93862d6ba02ae00667919"
+    },
+    {
+      "path": "serve.py",
+      "sha256": "a4e8e53fd6506fac2b09fa75aa3d6901077dde20701050375e91878248f04c16"
+    },
+    {
+      "path": "svc_logs.py",
+      "sha256": "c149ea2a71716d8e500adb68be6a775a823e2a6e8def5b83165c4480852d5155"
+    },
+    {
+      "path": "graceful_close.py",
+      "sha256": "3df4e0258c48b4a9c9476d2528531bb5b0487292e0fe6bbb99b459dd36a2d17a"
+    },
+    {
+      "path": "api.py",
+      "sha256": "5c6eabadc4e1c6608e03ee80d61defb026e6be804ed6dd0dbfcb072fb29dfd43"
+    },
+    {
+      "path": "founder.py",
+      "sha256": "ae5efe7b6ec9ca0e65295a9f81c4d99f059259f75fec97afdd03b6e1b8e34279"
+    },
+    {
+      "path": "finance_client.py",
+      "sha256": "2fc102afb9334bf62d9332b4d1f1776d0b8e831b0d8c82badb3fa2006432c8ea"
+    },
+    {
+      "path": "svc_tenants.py",
+      "sha256": "81b69bbcd898016d9507709e527080814318d44672e131dbf413384a69cd2438"
+    },
+    {
+      "path": "svc_schedules.py",
+      "sha256": "76d8f1db920ce8b593625ed63095f35715015ce258ecf765f507c1138aaeb9e4"
+    },
+    {
+      "path": "svc_manager.py",
+      "sha256": "c254b20e1dc6f2c99cc8c3d62ca75e98c0f6411dcf80b42a941fa47a9eb8f227"
+    },
+    {
+      "path": "svc_audits.py",
+      "sha256": "066d942dc92575bc161c76fcbb8e1383156cf21ce45c4c3b2e59f449374bbb3e"
+    },
+    {
+      "path": "dual_stack.py",
+      "sha256": "9dd1030d17bfa5eacbf8b3e96ddc155584a38c7ec13fbd4b8f5e8d5d7be2ebeb"
+    },
+    {
+      "path": "startup_profile.py",
+      "sha256": "847bba12844ecf6fb12beb071c3dc85b3b057d4e33ac0f497b9416b5d6775f50"
+    },
+    {
+      "path": "errors.py",
+      "sha256": "b222728b679e5ec7f08f3d897955a7dfb5900082ae68ccd2d07e3e26c3771833"
+    },
+    {
+      "path": "compliance_client.py",
+      "sha256": "a902e45572a72cba20933535a8f40f2cc391b7af2335e0b0b2ab1db56c1a69fa"
+    },
+    {
+      "path": "svc_reports.py",
+      "sha256": "93dc9b64f12cc953dfb838e0c5a1365543acac556bcd6ce95e2722b58c98e312"
+    },
+    {
+      "path": "envelope.py",
+      "sha256": "8ffc6e1524ab6415afa00876e2b0d10595ebc7b29625e99b5b9003b21b7ff8ef"
+    },
+    {
+      "path": "svc_gsc.py",
+      "sha256": "0dad85cef03bddc1b239f4f3b814db14c1f8560cb5b17ff6c0ffc5664aa6c270"
+    },
+    {
+      "path": "launch_guard.py",
+      "sha256": "d8fa90f8e6238dd848e4e1f67e380ca8ab985d95029c1c9d3b5b14d9c95bfc10"
+    }
+  ]
+}

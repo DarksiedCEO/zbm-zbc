@@ -225,6 +225,15 @@
    "statement": "An outbound notice needs Andre's token as the authorized signer and counsel review first when a licence or fair use is possible (512(f)).",
    "status": "verified",
    "title": "Outbound DMCA notices"
+  },
+  {
+   "kind": "founder",
+   "parameters": {},
+   "rule_id": "LG-20",
+   "source_urls": [],
+   "statement": "For the documents marked founder_approval_allowed (client_msa, the SOWs, zbc_order_form) only, and in place of the LG-02 sign-off record: Andre's token may approve a version on its content hash with a written rationale; the version is recorded with approval_basis founder_approval. Andre's token may also record a founder determination on CQ-19 with a written rationale: while it is in force, a clickwrap_unticked_box acceptance of those documents with every LG-03 field is evidence-sufficient, recorded with evidence_basis founder_determination. LG-01, LG-02, LG-07 and LG-18 govern every other document and every other use of a CQ row.",
+   "status": "verified",
+   "title": "Client commercial contracts: founder approval (ADR 0022)"
   }
  ],
  "source": "LEGAL_SPEC.md rev 1 \u00a7B.12",

@@ -231,3 +231,27 @@ def conn(client_id: str, shop: str, token_file: str, **budget) -> dict:
     if budget:
         c["budget"] = budget
     return c
+
+
+# ---- ADR 0024: the Compliance (38) gate --------------------------------------------------------------------------
+# TEST-ONLY: Compliance answers a current ALLOW for every client unless told otherwise. The production default
+# (NotConfiguredCompliance) refuses every client; the connector's other tests run behind this fake, as they do behind
+# a fake Shopify and a memory ledger. test_compliance_gate_adr0024.py tests the gate itself.
+
+
+class AllowCompliance:
+    connected = True
+
+    def __init__(self):
+        self.refuse: set = set()
+        self.unavailable = False
+        self.asked: list = []
+
+    def require_allow(self, client_id: str) -> dict:
+        from store_connector.reasons import StoreError
+        self.asked.append(client_id)
+        if self.unavailable:
+            raise StoreError("COMPLIANCE_UNAVAILABLE")
+        if client_id in self.refuse:
+            raise StoreError("COMPLIANCE_NOT_ACTIVATED")
+        return {"ruling_id": f"cmp-rul-{client_id}", "jurisdiction": "US-CA"}

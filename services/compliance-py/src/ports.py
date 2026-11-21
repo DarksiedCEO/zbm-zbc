@@ -107,13 +107,33 @@ class DocVersion:
     reason: str = ""
 
 
+@dataclass(frozen=True)
+class ClientDocument:
+    """ADR 0024 (HR-15): Legal's answer for one document a client accepted. ``current``: the version is Legal's
+    current version of ``doc_id`` with this hash; ``accepted``: the acceptance is this party's, for this version and
+    hash, with sufficient evidence. Unavailable is never a pass."""
+
+    available: bool
+    current: bool = False
+    accepted: bool = False
+    reason: str = ""
+
+
 class Legal37Port(Protocol):
     def current_version(self, doc_id: str) -> DocVersion: ...
 
+    def client_document(self, doc_id: str, version: str, doc_sha256: str, acceptance_id: str,
+                        party_ref: str) -> ClientDocument: ...
+
 
 class NotBuiltLegal37:
+    """COMPLIANCE_LEGAL_* unset (legal_client.HttpLegal37 is the wired client): every answer is unavailable."""
+
     def current_version(self, doc_id):
-        return DocVersion(False, reason="Legal (37) is not built yet: not allowed yet")
+        return DocVersion(False, reason="Legal (37) is not wired: not allowed yet")
+
+    def client_document(self, doc_id, version, doc_sha256, acceptance_id, party_ref):
+        return ClientDocument(False, reason="Legal (37) is not wired: not allowed yet")
 
 
 # --- Sanctions screening provider (spec C.6) -----------------------------------------

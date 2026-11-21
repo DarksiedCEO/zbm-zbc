@@ -1306,3 +1306,19 @@ prompt-volume source; Department 28 clientfix hand-off; the remaining agents per
 Search Console is built and NOT_CONNECTED until Andre's steps (section "Search Console"). (Built in Wave 3: the live
 run against ledger-rust, W3-1; the Finance (31) client to verify invoices, W3-2. Built in Wave 4: the Perplexity
 answer-engine adapter, W4.)
+
+## Restored log-ingest key continuity (2026-11-01)
+
+A new chunk must use the original ingest's recorded privacy-key fingerprint.
+The service captures the configured key under the ingest lock, checks that
+binding before processing, and checks both the captured and current key again
+under the commit lock. A mismatch returns HTTP409 LOG_HASH_KEY_MISMATCH without
+committing the chunk. Restore the original SEO_LOG_HASH_KEY_FILE to resume the
+same sequence. Do not rewrite the recorded fingerprint or aggregate sketches to
+make a new key appear compatible; intentional rotation requires a new ingest.
+
+Exact idempotent chunk replays can still return the existing result without new
+hashing or effects. Existing aggregates remain readable and can be finished
+without rehashing under a replacement key. The stored fingerprint is a continuity
+check, not authenticated journal signing or a substitute for key escrow. Tests
+cover wrong-key restart, original-key recovery and changes during processing.

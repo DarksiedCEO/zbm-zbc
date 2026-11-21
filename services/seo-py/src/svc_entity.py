@@ -35,6 +35,20 @@ def phone_digits(s: str) -> str:
     return d[1:] if len(d) == 11 and d.startswith("1") else d
 
 
+def validate_field(field: str, data: dict) -> None:
+    """The same supplied-fact vocabulary and validation for creation and subsequent updates."""
+    if field not in FIELDS:
+        raise Invalid(R("ENTITY_FIELD_UNKNOWN"))
+    if not all(type(data.get(k)) is str for k in ("value", "source", "authority", "provenance")):
+        raise Invalid(R("ENTITY_VALUE_INVALID"))
+    value = data["value"]
+    if not _VALUE.fullmatch(value) or not SOURCE.fullmatch(data["source"]) \
+            or data["authority"] not in AUTHORITIES or not _VALUE.fullmatch(data["provenance"]):
+        raise Invalid(R("ENTITY_VALUE_INVALID"))
+    if field == "telephone" and len(phone_digits(value)) != 10:
+        raise Invalid(R("ENTITY_VALUE_INVALID"))
+
+
 class EntityMixin:
     def _seed_entity(self) -> None:
         if ZBM_ENTITY in self.entities:
@@ -56,15 +70,43 @@ class EntityMixin:
             "entity_id": d["entity_id"], "tenant_id": d["tenant_id"], "version": 1,
             "fields": {k: {**f, "observed_at": at, "history": []} for k, f in d["fields"].items()}}
 
+    def create_entity(self, tid: str, body: dict) -> dict:
+        supplied = body["fields"]
+        if not isinstance(supplied, list) or not 1 <= len(supplied) <= len(FIELDS):
+            raise Invalid(R("ENTITY_VALUE_INVALID"))
+        names = set()
+        for value in supplied:
+            field = value["field"]
+            validate_field(field, value)
+            if field in names:
+                raise Invalid(R("ENTITY_VALUE_INVALID"))
+            names.add(field)
+        fields = {value["field"]: {k: value[k] for k in ("value", "source", "provenance", "authority")}
+                  for value in supplied}
+        with self.lock:
+            self._gate()
+            tenant = self._get(self.tenants, tid, "TENANT_NOT_FOUND")
+            self.check_kill(tenant=tid, capability="entity_write", write=True)
+            if tenant["kind"] != "client":
+                raise Invalid(R("ENTITY_TENANT_KIND_INVALID"))
+            # The route tenant is validated and at most40 characters; this is an existing entity-ID shape.
+            eid = f"ent-{tid}"
+            rk = self.rk("entity_create", tid, body)
+            if self._idem("andre", rk, body):
+                return self.entity_view(eid)
+            if eid in self.entities or any(e["tenant_id"] == tid for e in self.entities.values()):
+                raise Conflict(R("ENTITY_EXISTS"))
+            data = {"entity_id": eid, "tenant_id": tid,
+                    "fields": {field: dict(value) for field, value in fields.items()}}
+            self._commit("entity_created", self._req(data, "andre", rk, body, eid), "andre",
+                         evidence=("entity_created", f"entity:{eid}",
+                                   {"entity_id": eid, "tenant_id": tid,
+                                    "fields_sha256": self._fields_sha(fields)}, ("andre", rk)))
+            return self.entity_view(eid)
+
     def update_entity_field(self, entity_id: str, body: dict) -> dict:
         field, value = body["field"], body["value"]
-        if field not in FIELDS:
-            raise Invalid(R("ENTITY_FIELD_UNKNOWN"))
-        if not _VALUE.fullmatch(value) or not SOURCE.fullmatch(body["source"]) \
-                or body["authority"] not in AUTHORITIES or not _VALUE.fullmatch(body["provenance"]):
-            raise Invalid(R("ENTITY_VALUE_INVALID"))
-        if field == "telephone" and len(phone_digits(value)) != 10:
-            raise Invalid(R("ENTITY_VALUE_INVALID"))
+        validate_field(field, body)
         with self.lock:
             self._gate()
             e = self._get(self.entities, entity_id, "ENTITY_NOT_FOUND")
