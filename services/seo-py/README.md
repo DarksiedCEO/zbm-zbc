@@ -70,8 +70,8 @@ MUST failure or ERROR.
 | `SEO_NON_PRODUCTION` | `0` | `1` allows an in-memory run without `SEO_DATA_DIR` (tests only) |
 | `SEO_DATA_DIR` | — | the record log and its lock (flock: one process per directory) |
 | `SEO_KILL_GLOBAL` | `0` | `1` starts with the global kill switch engaged; it cannot be released at runtime |
-| `SEO_KILLED_CAPABILITIES` | empty | comma list of `fetch`, `render`, `ai_probe`, `audit`, `entity_write`, `prompt_sets`, `logs`, `schedules`, `reports` killed at start (sticky) |
-| `SEO_KILLED_PROVIDERS` | empty | comma list of `web`, `openai`, `anthropic`, `google`, `perplexity` killed at start (sticky) |
+| `SEO_KILLED_CAPABILITIES` | empty | comma list of `fetch`, `render`, `ai_probe`, `audit`, `entity_write`, `prompt_sets`, `logs`, `schedules`, `reports`, `keywords` killed at start (sticky) |
+| `SEO_KILLED_PROVIDERS` | empty | comma list of `web`, `openai`, `anthropic`, `google`, `perplexity`, `gsc`, `bing` killed at start (sticky) |
 | `SEO_FETCH_TIMEOUT_SECONDS` | `10` | per-phase timeout (1..60); the whole response must arrive within twice this |
 | `SEO_FETCH_MAX_BYTES` | 2 MiB | decoded body cap (64 KiB..10 MiB) |
 | `SEO_FETCH_MAX_REDIRECTS` | `5` | redirect cap (0..10), every hop re-checked |
@@ -79,6 +79,8 @@ MUST failure or ERROR.
 | `SEO_PROBE_SAMPLES` | `5` | answers sampled per prompt per engine (3..50) |
 | `SEO_BOT_INFO_URL` | unset | an https page about the crawler, added to its User-Agent |
 | `SEO_LOG_HASH_KEY_FILE` | — (required with `SEO_DATA_DIR`) | key for the keyed hashes behind the distinct-client-IP sketch of uploaded logs (`openssl rand -hex 32`, mode 0600); no IP and no IP hash is ever stored |
+| `SEO_VAULT_KEY`, `SEO_VAULT_KEY_ID` | unset | the vault / store-code key (Wave-1 `src/vault.py`, `src/primitives/codes.py` B-CD-01): base64url of exactly 32 random bytes and its short id, set together or not at all (partial or malformed = no key). Priya codes every WITHHELD keyword-ledger row as `{c:query:<16 hex>}` under it and records `codes_key_id` in the run report (priya-spec/2 F-7); unset, a keyword-ledger ingest with a withheld key is refused `503 VAULT_UNAVAILABLE` before any row is written, never a fallback to text. Never logged, shown or recorded |
+| `SEO_VAULT_KEY_PREVIOUS`, `SEO_VAULT_KEY_PREVIOUS_ID` | unset | the key being retired during a rotation: decrypt only (records written under it), every new write and code uses the current key; needs a current key |
 | `SEO_LOG_MAX_BYTES` | 256 MiB | bytes per log ingest (1 MiB..2 GiB) |
 | `SEO_LOG_RETENTION_DAYS` | `90` | after this an ingest is served as totals only (`expired`) |
 | `SEO_LOG_MAX_OPEN_INGESTS` | `2` | open log ingests per tenant (1..20) |
@@ -98,6 +100,7 @@ MUST failure or ERROR.
 | `SEO_GSC_MAX_REQUESTS` | `30` | HTTP requests per read, retries included (6..200); past it `GSC_BUDGET_EXHAUSTED` |
 | `SEO_GSC_TIMEOUT_SECONDS`, `SEO_GSC_DEADLINE_SECONDS` | `10` / `60` | per-attempt timeout (1..60) and the hard deadline over a whole read (5..300): DNS, connect, TLS and body |
 | `SEO_GSC_READS_PER_DAY` | `4` | Search Console reads per tenant in any 24 hours, scheduled re-audits included (1..48) |
+| `SEO_GSC_LEDGER_READS_PER_DAY` | `2` | Priya's keyword-ledger Search Console reads per tenant in any 24 hours (1..12), apart from `SEO_GSC_READS_PER_DAY` so ledgers never starve audits (ADR 0047) |
 | `SEO_GSC_RETENTION_DAYS` | `90` | after this a report's search-performance breakdowns are served as window totals only (1..480) |
 | `SEO_PERPLEXITY_API_KEY_FILE` | unset | Wave 4: the Perplexity API key in a file (regular file owned by the service user, mode 0600/0400, no symlink). Unset (and no `SEO_PERPLEXITY_API_KEY`): the Perplexity engine is `NOT_CONNECTED` and the service starts as before |
 | `SEO_PERPLEXITY_API_KEY` | unset | the same key as a plain variable, for platforms without secret files (Railway service variables). Setting both refuses start. The key is never logged, shown, recorded or reported (`/status` shows only `key_source`: `file` or `env`) |
@@ -157,9 +160,23 @@ within the byte cap, and enforces one hard deadline (twice `SEO_FETCH_TIMEOUT_SE
 | `POST /tenants/{tid}/log-ingests`, `.../{iid}/chunks`, `.../{iid}/finish`; `GET` both | dashboard, seo_agent, hub (own tenant) | first-party log upload in line-aligned base64 chunks; Selene's `log_access` report (Wave 2) |
 | `GET /tenants/{tid}/audits/{aid}/drift?against={aid}` | scoped | search-truth drift between two completed audits (Wave 2) |
 | `POST /tenants/{tid}/schedules`, `.../{sid}/status`; `GET` both | dashboard, seo_agent (+ Andre for clients) | scheduled re-audits; drift report per consecutive pair (Wave 2) |
+| `POST /tenants/{tid}/keyword-ledger` | dashboard, seo_agent (own); Andre for a client (+ Compliance activation) | Priya's keyword ledger, `{"request_id", "sources": ["gsc", "bing"], "bing_site_domain"}`: ESTABLISHED / EMERGING rows with per-source provenance; computed now, handed out once, never stored (ADR 0047) |
+| `GET /tenants/{tid}/keyword-ledger-runs` | dashboard, seo_agent, compliance_38 | recorded keyword-ledger runs (ids, hashes, counts; never rows) |
 | `GET /department`, `POST /agents/{agent}/lifecycle` | dashboard (+ Andre for restricted / retired), compliance_38 reads | work queues, scorecards, lifecycle (Wave 2) |
 | `POST /jobs/{integrity,interrupted-audits,schedule-tick}/run` | scheduler | integrity check; record interrupted runs; run due scheduled slots |
 | `GET /audit/{integrity,export,evidence}` | dashboard, compliance_38 | the R6-M1 evidence view: unanchored evidence = attempted, not done |
+
+## Priya — keyword ledger (ADR 0047)
+
+`src/agents/priya.py`, `src/svc_keywords.py`: one task, the tenant's keyword ledger from first-party data only. ESTABLISHED
+rows have measured impressions on the property (Search Console; Bing Webmaster Tools when wired), each source's numbers
+kept apart with source, date range and a Poisson band; EMERGING rows are thin observed long-tail queries (counts kept as
+measured, flagged) and variants derived deterministically from the site's own long-tail frames, with no volume at all.
+No market volume, no keyword difficulty, no model, no paid data. PII-suspect queries are dropped (counted only). A run
+spends one Search Console read of its own `SEO_GSC_LEDGER_READS_PER_DAY`; kill switches `capability:keywords`, `provider:gsc`,
+`provider:bing`. `src/bing_webmaster.py` (GetQueryStats) is fixtures only: `SEO_BING_WEBMASTER_KEY_FILE` still refuses
+start. `src/keyword_planner.py` (Google Ads KeywordPlanIdeaService) is an interface only. The EMERGING hand-off to Theo
+and Naomi (`priya-emerging-handoff/1`) is a contract only; neither is built.
 
 ## Layout
 

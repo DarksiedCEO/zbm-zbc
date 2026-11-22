@@ -701,6 +701,7 @@ Everything else finance-py reads — leave at the default (services/finance-py/R
 | `SEO_GSC_WINDOW_DAYS`, `SEO_GSC_PAGE_ROWS`, `SEO_GSC_MAX_PAGES`, `SEO_GSC_MAX_ROWS` | no | no | `28`, `5000`, `10`, `50000` | Search Console read window and pagination caps (seo-py README) |
 | `SEO_GSC_MAX_REQUESTS`, `SEO_GSC_TIMEOUT_SECONDS`, `SEO_GSC_DEADLINE_SECONDS` | no | no | `30`, `10`, `60` | requests per read (must cover the page caps, else start is refused), per-attempt timeout, whole-read deadline |
 | `SEO_GSC_READS_PER_DAY`, `SEO_GSC_RETENTION_DAYS` | no | no | `4`, `90` | reads per tenant per 24 h; days before breakdowns are served as totals only |
+| `SEO_GSC_LEDGER_READS_PER_DAY` | no | no | `2` | Priya's keyword-ledger reads per tenant per 24 h (1..12), a budget apart from audits' (ADR 0047) |
 | `SEO_PERPLEXITY_API_KEY` | no | yes | unset | the Perplexity key as a plain variable (the Railway form; ADR 0017 W4). Unset = the engine is `NOT_CONNECTED`. Must differ from every seo token |
 | `SEO_PERPLEXITY_API_KEY_FILE` | no | — | unset | the same key as a file; not used on Railway (setting both refuses start) |
 | `SEO_PERPLEXITY_PROTOCOL` | no | no | `agent` | `agent` (the Agent API, `POST /v1/agent`) or `sonar` (the legacy request, rollback only; ADR 0017 W4-8) |

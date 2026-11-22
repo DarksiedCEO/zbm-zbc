@@ -627,7 +627,37 @@ GSC-12. **Limitations (honest).**
      GSC-2; the first real read will be the first contact. U1 is unverified.
    - Strictness has a cost: a new top-level field from Google, or a row Google sends with clicks > impressions, stops
      the read visibly (`GSC_PROTOCOL_ERROR`) instead of being half-read.
-   - Names in queries are not detected as such; they are safe only because no query text is kept. Page templates
+   - Names in queries are not detected as such; they are safe only because no query text is kept. Address-shaped
+     queries, PO boxes, PMB numbers, rural routes, ZIP+4, a state with a ZIP, UK and Canadian postcodes, French
+     leading forms (`350 rue …`) and any query over 512 characters are `pii_suspect` since rules `2026-11-08.16`
+     (ADR 0047, "Personal data"); the id / token word rule no longer drops model numbers, tire sizes, decimals or
+     years (`24acc636a003`, `225/65r17`, `3.5`, `2012`). Not caught: bare named streets with no suffix (`1200
+     broadway`, `123 n main`), landmark or building-name addresses, streets with more than three name words or an
+     unlisted suffix, an English-word state code with its ZIP (`portland or 97201`), a UK postcode without its space,
+     other countries' postal formats (the rule is US-centric). Base64- and AWS-secret-like words holding `/` drop as
+     secrets, and since round 8 every URL-like query is `pii_suspect` whole (host name, scheme, `www.`, percent
+     escape, IP, `host:port`, or a non-fraction `/` word; after up to three percent-decodes), so URL queries are
+     never counted in another class; a Luhn-valid 13-19 digit run is a card number whatever its groups; split
+     secrets are judged with separators removed. Round 9: combining marks / format characters are stripped before
+     every check; IPv6, hex IPv4, script schemes and spaced / "dot" hosts are URL-like; split hex and base64 text
+     and cards split by filler letters drop. Round 10: one character normalisation shared with Priya's stored key;
+     the full word rules on secret-chunked queries; URL-safe base64 (with a tell); cards across short filler
+     tokens; spelled-out digit runs; a table-driven attack corpus (`tests/attack_corpus.py`). Not caught: dotted
+     octal / hex IPv4, "dot" hosts with uncommon TLDs, split base64 of binary data, an address spaced out character
+     by character, three or more stacked obfuscations (the attack corpus tests every single obfuscation and every
+     ordered pair, 18,826 cases, and all are dropped since round 12). Round 13: year lists and calendar dates in
+     every common order are kept (a 1,080-query year / date probe drops 0). Round 14: a date is exempt only when it
+     stands alone. Round 15 (structural): card, phone and SSN detectors always run on the raw text with no
+     exemption of any kind; exemptions only relax the generic digit rules. Over-dropped by design: digits that are a
+     valid card / phone / SSN however grouped (`10001 2025`). Round 16: detector separators by Unicode category;
+     7-digit local and vanity toll-free numbers; the classifier's ` at ` e-mail rule is e-mail shaped (`deals at
+     walmart` is kept; `logs._AT_WORD`, used by the log templater, is unchanged); every run of non-ordinary tokens is
+     scanned by the detectors, so context never hides a value.
+     Round 11: no length rule on joined letter-digit text (spec queries kept); 9+ digits across filler tokens;
+     homoglyph, enclosed and Spanish spelled digits; spaced / "dot" IPv4. Not caught: base64 under 12 characters, a random password written as a plain word. Over-dropped: a non-address shaped
+     like `<number> <word> st|ave|dr…` or `<number> <word> court|place|way` at the end of a query. Osei keeps no query
+     text, so a miss changes only which class a query is counted in; the client report's label lists what is set
+     aside. Page templates
      collapse every multi-word slug to `{slug}` and send templates of fewer than 3 URLs to `{other}`, but a plain
      one-word segment shared by 3 or more URLs is kept as written: a site whose paths name people with single words
      (`/users/jsmith/{slug}` across three posts) can still show such a word. The threshold of 3 is this service's
@@ -1322,3 +1352,11 @@ hashing or effects. Existing aggregates remain readable and can be finished
 without rehashing under a replacement key. The stored fingerprint is a continuity
 check, not authenticated journal signing or a substitute for key escrow. Tests
 cover wrong-key restart, original-key recovery and changes during processing.
+
+## Priya, the keyword agent (2026-11-08)
+
+Priya's keyword ledger (`POST /seo/v1/tenants/{tid}/keyword-ledger`), the Bing Webmaster Tools adapter (fixtures
+only; `SEO_BING_WEBMASTER_KEY_FILE` still refuses start), the Google Ads Keyword Planner interface, the new switches
+`capability:keywords` and `provider:bing`, and the EMERGING hand-off contract to Theo and Naomi are recorded in
+[ADR 0047](0047-seo-priya-keyword-ledger.md). A Priya run that reads Search Console spends one read of
+`SEO_GSC_READS_PER_DAY`; the ledger (it holds query text) is handed out once and never stored, so GSC-6 holds.

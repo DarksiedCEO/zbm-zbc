@@ -21,7 +21,7 @@ from envelope import sha
 from errors import Conflict, Forbidden, Invalid, Unavailable
 from reasons import R
 
-AGENTS = ("selene", "delia", "roman", "entity_check", "callum", "naomi", "osei")
+AGENTS = ("selene", "delia", "roman", "entity_check", "callum", "naomi", "osei", "priya")
 STATES = ("active", "watch", "retrain", "restricted", "retired")
 MOVES = {"active": ("watch", "restricted"), "watch": ("active", "retrain", "restricted"),
          "retrain": ("active", "watch", "restricted"), "restricted": ("active", "retrain", "retired"),
@@ -127,6 +127,7 @@ class ManagerMixin:
                                        round(sp_outcomes.get("NOT_CONNECTED", 0) / sp_runs, 4)}
                 if agent == "osei" else None,
                 "engine_runs": self.engine_scorecard() if agent == "callum" else None,
+                "keyword_runs": self.keyword_scorecard() if agent == "priya" else None,
                 "basis": "completed audit reports, finished log ingests, recorded drift reports and (Callum) "
                          "recorded answer-engine reservations and settlements"}
 
