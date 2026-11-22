@@ -51,6 +51,7 @@ class RunContext:
     paths: list = field(default_factory=lambda: ["/"])
     robots_cache: dict = field(default_factory=dict)
     robots: Optional[dict] = None          # filled by Selene, read by Delia and Roman
+    path_key: Optional[bytes] = None       # the log hash key: Delia's sitemap sample digests (agents/logs.path_digest)
 
     @property
     def origin(self) -> str:

@@ -27,12 +27,12 @@ import ipaddress
 import json
 import math
 import re
-import unicodedata
 from typing import Callable, Optional
 from urllib.parse import unquote, urlsplit
 
-import lookalikes
 from agents import bots
+from primitives import robots as robots_mod
+from primitives import safe_url as _su
 
 FORMATS = ("combined", "common", "jsonl")
 LINE_MAX = 8192
@@ -44,90 +44,51 @@ _CLF = re.compile(r'^(\S+) \S+ \S+ \[[^\]]{1,64}\] "([A-Z]{1,12}) (\S{1,4096})(?
                   r'(?: "([^"\\]*(?:\\.[^"\\]*)*)" "([^"\\]*(?:\\.[^"\\]*)*)")?\s*$')
 _UA_RX = {t: re.compile(r"(?<![A-Za-z0-9])" + re.escape(t) + r"(?![A-Za-z0-9])", re.I) for t in bots.ua_families()}
 
+# The one URL / path rule (AEGIS Wave-1 certification): templating lives in primitives/safe_url.py.
 
-_EMAIL = re.compile(r"[^/@\s]{1,64}@[^/@\s]{1,255}")
-_UUID = re.compile(r"[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}")
-_HEX = re.compile(r"[0-9a-fA-F]{16,}")
-_DIGITS = re.compile(r"\d{4,}")
-_TOKENISH = re.compile(r"[A-Za-z0-9_\-=+.~]{20,}")
-TEMPLATE_RULES = ("invisible characters removed; decode once; NFKC-normalise and fold confusable at-signs; drop query "
-                  "and fragment; per segment, judged on its lookalike fold (the repo's shared table): "
-                  "an e-mail in any spelling ('@', '(at)', '[at]', ' at ... dot', %40) -> {email}; UUID -> {uuid}; "
-                  "7+ digits in total, whatever separates them -> {number}; only digits -> {id}; a file name with "
-                  "a non-code extension -> {file}.ext; 16+ hex, 20+ token characters, 8+ characters mixing letters "
-                  "and 2+ digits, or over 40 characters -> {token}; any run of 4+ digits left -> {id}; short numeric "
-                  "segments next to each other with 7+ digits together -> {number}")
-
-
-_AT_WORD = re.compile(r"[(\[{<]\s*at\s*[)\]}>]|\s+at\s+|%40|&#0*64;|&commat;|\bat\b(?=[^/]*\bdot\b)", re.I)
-_FILE = re.compile(r"(.+)\.([A-Za-z0-9]{1,5})")
-STATIC_EXT = frozenset({"css", "js", "mjs", "map", "svg", "ico", "woff", "woff2", "ttf", "eot", "otf", "xml", "txt",
-                        "html", "htm", "php", "asp", "aspx", "jsp", "json", "webmanifest", "xhtml", "rss", "atom"})
-# Fold what NFKC leaves: other "at" signs to "@".
-_FOLD = str.maketrans({"\uff20": "@", "\ufe6b": "@", "\u24d0": "a"})
-
-
-def _digits(s: str) -> int:
-    return sum(c.isdigit() for c in s)
-
-
-_LOOKALIKE = lookalikes.Table()
-
-
-def _segment(seg: str) -> str:
-    """The placeholder for one path segment, or the segment itself when nothing in it looks identifying. Judged on
-    the segment's lookalike fold (war room, ADR 0017 W3-3: ``јαne`` is ``jane``, ``[αT]`` is ``[at]``, ``p\u0501f`` is
-    ``pdf``); a segment kept is kept as written (NFKC, invisible characters removed), never as its fold."""
-    if not seg:
-        return ""
-    folded = _LOOKALIKE.fold_cased(seg)
-    kind = _kind(folded)
-    if kind is not None:
-        return kind
-    return _DIGITS.sub("{id}", seg)[:40]
+_EMAIL = _su._EMAIL
+_UUID = _su._UUID
+_HEX = _su._HEX
+_DIGITS = _su._DIGITS
+_TOKENISH = _su._TOKENISH
+_AT_WORD = _su._AT_WORD
+_FILE = _su._FILE
+STATIC_EXT = _su.STATIC_EXT
+TEMPLATE_RULES = _su.TEMPLATE_RULES
+_digits = _su._digits
+_LOOKALIKE = _su._LOOKALIKE
 
 
 def _kind(seg: str) -> Optional[str]:
+    """The identifier classes of one word, as the Search Console query classifier (agents/search_performance.py)
+    reads them. Path templating itself is primitives/safe_url.py (``template_path`` below), which adds the parameter
+    and slug rules."""
     if "@" in seg or _EMAIL.search(seg) or _AT_WORD.search(seg):
         return "{email}"
     if _UUID.fullmatch(seg):
         return "{uuid}"
-    if _digits(seg) >= 7:                      # phone numbers, SSNs, card numbers, long ids, across any separator
+    if _digits(seg) >= 7:
         return "{number}"
     if seg.isdigit():
         return "{id}"
     m = _FILE.fullmatch(seg)
     if m and m.group(2).lower() not in STATIC_EXT:
-        return "{file}." + m.group(2).lower()  # a document or image file name may name a person
+        return "{file}." + m.group(2).lower()
     if _HEX.fullmatch(seg) or len(seg) > 40 or _TOKENISH.fullmatch(seg) or (
             len(seg) >= 8 and _digits(seg) >= 2 and any(c.isalpha() for c in seg)):
         return "{token}"
     return None
 
 
-def template_path(target: str) -> Optional[str]:
-    """A path with every identifier-looking part replaced by a typed placeholder; None when not a path.
-    NFKC-normalised and confusables folded first (fullwidth digits and at-signs become ASCII)."""
-    # war room (W3-3): invisible characters (format characters and every default-ignorable code point: zero-width
-    # space and joiners, soft hyphen, word joiner, BOM) are removed BEFORE the one decode, so they can neither hide
-    # an identifier from the rules nor break a percent escape (%EF%B<ZWSP>C%A0 is still a full-width at-sign)
-    p = _path(lookalikes.strip_invisible(target))
-    if p is None:
-        return None
-    p = lookalikes.strip_invisible(unicodedata.normalize("NFKC", p)).translate(_FOLD)
-    segs = p.split("/")[1:]
-    out = [_segment(s) for s in segs]
-    # digits split over several short numeric segments (/123/45/6789) count together
-    i = 0
-    while i < len(segs):
-        j = i
-        while j < len(segs) and segs[j].isdigit() and out[j] == "{id}":
-            j += 1
-        if j - i >= 2 and sum(_digits(segs[k]) for k in range(i, j)) >= 7:
-            for k in range(i, j):
-                out[k] = "{number}"
-        i = max(j, i + 1)
-    return ("/" + "/".join(out))[:300]
+template_path = _su.template_path
+_path = _su._path
+
+
+def path_digest(key: bytes, path: str) -> str:
+    """A keyed digest of one exact path (decoded once, no query): how the sitemap sample is kept and matched
+    (AEGIS Wave-1 M-S3 / M-S4). Delia digests the public sitemap paths with the service's log hash key; a log line's
+    path is digested the same way, in memory, and compared. Without the key the digest says nothing about the path."""
+    return hmac.new(key, b"seo-sitemap-path\x00" + path.encode("utf-8", "surrogatepass"), hashlib.sha256).hexdigest()[:32]
 
 
 def _hll_add(regs: list, key: bytes, ip: str) -> None:
@@ -203,8 +164,30 @@ def _status_class(s: int) -> str:
     return f"{s // 100}xx" if 100 <= s <= 599 else "other"
 
 
+# AEGIS Wave-1 M-S1, round 2 M2: one chunk's robots.txt checks are bounded by this COUNTED work (no clock); bot
+# requests left unchecked are counted (``robots_unchecked``) and the ingest report is PARTIAL, never a stalled upload.
+ROBOTS_CHUNK_WORK = robots_mod.STEP_WORK_UNITS
+
+
+def request_target(target: str) -> Optional[str]:
+    """The path and query of a logged request target AS WRITTEN (percent-encoding untouched, fragment dropped), for
+    the robots.txt check (round 2 M4: RFC 9309 matches the path WITH its query, and robots.canon decodes it once;
+    ``_path`` decodes and drops the query, so it is only for templating and the sitemap sample)."""
+    try:
+        if "://" in target:
+            p = urlsplit(target)
+            out = (p.path or "/") + (f"?{p.query}" if p.query else "")
+        else:
+            out = target.split("#", 1)[0]
+    except ValueError:
+        return None
+    if not out.startswith("/") or len(out) > PATH_MAX or any(ord(c) < 0x20 or ord(c) == 0x7F for c in out):
+        return None
+    return out
+
+
 def empty_delta() -> dict:
-    return {"lines": 0, "non_bot": 0, "no_user_agent": 0, "quarantined": {}, "families": {}}
+    return {"lines": 0, "non_bot": 0, "no_user_agent": 0, "quarantined": {}, "families": {}, "robots_unchecked": 0}
 
 
 def _family() -> dict:
@@ -213,13 +196,16 @@ def _family() -> dict:
 
 
 def process_chunk(fmt: str, data: bytes, key: bytes, verify: Callable[[str, str], str], seen: dict, budget: dict,
-                  robots=None, sample: Optional[dict] = None) -> dict:
+                  robots=None, sample: Optional[dict] = None, robots_expected: bool = False) -> dict:
     """One chunk -> an aggregate delta with nothing identifying in it. ``verify(ip, token)`` is the port (raw IP in
     memory only); ``seen`` caches verdicts in memory for this ingest; ``budget["left"]`` bounds port lookups;
-    ``robots`` the parsed robots.txt fixed at ingest creation; ``sample`` {sitemap path: index}."""
+    ``robots`` the parsed robots.txt fixed at ingest creation (in memory only); ``robots_expected``: the ingest had
+    one, so a bot request not checked against it (not in memory any more, or past the chunk's counted work) is counted
+    ``robots_unchecked``; ``sample`` {path_digest of a sitemap path: index}."""
     out = empty_delta()
     q = out["quarantined"]
     sample = sample or {}
+    rwork = robots_mod.Work(ROBOTS_CHUNK_WORK)
     for raw in data.split(b"\n"):
         raw = raw.rstrip(b"\r")
         if not raw.strip():
@@ -256,18 +242,26 @@ def process_chunk(fmt: str, data: bytes, key: bytes, verify: Callable[[str, str]
         sc = _status_class(rec["status"])
         fam["status"][sc] = fam["status"].get(sc, 0) + 1
         exact = _path(rec["path"])
-        tpl = template_path(rec["path"])
+        tpl = _su.template_path(rec["path"], words=True)    # round 2 M5: non-ordinary segments -> keyed digest
         if tpl is not None:
             if tpl in fam["templates"] or len(fam["templates"]) < TEMPLATES_PER_FAMILY:
                 fam["templates"][tpl] = fam["templates"].get(tpl, 0) + 1
             else:
                 fam["templates_dropped"] += 1
-        if exact is not None:
-            if robots is not None and not robots.allowed(tok, exact):
+        target = request_target(rec["path"])
+        if robots is not None:
+            verdict = robots.allowed(tok, target, rwork) if target is not None else None
+            if verdict is False:
                 fam["robots_blocked"] += 1
-            i = sample.get(exact)
-            if i is not None and i not in fam["sample_hits"]:
-                fam["sample_hits"].append(i)
+            elif verdict is None:
+                out["robots_unchecked"] += 1
+        elif robots_expected:
+            out["robots_unchecked"] += 1
+        if exact is not None:
+            if sample:
+                i = sample.get(path_digest(key, exact))
+                if i is not None and i not in fam["sample_hits"]:
+                    fam["sample_hits"].append(i)
         _hll_add(fam["hll"], key, ip)
         h = hmac.new(key, ip.encode("ascii"), hashlib.sha256).hexdigest()[:32]
         key_v = f"{tok}|{h}"
@@ -299,6 +293,7 @@ def merge(total: dict, delta: dict) -> dict:
     256 sketch registers, sample indices bounded by the sample."""
     for k in ("lines", "non_bot", "no_user_agent"):
         total[k] += delta[k]
+    total["robots_unchecked"] = total.get("robots_unchecked", 0) + delta.get("robots_unchecked", 0)
     for r, n in delta["quarantined"].items():
         total["quarantined"][r] = total["quarantined"].get(r, 0) + n
     for tok, f in delta["families"].items():

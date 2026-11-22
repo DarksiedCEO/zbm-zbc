@@ -16,9 +16,10 @@ import re
 from typing import Optional
 
 from agents import split_url
-from envelope import envelope, finding, observed
+from envelope import envelope, finding
 from primitives.fetch import FetchResult
 from primitives.parse import ORG_TYPES
+from primitives.safe_url import digest, safe_url
 from svc_entity import phone_digits
 
 AGENT, TASK = "entity_check", "on_site_entity_consistency"
@@ -34,6 +35,19 @@ METHODOLOGY = ("Organization / LocalBusiness JSON-LD nodes on the audited pages 
 LIMITS = ["Only the audited pages were read; NAP elsewhere on the site, and on listings (GBP, Apple Business "
           "Connect, Bing Places), is not checked in Wave 1.",
           "Markup inserted by JavaScript was not seen (rendering not connected)."]
+
+
+def comparison(field: str, site: str, cval: Optional[str]) -> dict:
+    """What is stored about an on-site value that differs from the record (round 2: never the page's text): the
+    result, whether it is equal after each normalisation step, the lengths, and a keyed digest of the normalised
+    on-site value (``safe_url.digest``: HMAC with the run's per-tenant key, so the same wrong value can be
+    recognised across runs without being kept)."""
+    s, c = site or "", cval or ""
+    ns = norm(field, s)
+    return {"result": "mismatch", "case_folded_equal": s.casefold() == c.casefold(),
+            "whitespace_folded_equal": " ".join(s.casefold().split()) == " ".join(c.casefold().split()),
+            "normalised_equal": ns == norm(field, c), "on_site_length": len(s), "canonical_length": len(c),
+            "on_site_digest": digest(ns or "", "entity-" + field)}
 
 
 def norm(field: str, v: Optional[str]) -> Optional[str]:
@@ -85,10 +99,12 @@ def homepage_phone(ctx, pages, telephone):
     f, x = pg.get("fetch"), pg.get("extract")
     if not isinstance(f, FetchResult):
         return unknown("FETCH_PROVENANCE_UNKNOWN")
-    obs["requested_url"], obs["final_url"] = _home_url(f.url), _home_url(f.final_url)
-    if configured is None or obs["requested_url"] != configured or obs["final_url"] is None:
+    requested, final = _home_url(f.url), _home_url(f.final_url)
+    # round 2 M5: compared raw, in memory; stored in the one safe form (a redirect target is crawled data)
+    obs["requested_url"], obs["final_url"] = safe_url(requested), safe_url(final)
+    if configured is None or requested != configured or final is None:
         return unknown("FETCH_PROVENANCE_UNKNOWN")
-    if obs["final_url"] != configured:
+    if final != configured:
         return unknown("FINAL_URL_DIFFERS")
     if f.state != "OK" or type(f.status) is not int or not 200 <= f.status < 300 \
             or f.content_type not in ("text/html", "application/xhtml+xml") or not isinstance(f.body, bytes):
@@ -152,7 +168,7 @@ def run(ctx, pages: dict, entity: Optional[dict]) -> dict:
                         findings.append(finding("ENTITY_FIELD_MISMATCH", "high", "measured", "ACT", url=url,
                                                 capability="P6",
                                                 detail={"field": field, "canonical": cval,
-                                                        "on_site": observed(site),
+                                                        "comparison": comparison(field, site, cval),
                                                         "canonical_source": entity["fields"][field]["source"],
                                                         "canonical_authority": entity["fields"][field]["authority"]}))
     if read and nodes_seen == 0:
