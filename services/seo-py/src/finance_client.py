@@ -68,6 +68,21 @@ def _system_resolve(host: str, port: int) -> list:
     return [i[4][0] for i in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)]
 
 
+def outbound_refused(kind: str, url: str, doc) -> Optional[str]:
+    """C2-3c3 (core-spec/2 T-3 / T-5, Wave-1 D-02m): the typed outbound check (seo-py ``outbound.check``: every
+    parameter has its SINK_FIELDS type; refusals counted) on the request about to be built. Loaded standalone by a
+    peer's contract test (no seo-py modules on its path) the check is ``PEER_OUTBOUND_CHECK`` when a test fixture set
+    it; otherwise the request is REFUSED (C2-3c4, lead ruling 17:15 PT F3c3-3: fail closed, never a silent pass)."""
+    try:
+        import outbound
+    except ImportError:
+        return PEER_OUTBOUND_CHECK(kind, url, doc) if PEER_OUTBOUND_CHECK is not None else "untyped"
+    return outbound.check(kind, url, doc)
+
+
+PEER_OUTBOUND_CHECK = None      # set ONLY by a peer contract test fixture (finance-py tests); None -> refuse
+
+
 class FinanceLookupError(Exception):
     """The lookup did not produce a usable answer. ``code`` is one of UNVERIFIABLE or INVOICE_NOT_FOUND."""
 
@@ -162,6 +177,9 @@ class FinanceClient:
         protocol outcome."""
         if not isinstance(invoice_id, str) or not INVOICE_ID.fullmatch(invoice_id):
             raise FinanceLookupError("FINANCE_RESPONSE_INVALID")
+        url = f"{self._base}/fin/v1/invoices/{invoice_id}/status"
+        if outbound_refused("finance", url, {"path": {"invoice_id": invoice_id}}):
+            raise FinanceLookupError("FINANCE_RESPONSE_INVALID")       # C2-3c3 (T-5): refused -> never sent, counted
         end = self._mono() + self.deadline_s
         last = "FINANCE_UNAVAILABLE"
         for attempt in range(self.attempts):
@@ -169,8 +187,7 @@ class FinanceClient:
             if left <= 0:
                 break
             try:
-                status, body = self._get(f"{self._base}/fin/v1/invoices/{invoice_id}/status",
-                                         min(self.timeout_s, left), end)
+                status, body = self._get(url, min(self.timeout_s, left), end)
             except _Retry:
                 last = "FINANCE_UNAVAILABLE"
             else:

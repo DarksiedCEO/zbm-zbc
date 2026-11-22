@@ -17,7 +17,7 @@ import pytest
 import config as config_mod
 import finance_client as fc
 from fixture_server import home_html, install_site
-from helpers import FakeLedger, Harness, base_env, derived, invoice_id, rid
+from helpers import FakeLedger, Harness, base_env, derived, invoice_id, rid, ruling_id
 from ports import Ports
 
 pytestmark = pytest.mark.local_http
@@ -281,7 +281,7 @@ def test_binding_a_finance_client_is_andre_s_and_only_for_client_tenants(tmp_pat
     assert h.post("/tenants/acme/finance-client", {"request_id": rid(), "finance_client_id": "a b"},
                   andre=True).status_code == 422
     t = h.ok(h.post("/tenants/acme/finance-client", body, andre=True))
-    assert t["finance_client_id"] == CLIENT
+    assert t["finance_client_id"] == h.svc._fc_code("acme", CLIENT)   # C2-6g2 E-COMP: the T-2 code
     assert h.ledger.of_type("tenant_finance_client_set")
 
 
@@ -442,7 +442,7 @@ def test_override_where_there_is_nothing_to_override_is_refused(tmp_path, srv):
               "INVOICE_OVERRIDE_NOT_ALLOWED")
     a = t.ok(paid_audit(t, invoice_id=invoice_id()), 201)
     assert a["invoice_verification"] == {"mode": "trust", "verdict": "UNCHECKED",   # ADR 0024: Compliance still asked
-                                         "compliance": {"verdict": "ALLOW", "ruling_id": f"cmp-rul-{CLIENT}",
+                                         "compliance": {"verdict": "ALLOW", "ruling_id": ruling_id(CLIENT),
                                                         "jurisdiction": "US-CA"}}
     assert t.ok(t.get("/status"))["invoice_verification"]["mode"] == "trust"
 
@@ -523,6 +523,6 @@ def test_consumption_and_binding_survive_a_restart(tmp_path, srv):
     iid = f.add()
     h.ok(paid_audit(h, invoice_id=iid), 201)
     h2 = h.restart(SEO_INVOICE_VERIFICATION=None)
-    assert h2.ok(h2.get("/tenants/acme"))["finance_client_id"] == CLIENT
+    assert h2.ok(h2.get("/tenants/acme"))["finance_client_id"] == h2.svc._fc_code("acme", CLIENT)   # C2-6g2
     h2.refused(paid_audit(h2, invoice_id=iid), 409, "INVOICE_ALREADY_USED")
     assert h2.ok(paid_audit(h2, invoice_id=f.add(2)), 201)["invoice_verification"]["verdict"] == "PAID"

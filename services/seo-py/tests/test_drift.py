@@ -30,6 +30,13 @@ def by_code(d):
     return {c["code"]: c for c in d["changes"]}
 
 
+def recorded(h, x):
+    """The report of the API owner view. Re-pinned back (G-7; owner decision 19:20 PT "Show machine fields", card
+    C2-OV; replaces lead ruling 16:15 PT): the page fingerprints and the robots.txt SHA-256 are typed hash fields of
+    the report-document table, shown in the owner's view, so the R-rules can compare owner views again."""
+    return x["report"]
+
+
 def test_identical_runs_have_no_changes(tmp_path, srv):
     h, a, b = two_runs(tmp_path, srv)
     d = h.ok(h.get(f"/tenants/zbm/audits/{b['audit_id']}/drift", params={"against": a["audit_id"]}))
@@ -39,7 +46,7 @@ def test_identical_runs_have_no_changes(tmp_path, srv):
 
 def test_page_content_change_is_real_change(tmp_path, srv):
     h, a, b = two_runs(tmp_path, srv, lambda s: s.html("site.test", "/", home_html(canonical=None, ld=None)))
-    d = drift.compare(a["report"], b["report"])
+    d = drift.compare(recorded(h, a), recorded(h, b))          # decision 19:20 PT (see recorded)
     c = by_code(d)["CANONICAL_MISSING"]
     assert c["change"] == "APPEARED" and c["class"] == "REAL_CHANGE"
     assert {"canonicals", "jsonld"} <= set(c["evidence"]["changed_fields"])
@@ -57,7 +64,7 @@ def test_fetch_failure_is_tool_failure(tmp_path, srv):
 def test_robots_change_is_real_change(tmp_path, srv):
     h, a, b = two_runs(tmp_path, srv, lambda s: s.text("site.test", "/robots.txt",
                                                         "User-agent: GPTBot\nDisallow: /\n"))
-    c = [x for x in drift.compare(a["report"], b["report"])["changes"]
+    c = [x for x in drift.compare(recorded(h, a), recorded(h, b))["changes"]   # decision 19:20 PT
          if x["code"] == "ROBOTS_BLOCKS_AI_OR_DATASET_CRAWLER"][0]
     assert c["class"] == "REAL_CHANGE" and len(set(c["evidence"]["robots_sha256"])) == 2
 

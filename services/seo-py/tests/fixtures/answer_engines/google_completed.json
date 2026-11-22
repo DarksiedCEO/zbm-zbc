@@ -1,0 +1,19 @@
+{
+ "candidates": [
+  {"index": 0, "finishReason": "STOP",
+   "content": {"role": "model", "parts": [{"text": "Thinking about it", "thought": true},
+                                          {"text": "Z Best Media is a revenue recovery agency in Long Beach."}]},
+   "groundingMetadata": {
+     "webSearchQueries": ["revenue recovery agency long beach"],
+     "searchEntryPoint": {"renderedContent": "<div>widget</div>"},
+     "groundingChunks": [
+       {"web": {"uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AAAAsynthetic1", "title": "site.test"}},
+       {"web": {"uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AAAAsynthetic2", "title": "competitor.test"}},
+       {"retrievedContext": {"uri": "gs://bucket/doc", "title": "internal"}}],
+     "groundingSupports": [{"segment": {"startIndex": 0, "endIndex": 55, "text": "Z Best Media is a revenue recovery agency in Long Beach."},
+                            "groundingChunkIndices": [0, 1]}]}}
+ ],
+ "usageMetadata": {"promptTokenCount": 21, "candidatesTokenCount": 40, "totalTokenCount": 61, "toolUsePromptTokenCount": 300},
+ "modelVersion": "gemini-3.8-flash",
+ "responseId": "synthetic-response-1"
+}

@@ -1,0 +1,21 @@
+{
+ "id": "msg_synthetic_01",
+ "type": "message",
+ "role": "assistant",
+ "model": "claude-sonnet-5-5",
+ "content": [
+  {"type": "text", "text": "I'll search for revenue recovery agencies."},
+  {"type": "server_tool_use", "id": "srvtoolu_synthetic", "name": "web_search", "input": {"query": "revenue recovery agency long beach"}},
+  {"type": "web_search_tool_result", "tool_use_id": "srvtoolu_synthetic", "content": [
+     {"type": "web_search_result", "url": "https://www.site.test/about", "title": "About", "encrypted_content": "EqSYNTHETIC", "page_age": "October 1, 2026"},
+     {"type": "web_search_result", "url": "https://competitor.test/recovery", "title": "Recovery", "encrypted_content": "EqSYNTHETIC2"}]},
+  {"type": "text", "text": "Z Best Media recovers marketplace revenue in Long Beach.",
+   "citations": [{"type": "web_search_result_location", "url": "https://www.site.test/about", "title": "About", "encrypted_index": "Eo8SYN", "cited_text": "Z Best Media ..."},
+                 {"type": "web_search_result_location", "url": "https://planted.test/x", "title": "Planted", "encrypted_index": "Eo8SYN2", "cited_text": "..."}]},
+  {"type": "text", "text": " Competitor Co is another option.",
+   "citations": [{"type": "web_search_result_location", "url": "https://competitor.test/recovery", "title": "Recovery", "encrypted_index": "Eo8SYN3", "cited_text": "..."}]}
+ ],
+ "usage": {"input_tokens": 6039, "output_tokens": 931, "server_tool_use": {"web_search_requests": 1}},
+ "stop_reason": "end_turn",
+ "stop_sequence": null
+}

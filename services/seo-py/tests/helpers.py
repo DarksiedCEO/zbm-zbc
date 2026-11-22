@@ -89,6 +89,30 @@ def write_key(path) -> str:
     return str(path)
 
 
+def write_vault_key(path) -> str:
+    """A test-only citation vault key file (ADR 0051), mode 0600: 32 random bytes generated at run time (never a
+    literal), base64url. Kept across restarts of one harness (the same file)."""
+    import base64
+    import os
+    if not path.exists():
+        raw = os.urandom(32)
+        while len(set(raw)) < 16:
+            raw = os.urandom(32)
+        path.write_text(base64.urlsafe_b64encode(raw).decode("ascii"))
+        os.chmod(path, 0o600)
+    return str(path)
+
+
+VAULT_ENV_NAMES = ("SEO_VAULT_KEY", "SEO_VAULT_KEY_FILE", "SEO_VAULT_KEY_ID")
+
+
+def citation_document(h, cid: str) -> dict:
+    """Sink job C: a recorded citation run's vaulted document, read for its owning tenant:
+    ``{"v", "result": the split and swept envelope (what the log line used to carry), "evidence": {id: record}}``."""
+    r = h.svc.citation_runs[cid]
+    return h.svc.vault.get_blob(r["tenant_id"], r["result_ref"])
+
+
 def base_env(**over) -> dict:
     """The Wave 1/2 suites predate invoice verification (W3-2) and test the rest of the paid flow, so they run with
     SEO_INVOICE_VERIFICATION=trust; tests/test_invoice_verification.py drops it (``SEO_INVOICE_VERIFICATION=None``)
@@ -102,6 +126,14 @@ def base_env(**over) -> dict:
         else:
             env[k] = v
     return env
+
+
+def ruling_id(client_id: str) -> str:
+    """A ruling id in the shape Compliance (38) issues (compliance-py ``service._b32``): ``cmp-rul-`` + the first 26
+    lower-case base32 characters of a SHA-256."""
+    import base64
+    raw = hashlib.sha256(f"seo-py test-only ruling {client_id}".encode()).digest()
+    return "cmp-rul-" + base64.b32encode(raw).decode("ascii").lower()[:26]
 
 
 class PassingCompliance:
@@ -124,7 +156,7 @@ class PassingCompliance:
             raise cc.ComplianceCheckError(self.error)
         if client_id in self.refuse:
             raise cc.ComplianceCheckError(cc.NOT_ACTIVATED)
-        return {"verdict": cc.ALLOW, "ruling_id": f"cmp-rul-{client_id}", "jurisdiction": "US-CA"}
+        return {"verdict": cc.ALLOW, "ruling_id": ruling_id(client_id), "jurisdiction": "US-CA"}
 
 
 class Harness:
@@ -134,6 +166,11 @@ class Harness:
         self.tmp = tmp
         if data_dir and "SEO_LOG_HASH_KEY_FILE" not in env_over:
             env_over["SEO_LOG_HASH_KEY_FILE"] = write_key(tmp / "log.key")
+        if data_dir and not any(n in env_over for n in VAULT_ENV_NAMES):
+            # ADR 0051: a durable service keeps client citation evidence in the vault, which needs a key (a test of
+            # the missing key passes SEO_VAULT_KEY_FILE=None)
+            env_over["SEO_VAULT_KEY_FILE"] = write_vault_key(tmp / "vault.key")
+            env_over["SEO_VAULT_KEY_ID"] = "k-test"
         self.env = base_env(SEO_DATA_DIR=data_dir, **env_over)
         self.settings = config_mod.load(self.env)
         self.ledger = ledger or FakeLedger()

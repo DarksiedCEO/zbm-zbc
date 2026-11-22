@@ -229,6 +229,8 @@ def test_m4_page_and_ruler_both_changed_is_unknown_never_real_change(tmp_path, s
     install_site(srv)
     h = harness(tmp_path, srv)
     own(h)
+    # re-pinned back (G-7; owner decision 19:20 PT "Show machine fields", card C2-OV; replaces ruling 16:15 PT): the
+    # fingerprints / robots SHA-256 are typed hash fields, shown in the API owner view the R-rules read
     a = h.ok(audit(h), 201)["report"]
     srv.html("site.test", "/", home_html(canonical=None))
     b = copy.deepcopy(h.ok(audit(h), 201)["report"])
@@ -241,6 +243,8 @@ def test_m4_robots_and_ruler_both_changed_is_unknown(tmp_path, srv):
     install_site(srv)
     h = harness(tmp_path, srv)
     own(h)
+    # re-pinned back (G-7; owner decision 19:20 PT "Show machine fields", card C2-OV; replaces ruling 16:15 PT): the
+    # fingerprints / robots SHA-256 are typed hash fields, shown in the API owner view the R-rules read
     a = h.ok(audit(h), 201)["report"]
     srv.text("site.test", "/robots.txt", "User-agent: GPTBot\nDisallow: /\n")
     b = copy.deepcopy(h.ok(audit(h), 201)["report"])
@@ -331,14 +335,20 @@ def test_t4_expired_ingests_keep_counts_only_and_are_not_rebuilt(tmp_path, srv):
     h.ok(send(h, iid, 1, b64([clf("66.249.66.1", f"/p/x{i}") for i in range(50)]), last=True))
     h.ok(h.post(f"/tenants/zbm/log-ingests/{iid}/finish", {"request_id": rid()}))
     g = h.svc.log_ingests[iid]
-    assert "templates" in g["totals"]["families"]["Googlebot"] and g["report"] is not None
+    # sink job D: memory holds counts only from the start (templates and the report are vault blobs); before expiry
+    # the report is served from its blob
+    assert g["report_ref"] is not None and h.ok(h.get(f"/tenants/zbm/log-ingests/{iid}"))["report"] is not None
+    assert h.svc._vaulted_open("zbm", "log_report", g["report_ref"], g["report_hmac"])["envelope"]["facts"][
+        "families"]["Googlebot"]["path_templates_seen"] >= 1
     h.clock.advance(days=91)
     v = h.ok(h.get(f"/tenants/zbm/log-ingests/{iid}"))
     assert v["status"] == "expired" and v["totals"]["families"]["Googlebot"]["requests"] == 50
     g = h.svc.log_ingests[iid]
-    assert g["evicted"] and g["report"] is None and g["sitemap_sample"] is None
+    assert g["evicted"] and g["report"] is None and g["report_ref"] is None and g["sitemap_sample"] is None
+    assert v["report"] is None and iid not in h.svc._log_inputs and iid not in h.svc._log_full
     assert set(g["totals"]["families"]["Googlebot"]) == {"requests", "verified", "spoofed", "claimed"}
     h2 = h.restart()                                            # replay on the same (advanced) clock
     g2 = h2.svc.log_ingests[iid]
-    assert g2["evicted"] and g2["report"] is None and g2["totals"]["families"]["Googlebot"]["requests"] == 50
+    assert g2["evicted"] and g2["report"] is None and g2["report_ref"] is None \
+        and g2["totals"]["families"]["Googlebot"]["requests"] == 50
     assert set(g2["totals"]["families"]["Googlebot"]) == {"requests", "verified", "spoofed", "claimed"}

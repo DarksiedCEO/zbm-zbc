@@ -40,12 +40,37 @@ CODES = frozenset({
     "ENTITY_NOT_FOUND", "ENTITY_FIELD_UNKNOWN", "ENTITY_VALUE_INVALID", "ENTITY_VERSION_STALE", "ENTITY_EXISTS", "ENTITY_TENANT_KIND_INVALID",
     # prompt sets and probes
     "PROMPT_SET_NOT_FOUND", "PROMPT_SET_EXISTS", "PROMPT_SET_INVALID", "PROVIDER_UNKNOWN", "PROMPT_PERSONAL_DATA",
+    # operator text that fails the shared core's strict check is refused before anything is written (review c13529af
+    # MUST 5): a prompt-set field holding a credential; an audit / schedule path or an entity field holding a
+    # credential or personal data
+    "PROMPT_SECRET", "PATH_WITHHELD", "ENTITY_VALUE_WITHHELD",
+    # review c0c09bd1: operator free text is vaulted, not refused (refused only for a strong key / PEM / user info, or a
+    # credential query key in a fetched URL); an identifier (tenant id, domain, Finance client id, prompt-set name,
+    # competitor domain, entity source) that holds a key, a 9+ digit run, an e-mail form or fails the strict check
+    "IDENTIFIER_WITHHELD",
     # answer-engine adapters (Wave 4; perplexity.py): the closed set an engine run reports
     "ENGINE_AUTH_REFUSED", "ENGINE_RATE_LIMITED", "ENGINE_UNAVAILABLE", "ENGINE_PROTOCOL_ERROR",
     "ENGINE_BUDGET_EXHAUSTED", "ENGINE_KILLED", "ENGINE_NOT_CONNECTED",
+    # Callum's citation-source runs (ADR 0046; svc_citations.py)
+    "CITATION_RUN_NOT_FOUND", "CITATION_RUN_RUNNING", "CITATION_RUN_NOT_COMPLETED",
+    # the client citation vault (ADR 0051, job 2; vault.py): no key (fail closed) / a record that cannot be read
+    "VAULT_UNAVAILABLE", "VAULT_RECORD_NOT_FOUND",
     # generic
     "REQUEST_ID_REUSED", "LEDGER_UNAVAILABLE", "STORE_UNAVAILABLE", "INTEGRITY_UNVERIFIED", "SERVICE_CLOSED",
     "JOB_UNKNOWN", "JOB_RUNNING", "INVALID", "FORBIDDEN_FIELD",
+    # C2-3b2 (lead rulings 15:32 PT F3b-2 / F3b-3 and 17:50 PT F4-1): the 500 body and a SeoError whose reason is not
+    # in this catalogue; the framework's default 404 / 405 bodies (no route / method for the request)
+    "INTERNAL_ERROR", "NOT_FOUND", "METHOD_NOT_ALLOWED",
+    # C2-14 (RV-1, owner default Q2-6): the reveal rate cap (100 / actor / hour) is used up
+    "REVEAL_RATE_LIMITED",
+    # C2-3b3 (lead ruling 18:20 PT F3b2-1): the 401 bodies (no / malformed Authorization header; token invalid)
+    "AUTH_MISSING", "AUTH_INVALID",
+    # C2-3b3 (lead ruling 18:20 PT F3b2-2): the ASGI input-limit bodies (api.InputLimits); no sub-reason prose
+    "URI_TOO_LONG", "HEADERS_TOO_LARGE", "BODY_TOO_LARGE", "BAD_REQUEST", "UNSUPPORTED_MEDIA_TYPE",
+    "REQUEST_TIMEOUT", "BODY_REFUSED",
+    # sink job A (sink_guard.py): a record bound for the log or the ledger held something that is not a machine value;
+    # nothing was written
+    "SINK_REFUSED",
 })
 
 
@@ -53,3 +78,17 @@ def R(code: str) -> str:
     if code not in CODES:
         raise AssertionError(f"reason code not in the catalogue: {code}")
     return code
+
+
+# C2-6a2: moved verbatim from api.py (validation error bodies, sink job D); api re-exports these names
+# validation error types whose message is built from the schema alone (a pattern, a bound, the allowed literals)
+ERROR_TYPES_WITH_MESSAGE = frozenset((
+    "missing", "forbidden_field", "extra_forbidden", "string_type", "string_pattern_mismatch", "string_too_short",
+    "string_too_long", "int_type", "bool_type", "literal_error", "list_type", "dict_type", "too_short", "too_long",
+    "greater_than_equal", "less_than_equal", "greater_than", "less_than", "model_type", "model_attributes_type",
+    "int_parsing", "bool_parsing", "none_required", "float_type", "finite_number"))
+# C2-3b (lead ruling F3-2, T-1 has no free-text type): the pydantic ``msg`` prose is never sent; ``msg_code`` is the
+# error type when it is one of ERROR_TYPES_WITH_MESSAGE (whose v1 message came from the schema alone), else
+# ERROR_MSG_WITHHELD. API contract tightening: a 422 body carries no human text (ADR note, owner informed).
+ERROR_MSG_WITHHELD = "invalid"
+ERROR_MSG_CODES = ERROR_TYPES_WITH_MESSAGE | {ERROR_MSG_WITHHELD}

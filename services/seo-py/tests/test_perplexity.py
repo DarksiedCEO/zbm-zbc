@@ -624,7 +624,14 @@ def test_audit_tenant_cited_with_position_and_hashes_no_body_stored(tmp_path):
     eng = c["facts"]["engines"]["perplexity"]
     p = eng["prompts"][0]
     assert p["class"] == "STRENGTH" and p["cited"] == 3 and p["cited_positions"] == [2, 2, 2] and p["best_position"] == 2
-    assert p["answers_sha256"] == [hashlib.sha256(f"Z Best Media. {marker}".encode()).hexdigest()] * 3
+    # Re-pinned (G-7; owner decision 19:20 PT "Show machine fields", card C2-OV; replaces lead ruling 16:15 PT): the
+    # machine-written 64-hex answers_sha256 is a typed hash field of the report-document table (report_fields) and is
+    # shown in the owner's view; the same hex inside free text stays masked (tests/test_owner_view_machine_fields.py).
+    answer_hash = hashlib.sha256(f"Z Best Media. {marker}".encode()).hexdigest()
+    assert p["answers_sha256"] == [answer_hash] * 3
+    stored = callum(h.svc.audit_view("zbm", v["audit_id"], masked=False))["facts"]["engines"]["perplexity"]
+    assert stored["prompts"][0]["answers_sha256"] == [answer_hash] * 3
+    assert marker not in json.dumps(stored)
     assert {s["host"] for s in p["other_sources"]} == {"competitor.test", "news.test"}
     assert eng["usage"]["calls"] == 3 and eng["usage"]["spend_usd"] == "0.015396" and eng["usage"]["settled"]
     log = json.dumps(h.ok(h.get("/audit/export", params={"limit": 1000})))
@@ -1356,3 +1363,19 @@ def test_r2_bad_characters_are_refused_after_normalisation():
     for c in ("­", "‍", " ", "ㅤ", "ﾠ", " ", "\x07", "﻿"):
         assert domain_match._ascii(f"ac{c}me.com") is None
         assert any(domain_match._bad_char(x) for x in unicodedata.normalize("NFKC", c).lower())
+
+
+class _C23cAnyPrompt:
+    def __contains__(self, _text) -> bool:
+        return True
+
+
+@pytest.fixture(autouse=True)
+def _c23c_prompt_scope():
+    """C2-3c re-pin (T-5 / E-LLM, owner decision 14:57 PT, lead ruling F3-4): these tests call ``ask()`` directly,
+    outside a probe run, so each test's own prompt counts as its configured prompt set. A probe run binds the tenant's
+    set (agents.probes / agents.callum); unbound or another tenant's text is refused (tests/test_outbound_typed.py)."""
+    import outbound
+    token = outbound._PROMPTS.set(_C23cAnyPrompt())
+    yield
+    outbound._PROMPTS.reset(token)

@@ -1,0 +1,27 @@
+{
+ "id": "resp_synthetic_0001",
+ "object": "response",
+ "created_at": 1793000000,
+ "status": "completed",
+ "model": "gpt-6-astra-2026-09-30",
+ "output": [
+  {"type": "web_search_call", "id": "ws_synthetic_1", "status": "completed",
+   "action": {"type": "search", "query": "marketplace revenue recovery long beach",
+              "sources": [{"type": "url", "url": "https://site.test/services"},
+                          {"type": "url", "url": "https://competitor.test/recovery"},
+                          {"type": "url", "url": "https://directory.test/agencies?utm_source=openai"},
+                          {"type": "api", "name": "oai-weather"}]}},
+  {"type": "message", "id": "msg_synthetic_1", "status": "completed", "role": "assistant",
+   "content": [{"type": "output_text",
+                "text": "Z Best Media in Long Beach offers marketplace revenue recovery [1]. Competitor Co also does [2].",
+                "annotations": [
+                  {"type": "url_citation", "start_index": 0, "end_index": 60, "url": "https://site.test/services?utm_source=openai", "title": "Services"},
+                  {"type": "url_citation", "start_index": 61, "end_index": 95, "url": "https://competitor.test/recovery", "title": "Recovery"},
+                  {"type": "url_citation", "start_index": 61, "end_index": 95, "url": "https://planted.test/not-in-search", "title": "Planted"}]}]}
+ ],
+ "usage": {"input_tokens": 312, "output_tokens": 88, "total_tokens": 400},
+ "tools": [{"type": "web_search"}],
+ "store": false,
+ "error": null,
+ "incomplete_details": null
+}

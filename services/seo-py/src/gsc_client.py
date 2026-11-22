@@ -70,6 +70,8 @@ from finance_client import (
     _Resolver,
     _system_resolve,
 )
+import outbound
+import sink_fields
 from primitives import Killed
 
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -221,11 +223,16 @@ def _b64json(o) -> bytes:
 
 def build_assertion(key: ServiceAccountKey, now: int, scope: str = SCOPE) -> bytes:
     """The signed JWT for the token request (Google's service-account flow; RS256)."""
+    signing_input = assertion_input(key, now, scope).encode("ascii")
+    return signing_input + b"." + _b64url(key.sign(signing_input))
+
+
+def assertion_input(key: ServiceAccountKey, now: int, scope: str = SCOPE) -> str:
+    """header.claims of the assertion for the configured key (C2-3c4 E-AUTH: the only assertion outbound admits)."""
     header = {"alg": "RS256", "typ": "JWT", "kid": key.key_id}
     claims = {"iss": key.client_email, "scope": scope, "aud": TOKEN_URL, "iat": int(now),
               "exp": int(now) + JWT_LIFETIME_S}
-    signing_input = _b64json(header) + b"." + _b64json(claims)
-    return signing_input + b"." + _b64url(key.sign(signing_input))
+    return (_b64json(header) + b"." + _b64json(claims)).decode("ascii")
 
 
 def property_host(prop: str) -> str | None:
@@ -495,8 +502,14 @@ class _Read:
         if tok is not None:
             return tok
         started = self.c._mono()
-        body = urlencode({"grant_type": GRANT_TYPE,
-                          "assertion": build_assertion(self.c.key, int(self.c._wall())).decode("ascii")}).encode()
+        now = int(self.c._wall())
+        assertion = build_assertion(self.c.key, now).decode("ascii")
+        # C2-3c4 E-AUTH (ruling 17:15 PT F3c3-2): only the configured key's assertion, only to oauth2.googleapis.com
+        with outbound.configured(gsc_assertion_input=assertion_input(self.c.key, now)):
+            refused = outbound.check("gsc.token", TOKEN_URL, {"body": {"grant_type": GRANT_TYPE, "assertion": assertion}})
+        if refused:
+            raise GscError("GSC_PROTOCOL_ERROR", "request_refused")
+        body = urlencode({"grant_type": GRANT_TYPE, "assertion": assertion}).encode()
         status, raw = self._send("POST", TOKEN_URL, {"Content-Type": "application/x-www-form-urlencoded"}, body,
                                  MAX_TOKEN_BODY, token_call=True)
         if status != 200:
@@ -508,7 +521,10 @@ class _Read:
         return secret
 
     def check_property(self, prop: str) -> str:
-        _status, raw = self._api("GET", f"{API_BASE}/sites", None, MAX_SITES_BODY, site_scoped=False)
+        url = f"{API_BASE}/sites"
+        if outbound.check("gsc.sites", url, {"path": {}}):     # C2-3c3 (T-5 / D-02m): refused -> never sent, counted
+            raise GscError("GSC_PROTOCOL_ERROR", "request_refused")
+        _status, raw = self._api("GET", url, None, MAX_SITES_BODY, site_scoped=False)
         return parse_sites(_json(raw), prop)
 
     def query(self, prop: str, start: str, end: str, dims: tuple, aggregation: str, row_limit: int,
@@ -518,6 +534,13 @@ class _Read:
         body = {"startDate": start, "endDate": end, "dimensions": list(dims), "type": "web", "dataState": "final",
                 "aggregationType": aggregation, "rowLimit": row_limit, "startRow": start_row}
         url = f"{API_BASE}/sites/{quote(prop, safe='')}/searchAnalytics/query"
+        m = PROPERTY.fullmatch(prop) if isinstance(prop, str) else None
+        site = {} if m is None else {"site_type": "sc-domain" if m.group("d") else m.group("s"),
+                                     "site_host": m.group("d") or m.group("h"), "property": prop}
+        # C2-3c3 (T-5 / D-02m): every parameter typed; refused -> never sent, counted. C2-3c4 (F3c3-2): the whole
+        # property (incl. a URL-prefix path part) must equal the tenant's CONFIGURED property (outbound.configured).
+        if m is None or outbound.check("gsc.query", url, {"path": site, "body": body}):
+            raise GscError("GSC_PROTOCOL_ERROR", "request_refused")
         _status, raw = self._api("POST", url, json.dumps(body, separators=(",", ":")).encode(), MAX_QUERY_BODY,
                                  site_scoped=True)
         return parse_rows(_json(raw), dims, row_limit, aggregation, start, end)
@@ -556,6 +579,9 @@ class _Read:
         """An authenticated call. A 401 with a cached token is retried once with a fresh token."""
         for fresh_try in (False, True):
             tok = self.token()
+            if httpx.URL(url).host != sink_fields.OUTBOUND_CLIENT_HOSTS["gsc.query"]:   # C2-3c4 E-AUTH: own host only
+                outbound.COUNTS[("gsc.query", "host")] += 1
+                raise GscError("GSC_PROTOCOL_ERROR", "request_refused")
             headers = {"Authorization": f"Bearer {tok.reveal()}", "Accept": "application/json"}
             if body is not None:
                 headers["Content-Type"] = "application/json"

@@ -57,7 +57,7 @@ def test_replacement_refused_before_processing_original_resumes(context, monkeyp
     # Exact idempotent replay performs no new hashing or commits even under B.
     h.ok(h.post(path+'/chunks',body)); assert calls == [] and state(h,iid) == before
     h = restart(slot,keys[0]); h.ok(h.post(path+'/chunks',second))
-    assert logs_mod.hll_estimate(h.svc.log_ingests[iid]['totals']['families']['Googlebot']['hll']) == 1
+    assert logs_mod.hll_estimate(h.svc._ingest_full('zbm', iid)[0]['families']['Googlebot']['hll']) == 1
     assert len(h.ledger.of_type('log_chunk_ingested')) == 2
     h.ok(h.post(path+'/finish',{'request_id':rid()}))
     h = restart(slot,keys[1]); h.ok(h.get(path))
@@ -94,7 +94,7 @@ def test_key_swap_during_processing_refused_under_commit_lock(context, monkeypat
     assert state(h,iid) == before
     h.settings.log_hash_key = bytes.fromhex(keys[0].read_text())
     h.ok(h.post(path+'/chunks',second))
-    assert logs_mod.hll_estimate(h.svc.log_ingests[iid]['totals']['families']['Googlebot']['hll']) == 1
+    assert logs_mod.hll_estimate(h.svc._ingest_full('zbm', iid)[0]['families']['Googlebot']['hll']) == 1
 
 def test_finish_existing_aggregate_under_new_key_does_not_rehash(context):
     slot,keys,iid,path,body = context; h = restart(slot,keys[1])
@@ -123,4 +123,4 @@ def test_processing_uses_locked_key_snapshot_across_transient_swap(context, monk
     monkeypatch.setattr(logs_mod,'process_chunk',processing)
     h.ok(h.post(path+'/chunks',next_chunk(body)))
     assert used == [True]
-    assert logs_mod.hll_estimate(h.svc.log_ingests[iid]['totals']['families']['Googlebot']['hll']) == 1
+    assert logs_mod.hll_estimate(h.svc._ingest_full('zbm', iid)[0]['families']['Googlebot']['hll']) == 1

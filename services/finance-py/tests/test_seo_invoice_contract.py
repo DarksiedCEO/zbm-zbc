@@ -31,6 +31,20 @@ def _load(name: str, rel: str):
 
 
 SEO_FIN = _load("peer_seo_finance_client", "seo-py/src/finance_client.py")
+
+
+def _peer_outbound_check(kind, url, doc):
+    """C2-3c4 (seo-py lead ruling 17:15 PT F3c3-3): loaded standalone, seo-py's finance_client refuses to send
+    unless a check is set. This explicit peer check (never a silent pass) admits exactly seo-py's typed finance doc:
+    kind finance, one path parameter invoice_id of the INVOICE_ID grammar, nothing else; anything else -> refused."""
+    ok = (kind == "finance" and isinstance(doc, dict) and set(doc) == {"path"} and set(doc["path"]) == {"invoice_id"}
+          and isinstance(doc["path"]["invoice_id"], str) and SEO_FIN.INVOICE_ID.fullmatch(doc["path"]["invoice_id"]))
+    return None if ok else "untyped"
+
+
+@pytest.fixture(autouse=True)
+def _seo_outbound_peer_check(monkeypatch):
+    monkeypatch.setattr(SEO_FIN, "PEER_OUTBOUND_CHECK", _peer_outbound_check)
 CLIENT = "zbm-seo-client-1"
 
 
