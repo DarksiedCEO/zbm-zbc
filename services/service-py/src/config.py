@@ -7,6 +7,7 @@ weaker.
 from __future__ import annotations
 
 import base64
+import ipaddress
 import json
 import os
 import re
@@ -31,6 +32,25 @@ SLA_FIRST_BOUNDS = (5, 2880)
 SLA_RESOLUTION_BOUNDS = (60, 20160)
 NON_PRODUCTION_HMAC_KEY = b"service-py non-production digest key, tests only!"
 _PRINTABLE = re.compile(r"[\x21-\x7e]{32,512}")
+# Hardening 2026-11-08 (finance-py's _check_ref): a Railway variable reference left unresolved ("${{shared.X}}") is
+# printable and can be 32+ characters long, so it passed as a token. Any token holding one refuses start.
+UNRESOLVED_REF_MARKERS = ("${{", "{{")
+_BASE_URL = re.compile(r"https?://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?")
+
+
+def check_ref(value: Optional[str], what: str) -> None:
+    """Refuse a setting whose value is an unresolved Railway reference. Names the setting only, never the value."""
+    if value and any(mark in value for mark in UNRESOLVED_REF_MARKERS):
+        raise RuntimeError(f"{what} holds an unresolved Railway reference (a '${{{{...}}}}' placeholder), not a "
+                           "token: set the referenced variable, then redeploy; refusing to start")
+
+
+def check_token(value: str, what: str) -> None:
+    """The one check for a token this service ACCEPTS (service, caller, Andre): not an unresolved reference, then
+    32..512 printable ASCII characters. The value never appears in the message."""
+    check_ref(value, what)
+    if not isinstance(value, str) or not _PRINTABLE.fullmatch(value):
+        raise RuntimeError(f"{what} must be 32..512 printable ASCII characters")
 _EMAIL = re.compile(r"[a-z0-9._%+-]{1,64}@[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63}){1,8}")
 _E164 = re.compile(r"\+[1-9][0-9]{7,14}")
 
@@ -234,8 +254,9 @@ def _caller_tokens(env, service_token: str) -> dict:
     for name, tok in tokens.items():
         if name not in KNOWN_CALLERS:
             raise RuntimeError(f"SVC_CALLER_TOKENS names an unknown caller {name[:40]!r}")
-        if not isinstance(tok, str) or not _PRINTABLE.fullmatch(tok):
+        if not isinstance(tok, str):
             raise RuntimeError(f"SVC_CALLER_TOKENS[{name}] must be 32..512 printable ASCII characters")
+        check_token(tok, f"SVC_CALLER_TOKENS[{name}]")
     values = list(tokens.values())
     if len(set(values)) != len(values) or service_token in values:
         raise RuntimeError("SVC_CALLER_TOKENS: every caller token must be distinct and differ from the service token")
@@ -244,11 +265,62 @@ def _caller_tokens(env, service_token: str) -> dict:
 
 def _thin(env, prefix: str) -> tuple:
     vals = [(env.get(f"{prefix}_{k}") or "").strip() or None for k in ("URL", "TOKEN", "CALLER_TOKEN")]
+    for k, v in zip(("URL", "TOKEN", "CALLER_TOKEN"), vals):     # outbound: what this service SENDS the peer
+        check_ref(v, f"{prefix}_{k}")
     if any(vals) and not all(vals):
         raise RuntimeError(f"{prefix}_URL, {prefix}_TOKEN and {prefix}_CALLER_TOKEN come as a set (all or none)")
-    if vals[0] and not re.fullmatch(r"https?://[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?", vals[0]):
+    if vals[0] and not _BASE_URL.fullmatch(vals[0]):
         raise RuntimeError(f"{prefix}_URL must be a base URL (scheme, host, optional port)")
     return tuple(vals)
+
+
+def _andre_token(env, service_token: str, caller_tokens: dict) -> Optional[str]:
+    """Hardening 2026-11-08 (finance-py's rule, spec §D): Andre's approval token, when set, is a real token — 32..512
+    printable characters, no unresolved reference — and differs from the service token and every caller token. Before,
+    any non-empty value was accepted (a one-character "x" guarded every approval), and a value equal to another token
+    was silently treated as "not configured": both now refuse start, so a misconfiguration is seen at deploy time,
+    never discovered when an approval fails. Unset stays allowed (every approval refused, shown in /svc/v1/status)."""
+    raw = (env.get("SVC_ANDRE_APPROVAL_TOKEN") or "").strip()
+    if not raw:
+        return None
+    check_token(raw, "SVC_ANDRE_APPROVAL_TOKEN")
+    if raw == service_token or raw in caller_tokens.values():
+        raise RuntimeError("SVC_ANDRE_APPROVAL_TOKEN must differ from SVC_SERVICE_TOKEN and every SVC_CALLER_TOKENS "
+                           "token (otherwise that caller would be Andre); refusing to start")
+    return raw
+
+
+def _ledger(env, inbound_tokens: list) -> tuple:
+    """Hardening 2026-11-08: LEDGER_SERVICE_URL and LEDGER_SERVICE_TOKEN come as a pair. Before, setting only one
+    silently ran with the unconfigured ledger (every write refused, the cause visible nowhere but 503s); a malformed
+    URL or an unresolved Railway reference was taken as is. Now: both or neither; the URL a base URL; the token not a
+    reference and different from every token this service accepts (a ledger token that leaks never opens this
+    service, and the reverse). Neither stays allowed: every write is refused (fail closed)."""
+    url = (env.get("LEDGER_SERVICE_URL") or "").strip() or None
+    token = (env.get("LEDGER_SERVICE_TOKEN") or "").strip() or None
+    check_ref(url, "LEDGER_SERVICE_URL")
+    check_ref(token, "LEDGER_SERVICE_TOKEN")
+    if bool(url) != bool(token):
+        raise RuntimeError("LEDGER_SERVICE_URL and LEDGER_SERVICE_TOKEN come as a pair (both or neither: without "
+                           "them every write is refused); refusing to start")
+    if url and not _BASE_URL.fullmatch(url.rstrip("/")):
+        raise RuntimeError("LEDGER_SERVICE_URL must be a base URL (http(s)://host[:port]); refusing to start")
+    if token and token in inbound_tokens:
+        raise RuntimeError("LEDGER_SERVICE_TOKEN must differ from every token this service accepts; refusing to start")
+    return url, token
+
+
+def _bind_addr(env) -> str:
+    """Hardening 2026-11-08: SVC_BIND_ADDR is an IP literal (IPv4 or IPv6; ``[::]`` accepted for the IPv6 wildcard)
+    or ``localhost``. Before, any text was passed to uvicorn, which failed only once serving began."""
+    raw = (env.get("SVC_BIND_ADDR") or "127.0.0.1").strip()
+    if raw == "localhost":
+        return raw
+    try:
+        ipaddress.ip_address(raw[1:-1] if raw.startswith("[") and raw.endswith("]") else raw)
+    except ValueError:
+        raise RuntimeError("SVC_BIND_ADDR must be an IP address (127.0.0.1, ::, [::]) or localhost") from None
+    return raw
 
 
 NOT_BUILT = {
@@ -270,13 +342,19 @@ def load(env: Optional[dict] = None) -> Settings:
     service_token = (env.get("SVC_SERVICE_TOKEN") or "").strip()
     if not _PRINTABLE.fullmatch(service_token):
         raise RuntimeError("SVC_SERVICE_TOKEN must be set (32..512 printable ASCII characters): fail closed")
+    check_token(service_token, "SVC_SERVICE_TOKEN")
     non_production = _flag(env, "SVC_NON_PRODUCTION")
-    s = Settings(service_token=service_token, caller_tokens=_caller_tokens(env, service_token),
+    caller_tokens = _caller_tokens(env, service_token)
+    # tokens and the ledger pair are checked BEFORE the data directory is locked: a refused start touches nothing
+    andre_token = _andre_token(env, service_token, caller_tokens)
+    ledger_url, ledger_token = _ledger(env, [service_token, *caller_tokens.values(), *([andre_token] if andre_token
+                                                                                        else [])])
+    bind_addr = _bind_addr(env)
+    s = Settings(service_token=service_token, caller_tokens=caller_tokens,
                  non_production=non_production, data_dir=_data_dir(env, non_production))
     s.data_dir_lock = hold_data_dir(s.data_dir) if s.data_dir else None
-    s.ledger_url = (env.get("LEDGER_SERVICE_URL") or "").strip() or None
-    s.ledger_token = (env.get("LEDGER_SERVICE_TOKEN") or "").strip() or None
-    s.andre_token = (env.get("SVC_ANDRE_APPROVAL_TOKEN") or "").strip() or None
+    s.ledger_url, s.ledger_token = ledger_url, ledger_token
+    s.andre_token = andre_token
 
     for brand in BRANDS:
         raw = (env.get(f"SVC_SUPPORT_EMAIL_{brand.upper()}") or "").strip().lower()
@@ -347,6 +425,6 @@ def load(env: Optional[dict] = None) -> Settings:
         raise RuntimeError("no HMAC key: set SVC_DATA_DIR (the key is generated there) or SVC_HMAC_KEY_FILE")
     s.at_risk_threshold = _int(env, "SVC_AT_RISK_THRESHOLD", 60, 1, 99)
     s.renewal_window_days = _int(env, "SVC_RENEWAL_WINDOW_DAYS", 60, 7, 180)
-    s.bind_addr = (env.get("SVC_BIND_ADDR") or "127.0.0.1").strip()
+    s.bind_addr = bind_addr
     s.port = _int(env, "SVC_PORT", 8460, 1024, 65535)
     return s

@@ -406,6 +406,10 @@ def create_app(service: SupportService, settings: config_mod.Settings) -> FastAP
     def clear_sms_pause(contact_id: str, req: dict = Depends(body(m.RequestOnly)), who: str = Depends(andre)) -> dict:
         return svc.clear_sms_pause(_id(contact_id, SV_ID), req)
 
+    @app.post("/svc/v1/contacts/{contact_id}/email-pause/clear", dependencies=auth)
+    def clear_email_pause(contact_id: str, req: dict = Depends(body(m.RequestOnly)), who: str = Depends(andre)) -> dict:
+        return svc.clear_email_pause(_id(contact_id, SV_ID), req)
+
     @app.post("/svc/v1/consents", dependencies=auth, status_code=201)
     def consent(req: dict = Depends(body(m.ConsentRecord)), who: str = Depends(caller("hub", "onboarding"))) -> dict:
         return svc.record_consent(who, req)

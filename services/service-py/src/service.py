@@ -19,6 +19,7 @@ is committed, and an outbound message is recorded on the ledger (``message_sent`
 from __future__ import annotations
 
 import base64
+import logging
 import hashlib
 import hmac
 import json
@@ -42,6 +43,7 @@ from ports import NOT_WIRED, Alert, HandoffRequest, Outbound, Ports
 from reasons import R
 from store import BodyStore, DataDirBusy, RecordLog, StoreCorrupt, StoreWriteError, verify_lines
 
+log = logging.getLogger("service.core")
 INTERNAL = "service_desk"
 INTEGRITY_RETRY_S = 15
 FORCED_MIN_S = 10
@@ -60,6 +62,7 @@ PLACEHOLDERS = ("first_name", "brand_name", "offer_title", "offer_terms", "offer
 TEMPLATE_PURPOSES = ("check_in", "nps_survey", "offer")
 PLACEHOLDER_RE = re.compile(r"\{(" + "|".join(PLACEHOLDERS) + r")\}")
 SMS_FOOTER = "\nReply STOP to opt out."
+FORWARD_PAUSE_OP = re.compile(r"[a-z]{1,20}_(paused|pause_cleared)")
 OPT_OUT_ONLY_WORDS = 4          # an opt-out of at most this many words is only that: no ticket
 MAX_SEND_ATTEMPTS = 5
 KEY_FINGERPRINT_LABEL = b"service-py SVC_HMAC_KEY fingerprint v1"
@@ -75,7 +78,9 @@ EVENTS = {"consent_granted": "consent_changed", "consent_revoked": "consent_chan
           "catalog_approved": "approval_recorded", "catalog_retired": "approval_recorded",
           "alert_new": "alert_raised", "sla_breach": "sla_breached", "plan_new": "save_plan_started",
           "plan_offer": "offer_selected", "routing_set": "approval_recorded", "message_sending": "message_sending",
-          "sms_paused": "sms_paused", "sms_pause_cleared": "sms_pause_cleared"}
+          "sms_paused": "sms_paused", "sms_pause_cleared": "sms_pause_cleared",
+          # hardening 2026-11-08: the email pause, the fail-closed twin of the SMS pause
+          "email_paused": "email_paused", "email_pause_cleared": "email_pause_cleared"}
 
 
 def _maybe(exc: Unavailable) -> Unavailable:
@@ -117,6 +122,8 @@ class SupportService:
         self.addr_revocations: dict[tuple, str] = {}
         # V2-H3 / V4-L1: pauses belong to the NUMBER: (brand, HMAC of the phone) -> when proactive SMS was paused
         self.sms_paused: dict[tuple, str] = {}
+        # hardening 2026-11-08: (brand, HMAC of the email address) -> when proactive email was paused
+        self.email_paused: dict[tuple, str] = {}
         self.address_changed_at: dict[tuple, str] = {}   # (contact, "phone" | "email") -> when it last changed
         self.tickets: dict[str, dict] = {}
         self.messages: dict[str, dict] = {}
@@ -346,6 +353,12 @@ class SupportService:
     def _apply(self, kind: str, d: dict, at: str) -> None:
         for e in d.get("effects", ()):
             handler = getattr(self, f"_e_{e.get('op')}", None)
+            if handler is None and isinstance(e.get("op"), str) and FORWARD_PAUSE_OP.fullmatch(e["op"]):
+                # review of PR #46 (M1): a pause / pause-clear effect written by a NEWER version (a rollback) is
+                # skipped and logged, never fatal. Only pauses: an unknown consent, message or any other effect still
+                # refuses start (skipping a revocation would send to someone who opted out)
+                log.warning("skipping unknown pause effect %r from a newer version (rollback)", e["op"][:40])
+                continue
             if handler is None:
                 raise StoreCorrupt(f"log record carries an unknown effect {str(e.get('op'))[:40]!r}")
             handler(e, at)
@@ -408,6 +421,14 @@ class SupportService:
     def _e_sms_pause_cleared(self, e, at):
         brand = self.contacts[e["contact_id"]]["brand"]
         self.sms_paused.pop((brand, self._addr_key("sms", e["phone"])), None)
+
+    def _e_email_paused(self, e, at):
+        brand = self.contacts[e["contact_id"]]["brand"]
+        self.email_paused.setdefault((brand, self._addr_key("email", e["email"])), at)
+
+    def _e_email_pause_cleared(self, e, at):
+        brand = self.contacts[e["contact_id"]]["brand"]
+        self.email_paused.pop((brand, self._addr_key("email", e["email"])), None)
 
     def _e_ticket_new(self, e, at):
         self.tickets[e["ticket_id"]] = {
@@ -862,7 +883,12 @@ class SupportService:
 
     def _channel_check(self, channel: str, contact: dict, proactive: bool, opt_out: bool = False) -> Optional[str]:
         return channels.check(channel, contact, lambda ch: self._live_consent(contact, ch), proactive,
-                              self.now(), opt_out, self.sms_paused_for(contact))
+                              self.now(), opt_out, self.sms_paused_for(contact), self.email_paused_for(contact))
+
+    def email_paused_for(self, contact: dict) -> bool:
+        """Proactive email to this contact's CURRENT address is paused, whichever contact the pause was recorded on."""
+        email = contact.get("email")
+        return bool(email) and (contact["brand"], self._addr_key("email", email)) in self.email_paused
 
     def sms_paused_for(self, contact: dict) -> bool:
         """Proactive SMS to this contact's CURRENT number is paused, whichever contact the pause was recorded on."""
@@ -894,6 +920,41 @@ class SupportService:
                     seen.add((c["contact_id"], phone))
                     out.append({"op": "sms_paused", "contact_id": c["contact_id"], "phone": phone})
         return out
+
+    def _email_pause_effects(self, contacts: list) -> list:
+        """Hardening 2026-11-08 (fail closed, exact match): pause proactive email to every email address of these
+        contacts. The opt-out word lists can never be complete (rounds V1..V3 and the war room each found wording they
+        missed); proactive SMS has been paused on every unanswered inbound since V3-C1, proactive email was not, so an
+        email opt-out phrased outside the lists kept check-ins, surveys and offers flowing. Only a message that IS an
+        approved question (kb.match) is answered and leaves the pause off."""
+        out, seen = [], set()
+        for c in contacts:
+            if c.get("email") and (c["contact_id"], c["email"]) not in seen:
+                seen.add((c["contact_id"], c["email"]))
+                out.append({"op": "email_paused", "contact_id": c["contact_id"], "email": c["email"]})
+        return out
+
+    def clear_email_pause(self, contact_id: str, body: dict) -> dict:
+        """Andre clears a pause on proactive email. It never restores a consent: a revoked consent stays revoked."""
+        with self.lock:
+            self._gate()
+            prev = self._idem("andre", "email_pause_clear", contact_id, body)
+            c = self.contacts.get(contact_id)
+            if prev is not None:
+                # review of PR #46 (L1): a replay answers with the state NOW (a later inbound may have paused again)
+                return {**prev, "email_paused": bool(c) and self.email_paused_for(c),
+                        "email_consent": (self.consents.get((contact_id, "email")) or {}).get("status")}
+            if c is None:
+                raise NotFound(R("CONTACT_NOT_FOUND"))
+            if not self.email_paused_for(c):
+                raise Conflict(R("NOT_PAUSED"))
+            resp = {"contact_id": contact_id, "email_paused": False,
+                    "email_consent": (self.consents.get((contact_id, "email")) or {}).get("status")}
+            self._commit("email_pause_cleared", {"effects": [{"op": "email_pause_cleared", "contact_id": contact_id,
+                                                              "email": c["email"]}],
+                                                 "request": self._req("andre", "email_pause_clear", contact_id, body),
+                                                 "response": resp}, "andre")
+            return resp
 
     def clear_sms_pause(self, contact_id: str, body: dict) -> dict:
         """Andre clears a pause on proactive SMS. It never restores a consent: a revoked consent stays revoked."""
@@ -1013,7 +1074,7 @@ class SupportService:
             if c is None:
                 raise NotFound(R("CONTACT_NOT_FOUND"))
             return {**c, "consents": self._consents_of(contact_id),
-                    "sms_paused": self.sms_paused_for(c)}
+                    "sms_paused": self.sms_paused_for(c), "email_paused": self.email_paused_for(c)}
 
     def _consents_of(self, contact_id: str) -> list[dict]:
         return [dict(v) for (cid, _), v in sorted(self.consents.items()) if cid == contact_id]
@@ -1199,8 +1260,13 @@ class SupportService:
             resp = {"contact_id": contact["contact_id"]}
             # sweep A (AEGIS H1, M1): an opt-out received BY EMAIL revokes EMAIL consent unless every opt-out phrase in
             # the person's own words names the phone; a typo of unsubscribe / stop by email revokes it too
-            decision = (channels.email_opt_out_decision(text, body.get("subject"))
-                        if channel == "email" and contact.get("email") else None)
+            if not contact.get("email"):
+                decision = None
+            elif channel == "email":
+                decision = channels.email_opt_out_decision(text, body.get("subject"))
+            else:
+                # hardening 2026-11-08: an email opt-out sent by chat or SMS ("stop emailing me") revoked SMS only
+                decision = channels.cross_channel_email_decision(text)
             email_revoke = decision in ("revoke", "revoke_direct")
             if decision == "ask":        # AEGIS H-F: an unclear email scope is never guessed: SMS only, Andre decides
                 effects.append(self._alert_effect("EMAIL_OPT_OUT_UNCLEAR", contact["contact_id"], rid))
@@ -1211,7 +1277,7 @@ class SupportService:
                 effects.append(self._alert_effect("OPT_OUT_POSSIBLE", contact["contact_id"], rid))
             email_effect = {"op": "consent_revoked", "contact_id": contact["contact_id"], "channel": "email",
                             "via": ("stop_by_email" if level == "exact" else "suspected_stop_by_email" if level
-                                    else "request_by_email"),
+                                    else "request_by_email") if channel == "email" else f"email_opt_out_by_{channel}",
                             "request_id": rid, "address": contact.get("email")}
             if revoke:
                 had = channel == "sms" and channels.consent_matches(
@@ -1222,6 +1288,12 @@ class SupportService:
                 if email_revoke:
                     effects.append(email_effect)
                     resp["email_opted_out"] = True
+                elif channel != "email" and decision != "ask" and contact.get("email") \
+                        and channels.broad_opt_out(text):
+                    # review of PR #46 (H1): "stop contacting me", "STOP ALL", "unsubscribe from everything",
+                    # "STOP correos", "stop em ails" carry more than an SMS keyword but name no channel this reading
+                    # can scope: email consent is kept, proactive email is paused (below) and Andre reads it
+                    effects.append(self._alert_effect("OPT_OUT_POSSIBLE", contact["contact_id"], rid))
                 resp["action"] = "opted_out"
                 if tail_opt_out:
                     effects.append(self._alert_effect("OPT_OUT_IN_QUOTED_TEXT", contact["contact_id"], rid))
@@ -1235,7 +1307,8 @@ class SupportService:
                     # V3-M2: an opt-out from an address no contact had (or naming another contact): Andre sees it
                     effects.append(self._alert_effect("OPT_OUT_UNKNOWN_SENDER", contact["contact_id"], rid))
                 elif channel == "sms" and len(triage_mod.normalise(text).split()) <= OPT_OUT_ONLY_WORDS:
-                    self._commit("sms_opt_out", {"effects": effects + pause,
+                    # review of PR #46 (H1): the short path paused SMS only; proactive email is paused here too
+                    self._commit("sms_opt_out", {"effects": effects + pause + self._email_pause_effects([contact] + named),
                                                  "request": self._req(actor, f"inbound_{channel}", target, body),
                                                  "response": resp}, actor)
                     return resp
@@ -1262,7 +1335,7 @@ class SupportService:
                                       body.get("subject"))
             if level:
                 tri = triage_mod.Triage(tri.primary if tri.categories else "other", tri.categories,
-                                        tri.signals + (f"sms:opt_out_{level}",), False, tri.question_count)
+                                        tri.signals + (f"sms:opt_out_{level}",), False, tri.question_count, tri.extra)
             body_sha_ = self._put_body(text)
             subject_sha = self._put_body(body["subject"]) if body.get("subject") else None
             mid = self._did("msg", actor, f"inbound_{channel}", target, rid)
@@ -1309,8 +1382,9 @@ class SupportService:
                     why = reason
             if not answered:
                 tri = triage_mod.Triage("no_answer" if not tri.categories else tri.primary, tri.categories,
-                                        tri.signals + (f"kb:{why}",), False, tri.question_count)
+                                        tri.signals + (f"kb:{why}",), False, tri.question_count, tri.extra)
                 effects += pause
+                effects += self._email_pause_effects([contact] + named)
                 effects += self._escalate_effects(actor, ticket, tri, target, rid)
                 resp["action"] = "escalated" if tri.categories else "queued_for_human"
             priority = triage_mod.PRIORITY.get(tri.primary, "p3")
@@ -1926,6 +2000,18 @@ class SupportService:
             band = health_mod.nps_band(body["score"])
             if band == "detractor":
                 effects.append(self._alert_effect("NPS_DETRACTOR", s["account_id"], sid))
+            contact = self.contacts.get(s.get("contact_id") or "")
+            if body.get("comment") and contact is not None:
+                # Hardening 2026-11-08 (fail closed): a survey comment is free text from the contact that nothing
+                # answers, so it pauses proactive SMS and email like any unanswered inbound message (V3-C1); before, a
+                # "stop texting and emailing me" written in the comment box was stored and never read. Opt-out wording
+                # in it alerts Andre (OPT_OUT_POSSIBLE); consent itself changes only through a messaging channel or
+                # Andre, since the survey form is not one.
+                c = body["comment"]
+                effects += self._pause_effects([contact]) + self._email_pause_effects([contact])
+                if channels.opt_out_level(c) is not None or channels.possible_opt_out(c) \
+                        or channels.cross_channel_email_decision(c) is not None:
+                    effects.append(self._alert_effect("OPT_OUT_POSSIBLE", contact["contact_id"], sid))
             resp = {"survey_id": sid, "score": body["score"], "band": band}
             self._commit("nps_response", {"effects": effects, "request": self._req(actor, "nps", sid, body),
                                           "response": resp}, actor)

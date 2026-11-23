@@ -679,6 +679,67 @@ def _casefold_reading(text: str) -> str | None:
     return alt if normalise(alt) != normalise(text) else None
 
 
+# Hardening 2026-11-08: an opt-out received by CHAT or SMS that names email ("stop emailing me", "unsubscribe me
+# from your texts and emails", "remove me from your mailing list") revoked SMS consent only; email consent stayed
+# active and nothing told Andre. The words below are the ones that, on those channels, make an opt-out an EMAIL one.
+# "list" / "lists" are left out: "take me off your list" sent by text names the text list as much as the mailing one.
+EMAIL_NAMING_WORDS = EMAIL_SCOPE_WORDS - {"list", "lists"}
+
+
+def names_email(text: Optional[str]) -> bool:
+    """The text (read as the opt-out rules read it: lookalikes folded, digits as letters, spelled-out words joined)
+    names email: one of ``EMAIL_NAMING_WORDS`` or the split "e mail(s)"."""
+    if not text:
+        return False
+    t = _read(text)
+    for norm in (normalise(t), normalise(_leet(t))):
+        toks = norm.split()
+        if set(toks) & EMAIL_NAMING_WORDS or any(a == "e" and b in ("mail", "mails", "mailing", "mailed")
+                                                 for a, b in zip(toks, toks[1:])):
+            return True
+    return False
+
+
+# Review of PR #46 (H1): the words an SMS / chat opt-out may hold and still be only an SMS keyword ("STOP", "stop
+# texting me please", "unsubscribe now"). Anything else ("STOP ALL", "stop contacting me", "unsubscribe from
+# everything", "STOP correos", "stop em ails") reaches further than texts in a way the scope rules cannot read.
+SMS_KEYWORD_ONLY = frozenset({"stop", "unsubscribe", "unsub", "cancel", "end", "quit", "halt", "revoke", "optout",
+                              "opt", "out", "please", "pls", "plz", "now", "thanks", "thank", "you", "thx", "me", "it",
+                              "ok", "okay", "already", "texting", "texts", "text", "txt", "txts", "txting", "sms",
+                              "texted", "my", "number", "this", "to", "the", "your"})
+
+
+def broad_opt_out(text: Optional[str]) -> bool:
+    """An opt-out that holds a word beyond an SMS keyword and its courtesy words (``SMS_KEYWORD_ONLY``), read with
+    leet undone and repeated letters collapsed: if ANY reading is keyword-only, it is not broad."""
+    if not text:
+        return False
+    t = _read(text)
+    for norm in (normalise(t), normalise(_leet(t))):
+        toks = {_collapse(w) for w in norm.split()}
+        if toks and toks <= SMS_KEYWORD_ONLY:
+            return False
+    return True
+
+
+def cross_channel_email_decision(text: Optional[str]) -> Optional[str]:
+    """What an opt-out received by CHAT or SMS does to EMAIL consent (hardening 2026-11-08). The same reading as an
+    email (``email_opt_out_decision``) — there is no quoted thread on these channels — but an opt-out revokes email
+    only when it NAMES email (``names_email``): a bare "STOP" by text is the carrier keyword for texts. ``"revoke"``
+    / ``"revoke_direct"``: email consent is revoked; ``"ask"``: Andre decides (``EMAIL_OPT_OUT_UNCLEAR``); None:
+    email consent is not touched (the email pause still stops proactive email until Andre has read the message)."""
+    if not text or not names_email(text):
+        return None
+    decision = email_opt_out_decision(text)
+    if decision in ("revoke", "revoke_direct", "ask"):
+        return decision
+    if decision == "keep":      # an SMS-only opt-out that asks to be reached by email ("... email me instead")
+        return None
+    if decision is None and (opt_out_level(text) is not None or possible_opt_out(text)):
+        return "ask"            # opt-out wording and an email word, but no phrase this reading can scope: Andre reads
+    return None
+
+
 def email_opt_out(text: Optional[str], subject: Optional[str] = None) -> bool:
     """Does an email revoke EMAIL consent (``email_opt_out_decision`` is ``"revoke"`` / ``"revoke_direct"``)?"""
     return email_opt_out_decision(text, subject) in ("revoke", "revoke_direct")
@@ -697,9 +758,11 @@ def consent_matches(consent: Optional[dict], address: Optional[str]) -> bool:
 
 
 def check(channel: str, contact: dict, consent_for: Callable[[str], Optional[dict]], proactive: bool, now: datetime,
-          opt_out_confirmation: bool = False, sms_paused: bool = False) -> Optional[str]:
+          opt_out_confirmation: bool = False, sms_paused: bool = False, email_paused: bool = False) -> Optional[str]:
     """None when allowed now; else a reason code. ``consent_for(channel) -> the consent record or None``.
-    ``opt_out_confirmation``: the one confirmation of an opt-out (no consent needed, sent at once)."""
+    ``opt_out_confirmation``: the one confirmation of an opt-out (no consent needed, sent at once).
+    ``email_paused`` (hardening 2026-11-08): proactive email to the contact's current address is paused by an inbound
+    message the bot did not answer, exactly as ``sms_paused`` pauses proactive SMS."""
     if channel == "sms":
         if not contact.get("phone"):
             return "NO_ADDRESS"
@@ -721,6 +784,8 @@ def check(channel: str, contact: dict, consent_for: Callable[[str], Optional[dic
             return "EMAIL_CONSENT_REVOKED"
         if proactive and not consent_matches(ec, contact["email"]):
             return "EMAIL_CONSENT_REQUIRED"
+        if proactive and email_paused:
+            return "EMAIL_PAUSED"
         return None
     if channel == "chat":
         return None
