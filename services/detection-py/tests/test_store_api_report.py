@@ -133,8 +133,13 @@ def test_sync_snapshot_and_status_through_the_api(client, store):
 def test_refusal_answers_carry_only_the_reason(client, store):
     store.fake.script = [__import__("httpx").Response(401, content=TOKEN.encode())]
     r = client.post("/stores/sync", json={"client_id": "acme"}, headers=AUTH)
+    # Nov 8 2026: a sync refusal also carries ``upstream``, closed tokens only (stage, HTTP status, Shopify error
+    # codes); the upstream body (here the token itself) never appears.
     assert r.status_code == 502 and r.json() == {"detail": {"reason": "STORE_AUTH_REFUSED",
-                                                           "message": "the store refused the credential"}}
+                                                           "message": "the store refused the credential"},
+                                                 "upstream": {"stage": "preflight", "http_status": 401,
+                                                              "graphql_codes": []}}
+    assert TOKEN not in r.text
 
 
 # ---- scan on store data + report ----------------------------------------------------------------------------

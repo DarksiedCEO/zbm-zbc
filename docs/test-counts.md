@@ -25,7 +25,7 @@ the check.
 | `python:compliance-py` | 816 | pytest collection | — |
 | `python:creative-py` | 870 | pytest collection | — |
 | `python:delivery-py` | 738 | pytest collection | — |
-| `python:detection-py` | 860 | pytest collection | — |
+| `python:detection-py` | 928 | pytest collection | — |
 | `python:finance-py` | 1621 | pytest collection | — |
 | `python:fulfillment-py` | 1119 | pytest collection | — |
 | `python:influencer-py` | 441 | pytest collection | — |

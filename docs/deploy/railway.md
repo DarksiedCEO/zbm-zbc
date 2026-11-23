@@ -1520,6 +1520,9 @@ delivery as blocked.
 
 ### Revenue Recovery: connecting a real store
 
+Founder's short version for the first store (Pussycat Alley), with the Shopify steps re-checked on Nov 8 2026 and a
+failure table: [docs/runbooks/rr-pca-first-connection.md](../runbooks/rr-pca-first-connection.md).
+
 AEGIS A2 H-2: before this, detection on Railway could not read any store (no ledger credential, no connections file,
 no credential file). The image now maps four `*_FILE` settings from sealed variables (table in "How `*_FILE` secrets
 map onto Railway"), with `RAILWAY_RUN_UID=0` so the entrypoint writes them as root and runs detection as uid 10001.

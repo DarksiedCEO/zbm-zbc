@@ -6,6 +6,8 @@ never carries upstream text, a token, a header or a customer field: the message 
 
 from __future__ import annotations
 
+from typing import Optional
+
 # code -> (HTTP status detection-py answers with, the fixed message shown to callers)
 REASONS: dict[str, tuple[int, str]] = {
     # no outbound call was made for any of these
@@ -22,6 +24,8 @@ REASONS: dict[str, tuple[int, str]] = {
     # ADR 0024: Compliance (38) is the hard gate before a client is served
     "COMPLIANCE_NOT_ACTIVATED": (409, "Compliance has no current activation for this client; nothing was read"),
     "COMPLIANCE_UNAVAILABLE": (503, "Compliance could not confirm this client's activation; nothing was read"),
+    # a programming error in detection itself (PR #45 review L-e): the service clock gave a time without a timezone
+    "STORE_CLOCK_INVALID": (500, "the service clock gave a time without a timezone; nothing was read"),
     # an outbound read was attempted and stopped
     "STORE_UNAVAILABLE": (502, "the store could not be reached"),
     "STORE_DEADLINE_EXCEEDED": (502, "the store read did not finish within its deadline"),
@@ -47,17 +51,23 @@ REASONS: dict[str, tuple[int, str]] = {
 NO_OUTBOUND = frozenset({"NOT_CONNECTED", "STORE_READS_DISABLED", "STORE_CONFIG_INVALID",
                          "STORE_CREDENTIAL_UNREADABLE", "STORE_BUDGET_EXHAUSTED", "STORE_SYNC_IN_PROGRESS",
                          "STORE_SYNC_CAPACITY", "LEDGER_UNAVAILABLE", "NOT_SYNCED", "SNAPSHOT_STALE",
-                         "COMPLIANCE_NOT_ACTIVATED", "COMPLIANCE_UNAVAILABLE"})
+                         "COMPLIANCE_NOT_ACTIVATED", "COMPLIANCE_UNAVAILABLE", "STORE_CLOCK_INVALID"})
 
 
 class StoreError(Exception):
-    """A store operation stopped. ``code`` is one of REASONS; ``str()`` is the fixed message, never upstream text."""
+    """A store operation stopped. ``code`` is one of REASONS; ``str()`` is the fixed message, never upstream text.
+
+    ``upstream``: set by the sync on a failure after a request was made — closed tokens only (stage, HTTP status,
+    allow-listed Shopify error codes); None otherwise."""
+
+    upstream: Optional[dict] = None
 
     def __init__(self, code: str):
         if code not in REASONS:
             raise AssertionError(f"not a store reason code: {code}")
         super().__init__(REASONS[code][1])
         self.code = code
+        self.upstream = None
 
     @property
     def http_status(self) -> int:
