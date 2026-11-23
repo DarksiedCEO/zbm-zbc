@@ -116,7 +116,7 @@ def view(obs, present=True):
 @pytest.mark.parametrize('obs', [None, {}, {'schema':'future'}, {'schema':'homepage-phone-sample/1','reason':[]}, {'schema':'homepage-phone-sample/1','state':'found'}])
 def test_present_malformed_never_legacy_clean(fmt, obs):
     data, model = cr.render(view(obs), 'acme', fmt)
-    assert model['renderer_version'] == 'seo-client-report/3'
+    assert model['renderer_version'] == 'seo-client-report/7'
     assert 'Homepage phone sample: UNKNOWN' in data.decode()
 
 
@@ -125,7 +125,7 @@ def test_present_malformed_never_legacy_clean(fmt, obs):
 def test_new_observation_rendered_with_limits(fmt, text):
     obs = observation({'/':page(text)})
     data, model = cr.render(view(obs), 'acme', fmt)
-    assert model['renderer_version'] == 'seo-client-report/3'
+    assert model['renderer_version'] == 'seo-client-report/7'
     assert 'sampled raw-html' in data.decode().lower() and '20000' in data.decode()
     label = 'FOUND' if text == PHONE else 'NOT FOUND IN SAMPLE'
     assert 'Homepage phone sample: ' + label in data.decode()
@@ -138,7 +138,7 @@ def test_absent_field_keeps_legacy_bytes(fmt):
     v = fx.fresh('full')
     before = copy.deepcopy(v)
     a, model = cr.render(v, 'acme', fmt)
-    assert model['renderer_version'] == 'seo-client-report/2'
+    assert model['renderer_version'] == 'seo-client-report/6'
     assert cr.render(view(None, present=False), 'acme', fmt)[0] == a
     assert v == before
 
@@ -178,7 +178,7 @@ def test_corrupted_new_observation_is_unknown_not_legacy(mutate):
     elif mutate == 'truncated': obs['sample_truncated'] = 'false'
     elif mutate == 'provenance': obs['final_url'] = ORIGIN+'/contact'
     data, model = cr.render(view(obs), 'acme', 'html')
-    assert model['renderer_version'] == 'seo-client-report/3'
+    assert model['renderer_version'] == 'seo-client-report/7'
     assert 'Homepage phone sample: UNKNOWN' in data.decode()
     sec = next(s for s in model['sections'] if s['key']=='entity')
     assert sec['status']['outcome'] != 'OK'

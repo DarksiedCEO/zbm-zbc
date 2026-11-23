@@ -95,7 +95,10 @@ def base_env(**over) -> dict:
     and tests the default, ``finance``."""
     env = {"SEO_SERVICE_TOKEN": SERVICE_TOKEN, "SEO_NON_PRODUCTION": "1", "SEO_ANDRE_APPROVAL_TOKEN": ANDRE,
            "SEO_CALLER_TOKENS": json.dumps(CALLERS), "SEO_TENANT_TOKENS": json.dumps(TENANT_TOKENS),
-           "SEO_INVOICE_VERIFICATION": "trust"}
+           "SEO_INVOICE_VERIFICATION": "trust",
+           # the suites run against an in-process fixture server: no politeness wait between its requests (the wait
+           # itself is tested in tests/test_report_sellable.py)
+           "SEO_CRAWL_DELAY_MS": "0"}
     for k, v in over.items():
         if v is None:
             env.pop(k, None)

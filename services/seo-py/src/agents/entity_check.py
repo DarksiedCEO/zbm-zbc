@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-from agents import split_url
+from agents import gone, split_url
 from envelope import envelope, finding, observed
 from primitives.fetch import FetchResult
 from primitives.parse import ORG_TYPES
@@ -161,7 +161,8 @@ def run(ctx, pages: dict, entity: Optional[dict]) -> dict:
     if home["state"] == "not_found_in_sample":
         findings.append(finding("HOMEPAGE_PHONE_NOT_IN_TEXT_SAMPLE", "low", "measured", "TEST", url=ctx.url("/"),
                                 capability="P6", detail={"sample_limit_chars": 20000, "sample_chars": home["sample_chars"]}))
-    outcome = "OK" if read == len(pages) and read else ("PARTIAL" if read else "INSUFFICIENT_EVIDENCE")
+    total = sum(1 for p in pages.values() if not gone(p))       # a 404 / 410 page is Selene's finding
+    outcome = "OK" if read == total and read else ("PARTIAL" if read else "INSUFFICIENT_EVIDENCE")
     if home["state"] == "unknown" and outcome == "OK":
         outcome = "PARTIAL"
     return envelope(AGENT, TASK, outcome, findings, methodology=METHODOLOGY, limitations=LIMITS, not_connected={"render"},

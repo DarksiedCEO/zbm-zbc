@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import Optional
 from urllib.parse import quote, unquote
 
 MAX_LINES = 20_000
@@ -25,6 +26,7 @@ MAX_RULE = 2000
 class Group:
     agents: list = field(default_factory=list)
     rules: list = field(default_factory=list)        # (allow: bool, pattern: str)
+    crawl_delay: Optional[float] = None              # non-standard Crawl-delay (seconds), when given and readable
 
 
 @dataclass
@@ -44,6 +46,14 @@ class Robots:
         if star:
             return [r for g in star for r in g.rules], "star"
         return [], "none"
+
+    def crawl_delay(self, token: str) -> Optional[float]:
+        """The Crawl-delay of the group(s) that apply to ``token`` (non-standard; the largest when several), or None."""
+        t = token.lower()
+        groups = [g for g in self.groups if any(a.lower() == t for a in g.agents)] or \
+            [g for g in self.groups if "*" in g.agents]
+        vals = [g.crawl_delay for g in groups if g.crawl_delay is not None]
+        return max(vals) if vals else None
 
     def allowed(self, token: str, path: str) -> bool:
         return self.decide(token, path)["allowed"]
@@ -115,6 +125,9 @@ def parse(text: str) -> Robots:
         elif key == "sitemap":
             if value:
                 out.sitemaps.append(value)
+        elif key == "crawl-delay" and current is not None and re.fullmatch(r"[0-9]{1,6}(\.[0-9]{1,3})?", value):
+            # non-standard (not in RFC 9309) but widely published; honoured by our crawler as a politeness floor
+            current.crawl_delay = float(value)
         else:
             out.lines_ignored += 1
     return out

@@ -132,6 +132,8 @@ class Settings:
     fetch_max_bytes: int = 2 * 1024 * 1024
     fetch_max_redirects: int = 5
     audit_max_pages: int = 10
+    crawl_delay_ms: int = 1000
+    audit_deadline_s: int = 90
     probe_samples: int = 5
     bot_info_url: Optional[str] = None
     log_hash_key: Optional[bytes] = None
@@ -480,6 +482,15 @@ def load(env: Optional[dict] = None) -> Settings:
     s.fetch_max_bytes = _int(env, "SEO_FETCH_MAX_BYTES", 2 * 1024 * 1024, 64 * 1024, 10 * 1024 * 1024)
     s.fetch_max_redirects = _int(env, "SEO_FETCH_MAX_REDIRECTS", 5, 0, 10)
     s.audit_max_pages = _int(env, "SEO_AUDIT_MAX_PAGES", 10, 1, 25)
+    s.crawl_delay_ms = _int(env, "SEO_CRAWL_DELAY_MS", 1000, 0, 3000)
+    s.audit_deadline_s = _int(env, "SEO_AUDIT_DEADLINE_SECONDS", 90, 30, 600)
+    if 2 * s.fetch_timeout_s > s.audit_deadline_s / 2:
+        # re-review of PR 47 (item 1): one fetch may take up to twice SEO_FETCH_TIMEOUT_SECONDS, and that whole time
+        # is kept free before the audit deadline; a pair that leaves less than half the deadline for anything else
+        # refuses start rather than breaking the deadline promise
+        raise RuntimeError(f"SEO_FETCH_TIMEOUT_SECONDS ({s.fetch_timeout_s}) is too long for "
+                           f"SEO_AUDIT_DEADLINE_SECONDS ({s.audit_deadline_s}): twice the fetch timeout (one fetch's "
+                           "longest time) must be at most half the audit deadline")
     s.probe_samples = _int(env, "SEO_PROBE_SAMPLES", 5, 3, 50)
     s.bot_info_url = _bot_info_url(env)
     if env.get("SEO_LOG_HASH_KEY_FILE"):

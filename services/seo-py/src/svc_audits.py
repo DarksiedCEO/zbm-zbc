@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 import traceback
 from pathlib import Path
 from typing import Optional
@@ -37,7 +38,8 @@ from primitives.parse import SCHEMA_RULES_VERSION
 from reasons import R
 
 log = logging.getLogger("seo.audits")
-REPORT_VERSION = "seo-audit-report/1"
+# 2: ``discovered_paths`` (Selene's bounded page discovery, ADR 0017 CR-12)
+REPORT_VERSION = "seo-audit-report/2"
 _PATH_OK = re.compile(r"/[\x21-\x7e]{0,500}")
 GLOBAL_LIMITS = [
     "Wave 1 reads public pages only. First-party truth (Bing Webmaster Tools, analytics, CRM; Search Console unless "
@@ -244,7 +246,14 @@ class AuditsMixin:
         started = iso(self.now())
         ctx = RunContext(fetcher=self.ports.fetcher, renderer=self.ports.renderer, guard=self.guard(tid),
                          clock=self.clock, osei=o, domain=body["domain"], scheme=body["scheme"],
-                         paths=list(body["paths"]))
+                         paths=list(body["paths"]), max_pages=self.settings.audit_max_pages,
+                         crawl_delay_s=self.settings.crawl_delay_ms / 1000,
+                         # one deadline over every request this audit makes to the site (SEO_AUDIT_DEADLINE_SECONDS);
+                         # no request starts that the fetcher's own hard bound (twice the per-phase timeout, which
+                         # nested robots.txt fetches share) could carry past it; config refuses a pair where that
+                         # bound exceeds half the deadline
+                         deadline=time.monotonic() + self.settings.audit_deadline_s,
+                         fetch_reserve_s=2 * self.settings.fetch_timeout_s)
         envs, pages = [], {}
         if self.ports.fetcher is None:
             envs.append(envelope("selene", "crawlability", "NOT_CONNECTED", [], methodology="no fetcher is wired",
@@ -287,7 +296,10 @@ class AuditsMixin:
         nc = sorted(set(self.ports.not_connected()) | {x for e in envs for x in e["not_connected"]})
         return {
             "report_version": REPORT_VERSION, "audit_id": aid, "tenant_id": tid, "domain": body["domain"],
-            "scheme": body["scheme"], "paths": list(body["paths"]), "started_at": started,
+            "scheme": body["scheme"], "paths": list(body["paths"]),
+            # pages read beyond the request: same-site links of the requested pages (Selene's bounded discovery)
+            "discovered_paths": [p for p in pages if p not in body["paths"]],
+            "started_at": started,
             "finished_at": iso(self.now()), "outcome": overall_outcome(envs),
             "outcome_rule": OUTCOME_RULE,
             "agents": envs,
