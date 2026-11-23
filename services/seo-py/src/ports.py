@@ -19,6 +19,9 @@ named NOT_CONNECTED port, and config.NOT_BUILT refuses to start if one is "selec
   finance                Finance (31) invoice verification (Wave 3, W3-2: finance_client.py; NOT_CONNECTED unless
                          SEO_FINANCE_URL / _TOKEN / _CALLER_TOKEN are set). A business gate, not an observation port:
                          it is listed in /status, never in an audit report's ``not_connected``.
+  field_data             Lena's real-user page-experience data (ADR 0050; crux_client.py). The Chrome UX Report
+                         provider only when SEO_CRUX_ENABLED=1 with SEO_CRUX_API_KEY_FILE; otherwise NOT_CONNECTED
+                         and no call is ever made.
 """
 
 from __future__ import annotations
@@ -177,6 +180,17 @@ def gsc_from_settings(settings, **test_hooks):
                      max_rows=settings.gsc_max_rows, max_requests=settings.gsc_max_requests, **test_hooks)
 
 
+def field_data_from_settings(settings, **test_hooks):
+    """Lena's field-data port (ADR 0050): the CrUX provider when enabled with a key, NOT_CONNECTED otherwise.
+    ``test_hooks`` (transport, network_backend, monotonic, sleep, resolve, dns_gate) are for tests only."""
+    import crux_client
+    if settings is None or not getattr(settings, "crux_enabled", False) or getattr(settings, "crux_key", None) is None:
+        return crux_client.NotConnectedFieldData()
+    return crux_client.CruxClient(settings.crux_key, timeout_s=settings.crux_timeout_s,
+                                  deadline_s=settings.crux_deadline_s, max_calls=settings.crux_calls_per_run,
+                                  **test_hooks)
+
+
 def perplexity_engine(settings):
     """The Perplexity port for these settings: the adapter when a key is configured, NOT_CONNECTED otherwise."""
     import perplexity
@@ -204,6 +218,7 @@ class Ports:
     bot_verifier: object = None
     finance: object = None
     compliance: object = None            # ADR 0024: compliance_client.py; NOT_CONNECTED refuses every client run
+    field_data: object = None            # ADR 0050: Lena's CrUX provider (crux_client.py); NOT_CONNECTED by default
 
     @classmethod
     def default(cls, settings=None) -> "Ports":
@@ -233,7 +248,8 @@ class Ports:
                    zero_day=NotConnectedSource("zero_day"), orca_publish=NotConnectedSource("orca_publish"),
                    clientfix=NotConnectedSource("clientfix"),
                    bot_verifier=DnsBotVerifier() if settings is not None and settings.bot_verify_dns
-                   else NotConnectedBotVerifier(), finance=finance, compliance=compliance)
+                   else NotConnectedBotVerifier(), finance=finance, compliance=compliance,
+                   field_data=field_data_from_settings(settings))
 
     def status(self) -> dict:
         def st(p) -> str:
@@ -245,7 +261,8 @@ class Ports:
                 "first_party": {n: st(p) for n, p in self.first_party.items()},
                 "zero_day": st(self.zero_day), "orca_publish": st(self.orca_publish), "clientfix": st(self.clientfix),
                 "bot_dns_verification": st(self.bot_verifier), "bot_ip_range_verification": NOT_CONNECTED,
-                "finance": st(self.finance), "compliance": st(self.compliance)}
+                "finance": st(self.finance), "compliance": st(self.compliance),
+                "field_data": st(self.field_data)}
 
     def engine_details(self) -> dict:
         """What /status shows of each answer engine: state, model, limits and the key's SOURCE (file or env), never

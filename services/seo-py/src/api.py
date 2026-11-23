@@ -492,6 +492,12 @@ def create_app(service: SeoService, settings: config_mod.Settings) -> FastAPI:
     def client_reports(aid: str, scope: tuple = Depends(scoped("dashboard", "compliance_38"))) -> list:
         return svc.client_reports_view(scope[1], _id(aid))
 
+    @app.get(P + "/tenants/{tid}/audits/{aid}/page-experience", dependencies=auth)
+    def page_experience(aid: str, scope: tuple = Depends(scoped("dashboard", "seo_agent", "hub",
+                                                                "compliance_38"))) -> dict:
+        """Lena's real-user page-experience section of a completed audit (ADR 0050), tenant-scoped."""
+        return svc.page_experience_view(scope[1], _id(aid))
+
     @app.get(P + "/tenants/{tid}/audits/{aid}", dependencies=auth)
     def audit(aid: str, scope: tuple = Depends(scoped("dashboard", "seo_agent", "hub", "finance_31",
                                                       "compliance_38"))) -> dict:

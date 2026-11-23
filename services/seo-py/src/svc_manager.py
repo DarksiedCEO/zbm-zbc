@@ -21,7 +21,7 @@ from envelope import sha
 from errors import Conflict, Forbidden, Invalid, Unavailable
 from reasons import R
 
-AGENTS = ("selene", "delia", "roman", "entity_check", "callum", "naomi", "osei")
+AGENTS = ("selene", "delia", "roman", "entity_check", "callum", "naomi", "osei", "lena")
 STATES = ("active", "watch", "retrain", "restricted", "retired")
 MOVES = {"active": ("watch", "restricted"), "watch": ("active", "retrain", "restricted"),
          "retrain": ("active", "watch", "restricted"), "restricted": ("active", "retrain", "retired"),
