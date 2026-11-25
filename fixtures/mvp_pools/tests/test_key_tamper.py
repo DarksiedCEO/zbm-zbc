@@ -1,8 +1,8 @@
 """Every non-label field of every answer key is proven: changing any one of them, or adding or dropping a row, is caught.
 
 Labels (the planted class names a set is organised by: pool-B classes are re-derived, but the call bank's
-``scenario``, F2/F4 ``case`` and F5 ``episode`` are names, and the health terms are checked against the call text)
-are excluded from the field sweep by name below.
+``scenario``, F2/F4 ``case`` and F5 ``episode`` are names) are excluded from the field sweep by name below. The
+caller's name and the health terms are re-derived from the call text and swept row by row, not just once per field.
 """
 
 from __future__ import annotations
@@ -41,6 +41,10 @@ SETS = {
 }
 
 
+def subject_text(calls, call_id):
+    return " ".join(t["text"] for c in calls if c["call_id"] == call_id for t in c["turns"])
+
+
 def _tampered(value):
     if isinstance(value, bool):
         return not value
@@ -69,6 +73,24 @@ class KeyTamper(unittest.TestCase):
                     bad[i][field] = _tampered(row[field])
                     with self.subTest(set=name, row=i, field=field):
                         self.assertTrue(check(subject, bad), f"{name}: changing {field} went unnoticed")
+
+    def test_every_call_bank_name_and_health_list_is_checked_row_by_row(self):
+        """AEGIS round 2: a per-(field, type) sweep missed rows whose check was 'appears somewhere in the text'."""
+        subject, key, check, _ = SETS["call_bank"]
+        for i, row in enumerate(key):
+            if row["must_capture"]:
+                first_word = subject_text(subject, row["call_id"]).split()[0]
+                for wrong in (first_word, row["must_capture"]["name"].split()[0]):
+                    bad = copy.deepcopy(key)
+                    bad[i]["must_capture"]["name"] = wrong
+                    with self.subTest(row=i, name=wrong):
+                        self.assertTrue(check(subject, bad))
+            if row["forbidden_terms_in_record"]:
+                for wrong in ([], row["forbidden_terms_in_record"][:1] + ["tampered"], ["Hi"]):
+                    bad = copy.deepcopy(key)
+                    bad[i]["forbidden_terms_in_record"] = wrong
+                    with self.subTest(row=i, terms=wrong):
+                        self.assertTrue(check(subject, bad))
 
     def test_extra_and_missing_rows_are_caught(self):
         for name, (subject, key, check, _labels) in SETS.items():

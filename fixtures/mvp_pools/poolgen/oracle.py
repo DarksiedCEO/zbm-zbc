@@ -256,6 +256,17 @@ def derive_call_entry(call: dict, scenario: str) -> dict:
     return entry
 
 
+# Health terms the oracle knows on its own; the key's forbidden list must be exactly the ones the caller said.
+HEALTH_LEXICON = ("pregnant", "blood thinners", "diabetes", "seizure", "embarazada", "anticoagulantes", "convulsión")
+# A caller's name: two capitalised words after a self-introduction cue (or opening a sentence), ending at "," or ".".
+_NAME = re.compile(r"(?:^|(?<=My name is )|(?<=Me llamo )|(?<=I'm )|(?<=[Ss]oy )|(?<=This is )|(?<=Habla )|(?<=It's )"
+                   r"|(?<=\. ))([A-Z][a-z]+ [A-Z][a-z]+)(?=[.,])", re.M)
+
+
+def spoken_names(call: dict) -> set[str]:
+    return {m for t in call["turns"] for m in _NAME.findall(t["text"])}
+
+
 def check_call_bank(calls: list[dict], key: list[dict]) -> list[str]:
     """Every field of every key entry must equal the entry re-derived from the call (the scenario is the label)."""
     errors: list[str] = []
@@ -272,14 +283,16 @@ def check_call_bank(calls: list[dict], key: list[dict]) -> list[str]:
         got = {f: v for f, v in k.items() if f != "forbidden_terms_in_record"}
         if got.get("must_capture"):
             got = dict(got, must_capture=dict(got["must_capture"], name=None))
-            if not isinstance(k["must_capture"].get("name"), str) or k["must_capture"]["name"] not in text:
-                errors.append(f"{call['call_id']}: expected name never spoken")
+            names = spoken_names(call)
+            if len(names) != 1 or k["must_capture"].get("name") != next(iter(names)):
+                errors.append(f"{call['call_id']}: key name {k['must_capture'].get('name')!r} is not the one name "
+                              f"the caller gives {sorted(names)}")
         if json.dumps(got, sort_keys=True) != json.dumps(derived, sort_keys=True):
             errors.append(f"{call['call_id']}: key differs from the call: key={got} derived={derived}")
         terms = k["forbidden_terms_in_record"]
-        if (k["scenario"] == "health_details") != bool(terms):
+        said = sorted(term for term in HEALTH_LEXICON if term in text.lower())
+        if not isinstance(terms, list) or sorted(terms) != said:
+            errors.append(f"{call['call_id']}: forbidden terms {terms} are not the health terms the caller said {said}")
+        if (k["scenario"] == "health_details") != bool(said):
             errors.append(f"{call['call_id']}: health terms present iff the caller gives health details")
-        for term in terms:
-            if term.lower() not in text.lower():
-                errors.append(f"{call['call_id']}: forbidden term '{term}' never said, so the test can't bite")
     return errors
