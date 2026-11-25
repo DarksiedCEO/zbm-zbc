@@ -159,20 +159,35 @@ def _reviews(s: Stream, classes: set[str]) -> list[dict]:
         if replied:
             reply_days = (s.pick([8, s.between(10, 40)]) if "review_slow_reply" in classes
                           else s.pick([7, s.between(0, 3)]))
-        reviews.append({"review_id": f"r{i:03d}", "days_ago": days_ago, "stars": stars,
+        reviews.append({"review_id": None, "days_ago": days_ago, "stars": stars,
                         "owner_reply_after_days": reply_days})
     if "review_star_trend_down" in classes:
         # guarantee a recent window to judge: three more low-star reviews inside the last 180 days
         for j in range(3):
-            reviews.append({"review_id": f"t{j}", "days_ago": s.between(120, 180) if gap else s.between(1, 180),
+            reviews.append({"review_id": None, "days_ago": s.between(120, 180) if gap else s.between(1, 180),
                             "stars": s.pick([1, 2]), "owner_reply_after_days": None})
     # adversarial: owner replies on very old reviews must not inflate the recent reply rate
-    reviews.append({"review_id": "r-old", "days_ago": 900, "stars": 4, "owner_reply_after_days": 1})
+    reviews.append({"review_id": None, "days_ago": 900, "stars": 4, "owner_reply_after_days": 1})
     if "review_burst" in classes:
-        start = s.between(5, 60) if not gap else s.between(150, 400)
+        # The burst sits in a stretch with no other review within 3 days either side, so the oracle can tell it apart
+        # from organic reviews by the data alone (ten or more inside a 3-day window), never by an id.
+        taken = {r["days_ago"] for r in reviews}
+        lo, hi = (5, 60) if not gap else (150, 400)
+        wide = s.shuffled(list(range(lo, 700)))          # fall back to anywhere inside the 730-day window
+        start = next((d for d in s.shuffled(list(range(lo, hi + 1))) + wide
+                      if not any(d - 3 <= t <= d + 5 for t in taken)), None)
+        if start is None:
+            raise AssertionError("no free stretch for the burst")
         for j in range(s.pick([10, 12])):    # 10 = exactly the burst line
-            reviews.append({"review_id": f"b{j:02d}", "days_ago": start + (j % 3), "stars": 5,
+            reviews.append({"review_id": None, "days_ago": start + (j % 3), "stars": 5,
                             "owner_reply_after_days": None})
+    # Ids carry nothing: random hex, so neither an id nor the order of equal-day reviews hints at what was planted.
+    ids = set()
+    for r in reviews:
+        while (rid := f"rev-{s.below(16 ** 10):010x}") in ids:
+            pass
+        ids.add(rid)
+        r["review_id"] = rid
     return sorted(reviews, key=lambda r: (r["days_ago"], r["review_id"]))
 
 
@@ -244,9 +259,10 @@ def _compatible(classes: set[str], cls: str) -> bool:
     return not any(frozenset({cls, c}) in CONFLICTS for c in classes)
 
 
-def _assign_classes(index: int, s: Stream) -> set[str]:
-    """Round-robin the primary class (guarantees every class appears), then 0-2 compatible extra classes."""
-    classes = {ALL_CLASSES[index % len(ALL_CLASSES)]}
+def _assign_classes(slot: int, s: Stream) -> set[str]:
+    """Round-robin the primary class over a SHUFFLED slot (every class appears; nothing visible gives the slot away),
+    then 0-2 compatible extra classes."""
+    classes = {ALL_CLASSES[slot % len(ALL_CLASSES)]}
     for _ in range(s.pick([0, 1, 1, 2])):
         cls = s.pick(ALL_CLASSES)
         if cls not in classes and _compatible(classes, cls):
@@ -260,12 +276,17 @@ def generate(seed: str) -> tuple[list[dict], list[dict]]:
     world: list[dict] = []
     key: list[dict] = []
     total = LEAKY_COUNT + CONTROL_COUNT
+    # AEGIS round 2: vertical and phone used to follow the loop index, which gave away control status and the planted
+    # class. Role, vertical and region now come from three independent per-seed shuffles.
+    role = root.child("role").shuffled(list(range(total)))
+    vslot = root.child("vertical").shuffled(list(range(total)))
+    rslot = root.child("region").shuffled(list(range(total)))
     for i in range(total):
         s = root.child(f"biz{i}")
-        control = i >= LEAKY_COUNT
-        vertical = VERTICAL_IDS[i % len(VERTICAL_IDS)]
-        area, state, tz = common.REGION_AREA_CODES[(i // len(VERTICAL_IDS)) % len(common.REGION_AREA_CODES)]
-        classes: set[str] = set() if control else _assign_classes(i, s.child("classes"))
+        control = role[i] >= LEAKY_COUNT
+        vertical = VERTICAL_IDS[vslot[i] % len(VERTICAL_IDS)]
+        area, state, tz = common.REGION_AREA_CODES[rslot[i] % len(common.REGION_AREA_CODES)]
+        classes: set[str] = set() if control else _assign_classes(role[i], s.child("classes"))
         biz_id = common.opaque_id("svc", seed, i)
         name = _name(s, vertical, s.below(1000))
         biz = {
@@ -277,7 +298,7 @@ def generate(seed: str) -> tuple[list[dict], list[dict]]:
             "name": name,
             "state": state,
             "time_zone": tz,
-            "main_phone": common.fixture_phone(area, i % 50),
+            "main_phone": common.fixture_phone(area, s.child("phone-no").below(50)),
         }
         biz["website"] = _site(s.child("site"), common.slugify(name) + "-" + biz_id[-6:], classes)
         gbp = _gbp(s.child("gbp"), biz, classes)

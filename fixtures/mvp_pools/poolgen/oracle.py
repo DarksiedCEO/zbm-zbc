@@ -83,7 +83,14 @@ def derive_pool_b(biz: dict) -> set[str]:
         found.add("gbp_wrong_hours")
 
     reviews = [r for r in biz["reviews"] if r["days_ago"] <= 730]
-    organic = [r for r in reviews if not r["review_id"].startswith("b")]
+    days = sorted(r["days_ago"] for r in reviews)
+    burst_days: set[int] = set()
+    for i in range(len(days)):
+        window = [d for d in days[i:] if d - days[i] < BURST_WINDOW_DAYS]
+        if len(window) >= BURST_COUNT:
+            burst_days |= set(window)
+    # organic = everything outside a burst window, judged from the data, never from an id
+    organic = [r for r in reviews if r["days_ago"] not in burst_days]
     if min(r["days_ago"] for r in reviews) > RECENCY_GAP_DAYS:
         found.add("review_recency_gap")
     replied = [r for r in organic if r["owner_reply_after_days"] is not None]
@@ -95,11 +102,8 @@ def derive_pool_b(biz: dict) -> set[str]:
     older = [r["stars"] for r in organic if r["days_ago"] > 180]
     if recent and older and sum(recent) / len(recent) <= 2.5 and sum(older) / len(older) >= 4.0:
         found.add("review_star_trend_down")
-    days = sorted(r["days_ago"] for r in reviews)
-    for i in range(len(days)):
-        if sum(1 for d in days[i:] if d - days[i] < BURST_WINDOW_DAYS) >= BURST_COUNT:
-            found.add("review_burst")
-            break
+    if burst_days:
+        found.add("review_burst")
 
     dm = biz["dm_inbox"]
     if dm["human_reply_minutes"] is None:
@@ -260,7 +264,7 @@ def derive_call_entry(call: dict, scenario: str) -> dict:
 HEALTH_LEXICON = ("pregnant", "blood thinners", "diabetes", "seizure", "embarazada", "anticoagulantes", "convulsión")
 # A caller's name: two capitalised words after a self-introduction cue (or opening a sentence), ending at "," or ".".
 _NAME = re.compile(r"(?:^|(?<=My name is )|(?<=Me llamo )|(?<=I'm )|(?<=[Ss]oy )|(?<=This is )|(?<=Habla )|(?<=It's )"
-                   r"|(?<=\. ))([A-Z][a-z]+ [A-Z][a-z]+)(?=[.,])", re.M)
+                   r"|(?<=\. ))([A-Z][a-z]+ [A-Z][a-z]+)(?=[.,])", re.MULTILINE)
 
 
 def spoken_names(call: dict) -> set[str]:

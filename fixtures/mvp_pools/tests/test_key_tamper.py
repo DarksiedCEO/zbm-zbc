@@ -21,6 +21,8 @@ from poolgen import (
     f3_transcripts,
     frontdesk_oracle,
     frontdesk_sets,
+    local_ops,
+    local_ops_oracle,
     oracle,
     pool_b,
     seo_local,
@@ -38,6 +40,8 @@ SETS = {
     "seo_l4": (*seo_local.generate_l4(SEED), seo_local_oracle.check_l4, set()),
     "seo_l5": (*seo_local.generate_l5(SEED), seo_local_oracle.check_l5, set()),
     "ci_watch": (*ci_watch.generate(SEED), ci_watch_oracle.check, set()),
+    "seo_l1": (*local_ops.generate_l1(SEED), local_ops_oracle.check_l1, set()),
+    "seo_l6": (*local_ops.generate_l6(SEED), local_ops_oracle.check_l6, set()),
 }
 
 

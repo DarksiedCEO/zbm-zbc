@@ -105,7 +105,7 @@ def generate_f4(seed: str) -> tuple[list[dict], list[dict]]:
             cases.append({"fixture": common.FIXTURE_LABEL, "pool": F4_POOL, "case_id": common.opaque_id("xfer", seed, n),
                           "ring_mode": "simultaneous",   # all on-call staff ring at once, so 30 s holds for any list
                           "in_business_hours": in_hours, "on_call_order": on_call, "staff_behavior": answers,
-                          "ring_timeout_seconds": s.pick([12, 15, 20]),
+                          "ring_timeout_seconds": s.pick([12, 15, 20, 30]),   # 30 = on the bar, still valid
                           "caller_number": common.fixture_phone(s.pick(sorted(AREA_TZ)), 50 + s.below(50))})
             if kind == "connect_first":
                 path, target = "connected", on_call[0]

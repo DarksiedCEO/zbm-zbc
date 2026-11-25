@@ -43,12 +43,12 @@ def _phone_fmt(e164: str, style: int) -> str:
     return (f"({a}) {b}-{c}", f"{a}-{b}-{c}", f"{a}.{b}.{c}", e164, f"1-{a}-{b}-{c}")[style % 5]
 
 
-def _canonical(s: Stream, i: int) -> dict:
-    city, state, zip_, area = CITIES[i % len(CITIES)]
+def _canonical(s: Stream, trade: str | None = None) -> dict:
+    city, state, zip_, area = s.pick(CITIES)
     st_full, st_abbr = s.pick(STREET_TYPES)
     has_suite = s.chance(1, 2)
     return {
-        "name": f"{s.pick(STREET_NAMES)} {s.pick(TRADES)} {s.between(100, 999)}",
+        "name": f"{s.pick(STREET_NAMES)} {trade or s.pick(TRADES)} {s.between(100, 999)}",
         "street_number": str(s.between(100, 9899)), "street_name": s.pick(STREET_NAMES),
         "street_type": st_full, "street_type_abbrev": st_abbr,
         "suite": str(s.between(1, 40)) if has_suite else None,
@@ -98,14 +98,15 @@ def generate_l4(seed: str) -> tuple[list[dict], list[dict]]:
     root = Stream(f"{POOL_ID}|l4|{seed}")
     dirs = _directories()
     subjects, key = [], []
+    role = root.child("role").shuffled(list(range(BUSINESSES)))
     for i in range(BUSINESSES):
         s = root.child(f"b{i}")
         biz_id = common.opaque_id("loc", seed, i)
-        canon = _canonical(s.child("canon"), i)
-        n_listings = s.between(15, 45)
+        canon = _canonical(s.child("canon"))
+        n_listings = s.between(15, len(dirs))
         chosen = s.shuffled(dirs)[:n_listings]
         listings, truth = [], []
-        control = i % 10 == 9            # 1 in 10 businesses: every listing correct (formatting variants allowed)
+        control = role[i] % 10 == 9      # 1 in 10 businesses, by a shuffled slot: every listing correct
         for j, d in enumerate(chosen):
             ls = s.child(f"l{j}")
             fault = None if control or not ls.chance(1, 5) else ls.pick(FAULTS)
@@ -133,7 +134,8 @@ def generate_l5(seed: str) -> tuple[list[dict], list[dict]]:
     for kind, dup, count in L5_KINDS:
         for _ in range(count):
             s = root.child(f"{kind}-{n}")
-            c = _canonical(s.child("canon"), n)
+            # a practitioner listing sits inside a dental practice, so the practice is always dental
+            c = _canonical(s.child("canon"), "Dental" if kind == "practitioner_listing" else None)
             a = _render_listing(c, s.child("a"), set(), None)
             # formatting differences only (a second phone number would need the owner's record to judge)
             b = _render_listing(c, s.child("b"), {v for v in FORMAT_VARIANTS

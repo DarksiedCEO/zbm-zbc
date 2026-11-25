@@ -1,4 +1,4 @@
-"""The held-out exam stays secret, and every threshold is tested exactly at its line (AEGIS review of e41e57b5)."""
+"""The held-out exam stays secret, and the listed thresholds are tested exactly at their line (AEGIS e41e57b5, 95ba0730)."""
 
 from __future__ import annotations
 
@@ -61,6 +61,38 @@ class HeldOutSecrecy(unittest.TestCase):
         c, ck = call_bank.generate(FRESH)
         self.assertEqual(oracle.check_call_bank(c, ck), [])
         self.assertEqual(frontdesk_oracle.check_f5(*frontdesk_sets.generate_f5(FRESH)), [])
+
+
+class NoAnswerInVisibleFields(unittest.TestCase):
+    """AEGIS round 2 (95ba0730): pool B's vertical and phone followed the loop index, and review ids named the class."""
+
+    def test_vertical_and_phone_do_not_recover_the_planted_role(self):
+        for seed in ("dev-a", FRESH):
+            world, key = pool_b.generate(seed)
+            kb = {k["business_id"]: k for k in key}
+            hits = 0
+            for b in world:
+                v = pool_b.VERTICAL_IDS.index(b["vertical"])
+                m = int(b["main_phone"][-2:]) % 50
+                guess = next((x for x in range(len(world)) if x % len(pool_b.VERTICAL_IDS) == v and x % 50 == m), 0)
+                hits += (guess >= pool_b.LEAKY_COUNT) == kb[b["business_id"]]["control"]
+            self.assertLess(hits / len(world), 0.95, seed)
+
+    def test_review_ids_are_opaque_and_unique(self):
+        import re
+        for b in pool_b.generate(FRESH)[0]:
+            ids = [r["review_id"] for r in b["reviews"]]
+            self.assertEqual(len(ids), len(set(ids)))
+            self.assertTrue(all(re.fullmatch(r"rev-[0-9a-f]{10}", i) for i in ids), ids[:3])
+
+    def test_pool_b_oracle_ignores_review_ids(self):
+        import copy
+        world, key = pool_b.generate("dev-b")
+        renamed = copy.deepcopy(world)
+        for b in renamed:
+            for n, r in enumerate(b["reviews"]):
+                r["review_id"] = f"b{n:03d}"
+        self.assertEqual(oracle.check_pool_b(renamed, key), [])
 
 
 class Boundaries(unittest.TestCase):

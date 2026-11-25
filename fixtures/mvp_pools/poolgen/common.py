@@ -18,7 +18,7 @@ from typing import TypeVar
 
 T = TypeVar("T")
 
-GENERATOR_VERSION = "mvp-pools-v0.1"
+GENERATOR_VERSION = "mvp-pools-v0.2"
 FIXTURE_LABEL = "FIXTURE DATA - synthetic, not a real business or person"
 
 # Area codes for the core region (AZ, NV, OR, WA, CA), each with the time zone the pool uses for it.

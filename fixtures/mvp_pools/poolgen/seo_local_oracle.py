@@ -29,6 +29,11 @@ def norm_street(street: str) -> str:
     return " ".join(out)
 
 
+def norm_site(url: str) -> str:
+    """http/https, a leading www. and a trailing slash are formatting, not a different website."""
+    return re.sub(r"^https?://(www\.)?", "", url.strip().lower()).rstrip("/")
+
+
 def norm_phone(phone: str) -> str:
     digits = re.sub(r"\D", "", phone)
     return digits[1:] if len(digits) == 11 and digits.startswith("1") else digits
@@ -50,6 +55,11 @@ def l4_verdict(canon: dict, listing: dict) -> str:
     allowed = {norm_phone(canon["phone"])} | ({norm_phone(canon["toll_free"])} if canon["toll_free"] else set())
     if norm_phone(listing["phone"]) not in allowed:
         faults.append("wrong_phone")
+    if (listing["city"].casefold(), listing["state"].upper(), listing["zip"][:5]) != \
+            (canon["city"].casefold(), canon["state"].upper(), canon["zip"][:5]):
+        faults.append("wrong_address")
+    if norm_site(listing["website"]) != norm_site(canon["website"]):
+        faults.append("wrong_website")
     if canon["open"] and listing["status"] != "open":
         faults.append("closed_listing")
     if len(faults) > 1:
