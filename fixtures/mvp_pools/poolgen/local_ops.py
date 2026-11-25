@@ -57,14 +57,21 @@ def generate_l1(seed: str) -> tuple[list[dict], list[dict]]:
             current = dict(rec)
             edits: list[dict] = []
             fields: list[str] = []
+            # the last sync's age says nothing about the state (AEGIS round 3: it used to be 30 whenever an edit existed)
+            last_sync = ps.between(21, 60)
             if state in ("drifted", "owner_hand_edit"):
                 fields = sorted(ps.shuffled(SYNC_FIELDS)[: ps.between(1, 2)])
                 for f in fields:
                     current[f] = _changed(f, rec[f], ps)
-                    edits.append({"field": f, "edited_by": "owner" if state == "owner_hand_edit" else
-                                  ps.pick(("platform_suggested_edit", "public_user_edit", "data_aggregator")),
-                                  "days_ago": ps.between(1, 20)})
-            last_sync = 30 if edits else ps.between(5, 30)
+                    # trap: some drift is never logged (an aggregator overwrite), so only the values reveal it
+                    if state == "owner_hand_edit" or not ps.chance(1, 3):
+                        edits.append({"field": f, "edited_by": "owner" if state == "owner_hand_edit" else
+                                      ps.pick(("platform_suggested_edit", "public_user_edit", "data_aggregator")),
+                                      "days_ago": ps.between(1, last_sync - 1)})
+            if state == "in_sync" and ps.chance(1, 4):
+                # trap: a logged non-owner edit since the sync that was already reverted, so the values still match
+                edits.append({"field": ps.pick(SYNC_FIELDS), "edited_by": "public_user_edit",
+                              "days_ago": ps.between(1, last_sync - 1)})
             if state == "in_sync" and ps.chance(1, 3):
                 d = rec["phone"][2:]
                 current["phone"] = f"({d[0:3]}) {d[3:6]}-{d[6:]}"

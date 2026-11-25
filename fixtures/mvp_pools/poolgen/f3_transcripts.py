@@ -16,7 +16,8 @@ from .common import Stream
 
 POOL_ID = "frontdesk-f3-transcripts"
 COUNT = 300
-LOW_CONFIDENCE = 0.6     # below this a turn is untrusted and must be flagged, never used as a fact
+LOW_CONFIDENCE = 0.6     # a SPOKEN turn below this is untrusted: flag it, never use it as a fact. A silent turn
+# (no words, confidence 0.0) carries nothing to trust or distrust and is not flagged; confirm at the spec freeze.
 
 
 def _spoken(e164: str) -> str:

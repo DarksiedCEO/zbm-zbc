@@ -28,7 +28,8 @@ Each answer key is planted by the generator **and** re-derived independently fro
 diffing each listing against the record and reading the edit log; L6 from the scenario, with its own message patterns,
 English only), `poolgen/review_replies_oracle.py` (L7, its own fake, refund and detail-term rules, English only) and `poolgen/ci_watch_oracle.py` (parses the page content and diffs versions). The oracles rebuild **every
 field** of every answer row except the set's label (the call bank's `scenario`, F2/F4 `case`, F5 `episode`; pool-B
-classes are re-derived too), and require the rows to match the subjects one to one.
+classes are re-derived too; F3's `need` is the caller's purpose, a label the oracle only bounds to the allowed
+vocabulary), and require the rows to match the subjects one to one.
 - `tests/test_key_tamper.py` changes each field of the answers (once per field and type; the call bank's caller name
   and health terms on every row), and adds and drops rows, and requires the oracle to notice every time.
 - Negative controls corrupt the subject data and require the same.
@@ -38,8 +39,9 @@ classes are re-derived too), and require the rows to match the subjects one to o
   days, review reply 7 / 8 days, reply rate exactly 30%.
 - **Generated only on the line, not one past:** the burst (exactly 10 reviews in 3 days; 9 is never generated) and the
   F4 30 s ring timeout (30 is generated; 31 would be an invalid ringing plan, which the oracle rejects).
-- **Not generated at the line at all:** the 730-day review window, the 2.5-star recent average, and the call bank's
-  opening and closing minute (calls fall on :00, :15, :30, :45 only).
+- **Generated on the line only:** the call bank's opening and closing minute (calls fall on :00, :15, :30, :45, so
+  calls land exactly at opening and closing but never a minute either side).
+- **Not generated at the line at all:** the 730-day review window and the 2.5-star recent average.
 - **Known limit:** pool B's oracle reads the vertical packs' hours from the same table as the generator, so a wrong
   hours table would be wrong in both places.
 - Nov 25 2026 sweeps with zero disagreements: 500 pool-B, 200 call-bank, 100 F2/F4 and 40 F5 seeds; after the round-2
@@ -75,6 +77,19 @@ Test-verification and Inquisitor found, and the next commits fix:
   were capped at 40, not 45. The L5 practitioner sat inside a non-dental business in 106 of 120 pairs; it is now always
   a dental practice. L4 controls were tied to the city; they now come from a shuffled slot.
 All the reviewers' probes were replayed on the fix and no longer reproduce.
+
+## AEGIS review round 3 (Nov 25 2026, subject c0d1e59c)
+Inquisitor broke 6 claims (2 high); fixed in the next commit:
+- **F3 `need` was copied from the key**, never checked (900/900 rewrites unnoticed). It is now bounded to the reason
+  categories and call purposes; a swap to another valid purpose is still not caught, so it is listed as a label.
+- **SEO-L1 answers could be read off the last-sync age** (30 whenever an edit was planted: 1191/1200 rows right without
+  reading a value). The sync age is now independent of the state, some drift is never logged, and some logged edits
+  were already reverted, so only the values tell. The same shortcut now gets about half the rows.
+- The call-bank minute claim is corrected (on the line only); the boundary test now checks the 7 / 8-day review reply
+  and the exact 30% reply rate; the visible call-bank `difficulty` field (which equalled "adversarial") is removed.
+- **Open for the spec freeze:** a silent F3 turn (confidence 0.0) is not flagged as low-confidence; the rule now says so
+  and Andre confirms it.
+test-verification's round 3 was still running at handoff.
 
 ## Use
 

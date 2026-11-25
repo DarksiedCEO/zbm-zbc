@@ -130,6 +130,19 @@ class Boundaries(unittest.TestCase):
         firsts = [min(r["days_ago"] for r in b["reviews"]) for b in world]
         self.assertIn(oracle.RECENCY_GAP_DAYS, firsts)
         self.assertIn(oracle.RECENCY_GAP_DAYS + 1, firsts)
+        replies = {r["owner_reply_after_days"] for b in world for r in b["reviews"]}
+        self.assertIn(oracle.SLOW_REVIEW_REPLY_DAYS, replies)       # 7 days: not slow
+        self.assertIn(oracle.SLOW_REVIEW_REPLY_DAYS + 1, replies)   # 8 days: slow
+        rates = []
+        for b in world:
+            recent = sorted(r["days_ago"] for r in b["reviews"] if r["days_ago"] <= 730)
+            burst = {d for i, x in enumerate(recent) for d in recent[i:i + oracle.BURST_COUNT]
+                     if len([y for y in recent[i:] if y - x < oracle.BURST_WINDOW_DAYS]) >= oracle.BURST_COUNT
+                     and d - x < oracle.BURST_WINDOW_DAYS}
+            organic = [r for r in b["reviews"] if r["days_ago"] <= 730 and r["days_ago"] not in burst]
+            if organic:
+                rates.append(sum(r["owner_reply_after_days"] is not None for r in organic) / len(organic))
+        self.assertIn(oracle.LOW_REPLY_RATE, rates)                  # exactly 30%: not a low reply rate
 
     def test_f5_look_alikes_are_allowed(self):
         _, key = frontdesk_sets.generate_f5("dev-a")

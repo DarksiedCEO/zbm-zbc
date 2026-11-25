@@ -234,7 +234,7 @@ def generate(seed: str) -> tuple[list[dict], list[dict]]:
                          "reason_categories": list(pack["reason_categories"]),
                          "emergency_types": list(pack["emergency_types"])},
                 "local_time": {"day": day, "time": hhmm, "time_zone": tz}, "audio": audio,
-                "difficulty": 3 if scenario in ADVERSARIAL else s.pick([1, 1, 2]), "turns": turns,
+                "turns": turns,
             })
 
             captures_contact = scenario not in ("hours", "wrong_number", "spam_call", "vendor", "long_silence",

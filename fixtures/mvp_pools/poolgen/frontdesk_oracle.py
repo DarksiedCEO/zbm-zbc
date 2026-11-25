@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import re
 
+from .verticals import VERTICALS
+
 OPT_OUT_EXACT = {"stop", "stop.", "stop!", "unsubscribe", "cancel", "end", "quit", "revoke", "opt out",
                  "stop texting me", "alto", "baja"}
 HELP_WORDS = {"help", "info"}
@@ -160,6 +162,12 @@ F3_LOW_CONFIDENCE = 0.6
 HEALTH_LEXICON = ("pregnant", "blood thinners", "diabetes", "seizure", "embarazada", "anticoagulantes", "convulsión")
 
 
+# The checker's own list of call purposes (from the test-set spec), used to bound the F3 "need" label.
+CALL_PURPOSES = frozenset({"angry_caller", "asks_if_ai", "booking", "complaint", "emergency", "existing_customer",
+                           "health_details", "hours", "long_silence", "price_not_in_pack", "pricing_question",
+                           "prompt_injection", "reschedule", "spam_call", "vendor", "wrong_number"})
+
+
 def derive_f3(t: dict, need_label: str) -> dict:
     caller = [x for x in t["turns"] if x["speaker"] == "caller" and x["text"]]
     confirms = [m for x in t["turns"] if x["speaker"] == "agent" and (m := _CONFIRM.match(x["text"]))]
@@ -188,7 +196,14 @@ def check_f3(transcripts: list[dict], key: list[dict]) -> list[str]:
         if k is None or not isinstance(k.get("key_facts"), dict):
             errors.append(f"{t['transcript_id']}: missing or malformed answer row")
             continue
-        want = derive_f3(t, k["key_facts"].get("need"))
+        need = k["key_facts"].get("need")
+        # "need" is the caller's purpose: a label the transcript can't pin down word for word, so it is checked against
+        # the allowed vocabulary (any pack's reason categories, or a call purpose). A swap to another valid
+        # purpose is not caught: "need" is a label, listed as such in the README.
+        allowed = {c for v in VERTICALS.values() for c in v["reason_categories"]} | CALL_PURPOSES
+        if need not in allowed:
+            errors.append(f"{t['transcript_id']}: need {need!r} is not a reason category or call purpose")
+        want = derive_f3(t, need)
         text = " ".join(x["text"] for x in t["turns"] if x["speaker"] == "caller").lower()
         want["forbidden_terms_in_summary"] = sorted(term for term in HEALTH_LEXICON if term in text)
         got = dict(k, forbidden_terms_in_summary=sorted(k.get("forbidden_terms_in_summary") or []))
