@@ -1,0 +1,150 @@
+"""Independent re-derivation of the F2/F4/F5 answer keys from the events alone (see oracle.py for the idea).
+
+Written from the rules, not from the generator: a reference consent keeper that replays the event stream, a reference
+text-back decider and a reference transfer router. Any disagreement with the planted key is reported.
+"""
+
+from __future__ import annotations
+
+OPT_OUT_EXACT = {"stop", "stop.", "stop!", "unsubscribe", "cancel", "end", "quit", "revoke", "opt out",
+                 "stop texting me", "alto", "baja"}
+HELP_WORDS = {"help", "info"}
+RESTART_WORDS = {"start", "unstop", "yes"}
+QUIET_START, QUIET_END = 21 * 60, 8 * 60      # sends allowed 08:00 <= t < 21:00 recipient-local
+
+
+def _osa_distance(a: str, b: str) -> int:
+    """Edit distance with adjacent transpositions (optimal string alignment)."""
+    d = [[0] * (len(b) + 1) for _ in range(len(a) + 1)]
+    for i in range(len(a) + 1):
+        d[i][0] = i
+    for j in range(len(b) + 1):
+        d[0][j] = j
+    for i in range(1, len(a) + 1):
+        for j in range(1, len(b) + 1):
+            cost = a[i - 1] != b[j - 1]
+            d[i][j] = min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost)
+            if i > 1 and j > 1 and a[i - 1] == b[j - 2] and a[i - 2] == b[j - 1]:
+                d[i][j] = min(d[i][j], d[i - 2][j - 2] + 1)
+    return d[len(a)][len(b)]
+
+
+def _looks_like_stop(text: str) -> bool:
+    """A near-miss of STOP (typo, swapped letters, a zero for the o, extra words after it) counts as an opt-out;
+    other short words (STAR, Stay, Spot) do not."""
+    words = text.strip().lower().replace("0", "o").split()
+    return bool(words) and (words[0].startswith("stop") or _osa_distance(words[0], "stop") <= 1)
+
+
+def decide_f5(events: list[dict]) -> dict[str, tuple[str, str | None]]:
+    state: dict[tuple[str, str], dict] = {}
+    decisions: dict[str, tuple[str, str | None]] = {}
+    by_time: dict[int, list[dict]] = {}
+    for e in events:
+        by_time.setdefault(e["t"], []).append(e)
+    for t in sorted(by_time):
+        batch = by_time[t]
+        # Within one instant, every consent change applies before any send (the opt-out wins the race).
+        for e in sorted(batch, key=lambda x: x["kind"] == "send_attempt"):
+            k = (e["client_id"], e["number"])
+            st = state.setdefault(k, {"written": False, "blocked": None})
+            if e["kind"] == "opt_in":
+                if e["consent"] == "express_written":
+                    st["written"], st["blocked"] = True, None
+            elif e["kind"] == "inbound_sms":
+                text = e["text"].strip().lower()
+                if text in OPT_OUT_EXACT:
+                    st["written"], st["blocked"] = False, "opted_out"
+                elif text in RESTART_WORDS and st["blocked"]:
+                    st["blocked"] = "start_keyword_does_not_restore"
+                elif text in HELP_WORDS:
+                    pass
+                elif _looks_like_stop(text):
+                    st["written"], st["blocked"] = False, "possible_opt_out"
+            elif e["kind"] == "number_reassigned":
+                st["written"], st["blocked"] = False, "number_reassigned"
+            elif e["kind"] == "carrier_opt_out":
+                st["written"], st["blocked"] = False, "carrier_opt_out"
+            elif e["kind"] == "send_attempt":
+                if st["blocked"]:
+                    decisions[e["send_id"]] = ("block", st["blocked"])
+                elif e["message_class"] == "marketing" and not st["written"]:
+                    decisions[e["send_id"]] = ("block", "no_written_consent")
+                else:
+                    decisions[e["send_id"]] = ("allow", None)
+    return decisions
+
+
+def check_f5(events: list[dict], key: list[dict]) -> list[str]:
+    got = decide_f5(events)
+    errors = [f"{k['send_id']}: key {k['decision']}/{k['reason']} vs replay {got.get(k['send_id'])}"
+              for k in key if got.get(k["send_id"]) != (k["decision"], k["reason"])]
+    ids = [k["send_id"] for k in key]
+    if sorted(got) != sorted(ids) or len(set(ids)) != len(ids):
+        errors.append(f"answer rows do not match the sends one to one ({len(got)} sends, {len(key)} rows)")
+    for k in key:
+        if set(k) != {"send_id", "episode", "decision", "reason"}:
+            errors.append(f"{k['send_id']}: unexpected fields {sorted(k)}")
+    return errors
+
+
+def decide_f2(e: dict) -> str:
+    if e["caller_id"] is None or e["line_type"] == "landline" or e["number_opted_out"]:
+        return "do_not_send"
+    if e["seconds_since_last_text_to_number"] is not None and e["seconds_since_last_text_to_number"] < 300:
+        return "do_not_send"
+    h, m = e["recipient_local_time"].split(":")
+    minute = int(h) * 60 + int(m)
+    if minute >= QUIET_START or minute < QUIET_END:
+        return "defer_until_0800"
+    return "send_now"
+
+
+def check_f2(events: list[dict], key: list[dict]) -> list[str]:
+    """Every field except the case label must equal the rule's answer; rows match one to one."""
+    errors = []
+    if sorted(e["missed_call_id"] for e in events) != sorted(k["missed_call_id"] for k in key) or \
+            len({k["missed_call_id"] for k in key}) != len(key):
+        errors.append("answer rows do not match the missed calls one to one")
+    by_id = {k["missed_call_id"]: k for k in key}
+    for e in events:
+        k = by_id.get(e["missed_call_id"])
+        action = decide_f2(e)
+        want = {"missed_call_id": e["missed_call_id"], "action": action,
+                "max_latency_seconds": 30 if action == "send_now" else None, "message_class": "informational",
+                "must_not": ["marketing_content", "send_to_opted_out"]}
+        if k is None or {f: v for f, v in k.items() if f != "case"} != want:
+            errors.append(f"{e['missed_call_id']}: key {k} vs rule {want}")
+    return errors
+
+
+def decide_f4(c: dict) -> tuple[str, str | None]:
+    if not c["in_business_hours"] or not c["on_call_order"]:
+        return "fallback_message_and_text_back", None
+    behaviors = [c["staff_behavior"][p] for p in c["on_call_order"]]
+    if "answers_after_caller_hung_up" in behaviors:
+        return "caller_hung_up_log_and_text_back", None
+    for p in c["on_call_order"]:
+        if c["staff_behavior"][p] == "answers":
+            return "connected", p
+    return "fallback_message_and_text_back", None
+
+
+def check_f4(cases: list[dict], key: list[dict]) -> list[str]:
+    """Every field except the case label must equal the rule's answer; rows match one to one."""
+    errors = []
+    if sorted(c["case_id"] for c in cases) != sorted(k["case_id"] for k in key) or \
+            len({k["case_id"] for k in key}) != len(key):
+        errors.append("answer rows do not match the cases one to one")
+    by_id = {k["case_id"]: k for k in key}
+    for c in cases:
+        k = by_id.get(c["case_id"])
+        path, target = decide_f4(c)
+        want = {"case_id": c["case_id"], "path": path, "connect_to": target, "max_seconds_to_connect_or_fallback": 30,
+                "must_not": ["drop_caller_without_fallback", "transfer_outside_hours"],
+                "whisper_summary_required": path == "connected"}
+        if k is None or {f: v for f, v in k.items() if f != "case"} != want:
+            errors.append(f"{c['case_id']}: key {k} vs rule {want}")
+        if c["ring_mode"] != "simultaneous" or c["ring_timeout_seconds"] > 30:
+            errors.append(f"{c['case_id']}: the ringing plan cannot meet the 30 s bar")
+    return errors

@@ -1,0 +1,42 @@
+{
+  "dev_seeds": {
+    "dev-a": {
+      "call_bank_answers.jsonl": "c4810515cca366e68880a39fc2409b82f62fbd91b1a2eadc7f29a2ffa6df3112",
+      "call_bank_calls.jsonl": "6fc79fb33ec391dba815bf2ed61d63fffb3892aa5e59668a611df4780eb900bb",
+      "f2_answers.jsonl": "0eec9e77a2d6c459fca09fbfd9528e2b4bfe805f11c190bad723eeaff1d19a7f",
+      "f2_missed_calls.jsonl": "951cd5f857d78a9dd832c474ad996da01514c8af12880e9d3364f0a2995aead2",
+      "f4_answers.jsonl": "3f761c8b4c2c4584b7ef0b67a9ca51dd107c4ce8d61f0623943ffaa215c103ac",
+      "f4_transfer_cases.jsonl": "22c308456825ac30d6502b2c7b66be0e2e947903fdad9606494d7f19ab602892",
+      "f5_answers.jsonl": "c997e1744e7c76c16ee153234debd10d5f055d192fd8da878b1013367f7f3006",
+      "f5_consent_events.jsonl": "41e92f9acfec489ec26b652522d553a1167eb532e22f4731954981f9d05ab458",
+      "pool_b_answers.jsonl": "a271ff0ac5476fca2038ee467b20d665a73551da508464dbe3ba8c8d95e26278",
+      "pool_b_world.jsonl": "defbc3bda7a7b9bb61c41c5bd9bfb972689e193e5945070306210ee1a8f0cea0"
+    },
+    "dev-b": {
+      "call_bank_answers.jsonl": "9e3148a2b41bb85633392d21beca5ea8617d38bdbd69622970a254858e63e144",
+      "call_bank_calls.jsonl": "bb882d711a28b5cf0c3b36764c4f3c279818cc9e66d314c9d19f3aa81670a1ca",
+      "f2_answers.jsonl": "ce96de3db4b87eba135dafd4f44bb4d70c9438ff79c2f8104c6afd902300a719",
+      "f2_missed_calls.jsonl": "a93e3800d2ea27e77ba1f5d92acac238ae62f7c306531342bbfabb9fedf304a4",
+      "f4_answers.jsonl": "6997e619cf22afa5b329bb2980c743c1abe052255515910d4daeb48ee47930b8",
+      "f4_transfer_cases.jsonl": "1bae2afeaf63d08819b828a220d3aa2fd1545a80afe57b66953d368c9e1b43f0",
+      "f5_answers.jsonl": "1c7af54cd7bf0e975ac47c35bb02810a73af49c0ddbb01b5b4f89a2c381b056a",
+      "f5_consent_events.jsonl": "ec1261539ea9f2784af0a873d4c155bc47c51e8b15d95a719014aa5a09d071ae",
+      "pool_b_answers.jsonl": "b846fc6a324412a00cb5892d288cb22d82f66e0ccb8fc9b6faa99609870d2725",
+      "pool_b_world.jsonl": "6b34c6d6bb83aabbffc240924775c5afd99c72e860ed45771cc0da182ba193a6"
+    },
+    "dev-c": {
+      "call_bank_answers.jsonl": "ac91f40aadfc6973e27b07ba35725ed61f291e67dd8868426a918e3a1ccfc08f",
+      "call_bank_calls.jsonl": "5b2688b8cde8b78eb23dd8c5863a5ad4fa93a520673b456262da1d83a5bad642",
+      "f2_answers.jsonl": "0a7ab47521fe5503b52d52344815484b4da2c563352e478c462de8aa3287adf2",
+      "f2_missed_calls.jsonl": "9a32188868f25a764e52fee10c16722ee9c76e86e23a72b7f394a150613464f3",
+      "f4_answers.jsonl": "8c491e92e369fd202527e2774552902b66ef50e647c404bacf8a26ef0c5f02b3",
+      "f4_transfer_cases.jsonl": "911725f4ae15acb9c81ce0fbfedd2bdd0c442f2842fe14c2ec08a9fce44808d1",
+      "f5_answers.jsonl": "17c938cc6399e7cd671f9e7388dca2f4b60ddde531aa18ac6b320ed11e683202",
+      "f5_consent_events.jsonl": "48cd59383e801e3a6e294dab7d618625ac058d5b8cd3f6b9c439e9133159dfd8",
+      "pool_b_answers.jsonl": "063555f385edb1399cc80adfb97ab3e68a1dfaea0ed2fc3b516227989fdb3009",
+      "pool_b_world.jsonl": "b4803f270d4c69ff993af8814734d55c29125245dbda13e32e14df76de69b6c8"
+    }
+  },
+  "generator": "mvp-pools-v0.1",
+  "note": "DEV seeds only. Held-out seeds are drawn privately by the reviewer lane and never committed (see poolgen/build.py)."
+}
