@@ -25,6 +25,8 @@ from poolgen import (
     local_ops_oracle,
     oracle,
     pool_b,
+    review_replies,
+    review_replies_oracle,
     seo_local,
     seo_local_oracle,
 )
@@ -42,6 +44,7 @@ SETS = {
     "ci_watch": (*ci_watch.generate(SEED), ci_watch_oracle.check, set()),
     "seo_l1": (*local_ops.generate_l1(SEED), local_ops_oracle.check_l1, set()),
     "seo_l6": (*local_ops.generate_l6(SEED), local_ops_oracle.check_l6, set()),
+    "seo_l7": (*review_replies.generate(SEED), review_replies_oracle.check, set()),
 }
 
 

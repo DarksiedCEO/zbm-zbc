@@ -29,6 +29,7 @@ from . import (
     frontdesk_sets,
     local_ops,
     pool_b,
+    review_replies,
     seo_local,
 )
 
@@ -48,6 +49,7 @@ SETS = (
     ("ci_watch_snapshots.jsonl", "ci_watch_answers.jsonl", ci_watch.generate),
     ("seo_l1_listings.jsonl", "seo_l1_answers.jsonl", local_ops.generate_l1),
     ("seo_l6_review_requests.jsonl", "seo_l6_answers.jsonl", local_ops.generate_l6),
+    ("seo_l7_reviews.jsonl", "seo_l7_answers.jsonl", review_replies.generate),
 )
 
 

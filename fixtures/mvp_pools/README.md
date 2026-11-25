@@ -18,6 +18,7 @@ only in the fictional 555-0100..0199 range, and web addresses use only `.test` o
 | SEO local: citation network | SEO-L4 | 200 businesses, each with an owner-confirmed record and 15–40 listings across 40 fictional directories. Listings are correct, correct with formatting-only differences (St./Street, suite styles, phone punctuation, a toll-free number the owner also lists, case, http/https/www), or carry one fault: wrong name, wrong address, wrong phone, or marked closed. 1 business in 10 is all-correct | A verdict per listing |
 | SEO local: listing sync | SEO-L1 | 60 businesses × 5 platforms (GBP, Apple, Bing, Yelp, Facebook) against the client-approved record: in sync, drifted (edited by a platform, the public or an aggregator), hand-edited by the OWNER after the last sync, or the platform API failing mid-sync. Traps: the phone in national format (formatting only) and an owner edit made before the last sync (already reconciled) | Per platform: no action / update with approval / surface the conflict (never overwrite the owner) / report the platform error (never mark synced), and the fields involved |
 | SEO local: review requests | SEO-L6 | 300 scenarios: 120 clean sends and 180 that must be refused: no real transaction, SMS without SMS consent, opted out, review gating (an audience filter), an incentive, suggested review text, "contact us instead of posting". Traps: "feel free to tell us" is not an incentive; no SMS consent does not block an email | send / refuse and the reason (FTC 16 CFR Part 465; Google's ban on selectively asking happy customers) |
+| SEO local: review replies | SEO-L7 | 300 reviews across the 8 verticals: positive, negative, mixed, refund requests, suspected fakes (a new one-review account inside a same-day pile-up of new accounts), and health or case details in med spa, dental and injury-law reviews. Traps: a genuine brand-new reviewer is not a fake; "no need for a refund" is not a refund request | Flag as suspected fake, route to the owner, owner approval before posting, must-nevers (never confirm a patient or client, never repeat the detail, never argue, never promise a refund) and the exact terms the reply must not repeat |
 | SEO local: listing pairs | SEO-L5 | 200 pairs: true duplicates, moved businesses, and three NOT-duplicate traps (a dentist's own listing inside a dental practice, a department listing, two businesses at one address) | Duplicate or not, the action, owner approval for any removal |
 
 ## How the answers are proven
@@ -25,7 +26,7 @@ Each answer key is planted by the generator **and** re-derived independently fro
 `poolgen/oracle.py` (pool B, call bank), `poolgen/frontdesk_oracle.py` (F2, F3, F4, F5), `poolgen/seo_local_oracle.py`
 (L4, L5, using its own address, city/state/ZIP, website and phone normalisation), `poolgen/local_ops_oracle.py` (L1 by
 diffing each listing against the record and reading the edit log; L6 from the scenario, with its own message patterns,
-English only) and `poolgen/ci_watch_oracle.py` (parses the page content and diffs versions). The oracles rebuild **every
+English only), `poolgen/review_replies_oracle.py` (L7, its own fake, refund and detail-term rules, English only) and `poolgen/ci_watch_oracle.py` (parses the page content and diffs versions). The oracles rebuild **every
 field** of every answer row except the set's label (the call bank's `scenario`, F2/F4 `case`, F5 `episode`; pool-B
 classes are re-derived too), and require the rows to match the subjects one to one.
 - `tests/test_key_tamper.py` changes each field of the answers (once per field and type; the call bank's caller name
@@ -107,6 +108,6 @@ module), so it is byte-identical on every Python version and platform.
    - transfers ring every on-call person at once, so 30 s holds.
 5. **Not built yet:** the synthetic-audio track (needs speech synthesis on the 32-core lane), RR pool A (e-commerce,
    extends `fixtures/`), the SEO site corpus (≥ 400 generated sites; the local layer is here), the L2 post and L3 Q&A
-   sets, L7 review replies, and the app-store and docs page shapes for the CI watch corpus.
+   sets, and the app-store and docs page shapes for the CI watch corpus.
 6. **Not wired into CI:** these tests run with the command above. Adding a CI step needs a `.github/workflows` change,
    which builders don't make.
