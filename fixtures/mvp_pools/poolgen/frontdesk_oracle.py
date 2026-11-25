@@ -6,6 +6,8 @@ text-back decider and a reference transfer router. Any disagreement with the pla
 
 from __future__ import annotations
 
+import re
+
 OPT_OUT_EXACT = {"stop", "stop.", "stop!", "unsubscribe", "cancel", "end", "quit", "revoke", "opt out",
                  "stop texting me", "alto", "baja"}
 HELP_WORDS = {"help", "info"}
@@ -147,4 +149,49 @@ def check_f4(cases: list[dict], key: list[dict]) -> list[str]:
             errors.append(f"{c['case_id']}: key {k} vs rule {want}")
         if c["ring_mode"] != "simultaneous" or c["ring_timeout_seconds"] > 30:
             errors.append(f"{c['case_id']}: the ringing plan cannot meet the 30 s bar")
+    return errors
+
+
+# ---------------------------------------------------------------- F3: call summarizer transcripts
+_CONFIRM = re.compile(r"^(?:Let me confirm|Confirmo): (?P<name>.+), (?:at|al) (?P<num>\d{3} \d{3} \d{4})\.$")
+_NUM = re.compile(r"\b(\d{3}) (\d{3}) (\d{4})\b")
+F3_LOW_CONFIDENCE = 0.6
+# The checker's own health-detail lexicon (EN/ES). A summarizer checker needs one anyway; it is not the generator's list.
+HEALTH_LEXICON = ("pregnant", "blood thinners", "diabetes", "seizure", "embarazada", "anticoagulantes", "convulsión")
+
+
+def derive_f3(t: dict, need_label: str) -> dict:
+    caller = [x for x in t["turns"] if x["speaker"] == "caller" and x["text"]]
+    confirms = [m for x in t["turns"] if x["speaker"] == "agent" and (m := _CONFIRM.match(x["text"]))]
+    last = confirms[-1] if confirms else None
+    trusted_numbers = {"".join(m) for x in caller if x["confidence"] >= F3_LOW_CONFIDENCE for m in _NUM.findall(x["text"])}
+    return {
+        "transcript_id": t["transcript_id"],
+        "key_facts": {"name": last["name"] if last else None,
+                      "callback_number": "+1" + last["num"].replace(" ", "") if last else None,
+                      "need": need_label,
+                      "urgency": "emergency" if any("911" in x["text"] for x in t["turns"] if x["speaker"] == "agent")
+                      else "routine"},
+        "must_flag_low_confidence": any(0 < x["confidence"] < F3_LOW_CONFIDENCE for x in caller),
+        "corrected_value_must_win": len(trusted_numbers) > 1,
+        "must_not": ["invent_fact", "include_health_detail", "use_low_confidence_turn_as_fact"],
+    }
+
+
+def check_f3(transcripts: list[dict], key: list[dict]) -> list[str]:
+    errors = []
+    by_id = {k["transcript_id"]: k for k in key}
+    if sorted(by_id) != sorted(t["transcript_id"] for t in transcripts) or len(by_id) != len(key):
+        errors.append("answer rows do not match the transcripts one to one")
+    for t in transcripts:
+        k = by_id.get(t["transcript_id"])
+        if k is None or not isinstance(k.get("key_facts"), dict):
+            errors.append(f"{t['transcript_id']}: missing or malformed answer row")
+            continue
+        want = derive_f3(t, k["key_facts"].get("need"))
+        text = " ".join(x["text"] for x in t["turns"] if x["speaker"] == "caller").lower()
+        want["forbidden_terms_in_summary"] = sorted(term for term in HEALTH_LEXICON if term in text)
+        got = dict(k, forbidden_terms_in_summary=sorted(k.get("forbidden_terms_in_summary") or []))
+        if got != want:
+            errors.append(f"{t['transcript_id']}: key differs from the transcript")
     return errors

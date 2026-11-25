@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from poolgen import build, call_bank, frontdesk_oracle, frontdesk_sets, oracle, pool_b, seo_local
+from poolgen import build, call_bank, f3_transcripts, frontdesk_oracle, frontdesk_sets, oracle, pool_b, seo_local
 
 FRESH = secrets.token_hex(16)   # stands in for a privately drawn held-out seed
 
@@ -29,7 +29,8 @@ class HeldOutSecrecy(unittest.TestCase):
         for gen, id_field in ((pool_b.generate, "business_id"), (call_bank.generate, "call_id"),
                               (frontdesk_sets.generate_f2, "missed_call_id"),
                               (frontdesk_sets.generate_f4, "case_id"), (frontdesk_sets.generate_f5, "send_id"),
-                              (seo_local.generate_l4, "business_id"), (seo_local.generate_l5, "pair_id")):
+                              (seo_local.generate_l4, "business_id"), (seo_local.generate_l5, "pair_id"),
+                              (f3_transcripts.generate, "transcript_id")):
             dev_ids = {k[id_field] for k in gen("dev-a")[1]}
             fresh_ids = {k[id_field] for k in gen(FRESH)[1]}
             self.assertFalse(dev_ids & fresh_ids, id_field)

@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from poolgen import common
+from poolgen import common, f3_transcripts
 from poolgen import frontdesk_oracle as oracle
 from poolgen import frontdesk_sets as sets
 
@@ -119,6 +119,31 @@ class Consent(unittest.TestCase):
         i = next(i for i, x in enumerate(k) if x["episode"] == "typo_stop_then_send")
         k[i]["decision"], k[i]["reason"] = "allow", None
         self.assertTrue(oracle.check_f5(F5, k))
+
+
+class Summarizer(unittest.TestCase):
+    T, K = f3_transcripts.generate(SEED)
+
+    def test_size_and_cases(self):
+        self.assertEqual(len(self.T), 300)
+        self.assertTrue(any(k["must_flag_low_confidence"] for k in self.K))
+        self.assertTrue(any(k["corrected_value_must_win"] for k in self.K))
+        self.assertTrue(any(k["forbidden_terms_in_summary"] for k in self.K))
+        self.assertTrue(any(k["key_facts"]["urgency"] == "emergency" for k in self.K))
+        self.assertTrue(any(t["language"] == "es" for t in self.T))
+
+    def test_key_is_proven(self):
+        self.assertEqual(oracle.check_f3(self.T, self.K), [])
+
+    def test_low_confidence_number_is_never_the_answer(self):
+        for t, k in zip(self.T, self.K):
+            low = [x["text"] for x in t["turns"] if x["speaker"] == "caller" and 0 < x["confidence"] < 0.6]
+            for text in low:
+                self.assertNotIn((k["key_facts"]["callback_number"] or "")[-4:], text.replace(" ", ""))
+
+    def test_recording_notice_opens_every_transcript(self):
+        for t in self.T:
+            self.assertTrue("recorded" in t["turns"][0]["text"] or "grabada" in t["turns"][0]["text"])
 
 
 class Separation(unittest.TestCase):

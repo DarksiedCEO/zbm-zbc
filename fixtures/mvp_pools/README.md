@@ -10,6 +10,7 @@ only in the fictional 555-0100..0199 range, and web addresses use only `.test` o
 |---|---|---|---|
 | RR pool B | RR-S1..S6 | 120 service businesses with planted leaks and 20 clean controls, across 8 vertical packs: site and form (7 builders), mobile pages at 3 viewports, Business-Profile-like listing, reviews, phone line, DM inbox, consent on file, 30-day lead log | Per business: findings per detector, refusals (missing consent), the lost leads each leak caused, "not a fault" traps |
 | Front-desk call bank, text track | RR-F1, F3 (F4 routing) | 504 scripted calls, 63 per vertical, 35% Spanish, 48 emergencies (medical, fire, violence, gas leak where the trade handles gas), prompt injection, health details, prices not in the pack, angry callers, silence, interruptions, self-corrected callback numbers | Route, facts to capture, must-say, must-never, health terms that must never reach the record |
+| F3 summarizer transcripts | RR-F3 | 300 two-sided transcripts built on the call bank, with per-turn speech-recognition confidence: health details, the caller's own corrections, a garbled low-confidence number then a clean repeat, emergencies | Key facts (name, number, need, urgency), must flag the low-confidence turn, corrected value wins, health terms that must never reach the summary |
 | F2 text-back | RR-F2 | 300 missed calls: landline, blocked caller ID, opted out, repeat within 5 minutes, quiet hours, boundaries | send now / defer to 08:00 / do not send |
 | F4 transfer router | RR-F4 | 200 cases: connect, second person connects, nobody on call, nobody answers, caller hangs up mid-transfer, outside hours | Connected or a fallback, never a dropped caller, within 30 s |
 | F5 consent keeper | RR-F5 | About 10,000 events: written consent, STOP variants, Spanish ALTO/BAJA, STOP typos, HELP, START (does not restore), new consent, reassigned number, carrier opt-out, and a STOP and a send in the same instant (file order shuffled) | allow / block and why |
@@ -18,7 +19,7 @@ only in the fictional 555-0100..0199 range, and web addresses use only `.test` o
 
 ## How the answers are proven
 Each answer key is planted by the generator **and** re-derived independently from the subject data by
-`poolgen/oracle.py` (pool B, call bank), `poolgen/frontdesk_oracle.py` (F2, F4, F5) and `poolgen/seo_local_oracle.py`
+`poolgen/oracle.py` (pool B, call bank), `poolgen/frontdesk_oracle.py` (F2, F3, F4, F5) and `poolgen/seo_local_oracle.py`
 (L4, L5, using its own address and phone normalisation). The oracles rebuild **every
 field** of every answer row except the set's label (the call bank's `scenario`, F2/F4 `case`, F5 `episode`; pool-B
 classes are re-derived too), and require the rows to match the subjects one to one.

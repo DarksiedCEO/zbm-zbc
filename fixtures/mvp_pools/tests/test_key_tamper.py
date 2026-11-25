@@ -14,7 +14,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from poolgen import call_bank, frontdesk_oracle, frontdesk_sets, oracle, pool_b, seo_local, seo_local_oracle
+from poolgen import (
+    call_bank,
+    f3_transcripts,
+    frontdesk_oracle,
+    frontdesk_sets,
+    oracle,
+    pool_b,
+    seo_local,
+    seo_local_oracle,
+)
 
 SEED = "dev-a"
 SETS = {
@@ -23,6 +32,7 @@ SETS = {
     "f2": (*frontdesk_sets.generate_f2(SEED), frontdesk_oracle.check_f2, {"case"}),
     "f4": (*frontdesk_sets.generate_f4(SEED), frontdesk_oracle.check_f4, {"case"}),
     "f5": (*frontdesk_sets.generate_f5(SEED), frontdesk_oracle.check_f5, {"episode"}),
+    "f3": (*f3_transcripts.generate(SEED), frontdesk_oracle.check_f3, set()),
     "seo_l4": (*seo_local.generate_l4(SEED), seo_local_oracle.check_l4, set()),
     "seo_l5": (*seo_local.generate_l5(SEED), seo_local_oracle.check_l5, set()),
 }
