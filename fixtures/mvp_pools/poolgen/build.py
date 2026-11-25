@@ -21,7 +21,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import call_bank, common, f3_transcripts, frontdesk_sets, pool_b, seo_local
+from . import call_bank, ci_watch, common, f3_transcripts, frontdesk_sets, pool_b, seo_local
 
 HERE = Path(__file__).resolve().parent
 SEEDS_FILE = HERE.parent / "seeds" / "dev.json"
@@ -36,6 +36,7 @@ SETS = (
     ("f5_consent_events.jsonl", "f5_answers.jsonl", frontdesk_sets.generate_f5),
     ("seo_l4_citations.jsonl", "seo_l4_answers.jsonl", seo_local.generate_l4),
     ("seo_l5_listing_pairs.jsonl", "seo_l5_answers.jsonl", seo_local.generate_l5),
+    ("ci_watch_snapshots.jsonl", "ci_watch_answers.jsonl", ci_watch.generate),
 )
 
 

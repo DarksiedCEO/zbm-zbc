@@ -14,13 +14,15 @@ only in the fictional 555-0100..0199 range, and web addresses use only `.test` o
 | F2 text-back | RR-F2 | 300 missed calls: landline, blocked caller ID, opted out, repeat within 5 minutes, quiet hours, boundaries | send now / defer to 08:00 / do not send |
 | F4 transfer router | RR-F4 | 200 cases: connect, second person connects, nobody on call, nobody answers, caller hangs up mid-transfer, outside hours | Connected or a fallback, never a dropped caller, within 30 s |
 | F5 consent keeper | RR-F5 | About 10,000 events: written consent, STOP variants, Spanish ALTO/BAJA, STOP typos, HELP, START (does not restore), new consent, reassigned number, carrier opt-out, and a STOP and a send in the same instant (file order shuffled) | allow / block and why |
+| CI watch corpus | CI-1 | 30 fictional competitor pages × 10 versions (20 pricing, 10 changelog). Every version carries noise (footer date, tracking parameters, A/B headline, cookie banner, nonce, testimonial order); about 3 in 10 also carry one real change: price, new feature, removed feature, new plan, terms | The exact meaningful changes per version, silence on noise-only versions |
 | SEO local: citation network | SEO-L4 | 200 businesses, each with an owner-confirmed record and 15–45 listings across 40 fictional directories. Listings are correct, correct with formatting-only differences (St./Street, suite styles, phone punctuation, a toll-free number the owner also lists, case, http/https/www), or carry one fault: wrong name, wrong address, wrong phone, or marked closed. 1 business in 10 is all-correct | A verdict per listing |
 | SEO local: listing pairs | SEO-L5 | 200 pairs: true duplicates, moved businesses, and three NOT-duplicate traps (a practitioner in a practice, a department listing, two businesses at one address) | Duplicate or not, the action, owner approval for any removal |
 
 ## How the answers are proven
 Each answer key is planted by the generator **and** re-derived independently from the subject data by
 `poolgen/oracle.py` (pool B, call bank), `poolgen/frontdesk_oracle.py` (F2, F3, F4, F5) and `poolgen/seo_local_oracle.py`
-(L4, L5, using its own address and phone normalisation). The oracles rebuild **every
+(L4, L5, using its own address and phone normalisation) and `poolgen/ci_watch_oracle.py` (parses the page content and
+diffs versions). The oracles rebuild **every
 field** of every answer row except the set's label (the call bank's `scenario`, F2/F4 `case`, F5 `episode`; pool-B
 classes are re-derived too), and require the rows to match the subjects one to one.
 - `tests/test_key_tamper.py` changes each field of the answers, and adds and drops rows, and requires the oracle to
@@ -78,6 +80,6 @@ module), so it is byte-identical on every Python version and platform.
    - transfers ring every on-call person at once, so 30 s holds.
 5. **Not built yet:** the synthetic-audio track (needs speech synthesis on the 32-core lane), RR pool A (e-commerce,
    extends `fixtures/`), the SEO site corpus (≥ 400 generated sites; the local layer is here), the remaining GBP-like
-   profile set for L1–L3, and the CI watch corpus.
+   profile set for L1–L3, and the app-store and docs page shapes for the CI watch corpus.
 6. **Not wired into CI:** these tests run with the command above. Adding a CI step needs a `.github/workflows` change,
    which builders don't make.

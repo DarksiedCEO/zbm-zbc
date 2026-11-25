@@ -16,6 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from poolgen import (
     call_bank,
+    ci_watch,
+    ci_watch_oracle,
     f3_transcripts,
     frontdesk_oracle,
     frontdesk_sets,
@@ -35,6 +37,7 @@ SETS = {
     "f3": (*f3_transcripts.generate(SEED), frontdesk_oracle.check_f3, set()),
     "seo_l4": (*seo_local.generate_l4(SEED), seo_local_oracle.check_l4, set()),
     "seo_l5": (*seo_local.generate_l5(SEED), seo_local_oracle.check_l5, set()),
+    "ci_watch": (*ci_watch.generate(SEED), ci_watch_oracle.check, set()),
 }
 
 

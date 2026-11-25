@@ -3,6 +3,8 @@
     "dev-a": {
       "call_bank_answers.jsonl": "c4810515cca366e68880a39fc2409b82f62fbd91b1a2eadc7f29a2ffa6df3112",
       "call_bank_calls.jsonl": "6fc79fb33ec391dba815bf2ed61d63fffb3892aa5e59668a611df4780eb900bb",
+      "ci_watch_answers.jsonl": "46a923627b3bd3c6cf45263ca4b34b268788eb978a782981c8b7f6ddf58ed6f1",
+      "ci_watch_snapshots.jsonl": "8722d7d4307e9fc2997055ba47fffa1db7afcb054fbde3064009e1bce3a9663c",
       "f2_answers.jsonl": "0eec9e77a2d6c459fca09fbfd9528e2b4bfe805f11c190bad723eeaff1d19a7f",
       "f2_missed_calls.jsonl": "951cd5f857d78a9dd832c474ad996da01514c8af12880e9d3364f0a2995aead2",
       "f3_answers.jsonl": "650c14195a6351e8f568fbb62b8a8f03baa475405202bf3f405ba6783e9453b6",
@@ -21,6 +23,8 @@
     "dev-b": {
       "call_bank_answers.jsonl": "9e3148a2b41bb85633392d21beca5ea8617d38bdbd69622970a254858e63e144",
       "call_bank_calls.jsonl": "bb882d711a28b5cf0c3b36764c4f3c279818cc9e66d314c9d19f3aa81670a1ca",
+      "ci_watch_answers.jsonl": "48841d24510b9aa4aae8e9cc9ec1c618a39bd705b744c8a7c7e05c17cf90dbaf",
+      "ci_watch_snapshots.jsonl": "172d7f3325a3d0871e6bbc07244b1393814ebbcdfc3c867a6ad96bb815a26877",
       "f2_answers.jsonl": "ce96de3db4b87eba135dafd4f44bb4d70c9438ff79c2f8104c6afd902300a719",
       "f2_missed_calls.jsonl": "a93e3800d2ea27e77ba1f5d92acac238ae62f7c306531342bbfabb9fedf304a4",
       "f3_answers.jsonl": "9f1bd99bf31c80d921a8cc8ff4e20a16292e195ac696bd7edd432bdc9efe7102",
@@ -39,6 +43,8 @@
     "dev-c": {
       "call_bank_answers.jsonl": "ac91f40aadfc6973e27b07ba35725ed61f291e67dd8868426a918e3a1ccfc08f",
       "call_bank_calls.jsonl": "5b2688b8cde8b78eb23dd8c5863a5ad4fa93a520673b456262da1d83a5bad642",
+      "ci_watch_answers.jsonl": "91b1d5662d7deb91d3a35a8b79d181c6b01e2b50c649011b5f0778b1f431f0e0",
+      "ci_watch_snapshots.jsonl": "1049234332dafc1ba54d16a494df1bfb7cc33eca87faebb948124f68312572d0",
       "f2_answers.jsonl": "0a7ab47521fe5503b52d52344815484b4da2c563352e478c462de8aa3287adf2",
       "f2_missed_calls.jsonl": "9a32188868f25a764e52fee10c16722ee9c76e86e23a72b7f394a150613464f3",
       "f3_answers.jsonl": "123bd947bbfbbf5cdee9361b2d04eae484a99addeb24c438b5cc09aa786cb175",
