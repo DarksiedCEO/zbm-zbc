@@ -284,3 +284,24 @@ def test_cancel_a_queued_message(w):
 def test_contact_without_email_cannot_be_emailed(w):
     lead = w.vlead(email=None)
     w.refused(queue(w, lead["contact_id"], w.template()), 422, "CONTACT_NO_EMAIL")
+
+
+def test_cold_email_pauses_at_the_spam_line_and_resumes_after_a_clean_day(tmp_path):
+    """Andre, 2026-11-26: sending stops at or above 0.30% complaints (yesterday or today); queued mail waits."""
+    h = Harness(tmp_path, ports=wired_ports(), SALES_WARMUP_SCHEDULE="2,4,8")
+    t = h.template()
+    first = [h.ok(queue(h, c, t), 201) for c in _leads(h, 2)]
+    assert h.ok(h.job("send-queue"))["sent"] == 2
+    h.ok(h.post("/sales/v1/events/email", {"request_id": rid(), "message_id": first[0]["message_id"],
+                                           "event": "complaint"}, "provider_events"))   # 1 of 2 today: 50%
+    late = h.vlead(email="late@shoplate.test", phone=None, account={"name": "Shop late"})["contact_id"]
+    h.ok(queue(h, late, t), 201)
+    r = h.ok(h.job("send-queue"))
+    assert (r["sent"], r["paused_spam_rate"]) == (0, 1)                 # today is over the line
+    h.clock.advance(days=1)
+    r = h.ok(h.job("send-queue"))
+    assert (r["sent"], r["paused_spam_rate"]) == (0, 1)                 # yesterday is over the line
+    h.clock.advance(days=1)
+    r = h.ok(h.job("send-queue"))
+    assert (r["sent"], r["paused_spam_rate"]) == (1, 0)                 # a day with nothing sent: resumes
+

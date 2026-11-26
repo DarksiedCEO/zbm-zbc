@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Optional
 
 from clock import parse_iso
@@ -173,6 +173,12 @@ class OutreachMixin:
     def _consent_active(self, contact: dict, channel: str, brand: str) -> bool:
         return bool(contact.get("phone_hash")) and i06_consent.active(self.consents, contact["phone_hash"], channel,
                                                                       brand)
+
+    def _spam_paused(self, domain: str | None, today: str) -> bool:
+        """Cold email from ``domain`` pauses while yesterday's or today's complaint rate is at or above 0.30%."""
+        yesterday = (date.fromisoformat(today) - timedelta(days=1)).isoformat()
+        return any(i09_send_cap.must_pause(st["sent"], st["complaint"])
+                   for st in (self._stats(yesterday, domain), self._stats(today, domain)))
 
     def _cap_today(self) -> int:
         s = self.settings
@@ -611,7 +617,7 @@ class OutreachMixin:
         recorded (typed ``outreach_send`` event, then the log line); the provider is called outside the lock; the
         outcome is recorded after. A message whose outcome could not be recorded stays ``sending`` (never resent
         on its own)."""
-        summary = {"sent": 0, "failed": 0, "cancelled": 0, "deferred_quiet_hours": 0, "capped": 0, "not_wired": 0,
+        summary = {"sent": 0, "failed": 0, "cancelled": 0, "deferred_quiet_hours": 0, "paused_spam_rate": 0, "capped": 0, "not_wired": 0,
                    "stopped": None}
         with self.lock:
             self._gate()
@@ -640,6 +646,9 @@ class OutreachMixin:
                     summary["deferred_quiet_hours"] += 1
                     continue
                 today = self.today()
+                if msg["channel"] == "email" and self._spam_paused(msg["from_domain"], today):
+                    summary["paused_spam_rate"] += 1      # stays queued; resumes after a day under 0.30%
+                    continue
                 if msg["channel"] == "email" and self._stats(today, msg["from_domain"])["sent"] >= self._cap_today():
                     summary["capped"] += 1
                     continue

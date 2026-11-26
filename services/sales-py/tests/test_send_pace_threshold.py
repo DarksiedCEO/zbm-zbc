@@ -21,3 +21,16 @@ def test_complaint_line_is_ten_per_ten_thousand(sent, complaints, advances):
 def test_bounce_line_unchanged():
     assert pace.may_advance(100, 0, 5) is True
     assert pace.may_advance(100, 0, 6) is False
+
+
+@pytest.mark.parametrize(("sent", "complaints", "paused"), [
+    (1000, 2, False),    # 0.20%: under the line
+    (1000, 3, True),     # exactly 0.30%: "avoid ever reaching" means at the line pauses
+    (10000, 29, False),
+    (10000, 30, True),
+    (1, 1, True),
+    (0, 0, False),       # nothing sent: never pauses
+    (0, 5, False),
+])
+def test_send_pause_line_is_thirty_per_ten_thousand_inclusive(sent, complaints, paused):
+    assert pace.must_pause(sent, complaints) is paused
