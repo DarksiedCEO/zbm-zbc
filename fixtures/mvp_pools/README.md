@@ -124,6 +124,17 @@ test-verification round 4 (same subject) confirmed the round-3 fixes and found t
 - Still surviving: the call bank's single-name and health-terms-only-in-health-calls checks (no call has two names,
   and no non-health call says a health term).
 
+## AEGIS Counterfeit (Nov 25 2026, subject e41e57b5; fixed Nov 26)
+Counterfeit ran late against the round-1 commit. Its two HIGH findings (the held-out seed readable from ids, and ids
+that gave the answer away) were already fixed by round 2. Its oracle-blindness finding was fixed by the type-strict,
+fully re-derived oracles of rounds 2-4. The two remaining gaps are fixed here:
+- **Fixture safety:** the phone check now finds any North American number in any written form (E.164, spaced as the
+  call turns speak it, dotted, dashed, bracketed, with or without the leading 1), and the address check parses the
+  real host (a fragment, query, user-info or backslash trick no longer passes). Digits glued to letters or a hyphen
+  are read as ids, not numbers; a real number written that way would not be caught (disclosed).
+- **`build verify`** now fails when no dev seed is pinned, or when a seed's pins do not name exactly the generated
+  files. It still proves the output has not drifted from the pins, not that the pins are right; the oracles do that.
+
 ## Use
 
 ```bash

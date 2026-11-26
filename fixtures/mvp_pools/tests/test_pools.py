@@ -10,6 +10,7 @@ import json
 import re
 import sys
 import unittest
+import urllib.parse
 from collections import Counter
 from pathlib import Path
 
@@ -61,29 +62,78 @@ class Determinism(unittest.TestCase):
             with self.subTest(seed=seed):
                 self.assertEqual(build.digests(seed), files)
 
+    def test_verify_fails_on_an_empty_or_partial_pin_list(self):
+        """Counterfeit round 1: verify passed with no seeds pinned, or with only one file pinned per seed."""
+        import contextlib
+        import io
+        real = build.load_seeds()
+        seed, files = next(iter(real["dev_seeds"].items()))
+        cases = {"empty": {**real, "dev_seeds": {}},
+                 "one file": {**real, "dev_seeds": {seed: dict([next(iter(files.items()))])}},
+                 "extra file": {**real, "dev_seeds": {seed: {**files, "extra.jsonl": "0" * 64}}}}
+        original = build.load_seeds
+        try:
+            for label, pins in cases.items():
+                build.load_seeds = lambda pins=pins: pins
+                with self.subTest(case=label), contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(build.cmd_verify(None), 1)
+            build.load_seeds = original
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(build.cmd_verify(None), 0)
+        finally:
+            build.load_seeds = original
+
     def test_no_held_out_seed_is_committed(self):
         names = set(build.load_seeds()["dev_seeds"])
         self.assertTrue(names and all(n.startswith("dev-") for n in names), names)
 
 
 class FixtureSafety(unittest.TestCase):
-    PHONE = re.compile(r"\+1\d{10}")
+    # any North American number in any written form: +1 or 1 prefix optional; space, dot, dash or brackets between the
+    # groups (the call turns speak numbers as "213 555 0142"); digits glued to letters or a hyphen are ids, not numbers. Counterfeit round 1 found the E.164-only pattern let a
+    # spoken real-shape number through.
+    PHONE = re.compile(r"(?<![\w+-])(?:\+?1[ .-]?)?\(?([2-9]\d{2})\)?[ .-]?(\d{3})[ .-]?(\d{4})(?!\w)")
+    # the host is what a browser would contact, so it is parsed, not cut at the first "/" (Counterfeit round 1:
+    # "https://realbiz.com#.test/" passed although its host is realbiz.com)
+    URL = re.compile(r"https?://[^\s\"<>]+", re.IGNORECASE)
+
+    @staticmethod
+    def _host(url: str):
+        try:
+            return urllib.parse.urlsplit(url.replace("\\", "/")).hostname   # browsers read "\\" as "/" here
+        except ValueError:
+            return None
+
+    def test_the_host_check_reads_the_real_host(self):
+        for url in ("https://realbiz.com#.test/", "https://realbiz.com?x=.test/", "https://x.test@realbiz.com/",
+                    "https://realbiz.com\\.test/"):
+            with self.subTest(url=url):
+                host = self._host(url)
+                self.assertFalse(host and common.is_fixture_domain(host), url)
 
     def _all_text(self):
         yield from build.render(SEED).items()
 
     def test_every_phone_is_in_the_fictional_range(self):
         for name, text in self._all_text():
-            for number in self.PHONE.findall(text):
+            for area, exchange, line in self.PHONE.findall(text):
+                number = f"+1{area}{exchange}{line}"
                 with self.subTest(file=name, number=number):
                     self.assertTrue(common.is_fixture_phone(number))
 
+    def test_the_phone_check_catches_every_written_form(self):
+        real = ("+12138675309", "213 867 5309", "(213) 867-5309", "213.867.5309", "1-213-867-5309", "2138675309")
+        for form in real:
+            with self.subTest(form=form):
+                found = self.PHONE.findall(f"call me at {form} today")
+                self.assertTrue(found and not common.is_fixture_phone("+1" + "".join(found[0])), form)
+
     def test_every_web_address_is_reserved(self):
-        hosts = re.compile(r"https?://([^/\"\s]+)")
         for name, text in self._all_text():
-            for host in hosts.findall(text):
-                with self.subTest(file=name, host=host):
-                    self.assertTrue(common.is_fixture_domain(host))
+            for url in self.URL.findall(text):
+                host = self._host(url)
+                with self.subTest(file=name, url=url):
+                    self.assertTrue(host and common.is_fixture_domain(host), url)
         for biz in WORLD:
             self.assertTrue(common.is_fixture_domain(biz["website"]["domain"]))
 

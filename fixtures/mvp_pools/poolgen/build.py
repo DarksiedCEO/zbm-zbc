@@ -91,8 +91,17 @@ def cmd_build(args: argparse.Namespace) -> int:
 def cmd_verify(_args: argparse.Namespace) -> int:
     seeds = load_seeds()
     bad = 0
-    for seed, pinned in seeds["dev_seeds"].items():
+    expected = {name for subject, key, _gen in SETS for name in (subject, key)}
+    if not seeds.get("dev_seeds"):
+        # Counterfeit round 1: an empty pin list checked nothing and still passed
+        print("DIFF no dev seeds are pinned")
+        bad += 1
+    for seed, pinned in (seeds.get("dev_seeds") or {}).items():
         got = digests(seed)
+        if set(pinned) != expected:
+            # every generated file must be pinned, and nothing else (a one-file pin used to pass)
+            print(f"DIFF {seed} pinned files {sorted(set(pinned) ^ expected)} differ from the generated set")
+            bad += 1
         for name, want in pinned.items():
             ok = got.get(name) == want
             bad += not ok
