@@ -89,7 +89,16 @@ Inquisitor broke 6 claims (2 high); fixed in the next commit:
   and the exact 30% reply rate; the visible call-bank `difficulty` field (which equalled "adversarial") is removed.
 - **Open for the spec freeze:** a silent F3 turn (confidence 0.0) is not flagged as low-confidence; the rule now says so
   and Andre confirms it.
-test-verification's round 3 was still running at handoff.
+test-verification round 3 (same subject) also found, and the next commit fixes:
+- **F3 took the caller's name and number from the agent's own confirmation line** (a consistent wrong name or number
+  in transcript and key passed: 196/196). The oracle now takes them from the caller's trusted turns (the last number
+  given wins) and requires the confirmation line to agree.
+- **The F3 low-confidence trap could not be fallen into:** the garbled turn never held a full number. It now holds a
+  plausible wrong 10-digit number, so trusting it gives a wrong callback (dropping the confidence filter now fails 27
+  rows).
+- L1 now generates an owner edit exactly at the last sync (reconciled, not a conflict).
+- Still not generated (mutants survive): L6 requests with two violations, a call with two names, a non-health call
+  that mentions a health term. Six generator mutants are caught only by the dev-seed hash pin.
 
 ## Use
 

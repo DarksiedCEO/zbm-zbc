@@ -77,7 +77,7 @@ def generate_l1(seed: str) -> tuple[list[dict], list[dict]]:
                 current["phone"] = f"({d[0:3]}) {d[3:6]}-{d[6:]}"
             if state == "in_sync" and ps.chance(1, 4):
                 edits.append({"field": ps.pick(SYNC_FIELDS), "edited_by": "owner",
-                              "days_ago": last_sync + ps.between(1, 60)})
+                              "days_ago": last_sync + ps.between(0, 60)})   # 0 = at the sync itself: reconciled
             listings.append({"platform": p, "fields": current, "last_sync_days_ago": last_sync,
                              "edit_log": edits,
                              "api_status": ps.pick(("error_503", "timeout", "error_mid_sync")) if state == "api_error"

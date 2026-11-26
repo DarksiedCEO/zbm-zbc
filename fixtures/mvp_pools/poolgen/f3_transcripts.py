@@ -48,7 +48,9 @@ def generate(seed: str) -> tuple[list[dict], list[dict]]:
             number = _spoken(cap["callback_number"])
             if asr_error:
                 # the recogniser garbles the number once; the caller repeats it cleanly when asked
-                garbled = number[:-2] + s.pick(["fifty", "sixty", "??"])
+                # a full, plausible, WRONG 10-digit number: trusting this turn gives a wrong callback number
+                last2 = int(number[-2:])
+                garbled = number[:-2] + f"{(last2 + s.between(1, 9)) % 100:02d}"
                 turns.append({"speaker": "agent", "confidence": 0.97,
                               "text": "¿Me repite el número, por favor?" if es else "Sorry, could you repeat the number?"})
                 turns.append({"speaker": "caller", "confidence": round(0.3 + s.below(25) / 100, 2), "text": garbled})

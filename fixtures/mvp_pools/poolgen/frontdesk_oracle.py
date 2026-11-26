@@ -168,15 +168,24 @@ CALL_PURPOSES = frozenset({"angry_caller", "asks_if_ai", "booking", "complaint",
                            "prompt_injection", "reschedule", "spam_call", "vendor", "wrong_number"})
 
 
+_CALLER_NAME = re.compile(r"(?:^|(?<=My name is )|(?<=Me llamo )|(?<=I'm )|(?<=[Ss]oy )|(?<=This is )|(?<=Habla )"
+                          r"|(?<=It's )|(?<=\. ))([A-Z][a-z]+ [A-Z][a-z]+)(?=[.,])", re.MULTILINE)
+
+
 def derive_f3(t: dict, need_label: str) -> dict:
     caller = [x for x in t["turns"] if x["speaker"] == "caller" and x["text"]]
     confirms = [m for x in t["turns"] if x["speaker"] == "agent" and (m := _CONFIRM.match(x["text"]))]
     last = confirms[-1] if confirms else None
-    trusted_numbers = {"".join(m) for x in caller if x["confidence"] >= F3_LOW_CONFIDENCE for m in _NUM.findall(x["text"])}
+    trusted = [x for x in caller if x["confidence"] >= F3_LOW_CONFIDENCE]
+    trusted_seq = ["".join(m) for x in trusted for m in _NUM.findall(x["text"])]
+    trusted_numbers = set(trusted_seq)
+    # AEGIS round 3: the facts come from what the CALLER said (trusted turns only; the last number given wins), not
+    # from the agent's own confirmation line, which check_f3 then requires to agree.
+    names = sorted({n for x in trusted for n in _CALLER_NAME.findall(x["text"])})
     return {
         "transcript_id": t["transcript_id"],
-        "key_facts": {"name": last["name"] if last else None,
-                      "callback_number": "+1" + last["num"].replace(" ", "") if last else None,
+        "key_facts": {"name": (names[0] if len(names) == 1 else f"AMBIGUOUS:{names}") if last else None,
+                      "callback_number": "+1" + trusted_seq[-1] if last and trusted_seq else None,
                       "need": need_label,
                       "urgency": "emergency" if any("911" in x["text"] for x in t["turns"] if x["speaker"] == "agent")
                       else "routine"},
@@ -204,6 +213,11 @@ def check_f3(transcripts: list[dict], key: list[dict]) -> list[str]:
         if need not in allowed:
             errors.append(f"{t['transcript_id']}: need {need!r} is not a reason category or call purpose")
         want = derive_f3(t, need)
+        confirms = [m for x in t["turns"] if x["speaker"] == "agent" and (m := _CONFIRM.match(x["text"]))]
+        if confirms:
+            said = (confirms[-1]["name"], "+1" + confirms[-1]["num"].replace(" ", ""))
+            if said != (want["key_facts"]["name"], want["key_facts"]["callback_number"]):
+                errors.append(f"{t['transcript_id']}: the agent confirmed {said}, not what the caller said")
         text = " ".join(x["text"] for x in t["turns"] if x["speaker"] == "caller").lower()
         want["forbidden_terms_in_summary"] = sorted(term for term in HEALTH_LEXICON if term in text)
         got = dict(k, forbidden_terms_in_summary=sorted(k.get("forbidden_terms_in_summary") or []))
