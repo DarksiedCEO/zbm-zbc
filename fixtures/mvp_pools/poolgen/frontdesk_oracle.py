@@ -9,7 +9,6 @@ from __future__ import annotations
 import re
 
 from . import common
-
 from .verticals import VERTICALS
 
 OPT_OUT_EXACT = {"stop", "stop.", "stop!", "unsubscribe", "cancel", "end", "quit", "revoke", "opt out",

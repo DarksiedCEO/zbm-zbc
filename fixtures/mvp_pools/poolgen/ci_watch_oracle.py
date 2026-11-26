@@ -4,9 +4,9 @@ changelog entries, terms) out of the HTML, ignore everything else, and diff cons
 from __future__ import annotations
 
 import re
+from html import unescape
 
 from . import common
-from html import unescape
 
 PLAN = re.compile(r'<section class="plan" data-plan="([^"]+)"><h3>.*?</h3><span class="price">\$(-?\d+)/mo</span>'
                   r'<ul class="features">(.*?)</ul></section>')
