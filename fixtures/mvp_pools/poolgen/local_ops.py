@@ -92,10 +92,13 @@ def generate_l1(seed: str) -> tuple[list[dict], list[dict]]:
     return [subjects[i] for i in order], [key[i] for i in order]
 
 
-L6_CASES = (("send", 120), ("no_transaction", 25), ("no_sms_consent", 25), ("opted_out", 20), ("gating", 35),
-            ("incentive", 30), ("suggested_text", 25), ("review_suppression", 20))
+L6_CASES = (("send", 120), ("no_transaction", 25), ("no_sms_consent", 25), ("opted_out", 20), ("gating", 25),
+            ("incentive", 20), ("suggested_text", 25), ("review_suppression", 20),
+            # two violations at once: the key lists both (AEGIS round 3: single-violation rows hid the reason logic)
+            ("gating+incentive", 5), ("opted_out+suggested_text", 5), ("no_transaction+review_suppression", 5),
+            ("incentive+no_sms_consent", 5))
 GATING = ({"only_if_rating_at_least": 4}, {"only_if_survey_score_at_least": 9}, {"exclude_if_complained": True})
-INCENTIVES = ("Leave us a review and get 10% off your next visit!", "Review us for a chance to win a $50 gift card.",
+INCENTIVES = ("Leave us a review and get 10% off your next visit!", "Review us and we'll send you a $25 gift card.", "Review us for a chance to win dinner for two.",
               "Post a 5-star review and your next cleaning is free.")
 SUGGESTED = ("You could say: 'Best service in town, highly recommend!'",
              "Feel free to copy this: 'Fast, friendly and fair prices.'")
@@ -115,29 +118,28 @@ def generate_l6(seed: str) -> tuple[list[dict], list[dict]]:
             channel = s.pick(("sms", "email"))
             text = s.pick(CLEAN).format(link="https://reviews.example.com/r")
             filt = None
-            if case == "gating":
+            parts = set(case.split("+"))
+            if "no_sms_consent" in parts:
+                channel = "sms"
+            if "gating" in parts:
                 filt = s.pick(GATING)
-            elif case == "incentive":
+            if "incentive" in parts:
                 text = s.pick(INCENTIVES) + " https://reviews.example.com/r"
-            elif case == "suggested_text":
+            if "suggested_text" in parts:
                 text = text + " " + s.pick(SUGGESTED)
-            elif case == "review_suppression":
+            if "review_suppression" in parts:
                 text = s.pick(SUPPRESSION) + " " + text
             sid = common.opaque_id("revreq", seed, n)
             subjects.append({
                 "fixture": common.FIXTURE_LABEL, "pool": L6_POOL, "request_id": sid, "channel": channel,
                 "customer": {"phone": common.fixture_phone("213", s.below(50)),
-                             "transaction": None if case == "no_transaction" else
+                             "transaction": None if "no_transaction" in parts else
                              {"type": s.pick(("purchase", "service_visit")), "days_ago": s.between(0, 30)},
-                             "sms_consent": not (case == "no_sms_consent" and channel == "sms") if channel == "sms"
-                             else s.chance(1, 2),
-                             "opted_out": case == "opted_out"},
+                             "sms_consent": "no_sms_consent" not in parts if channel == "sms" else s.chance(1, 2),
+                             "opted_out": "opted_out" in parts},
                 "audience_filter": filt, "message": text})
-            if case == "no_sms_consent" and channel == "email":
-                subjects[-1]["channel"] = "sms"
-                subjects[-1]["customer"]["sms_consent"] = False
-            reason = None if case == "send" else case
-            key.append({"request_id": sid, "decision": "send" if case == "send" else "refuse", "reason": reason})
+            reasons = [] if case == "send" else sorted(parts)
+            key.append({"request_id": sid, "decision": "refuse" if reasons else "send", "reasons": reasons})
             n += 1
     order = root.child("order").shuffled(list(range(len(subjects))))
     return [subjects[i] for i in order], [key[i] for i in order]

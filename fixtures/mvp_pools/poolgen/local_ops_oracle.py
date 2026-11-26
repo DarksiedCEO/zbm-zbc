@@ -69,8 +69,7 @@ def derive_l6(req: dict) -> dict:
               ("suggested_text", bool(_SUGGESTED.search(msg))),
               ("review_suppression", bool(_SUPPRESS.search(msg))))
     failed = [name for name, bad in checks if bad]
-    return {"request_id": req["request_id"], "decision": "refuse" if failed else "send",
-            "reason": failed[0] if failed else None}
+    return {"request_id": req["request_id"], "decision": "refuse" if failed else "send", "reasons": sorted(failed)}
 
 
 def check_l6(subjects: list[dict], key: list[dict]) -> list[str]:

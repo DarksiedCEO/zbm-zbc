@@ -67,13 +67,16 @@ class ListingSync(unittest.TestCase):
 class ReviewRequests(unittest.TestCase):
     def test_size_and_mix(self):
         self.assertEqual(len(L6_S), 300)
-        reasons = Counter(k["reason"] for k in L6_K)
-        self.assertEqual(reasons[None], 120)
-        self.assertEqual(set(reasons) - {None}, {c for c, _ in local_ops.L6_CASES} - {"send"})
+        sends = [k for k in L6_K if not k["reasons"]]
+        self.assertEqual(len(sends), 120)
+        seen = Counter("+".join(k["reasons"]) for k in L6_K if k["reasons"])
+        want = {"+".join(sorted(c.split("+"))) for c, _ in local_ops.L6_CASES} - {"send"}
+        self.assertEqual(set(seen), want)
+        self.assertEqual(sum(len(k["reasons"]) == 2 for k in L6_K), 20)
 
     def test_every_ftc_violation_refuses(self):
         for k in L6_K:
-            if k["reason"] in ("gating", "incentive", "suggested_text", "review_suppression"):
+            if set(k["reasons"]) & {"gating", "incentive", "suggested_text", "review_suppression"}:
                 self.assertEqual(k["decision"], "refuse")
 
     def test_look_alike_free_and_email_without_sms_consent_still_send(self):
@@ -89,11 +92,20 @@ class ReviewRequests(unittest.TestCase):
     def test_key_is_proven(self):
         self.assertEqual(local_ops_oracle.check_l6(L6_S, L6_K), [])
 
+    def test_dropping_one_of_two_reasons_is_caught(self):
+        for i, k in enumerate(L6_K):
+            if len(k["reasons"]) == 2:
+                for keep in k["reasons"]:
+                    bad = copy.deepcopy(L6_K)
+                    bad[i]["reasons"] = [keep]
+                    with self.subTest(row=i, keep=keep):
+                        self.assertTrue(local_ops_oracle.check_l6(L6_S, bad))
+
     def test_oracle_rejects_a_send_for_every_refusal_row(self):
         for i, k in enumerate(L6_K):
             if k["decision"] == "refuse":
                 bad = copy.deepcopy(L6_K)
-                bad[i] = dict(k, decision="send", reason=None)
+                bad[i] = dict(k, decision="send", reasons=[])
                 with self.subTest(row=i):
                     self.assertTrue(local_ops_oracle.check_l6(L6_S, bad))
 
