@@ -43,6 +43,22 @@ class ReviewReplies(unittest.TestCase):
         self.assertGreaterEqual(len(happy), 10)
         self.assertFalse(any(k["route_to_owner"] for k in happy))
 
+    def test_every_edge_of_the_fake_rule_is_generated(self):
+        """AEGIS round 4: each loosened fake rule must disagree with the key somewhere."""
+        loosened = {
+            "age 30": lambda r: r["reviewer"]["review_count"] == 1 and r["reviewer"]["account_age_days"] <= 30
+            and r["same_day_reviews_from_new_accounts"] >= 5,
+            "two reviews": lambda r: r["reviewer"]["review_count"] <= 2 and r["reviewer"]["account_age_days"] <= 7
+            and r["same_day_reviews_from_new_accounts"] >= 5,
+            "pile-up 3": lambda r: r["reviewer"]["review_count"] == 1 and r["reviewer"]["account_age_days"] <= 7
+            and r["same_day_reviews_from_new_accounts"] >= 3,
+            "pile-up only": lambda r: r["same_day_reviews_from_new_accounts"] >= 5,
+        }
+        rows = [(r, k) for seed in ("dev-a", "dev-b") for r, k in zip(*review_replies.generate(seed))]
+        for name, rule in loosened.items():
+            with self.subTest(rule=name):
+                self.assertTrue(any(rule(r) != k["flag_suspected_fake"] for r, k in rows), name)
+
     def test_key_is_proven_and_every_row_can_fail(self):
         self.assertEqual(review_replies_oracle.check(REVIEWS, KEY), [])
         for i, k in enumerate(KEY):

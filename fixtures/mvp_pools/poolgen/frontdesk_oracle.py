@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import re
 
+from . import common
+
 from .verticals import VERTICALS
 
 OPT_OUT_EXACT = {"stop", "stop.", "stop!", "unsubscribe", "cancel", "end", "quit", "revoke", "opt out",
@@ -117,7 +119,7 @@ def check_f2(events: list[dict], key: list[dict]) -> list[str]:
         want = {"missed_call_id": e["missed_call_id"], "action": action,
                 "max_latency_seconds": 30 if action == "send_now" else None, "message_class": "informational",
                 "must_not": ["marketing_content", "send_to_opted_out"]}
-        if k is None or {f: v for f, v in k.items() if f != "case"} != want:
+        if k is None or common.differs({f: v for f, v in k.items() if f != "case"}, want):
             errors.append(f"{e['missed_call_id']}: key {k} vs rule {want}")
     return errors
 
@@ -147,7 +149,7 @@ def check_f4(cases: list[dict], key: list[dict]) -> list[str]:
         want = {"case_id": c["case_id"], "path": path, "connect_to": target, "max_seconds_to_connect_or_fallback": 30,
                 "must_not": ["drop_caller_without_fallback", "transfer_outside_hours"],
                 "whisper_summary_required": path == "connected"}
-        if k is None or {f: v for f, v in k.items() if f != "case"} != want:
+        if k is None or common.differs({f: v for f, v in k.items() if f != "case"}, want):
             errors.append(f"{c['case_id']}: key {k} vs rule {want}")
         if c["ring_mode"] != "simultaneous" or c["ring_timeout_seconds"] > 30:
             errors.append(f"{c['case_id']}: the ringing plan cannot meet the 30 s bar")
@@ -221,6 +223,6 @@ def check_f3(transcripts: list[dict], key: list[dict]) -> list[str]:
         text = " ".join(x["text"] for x in t["turns"] if x["speaker"] == "caller").lower()
         want["forbidden_terms_in_summary"] = sorted(term for term in HEALTH_LEXICON if term in text)
         got = dict(k, forbidden_terms_in_summary=sorted(k.get("forbidden_terms_in_summary") or []))
-        if got != want:
+        if common.differs(got, want):
             errors.append(f"{t['transcript_id']}: key differs from the transcript")
     return errors

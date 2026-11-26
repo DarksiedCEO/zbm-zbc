@@ -127,3 +127,8 @@ def slugify(text: str) -> str:
         elif keep and keep[-1] != "-":
             keep.append("-")
     return "".join(keep).strip("-")
+
+
+def differs(a, b) -> bool:
+    """Type-strict comparison for answer keys: True == 1 in Python, but a key holding 1 for a yes/no field is wrong."""
+    return canonical_json(a) != canonical_json(b)

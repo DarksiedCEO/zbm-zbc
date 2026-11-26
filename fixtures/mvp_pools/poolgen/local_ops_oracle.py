@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import re
 
+from . import common
+
 L1_FIELDS = ("name", "phone", "hours", "website", "primary_category")
 
 
@@ -49,7 +51,7 @@ def check_l1(subjects: list[dict], key: list[dict]) -> list[str]:
             continue
         want = {"business_id": s["business_id"],
                 "platforms": [derive_l1_platform(s["approved_record"], lst) for lst in s["listings"]]}
-        if k != want:
+        if common.differs(k, want):
             errors.append(f"L1 {s['business_id']}: key differs from the listings")
     return errors
 
@@ -80,6 +82,6 @@ def check_l6(subjects: list[dict], key: list[dict]) -> list[str]:
     by_id = {k["request_id"]: k for k in key}
     for s in subjects:
         k = by_id.get(s["request_id"])
-        if k is not None and k != derive_l6(s):
+        if k is not None and common.differs(k, derive_l6(s)):
             errors.append(f"L6 {s['request_id']}: key {k} differs from the scenario {derive_l6(s)}")
     return errors

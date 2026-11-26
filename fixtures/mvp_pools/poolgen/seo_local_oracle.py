@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import re
 
+from . import common
+
 STREET_ABBREV = {"st": "street", "ave": "avenue", "blvd": "boulevard", "rd": "road", "dr": "drive"}
 UNIT_WORDS = {"suite", "ste", "unit", "#"}
 
@@ -77,7 +79,7 @@ def check_l4(businesses: list[dict], key: list[dict]) -> list[str]:
         want = {"business_id": b["business_id"],
                 "citations": [{"citation_id": li["citation_id"], "verdict": l4_verdict(b["canonical"], li)}
                               for li in b["listings"]]}
-        if k != want:
+        if common.differs(k, want):
             errors.append(f"{b['business_id']}: key differs from the listings")
     return errors
 
@@ -114,6 +116,6 @@ def check_l5(pairs: list[dict], key: list[dict]) -> list[str]:
                 "action": ("merge_or_remove_duplicate" if kind == "true_duplicate" else
                            "mark_old_listing_moved" if kind == "moved_business" else "leave_both"),
                 "requires_owner_approval": dup}
-        if by_id.get(p["pair_id"]) != want:
+        if common.differs(by_id.get(p["pair_id"]), want):
             errors.append(f"{p['pair_id']}: key {by_id.get(p['pair_id'])} vs listings {want}")
     return errors

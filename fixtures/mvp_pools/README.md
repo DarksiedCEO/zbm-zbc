@@ -116,6 +116,14 @@ Inquisitor broke 4 claims (1 high); fixed in the next commit and its probes repl
   and reading "at the sync" as "after it" now disagrees with the key on 204 rows.
 - The held-out id test now covers L1, L6 and L7.
 
+test-verification round 4 (same subject) confirmed the round-3 fixes and found the same L7 threshold gaps; also fixed:
+- Every oracle now compares answers type-strictly: a key holding `1` for a yes/no field used to pass, since
+  `True == 1` in Python. A test stores each yes/no answer as a number and requires it to be caught.
+- The L7 fake rule's edges include a two-review new account and a pile-up of exactly 4; a test requires every
+  loosened rule to disagree with the key.
+- Still surviving: the call bank's single-name and health-terms-only-in-health-calls checks (no call has two names,
+  and no non-health call says a health term).
+
 ## Use
 
 ```bash

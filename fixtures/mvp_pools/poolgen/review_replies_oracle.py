@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import re
 
+from . import common
+
 REGULATED = {"med_spa", "dental", "personal_injury_law"}
 DETAIL_LEXICON = ("botox", "filler", "root canal", "crown", "whiplash", "back injury")
 _REFUND_ASK = re.compile(r"\b(refund me|my money back|expect a (full )?refund|want a refund)\b", re.IGNORECASE)
@@ -38,6 +40,6 @@ def check(reviews: list[dict], key: list[dict]) -> list[str]:
     by_id = {k["review_id"]: k for k in key}
     for r in reviews:
         k = by_id.get(r["review_id"])
-        if k is not None and k != derive(r):
+        if k is not None and common.differs(k, derive(r)):
             errors.append(f"L7 {r['review_id']}: key {k} differs from the review {derive(r)}")
     return errors

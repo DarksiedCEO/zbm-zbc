@@ -4,6 +4,8 @@ changelog entries, terms) out of the HTML, ignore everything else, and diff cons
 from __future__ import annotations
 
 import re
+
+from . import common
 from html import unescape
 
 PLAN = re.compile(r'<section class="plan" data-plan="([^"]+)"><h3>.*?</h3><span class="price">\$(-?\d+)/mo</span>'
@@ -53,6 +55,6 @@ def check(snapshots: list[dict], key: list[dict]) -> list[str]:
         want = diff(last[snap["page_id"]], cur) if snap["page_id"] in last else []
         last[snap["page_id"]] = cur
         k = by.get((snap["page_id"], snap["version"]))
-        if k != {"page_id": snap["page_id"], "version": snap["version"], "meaningful_changes": want}:
+        if common.differs(k, {"page_id": snap["page_id"], "version": snap["version"], "meaningful_changes": want}):
             errors.append(f"{snap['page_id']} v{snap['version']}: key {k and k['meaningful_changes']} vs page {want}")
     return errors

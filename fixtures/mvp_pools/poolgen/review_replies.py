@@ -68,10 +68,10 @@ def generate(seed: str) -> tuple[list[dict], list[dict]]:
             elif kind == "small_pileup":
                 stars, text = 1, s.pick(FAKE + NEGATIVE)
                 reviewer = {"review_count": 1, "account_age_days": s.between(0, 7)}
-                same_day_new_accounts = s.between(2, 4)
+                same_day_new_accounts = s.pick([4, s.between(2, 3)])
             elif kind == "established_in_pileup":
                 stars, text = 1, s.pick(FAKE + NEGATIVE)
-                reviewer = s.pick([{"review_count": s.between(2, 40), "account_age_days": s.between(0, 7)},
+                reviewer = s.pick([{"review_count": s.pick([2, s.between(3, 40)]), "account_age_days": s.between(0, 7)},
                                    {"review_count": 1, "account_age_days": s.pick([8, s.between(9, 900)])}])
                 same_day_new_accounts = s.between(5, 12)
             elif kind == "new_reviewer_genuine":

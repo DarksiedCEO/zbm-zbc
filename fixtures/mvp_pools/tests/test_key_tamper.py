@@ -99,6 +99,16 @@ class KeyTamper(unittest.TestCase):
                     with self.subTest(row=i, terms=wrong):
                         self.assertTrue(check(subject, bad))
 
+    def test_a_yes_no_answer_stored_as_a_number_is_caught(self):
+        """AEGIS round 4: True == 1 in Python, so a loose compare accepted 1 for a yes/no field."""
+        for name, (subject, key, check, labels) in SETS.items():
+            for field, value in key[0].items():
+                if isinstance(value, bool) and field not in labels:
+                    bad = copy.deepcopy(key)
+                    bad[0][field] = int(value)
+                    with self.subTest(set=name, field=field):
+                        self.assertTrue(check(subject, bad), f"{name}: {field} as {int(value)} went unnoticed")
+
     def test_extra_and_missing_rows_are_caught(self):
         for name, (subject, key, check, _labels) in SETS.items():
             with self.subTest(set=name, case="extra"):
