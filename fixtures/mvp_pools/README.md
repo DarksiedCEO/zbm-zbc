@@ -84,7 +84,8 @@ Inquisitor broke 6 claims (2 high); fixed in the next commit:
   categories and call purposes; a swap to another valid purpose is still not caught, so it is listed as a label.
 - **SEO-L1 answers could be read off the last-sync age** (30 whenever an edit was planted: 1191/1200 rows right without
   reading a value). The sync age is now independent of the state, some drift is never logged, and some logged edits
-  were already reverted, so only the values tell. The same shortcut now gets about half the rows.
+  were already reverted. The same shortcut now gets about half the rows. (Round 4: the edit log alone still read
+  about three quarters of rows; see below.)
 - The call-bank minute claim is corrected (on the line only); the boundary test now checks the 7 / 8-day review reply
   and the exact 30% reply rate; the visible call-bank `difficulty` field (which equalled "adversarial") is removed.
 - **Open for the spec freeze:** a silent F3 turn (confidence 0.0) is not flagged as low-confidence; the rule now says so
@@ -100,6 +101,20 @@ test-verification round 3 (same subject) also found, and the next commit fixes:
 - L6 now has 20 requests with two violations, and the key lists every reason.
 - Still not generated (mutants survive): a call with two names, a non-health call
   that mentions a health term. Six generator mutants are caught only by the dev-seed hash pin.
+
+## AEGIS review round 4 (Nov 25 2026, subject dc6b77cc)
+Inquisitor broke 4 claims (1 high); fixed in the next commit and its probes replayed:
+- **SEO-L7 fakes were readable from the text** (three fixed sentences only fakes used; 300/300 on a fresh seed). Fakes
+  and genuine angry reviews now share the same lines, so the text predicts nothing beyond the base rate.
+- **The L7 fake rule was never exercised at its edges:** pile-ups of 2-4 and established accounts inside a pile-up were
+  never generated, so four loosened rules agreed with the key. Both now are, plus an account exactly 7 days old and a
+  pile-up of exactly 5; each loosened rule now disagrees with the key.
+- **SEO-L1 "only the values tell" was false.** With owner edits that were set back to the record and owner edits exactly
+  at the last sync on drifted listings, a predictor that reads only the edit log, sync age and API status now gets
+  about three quarters of rows (1849/2400), down from 1961; the rest needs the values. Platform errors are still read
+  from the API status by design. An owner edit exactly at the sync is now on every seed (31-50 rows on the dev seeds),
+  and reading "at the sync" as "after it" now disagrees with the key on 204 rows.
+- The held-out id test now covers L1, L6 and L7.
 
 ## Use
 

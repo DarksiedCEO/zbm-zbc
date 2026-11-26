@@ -22,8 +22,10 @@ from .common import Stream
 POOL_ID = "seo-l7-review-replies"
 REGULATED = ("med_spa", "dental", "personal_injury_law")
 OTHER = ("hvac", "plumbing", "auto_dealer_service", "restaurant", "insurance_agency")
-KINDS = (("positive", 70), ("negative", 50), ("refund_request", 20), ("mixed", 50), ("suspected_fake", 30),
-         ("new_reviewer_genuine", 20), ("health_detail", 40), ("refund_word_not_request", 20))
+KINDS = (("positive", 50), ("negative", 50), ("refund_request", 20), ("mixed", 50), ("suspected_fake", 30),
+         ("new_reviewer_genuine", 20), ("health_detail", 40), ("refund_word_not_request", 20),
+         # boundaries of the fake rule (AEGIS round 4): a pile-up one short of 5, and an established account inside one
+         ("small_pileup", 10), ("established_in_pileup", 10))
 HEALTH_DETAILS = {"med_spa": (("My Botox touch-up healed perfectly.", "botox"),
                               ("The filler in my lips looks natural.", "filler")),
                   "dental": (("After my root canal I had zero pain.", "root canal"),
@@ -53,14 +55,24 @@ def generate(seed: str) -> tuple[list[dict], list[dict]]:
             same_day_new_accounts = s.below(2)
             stars, text, refund, detail_terms = 5, s.pick(POSITIVE), False, []
             if kind == "negative":
-                stars, text = s.pick([1, 2]), s.pick(NEGATIVE)
+                stars, text = s.pick([1, 2]), s.pick(NEGATIVE + FAKE)
             elif kind == "refund_request":
                 stars, text, refund = s.pick([1, 2]), s.pick(NEGATIVE) + " " + s.pick(REFUND), True
             elif kind == "mixed":
                 stars, text = 3, s.pick(MIXED)
             elif kind == "suspected_fake":
-                stars, text = 1, s.pick(FAKE)
+                # the text is no tell: fakes and genuine angry reviews draw from the same lines
+                stars, text = 1, s.pick(FAKE + NEGATIVE)
+                reviewer = {"review_count": 1, "account_age_days": s.pick([7, s.between(0, 6)])}
+                same_day_new_accounts = s.pick([5, s.between(6, 12)])
+            elif kind == "small_pileup":
+                stars, text = 1, s.pick(FAKE + NEGATIVE)
                 reviewer = {"review_count": 1, "account_age_days": s.between(0, 7)}
+                same_day_new_accounts = s.between(2, 4)
+            elif kind == "established_in_pileup":
+                stars, text = 1, s.pick(FAKE + NEGATIVE)
+                reviewer = s.pick([{"review_count": s.between(2, 40), "account_age_days": s.between(0, 7)},
+                                   {"review_count": 1, "account_age_days": s.pick([8, s.between(9, 900)])}])
                 same_day_new_accounts = s.between(5, 12)
             elif kind == "new_reviewer_genuine":
                 stars, text = s.pick([1, 4, 5]), s.pick(NEGATIVE + POSITIVE)

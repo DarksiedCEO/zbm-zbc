@@ -68,6 +68,14 @@ def generate_l1(seed: str) -> tuple[list[dict], list[dict]]:
                         edits.append({"field": f, "edited_by": "owner" if state == "owner_hand_edit" else
                                       ps.pick(("platform_suggested_edit", "public_user_edit", "data_aggregator")),
                                       "days_ago": ps.between(1, last_sync - 1)})
+                if state == "drifted" and ps.chance(1, 3):
+                    # boundary: the owner also touched a drifted field exactly AT the last sync (reconciled), so this
+                    # is still drift to update, not a conflict; an "at the sync = after it" reading gets it wrong
+                    edits.append({"field": fields[0], "edited_by": "owner", "days_ago": last_sync})
+            if state == "in_sync" and ps.chance(1, 4):
+                # trap: the owner edited after the sync but set the value back to the record: nothing to surface
+                edits.append({"field": ps.pick(SYNC_FIELDS), "edited_by": "owner",
+                              "days_ago": ps.between(1, last_sync - 1)})
             if state == "in_sync" and ps.chance(1, 4):
                 # trap: a logged non-owner edit since the sync that was already reverted, so the values still match
                 edits.append({"field": ps.pick(SYNC_FIELDS), "edited_by": "public_user_edit",
@@ -77,7 +85,7 @@ def generate_l1(seed: str) -> tuple[list[dict], list[dict]]:
                 current["phone"] = f"({d[0:3]}) {d[3:6]}-{d[6:]}"
             if state == "in_sync" and ps.chance(1, 4):
                 edits.append({"field": ps.pick(SYNC_FIELDS), "edited_by": "owner",
-                              "days_ago": last_sync + ps.between(0, 60)})   # 0 = at the sync itself: reconciled
+                              "days_ago": last_sync + ps.pick([0, ps.between(1, 60)])})   # 0 = at the sync itself
             listings.append({"platform": p, "fields": current, "last_sync_days_ago": last_sync,
                              "edit_log": edits,
                              "api_status": ps.pick(("error_503", "timeout", "error_mid_sync")) if state == "api_error"

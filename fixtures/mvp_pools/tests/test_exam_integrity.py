@@ -16,8 +16,10 @@ from poolgen import (
     f3_transcripts,
     frontdesk_oracle,
     frontdesk_sets,
+    local_ops,
     oracle,
     pool_b,
+    review_replies,
     seo_local,
 )
 
@@ -40,7 +42,9 @@ class HeldOutSecrecy(unittest.TestCase):
                               (frontdesk_sets.generate_f2, "missed_call_id"),
                               (frontdesk_sets.generate_f4, "case_id"), (frontdesk_sets.generate_f5, "send_id"),
                               (seo_local.generate_l4, "business_id"), (seo_local.generate_l5, "pair_id"),
-                              (f3_transcripts.generate, "transcript_id"), (ci_watch.generate, "page_id")):
+                              (f3_transcripts.generate, "transcript_id"), (ci_watch.generate, "page_id"),
+                              (local_ops.generate_l1, "business_id"), (local_ops.generate_l6, "request_id"),
+                              (review_replies.generate, "review_id")):
             dev_ids = {k[id_field] for k in gen("dev-a")[1]}
             fresh_ids = {k[id_field] for k in gen(FRESH)[1]}
             self.assertFalse(dev_ids & fresh_ids, id_field)

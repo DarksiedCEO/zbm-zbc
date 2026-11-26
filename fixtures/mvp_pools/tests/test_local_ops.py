@@ -37,17 +37,21 @@ class ListingSync(unittest.TestCase):
                     self.assertFalse(ans["mark_synced"])
 
     def test_formatting_and_old_edit_traps_are_present_and_in_sync(self):
-        national = old_owner = 0
+        national = old_owner = at_sync = 0
         for s, k in zip(L1_S, L1_K):
             for lst, ans in zip(s["listings"], k["platforms"]):
                 if lst["fields"]["phone"].startswith("("):
                     national += 1
                     self.assertEqual(ans["action"], "none")
                 if lst["edit_log"] and all(e["days_ago"] > lst["last_sync_days_ago"] for e in lst["edit_log"]):
-                    old_owner += 1
+                    old_owner += 1      # every logged edit before the last sync: already reconciled
                     self.assertEqual(ans["action"], "none")
+                if any(e["edited_by"] == "owner" and e["days_ago"] == lst["last_sync_days_ago"] for e in lst["edit_log"]):
+                    at_sync += 1        # an owner edit exactly at the sync is never a conflict
+                    self.assertNotEqual(ans["action"], "surface_conflict")
         self.assertGreater(national, 10)
-        self.assertGreater(old_owner, 5)
+        self.assertGreater(old_owner, 3)
+        self.assertGreater(at_sync, 10)
 
     def test_key_is_proven_and_can_fail(self):
         self.assertEqual(local_ops_oracle.check_l1(L1_S, L1_K), [])
