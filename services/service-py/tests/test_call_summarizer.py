@@ -1195,3 +1195,38 @@ def test_a_correction_then_consent_to_the_corrected_number_carries_no_doubt_note
                         yes=True), PACK)
     assert s.callback_number == "+16025550110" and s.corrected_value_used
     assert "caller_doubted_this_number_earlier" not in s.notes
+
+
+@pytest.mark.parametrize("follow", ["Is that a no?", "Or should we use your work number instead?",
+                                    "Sorry, I mean is 602 555 0202 the best number to reach you?"])
+def test_a_yes_to_a_later_question_is_never_consent(follow):
+    t = tr("I need a repair.", "602 555 0101.", agent=rb("602 555 0101") + [follow], yes=True)
+    assert cs.summarize(t, PACK).callback_number is None
+
+
+def test_a_yes_then_any_later_question_withholds_the_callback():
+    t = tr("I need a repair.", "602 555 0101.", agent=rb("602 555 0101"))
+    t["turns"] += [{"speaker": "caller", "confidence": 0.95, "text": "Yes."},
+                   {"speaker": "agent", "confidence": 0.97, "text": "Anything else I can help with?"},
+                   {"speaker": "caller", "confidence": 0.95, "text": "No."}]
+    assert cs.summarize(t, PACK).callback_number is None
+
+
+def test_a_yes_then_a_plain_closing_line_keeps_the_callback():
+    t = tr("I need a repair.", "602 555 0101.", agent=rb("602 555 0101"))
+    t["turns"] += [{"speaker": "caller", "confidence": 0.95, "text": "Yes."},
+                   {"speaker": "agent", "confidence": 0.97, "text": "Great, someone will call you back today."}]
+    assert cs.summarize(t, PACK).callback_number == "+16025550101"
+
+
+def test_a_yes_after_a_receptionist_statement_is_not_the_answer_to_the_question():
+    t = tr("I need a repair.", "602 555 0101.", agent=rb("602 555 0101") + ["Let me also note your address."], yes=True)
+    assert cs.summarize(t, PACK).callback_number is None
+
+
+def test_a_yes_then_a_later_question_answered_yes_withholds_the_callback():
+    t = tr("I need a repair.", "602 555 0101.", agent=rb("602 555 0101"))
+    t["turns"] += [{"speaker": "caller", "confidence": 0.95, "text": "Yes."},
+                   {"speaker": "agent", "confidence": 0.97, "text": "Or should I text you instead?"},
+                   {"speaker": "caller", "confidence": 0.95, "text": "Yes."}]
+    assert cs.summarize(t, PACK).callback_number is None

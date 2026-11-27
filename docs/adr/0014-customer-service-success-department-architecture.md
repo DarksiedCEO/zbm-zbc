@@ -963,4 +963,10 @@ after; when the caller's own words had rejected or corrected that number, the no
 `caller_doubted_this_number_earlier` is added and the yes stands. The read-back line still confirms the name. The
 plain-words and phone-word fences around the callback are removed. The shared MVP F3 pool now has the consent
 question after every read-back (fixtures/mvp_pools: generator, oracle and the three dev-seed f3 transcript pins);
-the answer keys are unchanged. Mutation harness (call_summarizer): 77 mutants, 58 killed, 19 equivalent.
+the answer keys are unchanged. Mutation harness (call_summarizer): 79 mutants, 60 killed, 19 equivalent.
+
+AEGIS Inquisitor round 16 on 84d856e2 (RR-F3): a yes to a later receptionist question ("Is that a no?", "Or should
+we use your work number?") was read as consent. Now the very next spoken turn after the consent question must be the
+caller's yes, and the receptionist may ask nothing after it (a closing statement is fine). The doubt note is described
+exactly: it fires when this module's own rejection and correction rules (a word list) marked the number. The pool
+oracle applies the same next-turn rule.

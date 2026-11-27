@@ -11,9 +11,11 @@ Rules (spec v0.1, the front-desk shared rules, the Nov 26 spec-freeze rulings):
 - A callback number is reported only when a trusted receptionist turn is exactly the fixed consent question for one
   number ("Is 602 555 0101 the best number to call you back?", "¿Es el 602 555 0101 el mejor número para
   devolverle la llamada?"), the caller gave that number in a trusted turn, and everything the caller says after the
-  question is a trusted yes (Andre's ruling, Nov 27 2026, option (a)). The explicit yes settles anything the caller
-  said about the number before it; when the caller's own words had rejected or corrected that number, the note
-  ``caller_doubted_this_number_earlier`` is added and the yes still stands. Anything else (no question, another
+  question is a trusted yes (Andre's ruling, Nov 27 2026, option (a)): the very next spoken turn after the question is
+  the caller's yes, and the receptionist asks nothing after it (a yes to a later question is never consent; AEGIS
+  round 16). The explicit yes settles anything the caller said about the number before it. When this module's own
+  rejection and correction rules (a word list, so not every phrasing) had marked that number as rejected or
+  replaced, the note ``caller_doubted_this_number_earlier`` is added and the yes still stands. Anything else (no question, another
   wording, "No", "Yes, but text my other number", a low-confidence yes) is no callback, and the summary says to
   check the recording. The caller-side readings (rejections, correction cues) still decide ``corrected_value_used``.
 - A name is reported only when the caller gave it AND the receptionist confirmed it: the caller says it after a
@@ -424,6 +426,18 @@ def _clean_confirmation(text: str) -> bool:
     return "?" not in text and "¿" not in text and not _RETRACT.search(text)
 
 
+def _answers_consent(ordered: list, i: int) -> bool:
+    """The very next spoken turn after the consent question (turn ``i``) is the caller's trusted yes, every later
+    caller turn is a trusted yes too, and the receptionist asks nothing after it (AEGIS F3 round 16: a yes to a later
+    question, "Is that a no?", "Or should we use your work number?", was read as consent)."""
+    after = [(sp, c, x) for sp, c, x in ordered[i + 1:] if x.strip()]
+    if not after or after[0][0] != "caller":
+        return False
+    if any(sp == "agent" and ("?" in x or "¿" in x) for sp, _, x in after):
+        return False
+    return _affirmed(ordered, i)
+
+
 def _affirmed(ordered: list, i: int) -> bool:
     """After turn ``i`` the caller said something, and everything the caller said was an affirmation."""
     later = [(c, x) for sp, c, x in ordered[i + 1:] if sp in ("caller", "unknown") and x.strip()]
@@ -607,7 +621,7 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
         if sp == "agent" and c >= LOW_CONFIDENCE and m:
             nums = {"+1" + "".join(n.groups()) for n in _NUM.finditer(m.group(1) or m.group(2))}
             consent = (nums.pop(), i) if len(nums) == 1 else None
-    if consent and consent[0] in said_numbers and _affirmed(ordered, consent[1]):
+    if consent and consent[0] in said_numbers and _answers_consent(ordered, consent[1]):
         if callback != consent[0]:
             notes.append("callback_from_consent_question")
         if consent[0] in rejected_numbers or (callback is not None and callback != consent[0]):

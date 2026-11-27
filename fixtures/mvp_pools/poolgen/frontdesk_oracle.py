@@ -182,8 +182,10 @@ def _consented(t: dict, digits: str) -> bool:
     for i, x in enumerate(turns):
         m = _CONSENT.match(x["text"]) if x["speaker"] == "agent" else None
         if m and (m["num"] or m["num2"]).replace(" ", "") == digits:
-            nxt = next((y for y in turns[i + 1:] if y["speaker"] == "caller" and y["text"]), None)
-            if nxt is not None and nxt["text"] in ("Yes.", "Sí."):
+            later = [y for y in turns[i + 1:] if y["text"]]
+            # the very next spoken turn is the caller's yes, and the agent asks nothing afterwards
+            if later and later[0]["speaker"] == "caller" and later[0]["text"] in ("Yes.", "Sí.") and \
+                    not any(y["speaker"] == "agent" and ("?" in y["text"] or "¿" in y["text"]) for y in later):
                 return True
     return False
 
