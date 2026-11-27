@@ -5,7 +5,7 @@ list, never their own words), how urgent it is, and the next action. Determinist
 
 Rules (spec v0.1, the front-desk shared rules, the Nov 26 spec-freeze rulings):
 - Nothing is added that the caller did not say. Facts come only from the CALLER's turns that speech recognition
-  trusts (confidence >= 0.6); the receptionist's own confirmation line is checked against them, never used as the
+  trusts (confidence >= 0.6); the receptionist's own confirmation line is checked against the callback when one is reported, never used as the
   source. A turn below 0.6 that has words is flagged and never used as a fact. A silent turn carries nothing and is
   not flagged (Nov 26 ruling): silence means re-ask, never guess.
 - A callback number is reported only when a trusted receptionist turn is exactly the fixed consent question for one
@@ -13,7 +13,7 @@ Rules (spec v0.1, the front-desk shared rules, the Nov 26 spec-freeze rulings):
   devolverle la llamada?"), the caller gave that number in a trusted turn, and everything the caller says after the
   question is a trusted yes (Andre's ruling, Nov 27 2026, option (a)): the very next spoken turn after the question is
   the caller's yes, and after it the receptionist says nothing but the 911 instruction in one of its two fixed forms
-  ("Please hang up and dial 911 right now.", "Cuelgue y marque al 911 ahora mismo.", character for character) or a
+  ("Please hang up and dial 911 right now.", "Cuelgue y marque al 911 ahora mismo.", exactly, read after NFKC) or a
   fixed closing line as said, with nothing set aside ("Thank you, we'll call you back soon.", "Gracias,
   le llamaremos pronto."); anything else, a question or not, means no callback (a yes to a later question is never
   consent; AEGIS rounds 16-19). The explicit yes settles anything the caller said about the number before it. When this module's own
@@ -388,8 +388,10 @@ _CUE = r"(?:let me confirm|just to confirm|to confirm|so to confirm|confirmo|par
 _NUM_TEXT = r"\(?[2-9]\d{2}\)?[ .\-]?[2-9]\d{2}[ .\-]?\d{4}"
 # the fixed confirmation, the whole turn and nothing else (AEGIS round 11: "Let me confirm: you can't take calls at
 # ..." passed a start-only check): "Let me confirm: Ana Reyes.", "Let me confirm: Ana Reyes, at 602 555 0101.",
-# "Let me confirm: at 602 555 0101.", "Confirmo: Ana Reyes, al 602 555 0101."
+# "Confirmo: Ana Reyes, al 602 555 0101."; a number-only line ("Let me confirm: at 602 555 0101.") confirms no name
+# and is matched by _CONFIRM_NUMBER_LINE, so the number in it is still checked (AEGIS F3 round 21)
 _CONFIRM_LINE = re.compile(rf"{_CUE}\s*[:,]?\s*({_WORD} {_WORD})(?:,?\s+(?:at|al)\s+{_NUM_TEXT})?\s*[.!]?", re.IGNORECASE)
+_CONFIRM_NUMBER_LINE = re.compile(rf"{_CUE}\s*[:,]?\s*(?:at|al)\s+{_NUM_TEXT}\s*[.!]?", re.IGNORECASE)
 
 
 
@@ -431,7 +433,7 @@ def _clean_confirmation(text: str) -> bool:
 
 
 # only spaces, tabs and line breaks at the ends are trimmed; str.strip() would also drop the controls U+001C-U+001F
-# (AEGIS F3 round 20), and "character for character" means every other character counts
+# (AEGIS F3 round 20): every other character counts, read after NFKC (full-width forms fold to the plain ones)
 _EDGES = " \t\r\n"
 _FIXED_911 = frozenset({"Please hang up and dial 911 right now.", "Cuelgue y marque al 911 ahora mismo."})
 
@@ -440,14 +442,15 @@ def _answers_consent(ordered: list, i: int) -> bool:
     """The very next spoken turn after the consent question (turn ``i``) is the caller's trusted yes, every later
     caller turn is a trusted yes too, and the receptionist asks nothing after it (AEGIS F3 round 16: a yes to a later
     question, "Is that a no?", "Or should we use your work number?", was read as consent)."""
-    after = [(sp, c, x) for sp, c, x in ordered[i + 1:] if x.strip()]
+    after = [(sp, c, x) for sp, c, x in ordered[i + 1:] if x.strip(_EDGES)]   # a turn of controls is a turn (round 21)
     if not after or after[0][0] != "caller":
         return False
     # after it the receptionist may say only the fixed 911 instruction or a fixed closing line: anything else might
     # be another question, with or without a question mark (AEGIS round 17: "？", "؟", "Let me know if that's not
     # right."), so the inverted default withholds the callback. Both are matched on the turn as said, with nothing set
     # aside (AEGIS round 18: "Thanks <or is work better?>"; round 19: "...right now. ❓", flag letters or tag characters
-    # after the 911 line), and the 911 line only as one of its two fixed forms, character for character
+    # after the 911 line), and the 911 line only as one of its two fixed forms, exactly after NFKC (closing lines
+    # are matched without regard to case)
     if any(sp == "agent" and _CLOSING.fullmatch(_fold(x).strip(_EDGES)) is None
            and _fold(x).strip(_EDGES) not in _FIXED_911 for sp, _, x in after):
         return False
@@ -650,7 +653,8 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
     # the receptionist's fixed confirmation line ("Let me confirm: Ana Reyes, at 602 555 0202.") is checked against
     # the callback: any number it names that is not the callback is flagged (AEGIS F3 round 20: compared with the
     # last receptionist number, which is always the consent question's, the check could never fire)
-    confirmed = ["+1" + "".join(m) for x in agent_trusted if _CONFIRM_LINE.fullmatch(_fold(x).strip())
+    confirmed = ["+1" + "".join(m) for x in agent_trusted
+                 if _CONFIRM_LINE.fullmatch(_fold(x).strip()) or _CONFIRM_NUMBER_LINE.fullmatch(_fold(x).strip())
                  for m in _NUM.findall(_fold(x))]                                  # NFKC: "602\xa0555"
     if callback and any(n != callback for n in confirmed):
         notes.append("confirmation_disagrees_with_caller")

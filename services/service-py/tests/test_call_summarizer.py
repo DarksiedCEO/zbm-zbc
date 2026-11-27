@@ -1374,12 +1374,28 @@ def test_a_digit_word_cut_by_a_window_is_not_a_correction():
     assert "ambiguous_number" not in cs.summarize(t, {"reason_categories": ["repair"]}).notes
 
 
-def test_a_consent_number_with_a_no_break_space_is_the_last_confirmed_number():
+def test_a_number_only_confirmation_of_another_number_is_flagged():
     t = _consent_call("I need a repair. My cell is 602 555 0101.")
     t["turns"][2]["text"] = "Is 602 555 0101 the best number to call you back?"
     t["turns"].insert(2, {"speaker": "agent", "confidence": 0.97, "text": "Let me confirm: at 602 555 0202."})
     s = cs.summarize(t, {"reason_categories": ["repair"]})
+    assert s.callback_number == "+16025550101" and "confirmation_disagrees_with_caller" in s.notes
+
+
+def test_a_number_only_confirmation_with_a_no_break_space_of_the_callback_is_not_flagged():
+    t = _consent_call("I need a repair. My cell is 602 555 0101.")
+    t["turns"].insert(2, {"speaker": "agent", "confidence": 0.97, "text": "Let me confirm: at 602\u00a0555\u00a00101."})
+    s = cs.summarize(t, {"reason_categories": ["repair"]})
     assert s.callback_number == "+16025550101" and "confirmation_disagrees_with_caller" not in s.notes
+
+
+@pytest.mark.parametrize("where", ["after", "before"])
+def test_a_receptionist_turn_of_only_controls_is_a_turn(where):
+    t = tr("I need a repair.", "602 555 0101.", agent=rb("602 555 0101"))
+    junk = {"speaker": "agent", "confidence": 0.97, "text": "\x1c\x1d\x1e\x1f"}
+    yes = {"speaker": "caller", "confidence": 0.95, "text": "Yes."}
+    t["turns"] += [yes, junk] if where == "after" else [junk, yes]
+    assert cs.summarize(t, PACK).callback_number is None
 
 
 def test_a_confirmation_line_naming_another_number_is_flagged():
@@ -1419,3 +1435,10 @@ def test_an_earlier_confirmation_of_another_number_is_flagged_even_if_a_later_on
                        {"speaker": "agent", "confidence": 0.97, "text": "Let me confirm: Ana Reyes, at 602 555 0101."},
                        {"speaker": "caller", "confidence": 0.95, "text": "Yes."}]
     assert "confirmation_disagrees_with_caller" in cs.summarize(t, {"reason_categories": ["repair"]}).notes
+
+
+def test_a_receptionist_turn_that_is_not_a_confirmation_line_is_not_checked():
+    t = _consent_call("I need a repair. My cell is 602 555 0101.")
+    t["turns"].insert(2, {"speaker": "agent", "confidence": 0.97, "text": "Our office line is 602 555 0202."})
+    s = cs.summarize(t, {"reason_categories": ["repair"]})
+    assert s.callback_number == "+16025550101" and "confirmation_disagrees_with_caller" not in s.notes
