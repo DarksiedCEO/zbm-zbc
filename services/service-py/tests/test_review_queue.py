@@ -65,7 +65,7 @@ def test_not_an_opt_out_clears_the_hold_and_the_keeper_agrees():
     assert (audit.reviewer, audit.ruling, audit.replies) == ("Dana Ortiz", "not_an_opt_out", item.replies)
 
 
-def test_opt_out_ruling_is_permanent():
+def test_opt_out_ruling_holds_against_later_replies():
     h = [opt_in(), sms(5, "sounds good, see you tuesday")]
     item = rq.pending(h)[0]
     event, _ = rq.review_event(h, item.item_id, "Dana Ortiz", "opt_out")
@@ -161,3 +161,42 @@ def test_the_queue_never_changes_the_history():
 def test_a_reply_the_keeper_cannot_read_goes_to_a_person_even_if_it_sounds_like_an_opt_out():
     items = rq.pending([opt_in(), sms(5, "Please discontinue these texts")])
     assert len(items) == 1 and items[0].replies == ((5, "Please discontinue these texts"),)
+
+
+def test_a_reply_recorded_after_the_review_with_an_earlier_time_is_not_cleared():
+    h = [opt_in(), sms(5, "what time do you open?")]
+    event, audit = rq.review_event(h, rq.pending(h)[0].item_id, "Dana Ortiz", "not_an_opt_out")
+    late = sms(5, "Please discontinue these texts")
+    assert decide(h + [event, late]).reason == "unrecognised_reply"
+    items = rq.pending(h + [event, late])
+    assert len(items) == 1 and (5, "Please discontinue these texts") in items[0].replies
+    assert audit.replies == ((5, "what time do you open?"),)
+
+
+def test_any_reply_text_has_a_digest_and_is_queued():
+    h = [opt_in(), sms(5, "hi \ud83d"), sms(6, "hello", number="+16025550102"), opt_in(number="+16025550102")]
+    assert len(rq.pending([opt_in(), sms(5, "hi \ud83d")])) == 1
+
+
+class Shifty(str):
+    def strip(self, *a):
+        raise RuntimeError("boom")
+
+    def __iter__(self):
+        raise RuntimeError("boom")
+
+
+@pytest.mark.parametrize("field", ["reviewer", "ruling", "item_id"])
+def test_hostile_string_subclasses_raise_only_value_error(field):
+    h = [opt_in(), sms(5, "what time do you open?")]
+    args = {"item_id": rq.pending(h)[0].item_id, "reviewer": "Dana Ortiz", "ruling": "not_an_opt_out"}
+    args[field] = Shifty(args[field])
+    with pytest.raises(ValueError):
+        rq.review_event(h, args["item_id"], args["reviewer"], args["ruling"])
+
+
+def test_opt_out_ruling_is_lifted_only_by_new_written_consent():
+    h = [opt_in(), sms(5, "sounds good, see you tuesday")]
+    event, _ = rq.review_event(h, rq.pending(h)[0].item_id, "Dana Ortiz", "opt_out")
+    assert decide(h + [event, sms(20, "hello")]).reason == "opted_out"
+    assert decide(h + [event, opt_in(t=30)]).decision == "allow"

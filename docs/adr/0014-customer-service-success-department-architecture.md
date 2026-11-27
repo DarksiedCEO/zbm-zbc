@@ -582,4 +582,13 @@ queue reads the keeper itself (a probe send per record, replayed after the last 
 rules, so a record held for anything stronger is never queued. An item shows every unread reply for its record, and
 a ruling is accepted only while the item is exactly what was listed: a reply that arrived after the reviewer opened
 it makes the ruling stale (`StaleItem`), so a ruling never clears a reply its reviewer did not read. Rulings are
-`not_an_opt_out` (clears the hold) or `opt_out` (permanent), each with an audit row. Fixture-only; nothing is sent.
+`not_an_opt_out` (clears the hold) or `opt_out` (an opt-out that, as after STOP, only new express written consent
+lifts), each with an audit row. Fixture-only; nothing is sent.
+
+AEGIS review-queue round 1 (Nov 27 2026): a review timed after the newest event could still clear a reply recorded
+later with an earlier time, which the reviewer never saw. The consent keeper now keeps each record's unread replies
+(since the last clearing review or written consent) and a `not_an_opt_out` review clears the hold only when its
+`seen` field equals `seen_digest` of exactly those replies; a review without `seen`, or for other replies, clears
+nothing and leaves the unread replies for the next review. The queue takes its list of unread replies from the
+keeper and puts that digest in every review event. Digests use ASCII-escaped JSON, so any reply text has one; the
+reviewer, ruling and item id must be plain `str`.

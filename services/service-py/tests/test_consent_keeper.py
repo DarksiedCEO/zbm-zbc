@@ -35,8 +35,25 @@ def decide(events):
     return {(d.send_id, d.t): (d.decision, d.reason) for d in ck.ConsentKeeper().replay(events)}
 
 
+def with_seen(events):
+    """Fill each not_an_opt_out review's ``seen`` with the keeper's digest of the replies unread just before it (the
+    review queue's job in production; AEGIS review-queue round 1: a review clears only what its reviewer saw)."""
+    out = []
+    for e in events:
+        if isinstance(e, dict) and e.get("kind") == "staff_review" and e.get("ruling") == "not_an_opt_out" and \
+                "seen" not in e:
+            k = ck.ConsentKeeper()
+            k.replay([x for x in events if isinstance(x, dict) and x.get("kind") != "send_attempt" and
+                      isinstance(x.get("t"), int) and x["t"] < e["t"]])
+            n = ck.normalise_number(e.get("number"))
+            if n is not None and isinstance(e.get("client_id"), str):
+                e = dict(e, seen=ck.seen_digest(e["client_id"], n, k.unread_replies(e["client_id"], n)))
+        out.append(e)
+    return out
+
+
 def one(events):
-    ds = ck.ConsentKeeper().replay(events)
+    ds = ck.ConsentKeeper().replay(with_seen(events))
     assert len(ds) == 1
     return ds[0].decision, ds[0].reason
 
@@ -559,7 +576,7 @@ def test_a_modifier_mark_is_not_a_reviewer_name(name):
 def test_a_real_reviewer_name_in_any_script_counts(name):
     events = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="Can I come at 4?"),
               ev("staff_review", 6, reviewer=name, ruling="not_an_opt_out"), send(7)]
-    assert ck.ConsentKeeper().replay(events)[0].decision == "allow"
+    assert ck.ConsentKeeper().replay(with_seen(events))[0].decision == "allow"
 
 
 # ---------------------------------------------------------------- AEGIS round 10 (Inquisitor, cd44d89c)
@@ -616,3 +633,26 @@ def test_an_event_that_is_not_a_plain_dict_or_holds_an_object_refuses():
         ck.ConsentKeeper().replay([D(ev("opt_in", 1, consent="express_written"))])
     with pytest.raises(ValueError):
         ck.ConsentKeeper().replay([ev("opt_in", 1, consent="express_written", extra=object())])
+
+
+# ---------------------------------------------------------------- review queue round 1: the seen digest
+def test_a_review_without_the_seen_digest_clears_nothing():
+    h = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="Can I come at 4?")]
+    assert ck.ConsentKeeper().replay(h + [ev("staff_review", 6, reviewer="Dana", ruling="not_an_opt_out"),
+                                          send(7)])[0].reason == "unrecognised_reply"
+
+
+def test_a_reply_recorded_late_with_an_earlier_time_changes_the_digest_and_is_not_cleared():
+    h = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="Can I come at 4?")]
+    review = with_seen(h + [ev("staff_review", 6, reviewer="Dana", ruling="not_an_opt_out")])[-1]
+    late = ev("inbound_sms", 5, text="Please discontinue these texts")
+    assert ck.ConsentKeeper().replay(h + [review, late, send(7)])[0].reason == "unrecognised_reply"
+    assert ck.ConsentKeeper().replay(h + [review, send(7)])[0].decision == "allow"
+
+
+def test_a_mismatched_review_keeps_the_unread_replies_for_the_next_review():
+    h = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="Can I come at 4?")]
+    bad = ev("staff_review", 6, reviewer="Dana", ruling="not_an_opt_out", seen="0" * 64)
+    k = ck.ConsentKeeper()
+    k.replay(h + [bad])
+    assert k.unread_replies("client-a", "+16025550101") == ((5, "Can I come at 4?"),)

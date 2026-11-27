@@ -19,7 +19,9 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings, ADR 0014):
   ``unrecognised_reply``. Five review rounds showed that no word list catches every way to say "stop texting me"
   (other apostrophes, leet, emoji letters, "Please discontinue these texts", "Cancelen los mensajes"), so the keeper
   no longer decides that a free-text reply is harmless; a person does. A ``staff_review`` event (a named reviewer's
-  ruling ``not_an_opt_out``, recorded after the reply) clears ``unrecognised_reply`` and nothing else; the ruling
+  ruling ``not_an_opt_out``, recorded after the reply, whose ``seen`` field is ``seen_digest`` of exactly the replies
+  still unread for that record; a review without it, or for other replies, clears nothing) clears
+  ``unrecognised_reply`` and nothing else; the ruling
   ``opt_out`` records the reply as an opt-out (``opted_out``, which no review clears). New express written consent
   recorded after the reply also clears it, exactly as new consent after STOP restores texting (a ruling for Andre:
   AEGIS round 8 asked whether an unreviewed reply should outlast new consent).
@@ -48,6 +50,8 @@ texts, and one client's consent never covers another's.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -269,6 +273,7 @@ class Record:
     suppressed_at: Optional[int] = None
     carrier_blocked: bool = False
     evidence: list = field(default_factory=list)   # indices of the events that set the current state
+    unread: list = field(default_factory=list)     # (t, text) of every reply since the last review or written consent
 
 
 @dataclass(frozen=True)
@@ -278,6 +283,14 @@ class Decision:
     reason: Optional[str]         # None on allow
     t: int
     evidence: tuple               # event indices (input order) the decision rests on
+
+
+def seen_digest(client_id: str, number: str, replies) -> str:
+    """The digest a reviewer's ``seen`` field must carry: the client, the number and every unread reply (t, text),
+    oldest first. ASCII-escaped JSON, so any text (a lone surrogate included) has one digest."""
+    raw = json.dumps([normalise_client(client_id), number, [[int(t), str(x)] for t, x in sorted(replies)]],
+                     ensure_ascii=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("ascii")).hexdigest()
 
 
 class ConsentKeeper:
@@ -320,6 +333,12 @@ class ConsentKeeper:
             # AEGIS Inquisitor c08c3f3f H1: an opt-out for a number we cannot read must not vanish; the replay refuses
             raise ValueError(f"event {i}: unreadable number on a {kind} event")
 
+    def unread_replies(self, client_id: str, number: str) -> tuple:
+        """After a ``replay``: the (t, text) of every reply for this record since the last review that cleared it or
+        the last written consent, oldest first (what a reviewer must read). Empty for an unknown record."""
+        rec = self._records.get((normalise_client(client_id), number))
+        return tuple(sorted(rec.unread)) if rec is not None else ()
+
     def replay(self, events: Iterable[dict]) -> list[Decision]:
         """Decide every send_attempt in ``events`` (any order). Raises ValueError on a malformed event: the replay
         refuses as a whole rather than decide on part of the record."""
@@ -357,6 +376,7 @@ class ConsentKeeper:
             if e.get("consent") != "express_written" or e.get("source") not in CONSENT_SOURCES:
                 return   # only express written consent from a known source counts; anything else is not consent
             rec.written_consent_at = e["t"]
+            rec.unread = []                  # new written consent: what came before it is no longer "unread"
             if (rec.suppressed_at is None or e["t"] > rec.suppressed_at) and rec.suppressed in (
                     "opted_out", "possible_opt_out", "start_keyword_does_not_restore", "number_reassigned",
                     "unrecognised_reply"):
@@ -364,6 +384,7 @@ class ConsentKeeper:
             # the evidence keeps the event that set a block the opt-in did not clear (AEGIS round 7)
             rec.evidence = rec.evidence + [i] if rec.carrier_blocked or rec.suppressed is not None else [i]
         elif kind == "inbound_sms":
+            rec.unread = rec.unread + [(e["t"], e["text"])]
             reading = opt_out_reading(e["text"])
             if reading is not None:
                 self._suppress(rec, reading, e["t"], i)
@@ -372,10 +393,18 @@ class ConsentKeeper:
                 rec.evidence = rec.evidence + [i]
             # HELP, look-alike words and anything else change nothing
         elif kind == "staff_review" and e["ruling"] == "opt_out":
-            self._suppress(rec, "opted_out", e["t"], i)       # a person read the reply as an opt-out: permanent
+            self._suppress(rec, "opted_out", e["t"], i)       # a person read the reply as an opt-out
+            rec.unread = []
         elif kind == "staff_review":
-            # clears only a reply nobody had read, and only when the review comes after it
-            if rec.suppressed == "unrecognised_reply" and rec.suppressed_at is not None and e["t"] > rec.suppressed_at:
+            # clears only a reply nobody had read, only when the review comes after it, and only when the reviewer saw
+            # exactly the unread replies there are: a reply recorded late, even with an earlier time, changes the
+            # digest and clears nothing (AEGIS review-queue round 1)
+            seen = e.get("seen")
+            matches = type(seen) is str and seen == seen_digest(e["client_id"], normalise_number(e["number"]),
+                                                                 rec.unread)
+            if matches and rec.suppressed == "unrecognised_reply" and rec.suppressed_at is not None and \
+                    e["t"] > rec.suppressed_at:
+                rec.unread = []
                 rec.suppressed, rec.suppressed_at = None, None
                 rec.evidence = rec.evidence + [i]
         elif kind == "carrier_opt_out":
