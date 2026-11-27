@@ -15,7 +15,9 @@ Rules:
   arrived after the reviewer opened the item makes the ruling stale (``StaleItem``). The event carries ``seen``, the
   keeper's digest of exactly the replies shown (``consent_keeper.seen_digest``), and the keeper clears the hold only
   when its own unread replies still have that digest: a reply recorded later, even with an earlier time, changes the
-  digest and the ruling clears nothing, so a ruling can never clear a reply its reviewer did not read. The review is timed after the newest event in the history, the reviewer must have
+  digest and the ruling clears nothing, so a ruling can never clear a reply its reviewer did not read. (A reply timed
+  before the record's latest written consent is not unread at all: the consent cleared it, as new consent after STOP
+  restores texting, and it is not in the digest.) The review is timed after the newest event in the history, the reviewer must have
   a readable name in plain text (the keeper's own rule), and the ruling is ``not_an_opt_out`` (clears the hold) or
   ``opt_out`` (records an opt-out; as after STOP, only new express written consent lifts it).
 - Every ruling is kept as a plain audit row (who, when, which replies, which ruling); the history plus the review

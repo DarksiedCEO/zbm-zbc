@@ -581,7 +581,8 @@ keeper holds for `unrecognised_reply` and turns a named reviewer's ruling into t
 queue reads the keeper itself (a probe send per record, replayed after the last event), never its own copy of the
 rules, so a record held for anything stronger is never queued. An item shows every unread reply for its record, and
 a ruling is accepted only while the item is exactly what was listed: a reply that arrived after the reviewer opened
-it makes the ruling stale (`StaleItem`), so a ruling never clears a reply its reviewer did not read. Rulings are
+it makes the ruling stale (`StaleItem`), and the keeper's `seen` digest (below) makes sure a ruling never clears a
+reply its reviewer did not read. Rulings are
 `not_an_opt_out` (clears the hold) or `opt_out` (an opt-out that, as after STOP, only new express written consent
 lifts), each with an audit row. Fixture-only; nothing is sent.
 
@@ -591,4 +592,10 @@ later with an earlier time, which the reviewer never saw. The consent keeper now
 `seen` field equals `seen_digest` of exactly those replies; a review without `seen`, or for other replies, clears
 nothing and leaves the unread replies for the next review. The queue takes its list of unread replies from the
 keeper and puts that digest in every review event. Digests use ASCII-escaped JSON, so any reply text has one; the
-reviewer, ruling and item id must be plain `str`.
+reviewer, ruling and item id must be plain `str`. A reply timed before the record's latest written consent is not unread (the consent cleared it, as
+after STOP) and is not in the digest.
+
+AEGIS review-queue round 2 (Nov 27 2026): "stp", "sop", "sto" and "top" as the whole reply read as
+`possible_opt_out` (the classifier skips words under four letters, so a reviewer could have cleared a STOP typo);
+an `opt_out` ruling also resets the unread replies; a replay clears the keeper's state before it validates, so a
+refused replay leaves nothing from an earlier one.

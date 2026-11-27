@@ -256,9 +256,16 @@ def opt_out_reading(text: str) -> Optional[str]:
         return "opted_out"
     if _refusal_near_contact(text):
         return "possible_opt_out"     # fail toward suppression: a refusal anywhere near a contact word blocks
+    if _reply_key(text) in _SHORT_STOP_TYPOS:
+        return "possible_opt_out"     # "stp", "sop", "sto", "top" as the whole reply (AEGIS review-queue round 2)
     if _reply_key(text) in SAFE_REPLIES or _restart_word(text):
         return None
     return "unrecognised_reply"       # free text a person must read: blocks until a staff_review clears it
+
+
+# "stop" with one letter missing, as the whole reply: the classifier skips words under four letters, so these are read
+# here (a reviewer could otherwise clear a STOP typo as "not an opt-out")
+_SHORT_STOP_TYPOS = frozenset({"top", "sop", "stp", "sto"})
 
 
 def _reply_key(text: str) -> str:
@@ -334,14 +341,16 @@ class ConsentKeeper:
             raise ValueError(f"event {i}: unreadable number on a {kind} event")
 
     def unread_replies(self, client_id: str, number: str) -> tuple:
-        """After a ``replay``: the (t, text) of every reply for this record since the last review that cleared it or
-        the last written consent, oldest first (what a reviewer must read). Empty for an unknown record."""
+        """After a ``replay``: the (t, text) of every reply for this record since the last review that cleared it, the
+        last ``opt_out`` ruling or the last written consent, oldest first (what a reviewer must read). Empty for an
+        unknown record, and after a refused replay."""
         rec = self._records.get((normalise_client(client_id), number))
         return tuple(sorted(rec.unread)) if rec is not None else ()
 
     def replay(self, events: Iterable[dict]) -> list[Decision]:
         """Decide every send_attempt in ``events`` (any order). Raises ValueError on a malformed event: the replay
         refuses as a whole rather than decide on part of the record."""
+        self._records = {}             # first, so even a refused replay leaves no earlier state (review-queue round 2)
         if not isinstance(events, (list, tuple)):
             raise ValueError("events must be a list of event objects")
         rows = list(events)
@@ -355,7 +364,6 @@ class ConsentKeeper:
                     raise ValueError(f"event {i}: send_id {e['send_id']!r} appears twice")
                 seen.add(e["send_id"])
         # AEGIS Inquisitor c08c3f3f H2: every replay is the whole history; nothing carries over from an earlier call
-        self._records = {}
         # at one instant an opt-out reading applies after a restart word, so the reason does not depend on input order
         rank = {i: 1 if e["kind"] == "inbound_sms" and opt_out_reading(e["text"]) else 0 for i, e in enumerate(rows)}
         order = sorted(range(len(rows)), key=lambda i: (rows[i]["t"], _ORDER[rows[i]["kind"]], rank[i], i))

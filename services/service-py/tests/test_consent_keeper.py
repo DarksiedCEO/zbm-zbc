@@ -656,3 +656,18 @@ def test_a_mismatched_review_keeps_the_unread_replies_for_the_next_review():
     k = ck.ConsentKeeper()
     k.replay(h + [bad])
     assert k.unread_replies("client-a", "+16025550101") == ((5, "Can I come at 4?"),)
+
+
+@pytest.mark.parametrize("text", ["stp", "STP.", "sop", "sto", "top"])
+def test_a_three_letter_stop_typo_as_the_whole_reply_is_a_possible_opt_out_no_review_clears(text):
+    h = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text=text)]
+    assert one(h + [send(6)]) == ("block", "possible_opt_out")
+    assert one(h + [ev("staff_review", 6, reviewer="Dana", ruling="not_an_opt_out"), send(7)])[0] == "block"
+
+
+def test_a_refused_replay_leaves_no_earlier_state():
+    k = ck.ConsentKeeper()
+    k.replay([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="Can I come at 4?")])
+    with pytest.raises(ValueError):
+        k.replay([{"kind": "nope"}])
+    assert k.unread_replies("client-a", "+16025550101") == ()
