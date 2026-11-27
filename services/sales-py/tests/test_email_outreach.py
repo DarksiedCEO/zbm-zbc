@@ -4,6 +4,8 @@ recorded before sent."""
 
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 import pytest
 
 from helpers import ANDRE, CALLERS, FakeSender, Harness, rid, wired_ports
@@ -284,3 +286,107 @@ def test_cancel_a_queued_message(w):
 def test_contact_without_email_cannot_be_emailed(w):
     lead = w.vlead(email=None)
     w.refused(queue(w, lead["contact_id"], w.template()), 422, "CONTACT_NO_EMAIL")
+
+
+def _complain(h, message_id):
+    h.ok(h.post("/sales/v1/events/email", {"request_id": rid(), "message_id": message_id, "event": "complaint"},
+                "provider_events"))
+
+
+def _queue_late(h, t, name="late"):
+    cid = h.vlead(email=f"{name}@shop{name}.test", phone=None, account={"name": f"Shop {name}"})["contact_id"]
+    h.ok(queue(h, cid, t), 201)
+
+
+def test_cold_email_pauses_at_the_spam_line_and_resumes_when_the_week_is_clean(tmp_path):
+    """Andre, 2026-11-26: sending stops at or above 0.30% complaints; queued mail waits. The 7-day window by send day
+    means one idle day does not clear a bad day (AEGIS follow-up S2); the bad day ages out after 7 days."""
+    h = Harness(tmp_path, ports=wired_ports(), SALES_WARMUP_SCHEDULE="2,4,8")
+    t = h.template()
+    first = [h.ok(queue(h, c, t), 201) for c in _leads(h, 2)]
+    assert h.ok(h.job("send-queue"))["sent"] == 2
+    _complain(h, first[0]["message_id"])                                # 1 of 2 today: 50%
+    _queue_late(h, t)
+    r = h.ok(h.job("send-queue"))
+    assert (r["sent"], r["paused_spam_rate"]) == (0, 1)                 # today is over the line
+    for _ in range(6):                                                  # D+1 .. D+6: D is still in the window
+        h.clock.advance(days=1)
+        r = h.ok(h.job("send-queue"))
+        assert (r["sent"], r["paused_spam_rate"]) == (0, 1)
+    h.clock.advance(days=1)                                             # D+7: D has left the window
+    r = h.ok(h.job("send-queue"))
+    assert (r["sent"], r["paused_spam_rate"]) == (1, 0)
+
+
+@pytest.mark.parametrize("lag_days", [1, 2, 6])
+def test_a_late_complaint_still_pauses(tmp_path, lag_days):
+    """AEGIS follow-up S1: complaints are booked to the send day and arrive late; they must still pause."""
+    h = Harness(tmp_path, ports=wired_ports(), SALES_WARMUP_SCHEDULE="2,4,8")
+    t = h.template()
+    first = [h.ok(queue(h, c, t), 201) for c in _leads(h, 2)]
+    assert h.ok(h.job("send-queue"))["sent"] == 2
+    h.clock.advance(days=lag_days)
+    _complain(h, first[0]["message_id"])
+    _queue_late(h, t)
+    r = h.ok(h.job("send-queue"))
+    assert (r["sent"], r["paused_spam_rate"]) == (0, 1)
+
+
+def test_the_window_adds_up_older_days(tmp_path):
+    """Days 2..6 back are not checked one by one, only together: 4/1400 is 0.286% (sends), 5/1400 is 0.357% (pause)."""
+    h = Harness(tmp_path, ports=wired_ports())
+    s, today = h.svc, date.fromisoformat(h.svc.today())
+
+    def day(n):
+        return s._stats((today - timedelta(days=n)).isoformat(), "a.test")
+
+    for n in range(7):
+        day(n)["sent"] = 200
+    for n in (2, 3, 4, 5):
+        day(n)["complaint"] = 1
+    assert not s._spam_paused("a.test", today.isoformat())
+    day(6)["complaint"] = 1
+    assert s._spam_paused("a.test", today.isoformat())
+    assert s._spam_paused("a.test", (today + timedelta(days=1)).isoformat())       # day 6 out: 4/1200 = 0.33%
+    assert not s._spam_paused("a.test", (today + timedelta(days=3)).isoformat())   # days 4..6 out: 2/800 = 0.25%
+
+
+def test_the_pause_is_per_domain_and_reads_without_creating_rows(tmp_path):
+    h = Harness(tmp_path, ports=wired_ports())
+    s, today = h.svc, h.svc.today()
+    st = s._stats(today, "a.test")
+    st["sent"], st["complaint"] = 100, 50
+    before = set(s.day_stats)
+    assert s._spam_paused("a.test", today)
+    assert not s._spam_paused("b.test", today) and not s._spam_paused(None, today)
+    assert set(s.day_stats) == before
+
+
+def test_the_warmup_holds_while_the_domain_is_paused(tmp_path):
+    """AEGIS follow-up S3: a late complaint on an older send day holds the warm-up, not only yesterday's."""
+    h = Harness(tmp_path, ports=wired_ports(), SALES_WARMUP_SCHEDULE="2,4,8")
+    t = h.template()
+    leads = _leads(h, 6)
+    first = [h.ok(queue(h, c, t), 201) for c in leads[:2]]
+    assert h.ok(h.job("send-queue"))["sent"] == 2                       # day D
+    h.clock.advance(days=1)
+    assert h.ok(h.job("warmup-reset"))["step"] == 2                    # D was clean
+    for c in leads[2:]:
+        h.ok(queue(h, c, t), 201)
+    assert h.ok(h.job("send-queue"))["sent"] == 4                       # D+1, clean
+    h.clock.advance(days=1)
+    _complain(h, first[0]["message_id"])                                # booked to D: 1 of 6 in the window
+    r = h.ok(h.job("warmup-reset"))                                     # yesterday (D+1) alone would advance
+    assert r["held"] == "PAUSED_SPAM_RATE" and r["step"] == 2
+
+
+def test_texts_are_not_held_by_the_email_pause(w):
+    from test_sms_voice import sms, sms_template
+    lead = w.vlead()
+    w.ok(w.consent(lead["contact_id"]), 201)
+    w.ok(sms(w, lead["contact_id"], sms_template(w)), 201)
+    for domain in (None, w.svc.settings.outreach_domain):
+        st = w.svc._stats(w.svc.today(), domain)
+        st["sent"], st["complaint"] = 1, 1
+    r = w.ok(w.job("send-queue"))
+    assert (r["sent"], r["paused_spam_rate"]) == (1, 0)

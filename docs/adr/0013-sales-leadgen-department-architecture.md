@@ -72,8 +72,12 @@ agent calls this service yet.
     gets, from the service and not the template, the brand, `SALES_POSTAL_ADDRESS` and a one-click unsubscribe link
     with `List-Unsubscribe` and `List-Unsubscribe-Post` (RFC 8058). The send pace: a warm-up schedule
     (`SALES_WARMUP_SCHEDULE`, default 20,30,40,60,80,100,150,200) capped by `SALES_DAILY_SEND_CAP`; it advances one
-    step a day only through the `warmup-reset` job and holds when yesterday's complaints exceed 0.3% or hard bounces
-    5%. Messages over the cap stay queued.
+    step a day only through the `warmup-reset` job and holds when yesterday's complaints exceed 0.10% (Google's sender guideline; was 0.3% until 2026-11-25) or hard bounces
+    5%. Messages over the cap stay queued. Send pause (Andre, 2026-11-26): cold email from a domain stops while its
+    complaint rate is at or above 0.30% (Google's "avoid ever reaching" line) on yesterday's sends, today's, or the
+    last 7 days of sends together, with complaints booked to the send day so late ones still count; queued messages
+    wait, the warm-up holds, and sending resumes once every check is under the line (`paused_spam_rate` in the
+    send-queue summary).
 11. **Suppression** is one list across both brands, append-only with no removal path at all. Opt-outs (the one-click
     link, a reply, a STOP), hard bounces and complaints suppress at once, and queued messages to that address are
     cancelled in the same log line.

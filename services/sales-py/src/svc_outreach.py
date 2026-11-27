@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Optional
 
 from clock import parse_iso
@@ -173,6 +173,18 @@ class OutreachMixin:
     def _consent_active(self, contact: dict, channel: str, brand: str) -> bool:
         return bool(contact.get("phone_hash")) and i06_consent.active(self.consents, contact["phone_hash"], channel,
                                                                       brand)
+
+    def _spam_paused(self, domain: str | None, today: str) -> bool:
+        """Cold email from ``domain`` pauses while the complaint rate is at or above 0.30% on yesterday's sends, on
+        today's, or on the last ``PAUSE_WINDOW_DAYS`` days of sends together (complaints are booked to the send day
+        and arrive late, so the window is what catches them). Reads stats without creating empty rows."""
+        end = date.fromisoformat(today)
+        days = [self.day_stats.get(f"{domain or ''}|{(end - timedelta(days=n)).isoformat()}",
+                                   {"sent": 0, "complaint": 0}) for n in range(i09_send_cap.PAUSE_WINDOW_DAYS)]
+        window = (sum(d["sent"] for d in days), sum(d["complaint"] for d in days))
+        return any(i09_send_cap.must_pause(sent, complaints)
+                   for sent, complaints in ((days[0]["sent"], days[0]["complaint"]),
+                                            (days[1]["sent"], days[1]["complaint"]), window))
 
     def _cap_today(self) -> int:
         s = self.settings
@@ -611,7 +623,7 @@ class OutreachMixin:
         recorded (typed ``outreach_send`` event, then the log line); the provider is called outside the lock; the
         outcome is recorded after. A message whose outcome could not be recorded stays ``sending`` (never resent
         on its own)."""
-        summary = {"sent": 0, "failed": 0, "cancelled": 0, "deferred_quiet_hours": 0, "capped": 0, "not_wired": 0,
+        summary = {"sent": 0, "failed": 0, "cancelled": 0, "deferred_quiet_hours": 0, "paused_spam_rate": 0, "capped": 0, "not_wired": 0,
                    "stopped": None}
         with self.lock:
             self._gate()
@@ -640,6 +652,9 @@ class OutreachMixin:
                     summary["deferred_quiet_hours"] += 1
                     continue
                 today = self.today()
+                if msg["channel"] == "email" and self._spam_paused(msg["from_domain"], today):
+                    summary["paused_spam_rate"] += 1      # stays queued; resumes once every check is under 0.30%
+                    continue
                 if msg["channel"] == "email" and self._stats(today, msg["from_domain"])["sent"] >= self._cap_today():
                     summary["capped"] += 1
                     continue
@@ -695,10 +710,12 @@ class OutreachMixin:
             held = "AT_FULL_PACE"
         else:
             st = self._stats((today - timedelta(days=1)).isoformat(), domain)
-            if i09_send_cap.may_advance(st["sent"], st["complaint"], st["hard_bounce"]):
-                step += 1
-            else:
+            if not i09_send_cap.may_advance(st["sent"], st["complaint"], st["hard_bounce"]):
                 held = "HELD_BY_YESTERDAY"
+            elif self._spam_paused(domain, today.isoformat()):
+                held = "PAUSED_SPAM_RATE"     # a clean yesterday, but late complaints put the week over 0.30%
+            else:
+                step += 1
         result = {"domain": domain, "step": step + 1, "held": held,
                   "cap_today": i09_send_cap.cap(self.settings.warmup, step, self.settings.daily_send_cap)}
         data = {"domain": domain, "date": today.isoformat() if held is None else w["advanced_on"], "step": step}
