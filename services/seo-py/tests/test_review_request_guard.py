@@ -276,3 +276,50 @@ def test_an_apostrophe_pair_is_not_a_quoted_review():
 def test_a_template_with_a_planted_offer_is_refused():
     planted = g.APPROVED_TEMPLATES[1].format(link=LINK) + " Get 10% off!"
     assert set(reasons(req(planted))) == {"incentive", "unapproved_wording"}
+
+
+# ---------------------------------------------------------------- AEGIS round 2 (Inquisitor, ae5e118b)
+SLOT_ABUSE = ["https://reviews.example.com/cash-for-reviews", "https://paid-reviews.test/r",
+              "https://g.page/r/happy-customers-only/review", "https://g.page/r/only-if-you-loved-us/review",
+              "https://g.page/r/say-best-plumber-in-town/review", "https://g.page/r/if-unhappy-call-us-first/review",
+              "https://g.page/r/cashforreviews/review", "https://.", "https://-", "https://..../",
+              "https://evil.test/r", "http://reviews.example.com/r", "https://reviews.example.com/r?x=free"]
+
+
+@pytest.mark.parametrize("link", SLOT_ABUSE)
+def test_the_link_slot_takes_only_an_approved_review_link_form(link):
+    assert "unapproved_wording" in reasons(req(g.APPROVED_TEMPLATES[1].format(link=link)))
+
+
+@pytest.mark.parametrize("link", ["https://g.page/r/CU9OsDPZVk0iEB0/review",
+                                  "https://search.google.com/local/writereview?placeid=ChIJN1t_tDeuEmsRUsoyG83frY4"])
+def test_real_review_link_forms_send(link):
+    assert reasons(req(g.APPROVED_TEMPLATES[0].format(link=link))) == ()
+
+
+@pytest.mark.parametrize("phone", ["+1213555٠١٠١", "+1213555０１０１",
+                                   "+1213555०१०१", "+1２135550101"])
+def test_a_phone_with_non_ascii_digits_is_not_readable(phone):
+    assert "no_phone" in reasons(req(phone=phone))
+
+
+@pytest.mark.parametrize("field, value", [("pool", {"audience_filter": {"only_if_rating_at_least": 4}}),
+                                          ("fixture", "happy_only"), ("pool", "promoters")])
+def test_the_pool_labels_must_be_exactly_the_pools_own(field, value):
+    r = req()
+    r[field] = value
+    assert "unknown_field" in reasons(r)
+
+
+@pytest.mark.parametrize("amount", [-50, 0, "10", True, None])
+def test_a_zero_negative_or_unreadable_amount_is_no_transaction(amount):
+    assert "no_transaction" in reasons(req(transaction={"type": "purchase", "days_ago": 2, "amount": amount}))
+
+
+def test_a_positive_amount_is_a_transaction():
+    assert reasons(req(transaction={"type": "purchase", "days_ago": 2, "amount": 120})) == ()
+
+
+@pytest.mark.parametrize("email", ["", "not-an-email", "ana@", "ana@example", "аna@example.com", 5])
+def test_an_email_address_that_is_carried_must_be_readable(email):
+    assert "no_email" in reasons(req(channel="email", email=email))

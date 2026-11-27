@@ -1330,7 +1330,7 @@ if not, list every reason. Not wired to any route, sender or Business Profile; n
 
 | Rule (FTC 16 CFR Part 465; Google's ban on selective solicitation; TCPA) | Refusal reason |
 |---|---|
-| The wording is an approved template (`APPROVED_TEMPLATES`, ZBM-written honest asks in English and Spanish, one https link) and an email subject, if any, is approved | `unapproved_wording` |
+| The wording is an approved template (`APPROVED_TEMPLATES`, ZBM-written honest asks in English and Spanish) whose one link is an approved review-link form, and an email subject, if any, is approved | `unapproved_wording` |
 | A real customer after a real transaction (purchase or service visit, at most 365 days ago, not cancelled, refunded, voided or disputed) | `no_transaction` |
 | A text only to a readable +1 phone number, with SMS consent; email needs no SMS consent | `no_phone`, `no_sms_consent` |
 | Not opted out by any known flag (`opted_out` must be exactly `false`; `sms_opted_out`, `do_not_contact`, `unsubscribed`, `email_opted_out` must be `false` or absent) | `opted_out` |
@@ -1358,3 +1358,13 @@ apostrophes 12 characters apart read as a quoted review; the old "tier-0 approva
 this repo and is no longer relied on. **Accepted:** every honest wording that is not a template is refused
 (`unapproved_wording`; the reviewer's 20 honest messages all refuse). A refused honest request costs a review, not
 an FTC violation; a person adds wording by approving it as a template in code review.
+
+AEGIS round 2 (Nov 26 2026, Inquisitor on ae5e118b): the round-1 fixes held; 3 High, all fixed. The `{link}` slot took
+any https host and path, so an approved template carried "/cash-for-reviews", "/happy-customers-only" or "https://.":
+the slot now takes only three link forms (`https://g.page/r/<id>/review`, Google's `writereview?placeid=<id>`, and the
+fixture pool's `https://reviews.example.com/r`), and the id is read for offer, gating, suggestion and steer-away words.
+The phone check used `\d`, so Arabic-Indic or full-width digits read as a phone: ASCII digits only now. Review: the
+`pool` and `fixture` fields were known but unread; they must now carry exactly the pool's own labels. A zero, negative
+or unreadable `amount` is `no_transaction`. An email address the request carries must be readable (`no_email`); a
+missing one is not refused, because the pool's records carry none and the sender looks the address up (known limit).
+Regression tests: "AEGIS round 2".

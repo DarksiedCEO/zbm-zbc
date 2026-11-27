@@ -36,7 +36,7 @@ from dataclasses import dataclass
 CHANNELS = ("sms", "email")
 TRANSACTION_TYPES = ("purchase", "service_visit")
 MAX_TRANSACTION_AGE_DAYS = 365
-REASONS = ("gating", "incentive", "no_phone", "no_sms_consent", "no_transaction", "opted_out", "review_suppression",
+REASONS = ("gating", "incentive", "no_email", "no_phone", "no_sms_consent", "no_transaction", "opted_out", "review_suppression",
            "suggested_text", "unapproved_wording", "unknown_field", "unreadable")
 
 # Approved wording (ZBM-authored; each one is tested to trip none of the readings below). The first three are also
@@ -51,14 +51,25 @@ APPROVED_TEMPLATES = (
 )
 APPROVED_SUBJECTS = ("How did we do?", "Your honest review", "¿Cómo le fue?")
 REQUEST_FIELDS = {"request_id", "channel", "customer", "audience_filter", "message", "subject", "fixture", "pool"}
+# the fixture pool's own labels are the only values these two fields may carry (anything else: ``unknown_field``)
+LABEL_VALUES = {"fixture": "FIXTURE DATA - synthetic, not a real business or person", "pool": "seo-l6-review-requests"}
 CUSTOMER_FIELDS = {"phone", "email", "name", "transaction", "sms_consent", "opted_out", "sms_opted_out",
                    "do_not_contact", "unsubscribed", "email_opted_out"}
 OPT_OUT_FLAGS = ("sms_opted_out", "do_not_contact", "unsubscribed", "email_opted_out")
 TRANSACTION_FIELDS = {"type", "days_ago", "status", "id", "amount", "refunded"}
 TRANSACTION_OK_STATUSES = (None, "completed", "paid", "fulfilled", "closed")
 
-_LINK = re.compile(r"https://[A-Za-z0-9.\-]+(?:/[A-Za-z0-9._~\-/]*)?")
-_PHONE = re.compile(r"\+1[2-9]\d{2}[2-9]\d{6}")
+# The {link} slot takes only a review link in one of these exact forms (AEGIS round 2: any https host and path let
+# "/cash-for-reviews" or "https://." ride inside an approved template). The id is letters, digits, "_" or "-" only
+# and is also read for offer, gating, suggestion and steer-away words (separators read as spaces, and as nothing).
+_LINK_ID = r"[A-Za-z0-9_\-]{6,64}"
+_LINK_FORMS = (rf"https://g\.page/r/({_LINK_ID})/review", rf"https://search\.google\.com/local/writereview\?placeid=({_LINK_ID})",
+               r"https://reviews\.example\.com/(r)")          # the fixture pool's own link (example.com is reserved)
+_LINK = re.compile("(?:" + "|".join(f"(?:{f})" for f in _LINK_FORMS) + ")")
+_ID_WORDS = re.compile(r"cash|free|gift|discount|coupon|deal|prize|reward|win|paid|pay|happy|only|love|best|great|"
+                       r"star|unhappy|complain|call|text|first|instead|bonus|off|grat|regalo|premio", re.IGNORECASE)
+_PHONE = re.compile(r"\+1[2-9][0-9]{2}[2-9][0-9]{6}")         # ASCII digits only: [0-9], never \d
+_EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+")
 _TEMPLATES = tuple(re.compile(re.escape(t).replace(re.escape("{link}"), _LINK.pattern)) for t in APPROVED_TEMPLATES)
 
 _INCENTIVE = re.compile(
@@ -130,9 +141,16 @@ def _wording_reasons(text: str) -> set:
 
 
 def _approved(message: object, subject: object) -> bool:
-    if not isinstance(message, str) or not any(t.fullmatch(message) for t in _TEMPLATES):
+    if not isinstance(message, str):
         return False
-    return subject is None or subject in APPROVED_SUBJECTS
+    for t in _TEMPLATES:
+        m = t.fullmatch(message)
+        if m:
+            link_id = next(g for g in m.groups() if g is not None)
+            if link_id != "r" and (_ID_WORDS.search(link_id) or _wording_reasons(re.sub(r"[_\-]", " ", link_id))):
+                return False
+            return subject is None or subject in APPROVED_SUBJECTS
+    return False
 
 
 def _transaction_ok(tx: object) -> bool:
@@ -140,6 +158,9 @@ def _transaction_ok(tx: object) -> bool:
         return False
     if tx.get("status") not in TRANSACTION_OK_STATUSES or tx.get("refunded") not in (None, False):
         return False
+    amount = tx.get("amount")
+    if "amount" in tx and (isinstance(amount, bool) or not isinstance(amount, (int, float)) or not amount > 0):
+        return False                   # a zero, negative or unreadable amount is not a real purchase
     age = tx.get("days_ago")
     return isinstance(age, int) and not isinstance(age, bool) and 0 <= age <= MAX_TRANSACTION_AGE_DAYS
 
@@ -153,7 +174,7 @@ def check(request: dict) -> Verdict:
     channel, customer = request.get("channel"), request.get("customer")
     if channel not in CHANNELS or not isinstance(customer, dict):
         reasons.add("unreadable")
-    if set(request) - REQUEST_FIELDS:
+    if set(request) - REQUEST_FIELDS or any(k in request and request[k] != v for k, v in LABEL_VALUES.items()):
         reasons.add("unknown_field")
     if isinstance(customer, dict):
         if set(customer) - CUSTOMER_FIELDS:
@@ -165,6 +186,11 @@ def check(request: dict) -> Verdict:
                 reasons.add("no_phone")
             if customer.get("sms_consent") is not True:
                 reasons.add("no_sms_consent")
+        # an email address, when the request carries one, must be readable; the pool's records carry none (the
+        # sender looks the address up), so a missing one is not refused here (disclosed in ADR 0017)
+        if channel == "email" and "email" in customer and not (
+                isinstance(customer["email"], str) and customer["email"].isascii() and _EMAIL.fullmatch(customer["email"])):
+            reasons.add("no_email")
         if customer.get("opted_out") is not False or \
                 any(customer.get(f, False) is not False for f in OPT_OUT_FLAGS):
             reasons.add("opted_out")
