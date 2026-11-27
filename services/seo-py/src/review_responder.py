@@ -24,8 +24,10 @@ Rules:
   they made it right"). Routing a review that asks for nothing costs only an owner look.
 - A suspected fake (a one-review account at most 7 days old, posted on a day at least 5 other new accounts reviewed the
   business) gets no public reply: ``reply`` is None, it is flagged for a removal request and routed to the owner.
-- A review that cannot be read (not an object, no id, stars not a whole number 1-5, reviewer fields
-  missing or not plain numbers) gets no reply and goes to the owner; it never raises. Only a non-list batch raises
+- A review that cannot be read (not an object, no id, stars not a whole number 1-5, text not a string, reviewer or
+  pile-up fields missing, not plain whole numbers or negative) gets no reply and goes to the owner; it never raises.
+  A review whose reviewer and pile-up fields meet the fake rule is flagged as a suspected fake even when its other
+  fields cannot be read. Only a non-list batch raises
   ValueError.
 """
 
@@ -143,14 +145,15 @@ def _draft(review: object) -> ReplyDraft:
         reviewer = None
     count = _whole(reviewer.get("review_count")) if type(reviewer) is dict else None
     age = _whole(reviewer.get("account_age_days")) if type(reviewer) is dict else None
-    if rid is None or stars is None or not 1 <= stars <= 5 or type(text) is not str or None in (pile, count, age) \
-            or min(pile, count, age) < 0:
-        return ReplyDraft(rid or "unknown", None, False, True, True, ("unreadable",))
+    counts_ok = None not in (pile, count, age) and min(pile, count, age) >= 0
+    fake = counts_ok and count == 1 and age <= 7 and pile >= 5     # read first, so an unreadable text never hides it
+    if rid is None or stars is None or not 1 <= stars <= 5 or type(text) is not str or not counts_ok:
+        notes = ("unreadable", "suspected_fake_request_removal") if fake else ("unreadable",)
+        return ReplyDraft(rid or "unknown", None, fake, True, True, notes)   # (AEGIS L7 round 8)
     vertical = review.get("vertical")
     known = type(vertical) is str and vertical in KNOWN
     regulated = not known or vertical in REGULATED        # an unknown vertical gets the regulated wordings
     notes = [] if known else ["unknown_vertical_treated_as_regulated"]
-    fake = count == 1 and age <= 7 and pile >= 5
     if fake:
         return ReplyDraft(rid, None, True, True, True, tuple(notes + ["suspected_fake_request_removal"]))
     money = _money_route(text, stars)

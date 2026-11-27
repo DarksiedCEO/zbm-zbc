@@ -247,3 +247,12 @@ def test_any_non_ascii_character_or_substring_stem_routes(text):
 def test_every_non_printable_ascii_character_routes_too():
     for c in [chr(i) for i in range(32)] + ["\x7f"]:
         assert rr.draft(review(text=f"Great job{c}thanks", stars=5)).route_to_owner, hex(ord(c))
+
+
+@pytest.mark.parametrize("bad", [{"text": None}, {"text": 7}, {"stars": 0}, {"review_id": ""}])
+def test_a_fake_with_unreadable_fields_is_still_flagged_for_removal(bad):
+    r = review(stars=1, reviewer={"review_count": 1, "account_age_days": 2}, same_day_reviews_from_new_accounts=6)
+    r.update(bad)
+    d = rr.draft(r)
+    assert d.flag_suspected_fake and d.reply is None and d.route_to_owner and d.owner_approval_before_posting
+    assert "unreadable" in d.notes and "suspected_fake_request_removal" in d.notes
