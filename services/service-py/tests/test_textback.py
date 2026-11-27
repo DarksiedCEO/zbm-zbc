@@ -218,9 +218,14 @@ def test_the_gate_reads_one_number_however_it_is_written():
         "texted_within_5_minutes"
 
 
-def test_the_gate_needs_an_aware_clock():
+def test_the_gate_without_an_aware_clock_never_sends_and_never_raises():
+    gate = tb.TextBackGate()
+    for now in (datetime(2026, 11, 27, 18, 0), "2026-11-27T18:00", None):
+        d = gate.decide(call(), now=now)
+        assert (d.action, d.reason) == ("do_not_send", "unknown_local_time")
+    assert gate._last == {}
     with pytest.raises(ValueError):
-        tb.TextBackGate().decide(call(), now=datetime(2026, 11, 27, 18, 0))
+        gate.decide(call(missed_call_id=None), now=None)
 
 
 def test_a_deferral_with_a_clock_names_the_next_0800_in_the_recipients_zone():
@@ -333,3 +338,27 @@ def test_an_unconvertible_clock_fails_closed_with_a_reason():
             return None
     d = tb.decide(call(recipient_local_time=None), now=datetime(2026, 11, 27, 12, 0, tzinfo=Broken()))
     assert d.reason == "unknown_local_time"
+
+
+# ---------------------------------------------------------------- AEGIS round 3 (Inquisitor, 437d2871)
+@pytest.mark.parametrize("name", ["Cheapest Plumbing", "Discounted Dental", "Freebies Inc", "BOGO Tacos",
+                                  "Clearance Center", "Corte Gr\u00e1tis", "Fr\u0113\u0113 Estimates",
+                                  "\u0191ree Estimates", "Baratos Auto", "Limpieza Gratuita", "Rebajas Hoy",
+                                  "Half Price Cuts", "Cuts 9.99", "50 0FF", "Fr33 Quotes", "Respond Now",
+                                  "Opt In Today", "Responda Ya", "Envie SI", "Llame Ya", "Call Now"])
+def test_round_3_names_that_must_be_left_out(name):
+    d = tb.decide(call(), business_name=name, callback_number="+16025550111")
+    assert d.text.startswith("Sorry we missed your call."), d.text
+
+
+def test_a_consent_keeper_that_raises_is_unknown_consent():
+    def broken(number):
+        raise RuntimeError("store down")
+    assert tb.decide(call(), opted_out=broken).reason == "consent_unknown"
+
+
+def test_a_deferral_past_the_last_clock_date_never_raises():
+    from zoneinfo import ZoneInfo
+    now = datetime(9999, 12, 31, 23, 0, tzinfo=ZoneInfo("America/Phoenix"))
+    d = tb.decide(call(), now=now)
+    assert (d.action, d.reason) == ("do_not_send", "unknown_local_time")

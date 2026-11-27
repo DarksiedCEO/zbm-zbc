@@ -40,12 +40,18 @@ REPEAT_WINDOW_SECONDS = 300
 SEND_DEADLINE_SECONDS = 30
 TEXTABLE_LINES = ("mobile", "voip")
 _HHMM = re.compile(r"([01]\d|2[0-3]):([0-5]\d)")
-# A business name must be letters (Latin script only, so a look-alike Cyrillic or Greek letter cannot hide a word),
-# spaces and & ' . , - ( ), with at most 3 digits, no domain-like "x.yz", and none of the offer or instruction words.
-_PROMO = re.compile(r"https?|www|\w\.[a-z]{2,}\b|\b(?:off|free|deals?|sales?|offers?|discounts?|promos?|coupons?|win|"
-                    r"wins|winner|prize|gratis|descuentos?|ofertas?|promoci[oó]n(?:es)?|cheap|save|savings|usd|"
-                    r"dollars?|bucks|reply|text|join|yes|stop|click|visit|subscribe)\b", re.IGNORECASE)
-_SAFE_NAME = re.compile(r"[A-Za-z\u00c0-\u024f&'.,\- ()0-9]{1,40}")
+# A business name must be letters (Latin script, basic and Latin-1/Extended-A only, so a look-alike Cyrillic, Greek or
+# rare Latin letter such as "Ƒ" cannot hide a word), spaces and & ' . , - ( ), with at most 3 digits, no price
+# ("9.99"), no domain-like "x.yz", and no word that STARTS like an offer or an instruction. The check reads the name
+# with accents removed ("Frēē", "grátis") and digit look-alikes undone ("0FF", "fr33"). A name that fails is left out
+# of the text, never the text itself, so this errs toward leaving a real name out ("Winston's" starts with "win").
+_PROMO = re.compile(r"https?|www|\w\.[a-z]{2,}\b|\d[.,]\d|\b(?:off|ya|yes|si|opt|bogo|usd)\b|"
+                    r"\b(?:free|gratis|gratuit|discount|descuent|cheap|barat|sale|deal|offer|oferta|promo|coupon|"
+                    r"cupon|prize|premio|win|clearance|rebaja|half|price|precio|save|saving|ahorr|dollar|buck|cash|"
+                    r"reply|respond|text|txt|join|stop|click|visit|subscrib|envi[ae]|llam|marque|call)",
+                    re.IGNORECASE)
+_LEET = str.maketrans("013457@$", "oieastas")
+_SAFE_NAME = re.compile(r"[A-Za-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u017f&'.,\- ()0-9]{1,40}")
 # tzdata entries that are not a place: "zone not set" placeholders and the host's own zone
 _PLACEHOLDER_ZONES = re.compile(r"(?:Factory|localtime|posixrules|posix/.*|right/.*|SystemV/.*|Etc/.*|"
                                 r"[A-Z]{3,5}(?:\d[A-Z]{3,5})?)", re.IGNORECASE)
@@ -66,7 +72,10 @@ def _clean_name(name: object) -> Optional[str]:
     if not isinstance(name, str) or any(unicodedata.category(c)[0] == "C" for c in name):
         return None              # control or format characters (a line break, a zero-width space): left out
     name = " ".join(name.split())
-    if not name or not _SAFE_NAME.fullmatch(name) or _PROMO.search(name) or sum(c.isdigit() for c in name) > 3:
+    if not name or not _SAFE_NAME.fullmatch(name) or sum(c.isdigit() for c in name) > 3:
+        return None
+    plain = "".join(c for c in unicodedata.normalize("NFKD", name) if not unicodedata.combining(c))
+    if _PROMO.search(plain) or _PROMO.search(plain.translate(_LEET)):
         return None
     if any(c.isalpha() and not unicodedata.name(c, "").startswith("LATIN") for c in name):
         return None
@@ -141,7 +150,10 @@ def decide(call: dict, now: Optional[datetime] = None,
         return no("landline")
     if line not in TEXTABLE_LINES:
         return no("unknown_line_type")
-    blocked = opted_out(number) if opted_out is not None else call.get("number_opted_out")
+    try:
+        blocked = opted_out(number) if opted_out is not None else call.get("number_opted_out")
+    except Exception:                 # the consent keeper could not answer: unknown consent never sends
+        blocked = None
     if blocked is not False:
         return no("opted_out" if blocked is True else "consent_unknown")
     if "seconds_since_last_text_to_number" not in call:
@@ -162,8 +174,11 @@ def decide(call: dict, now: Optional[datetime] = None,
     end = channels.QUIET_END_HOUR * 3600 - (SEND_DEADLINE_SECONDS if local is not None else 0)
     if start <= seconds < end:
         return TextBackDecision(mcid, "send_now", "ok", SEND_DEADLINE_SECONDS, text=text)
-    return TextBackDecision(mcid, "defer_until_0800", "quiet_hours", None, text=text,
-                            not_before=_next_0800(local) if local is not None else None)
+    try:
+        not_before = _next_0800(local) if local is not None else None
+    except OverflowError:             # the next 08:00 is past the last date a clock can hold
+        return no("unknown_local_time")
+    return TextBackDecision(mcid, "defer_until_0800", "quiet_hours", None, text=text, not_before=not_before)
 
 
 class TextBackGate:
@@ -180,7 +195,10 @@ class TextBackGate:
                 raise ValueError
             utc = now.astimezone(timezone.utc)   # real elapsed time: two times in one zone subtract on the wall
         except Exception:                        # clock (AEGIS round 2: across a DST jump), so compare in UTC
-            raise ValueError("the gate needs an aware, readable clock") from None
+            mcid = call.get("missed_call_id") if isinstance(call, dict) else None
+            if not isinstance(mcid, str) or not mcid:
+                raise ValueError("missed_call_id is required") from None
+            return TextBackDecision(mcid, "do_not_send", "unknown_local_time", None)   # nothing recorded
         number = normalise_number(call.get("caller_id")) if isinstance(call, dict) else None
         last = self._last.get(number) if number else None
         since = int((utc - last).total_seconds()) if last else None

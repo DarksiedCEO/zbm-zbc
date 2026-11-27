@@ -616,3 +616,12 @@ Placeholder zones ("Factory", "localtime", "UTC", "Etc/...") were read as real p
 a place is used now. A clock that cannot be converted (overflow, a tzinfo that raises) now fails closed with
 `unknown_local_time` instead of raising. Regression tests: "AEGIS round 2" section; the DST test fails on the old
 wall-clock subtraction.
+
+AEGIS round 3 (Nov 26 2026, Inquisitor on 437d2871): no High; the kill criteria held. Review, all fixed: more offer
+and instruction words still passed in names ("Cheapest", "Discounted", "BOGO", "Clearance", "grátis", "Frēē",
+"Ƒree", "Rebajas", "Half Price", "9.99", "0FF", "Respond", "Opt In", "Llame Ya"). A name is now read with accents
+removed and digit look-alikes undone, rejected when any word STARTS like an offer or instruction (it errs toward
+leaving a real name out; the text still goes, without the name), and its letters are limited to basic Latin,
+Latin-1 and Latin Extended-A. The gate given an unreadable clock now returns `unknown_local_time` and records
+nothing instead of raising; a consent keeper that raises reads as `consent_unknown`; a deferral whose next 08:00
+is past the last date a clock can hold returns `unknown_local_time`. Regression tests: "AEGIS round 3".
