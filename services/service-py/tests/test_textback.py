@@ -274,3 +274,62 @@ def test_certification_holds_on_the_clock_path_and_grades_reason_and_text(seed):
             if d.action != "do_not_send" and not (d.text and "STOP" in d.text):
                 wrong.append((k["case"], "text", d.text))
     assert wrong == [], wrong[:5]
+
+
+# ---------------------------------------------------------------- AEGIS round 2 (Inquisitor, 9fcd033b)
+def test_the_gate_compares_in_utc_whatever_zone_the_clocks_carry():
+    gate = tb.TextBackGate()
+    ny, utc = ZoneInfo("America/New_York"), timezone.utc
+    t0 = datetime(2026, 11, 27, 15, 0, tzinfo=utc)              # 10:00 New York
+    gate.decide(call(recipient_time_zone="America/New_York", recipient_local_time=None), now=t0)
+    t1 = (t0 + timedelta(seconds=180)).astimezone(ny)
+    d = gate.decide(call(missed_call_id="mc-2", recipient_time_zone="America/New_York", recipient_local_time=None),
+                    now=t1)
+    assert d.reason == "texted_within_5_minutes"
+
+
+def test_the_gate_measures_real_seconds_across_a_dst_jump():
+    """The Inquisitor's repro: a clock in New York across spring-forward, 01:58 EST then 03:01 EDT (180 real s), for a
+    caller in Tokyo where it is mid-afternoon. On the wall clock that is 63 minutes; in real time it is 3."""
+    ny = ZoneInfo("America/New_York")
+    gate = tb.TextBackGate()
+    c = call(recipient_time_zone="Asia/Tokyo", recipient_local_time=None)
+    assert gate.decide(c, now=datetime(2027, 3, 14, 1, 58, tzinfo=ny)).action == "send_now"
+    second = gate.decide(dict(c, missed_call_id="mc-2"), now=datetime(2027, 3, 14, 3, 1, tzinfo=ny))
+    assert (second.action, second.reason) == ("do_not_send", "texted_within_5_minutes")
+
+
+@pytest.mark.parametrize("name", ["acme.com", "bit.ly", "FR\u0415\u0415 Estimates", "Daily Deals", "Discounts Galore",
+                                  "Ofertas Hoy", "Cuts 19.99 USD", "Reply YES to join", "Call 0044 20 7946 0958",
+                                  "Visit shop", "Save Big"])
+def test_round_2_names_that_must_be_left_out(name):
+    d = tb.decide(call(), business_name=name, callback_number="+16025550111")
+    assert d.text.startswith("Sorry we missed your call.")
+
+
+@pytest.mark.parametrize("name", ["Desert Sky Plumbing", "Smith & Sons", "Studio 54", "Caf\u00e9 Rosa",
+                                  "O'Brien Dental (Fixture)"])
+def test_ordinary_business_names_are_kept(name):
+    assert tb.decide(call(), business_name=name).text.startswith(name + ":")
+
+
+@pytest.mark.parametrize("tz", ["Factory", "localtime", "UTC", "Etc/GMT+7", "EST", "posixrules"])
+def test_a_zone_that_is_not_a_place_is_never_used(tz):
+    now = datetime(2026, 11, 27, 12, 0, tzinfo=timezone.utc)
+    assert tb.decide(call(recipient_time_zone=tz, recipient_local_time=None), now=now).reason == "unknown_local_time"
+    assert tb.decide(call(recipient_time_zone=tz)).reason == "unknown_local_time"
+
+
+def test_an_unconvertible_clock_fails_closed_with_a_reason():
+    d = tb.decide(call(recipient_time_zone="Pacific/Kiritimati", recipient_local_time=None),
+                  now=datetime.max.replace(tzinfo=timezone.utc))
+    assert (d.action, d.reason) == ("do_not_send", "unknown_local_time")
+
+    class Broken(tzinfo):
+        def utcoffset(self, dt):
+            raise RuntimeError("broken")
+
+        def dst(self, dt):
+            return None
+    d = tb.decide(call(recipient_local_time=None), now=datetime(2026, 11, 27, 12, 0, tzinfo=Broken()))
+    assert d.reason == "unknown_local_time"

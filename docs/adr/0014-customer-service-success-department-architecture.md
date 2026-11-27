@@ -591,7 +591,7 @@ sent from here.
 | Consent | Asks the RR-F5 keeper with the normalised number (`opted_out(number)`), or uses the keeper's flag on the record; anything but a clear "not opted out" blocks (`consent_unknown`) |
 | One text per 5 minutes | Under 300 s since the last text: no text; exactly 300 s may text. `TextBackGate` remembers every text it approved, so repeated calls through one gate never double-text even when the record says "never texted"; a record without the last-text field fails closed. The gate is in memory: a store that outlives a restart is the wiring's job |
 | Quiet hours | The recipient's: 08:00 to before 21:00 local. The zone must always be readable. With a real clock the clock decides, to the second, and a send-now needs its 30 s deadline to land before 21:00 (20:59:30 already waits); without one the record's HH:MM is used. An unknown zone or a clock with no UTC offset is never guessed (`unknown_local_time`). A deferral must be decided again at 08:00 by the caller (consent and the 5-minute rule are read then) |
-| The text | Always worded and always carries STOP (ALTO in Spanish). A business name with a link, offer, price or control character, or a callback number that is not a North American number, is left out rather than sent |
+| The text | Always worded and always carries STOP (ALTO in Spanish). A business name is used only when it is Latin-script letters, spaces and simple punctuation with at most 3 digits, with no link, domain, offer, price, control character or instruction word; a callback number that is not a North American number is left out |
 
 Certification: `services/service-py/tests/test_textback.py` runs the shared MVP pool (F2, 300 missed calls per seed,
 boundaries at 07:59 / 08:00 / 20:59 / 21:00 and 299 / 300 s) for the three DEV seeds and three more: every action,
@@ -605,4 +605,14 @@ the real clock; High: the 5-minute rule rested only on the record (three calls, 
 tzinfo with no offset was read in the server's zone; the certification never graded the clock path, the reason or
 the text. All fixed as above with regression tests ("AEGIS round 1" section of the test file). The earlier "10 of 10
 mutants" line is withdrawn here: mutation results now come from `services/service-py/devtools/frontdesk_mutants.py`
-(RR-F3 commit), which anyone can rerun.
+(it arrives with the RR-F3 commit at the top of this stack; until then the count is not claimed).
+
+AEGIS round 2 (Nov 26 2026, Inquisitor on 9fcd033b): the round-1 fixes held. New High: the gate subtracted two times
+on the wall clock, so across a daylight-saving jump 180 real seconds read as 63 minutes and one number was texted
+twice; the gate now keeps and compares UTC. Review: names that must be left out still got through (bare domains,
+look-alike letters, plurals of offer words, "USD", "Reply YES"); a name is now used only when it is Latin-script
+letters and simple punctuation with at most 3 digits and no link, domain, offer, price or instruction word.
+Placeholder zones ("Factory", "localtime", "UTC", "Etc/...") were read as real places; only a zone with an area and
+a place is used now. A clock that cannot be converted (overflow, a tzinfo that raises) now fails closed with
+`unknown_local_time` instead of raising. Regression tests: "AEGIS round 2" section; the DST test fails on the old
+wall-clock subtraction.

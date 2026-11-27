@@ -12,12 +12,14 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings, TCPA practice):
 - Quiet hours are the RECIPIENT's: texting is allowed from 08:00 up to, not including, 21:00 in the caller's own
   zone. The zone must always be readable. With a real clock (``now``, an aware time) the clock decides, in that
   zone, to the second, and a send-now needs its whole 30 s deadline to land before 21:00. Without a clock the
-  record's ``recipient_local_time`` (HH:MM) is used. An unknown zone or a clock with no UTC offset is never guessed.
+  record's ``recipient_local_time`` (HH:MM) is used. An unknown zone, a zone that is not a place ("UTC", "Factory",
+  "localtime", "Etc/..."), or a clock with no UTC offset or that cannot be converted is never guessed.
   Outside the window the decision is ``defer_until_0800`` with the next 08:00 when the clock is known; the caller
   must ask again then (consent and the 5-minute rule are read at that moment, not now).
 - The text is informational only (a way to continue the call), never marketing, and always says how to opt out. It
-  is always worded; a business name with a link, an offer, a price or control characters is left out, and a callback
-  number that is not a North American number is left out.
+  is always worded. A business name is used only when it is Latin-script letters, spaces and & ' . , - ( ) with at
+  most 3 digits, and carries no link, domain, offer, price or instruction word ("reply", "join", "yes" ...);
+  otherwise it is left out. A callback number that is not a North American number is left out.
 - A send-now decision must reach the caller within 30 s (the bar); the deadline travels with the decision.
 - Anything this module cannot read (line type, consent state, zone, local time, last-text time) fails closed: no
   text, with the reason.
@@ -28,7 +30,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
 
 import channels
@@ -38,9 +40,15 @@ REPEAT_WINDOW_SECONDS = 300
 SEND_DEADLINE_SECONDS = 30
 TEXTABLE_LINES = ("mobile", "voip")
 _HHMM = re.compile(r"([01]\d|2[0-3]):([0-5]\d)")
-_PROMO = re.compile(r"https?://|www\.|\.[a-z]{2,}/|%|\$|\b(?:off|free|deal|sale|offer|discount|promo|coupon|win|"
-                    r"gratis|descuento|oferta|promoci[oó]n)\b", re.IGNORECASE)
-_SAFE_NAME = re.compile(r"[\w&'.,\- ()]{1,40}")
+# A business name must be letters (Latin script only, so a look-alike Cyrillic or Greek letter cannot hide a word),
+# spaces and & ' . , - ( ), with at most 3 digits, no domain-like "x.yz", and none of the offer or instruction words.
+_PROMO = re.compile(r"https?|www|\w\.[a-z]{2,}\b|\b(?:off|free|deals?|sales?|offers?|discounts?|promos?|coupons?|win|"
+                    r"wins|winner|prize|gratis|descuentos?|ofertas?|promoci[oó]n(?:es)?|cheap|save|savings|usd|"
+                    r"dollars?|bucks|reply|text|join|yes|stop|click|visit|subscribe)\b", re.IGNORECASE)
+_SAFE_NAME = re.compile(r"[A-Za-z\u00c0-\u024f&'.,\- ()0-9]{1,40}")
+# tzdata entries that are not a place: "zone not set" placeholders and the host's own zone
+_PLACEHOLDER_ZONES = re.compile(r"(?:Factory|localtime|posixrules|posix/.*|right/.*|SystemV/.*|Etc/.*|"
+                                r"[A-Z]{3,5}(?:\d[A-Z]{3,5})?)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -58,7 +66,9 @@ def _clean_name(name: object) -> Optional[str]:
     if not isinstance(name, str) or any(unicodedata.category(c)[0] == "C" for c in name):
         return None              # control or format characters (a line break, a zero-width space): left out
     name = " ".join(name.split())
-    if not name or not _SAFE_NAME.fullmatch(name) or _PROMO.search(name):
+    if not name or not _SAFE_NAME.fullmatch(name) or _PROMO.search(name) or sum(c.isdigit() for c in name) > 3:
+        return None
+    if any(c.isalpha() and not unicodedata.name(c, "").startswith("LATIN") for c in name):
         return None
     return name
 
@@ -80,13 +90,19 @@ def message(business_name: Optional[str] = None, callback_number: Optional[str] 
 
 def _local(call: dict, now: Optional[datetime]) -> tuple[Optional[int], Optional[datetime]]:
     """(seconds after local midnight, the local datetime when a clock is known) or (None, None)."""
-    z = channels.zone(call.get("recipient_time_zone"))
+    name = call.get("recipient_time_zone")
+    if not isinstance(name, str) or "/" not in name or _PLACEHOLDER_ZONES.fullmatch(name):
+        return None, None             # only a real place ("America/Phoenix"); never UTC, Factory or the host's zone
+    z = channels.zone(name)
     if z is None:
         return None, None
     if now is not None:
-        if not isinstance(now, datetime) or now.utcoffset() is None:
+        try:
+            if not isinstance(now, datetime) or now.utcoffset() is None:
+                return None, None
+            local = now.astimezone(z)
+        except Exception:             # an unreadable clock (overflow, a tzinfo that raises) fails closed with a reason
             return None, None
-        local = now.astimezone(z)
         return local.hour * 3600 + local.minute * 60 + local.second, local
     raw = call.get("recipient_local_time")
     m = _HHMM.fullmatch(raw) if isinstance(raw, str) else None
@@ -159,12 +175,16 @@ class TextBackGate:
         self._last: dict[str, datetime] = {}
 
     def decide(self, call: dict, now: datetime, **kw) -> TextBackDecision:
-        if not isinstance(now, datetime) or now.utcoffset() is None:
-            raise ValueError("the gate needs an aware clock")
+        try:
+            if not isinstance(now, datetime) or now.utcoffset() is None:
+                raise ValueError
+            utc = now.astimezone(timezone.utc)   # real elapsed time: two times in one zone subtract on the wall
+        except Exception:                        # clock (AEGIS round 2: across a DST jump), so compare in UTC
+            raise ValueError("the gate needs an aware, readable clock") from None
         number = normalise_number(call.get("caller_id")) if isinstance(call, dict) else None
         last = self._last.get(number) if number else None
-        since = int((now - last).total_seconds()) if last else None
+        since = int((utc - last).total_seconds()) if last else None
         d = decide(call, now=now, seconds_since_gate=since, **kw)
         if d.action == "send_now" and number:
-            self._last[number] = now
+            self._last[number] = utc
         return d
