@@ -412,8 +412,9 @@ def test_us_territory_and_canadian_callbacks_are_offered(number):
 
 
 # ---------------------------------------------------------------- AEGIS round 7 (Inquisitor, e8149296)
-def test_a_clock_whose_offset_changes_between_questions_is_read_once():
-    from datetime import datetime, timedelta, timezone, tzinfo
+def test_a_clock_whose_offset_changes_between_questions_is_read_once(monkeypatch):
+    import time
+    from datetime import datetime, timedelta, tzinfo
 
     class FlipFlop(tzinfo):
         def __init__(self):
@@ -421,17 +422,23 @@ def test_a_clock_whose_offset_changes_between_questions_is_read_once():
 
         def utcoffset(self, dt):
             self.n += 1
-            return timedelta(hours=-7) if self.n == 1 else None
+            return timedelta(hours=14) if self.n == 1 else None
 
         def dst(self, dt):
             return None
 
-    now = datetime(2026, 11, 27, 6, 30, tzinfo=FlipFlop())     # 06:30 in Phoenix: before 08:00
-    d = tb.decide(call(recipient_time_zone="America/Phoenix"), now=now, opted_out=lambda n: False)
-    assert d.action == "defer_until_0800"
-    g = tb.TextBackGate().decide(call(recipient_time_zone="America/Phoenix"),
-                                 now=datetime(2026, 11, 27, 6, 30, tzinfo=FlipFlop()), opted_out=lambda n: False)
-    assert g.action == "defer_until_0800"
+    # 20:00 at +14 is 06:00 UTC, 23:00 in Phoenix: quiet hours. Read again as a host-zone (UTC) time it would be 13:00.
+    monkeypatch.setenv("TZ", "UTC")      # the host zone a second read would fall back to
+    time.tzset()
+    try:
+        d = tb.decide(call(recipient_time_zone="America/Phoenix"), now=datetime(2026, 11, 27, 20, 0, tzinfo=FlipFlop()),
+                      opted_out=lambda n: False)
+        g = tb.TextBackGate().decide(call(recipient_time_zone="America/Phoenix"),
+                                     now=datetime(2026, 11, 27, 20, 0, tzinfo=FlipFlop()), opted_out=lambda n: False)
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+    assert (d.action, g.action) == ("defer_until_0800", "defer_until_0800")
 
 
 def test_a_clock_subclass_is_not_a_clock():
