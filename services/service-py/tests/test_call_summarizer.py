@@ -556,3 +556,56 @@ def test_a_low_confidence_receptionist_turn_never_drives_the_disagreement_note()
     t = tr("I need a repair.", "Ana Reyes, 602 555 0101.")
     t["turns"].append({"speaker": "agent", "confidence": 0.2, "text": "Let me confirm: Ana Reyes, at 602 555 0199."})
     assert "confirmation_disagrees_with_caller" not in cs.summarize(t, PACK).notes
+
+
+# ---------------------------------------------------------------- AEGIS round 5 (Inquisitor, 4c896304)
+@pytest.mark.parametrize("turns", [(low("my water heater burst, call me back"),),
+                                   (low("hello?"), low("can you hear me, I need a repair")),
+                                   ("Hello?", low("the basement is flooding"))])
+def test_words_heard_badly_are_never_nothing_said(turns):
+    s = cs.summarize(tr(*turns), PACK)
+    assert s.need != "long_silence" and "No follow-up needed" not in s.text
+    assert "review the recording" in s.text
+
+
+def test_a_low_confidence_turn_still_raises_check_now():
+    s = cs.summarize(tr(low("there's smoke coming out of the panel")), PACK)
+    assert s.possible_emergency and s.text.startswith("CHECK NOW: ") and s.urgency == "routine"
+
+
+def test_real_silence_is_still_long_silence():
+    assert cs.summarize(tr("[silence]"), PACK).need == "long_silence"
+    assert cs.summarize(tr("Hello?"), PACK).need == "long_silence"
+
+
+@pytest.mark.parametrize("line", ["In an emergency. Call 911.", "When in doubt, call 911.",
+                                  "We are not an emergency line. Call 911.", "Si es una emergencia. Llame al 911.",
+                                  "En una emergencia, marque 911.", "For emergencies: call 911.",
+                                  "Okay. Call 911.", "Call 911. Otherwise we'll call you back."])
+def test_the_911_instruction_is_the_whole_turn_and_nothing_else(line):
+    assert cs.summarize(tr("I need a repair.", agent=[line]), PACK).urgency == "routine"
+
+
+@pytest.mark.parametrize("line", ["Please hang up and dial 911 right now.", "Cuelgue y marque al 911 ahora mismo.",
+                                  "  Call 911 now!  "])
+def test_the_fixed_911_turn_is_still_the_instruction(line):
+    assert cs.summarize(tr("There's a fire.", agent=[line]), PACK).urgency == "emergency"
+
+
+@pytest.mark.parametrize("line", ["My number is 602 555 0110, no wait, 0101.", "602 555 0110, sorry, 0101 I mean.",
+                                  "Es el 602 555 0110, perdón, 0101."])
+def test_a_correction_we_cannot_complete_is_ambiguous(line):
+    s = cs.summarize(tr("I need a repair.", line), PACK)
+    assert s.callback_number is None and "ambiguous_number" in s.notes
+
+
+def test_a_complete_correction_still_picks_the_new_number():
+    s = cs.summarize(tr("I need a repair.", "602 555 0110, no wait, 602 555 0101."), PACK)
+    assert s.callback_number == "+16025550101"
+
+
+@pytest.mark.parametrize("line", ["I'm Ana Reyes's husband, call me at 602 555 0101.",
+                                  "I'm Ana Reyes' son, 602 555 0101."])
+def test_a_possessive_is_someone_else(line):
+    agent = [f"Let me confirm: {line[4:]}"]
+    assert cs.summarize(tr(line, "I need a repair.", agent=agent), PACK).name is None

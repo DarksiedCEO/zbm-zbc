@@ -838,3 +838,15 @@ disagreement note reads only trusted receptionist turns; a Spanish gas pattern n
 **For Andre:** the CHECK NOW net is still a word list and will always miss some wording; it can only add a flag, and
 urgency itself comes from the receptionist's instruction. The summary is advisory to the owner; nothing is decided or
 sent from it. Regression tests: "AEGIS round 4".
+
+AEGIS Inquisitor round 5 on 4c896304 (RR-F3): (1) a call whose spoken caller turns were all below 0.6 is no longer
+read as `long_silence` / "No follow-up needed": it is `unclear` and the action says part of the call could not be
+heard clearly and to review the recording; any flagged call without a usable outcome says the same. The CHECK NOW net
+now also reads low-confidence words (never as facts, only as a warning). (2) The 911 instruction counts only when the
+whole trusted receptionist turn is one of its fixed forms; anything said with it ("In an emergency. Call 911.", "When
+in doubt, call 911", "We are not an emergency line. Call 911.") is not the instruction; the separate condition word
+list is gone. Trade-off: a real instruction said together with other words ("Okay. Please hang up and dial 911.")
+is not read as URGENT; the caller's own emergency words still raise CHECK NOW. Review items fixed: a correction we
+cannot complete ("0110, no wait, 0101") is `ambiguous_number`; a possessive ("I'm Ana Reyes's husband") is never a
+name. Disclosed: the CHECK NOW net missed 38 of 55 emergency phrasings in that round's corpus; it is a net, not a
+detector. Mutation harness (all four agents, on the stack at this commit): 125 mutants, 119 killed, 6 equivalent.

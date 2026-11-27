@@ -73,9 +73,12 @@ _REJECTED_AFTER = re.compile(r"^\W{0,3}(?:(?:which|that|it|this one|that one)(?:
                              r"do not use (?:it|that)|never use (?:it|that)|"
                              r"ya no (?:es|sirve|funciona)|no (?:es el m[ií]o|sirve|funciona)|desconectado)",
                              re.IGNORECASE)
-_CORRECTION = re.compile(r"\bno wait\b|\bsorry\b|\bactually\b|\bi mean\b|\bcorrection\b|\bscratch that\b|"
+_CORRECTION_CUE = (r"\bno wait\b|\bsorry\b|\bactually\b|\bi mean\b|\bcorrection\b|\bscratch that\b|"
                          r"\bmake that\b|\brather\b|\bperd[oó]n\b|\bmejor\b|\bquiero decir\b|\bdisculpe?\b|"
-                         r"\bmás bien\b|\bcorrijo\b", re.IGNORECASE)
+                         r"\bmás bien\b|\bcorrijo\b")
+_CORRECTION = re.compile(_CORRECTION_CUE, re.IGNORECASE)
+# a correction cue followed by digits that do not form a whole number
+_PARTIAL_CORRECTION = re.compile("(?:" + _CORRECTION_CUE + r")[\s,:\-]{0,5}\d", re.IGNORECASE)
 _WORD = r"[A-ZÁÉÍÓÚÑÜ][a-záéíóúñü'\-]+"
 # where a caller gives their own name: a strong lead-in, then First Last; or a weak lead-in ("this is", "it's",
 # "habla") only when the name is followed straight by a number or a calling phrase (AEGIS F3 round 2: "It's Christmas
@@ -251,21 +254,16 @@ def _need(trusted: list[str], pack: dict, emergency: bool, any_words: bool) -> s
                 cats = [c for c in raw if isinstance(c, str) and c] if isinstance(raw, (list, tuple)) else []
                 return cats[0] if cats else "booking"
             return label
-    if not any_words or all(_is_greeting(t) for t in trusted):
-        return "long_silence"      # nothing but a greeting into silence
+    if not any_words or (trusted and all(_is_greeting(t) for t in trusted)):
+        return "long_silence"      # nothing spoken, or nothing but a greeting into silence
     return "unclear"
 
 
 def _said_911(agent_text: str) -> bool:
-    """The receptionist told the caller to call 911: one sentence that is exactly one of the instruction's fixed forms
-    ("For emergencies, please call 911", "Do not call 911 for a leak", "Did you call 911?" are not)."""
-    if _CONDITION.search(agent_text):  # a condition anywhere in the turn ("If anyone is hurt, don't wait. Call 911.")
-        return False
-    return any(_SAID_911.fullmatch(sentence.strip()) for sentence in re.split(r"(?<=[.!?])\s+|\n", agent_text))
-
-
-_CONDITION = re.compile(r"\b(?:if|only if|in case|whenever|should|for (?:emergencies|an emergency|a medical emergency)|"
-                        r"otherwise|unless|though|si|en caso|solo si|cuando)\b", re.IGNORECASE)
+    """The receptionist told the caller to call 911: the whole trusted turn is exactly one of the instruction's fixed
+    forms. Anything said with it ("In an emergency. Call 911.", "When in doubt, call 911", "We are not an emergency
+    line. Call 911.") is not the instruction (AEGIS round 5); the caller's own words still raise CHECK NOW."""
+    return _SAID_911.fullmatch(agent_text.strip()) is not None
 
 
 def _confidence(raw: object) -> Fraction:
@@ -292,12 +290,17 @@ def _callback(trusted: list[str], notes: list[str]) -> tuple[Optional[str], bool
             last_end = m.end()
             notes.append("rejected_number_not_used")
             continue
-        found.append(("+1" + "".join(m.groups()), before))
+        found.append(("+1" + "".join(m.groups()), before, m.end()))
         last_end = m.end()
     if not found:
         return None, False
+    end = found[-1][2]
+    nxt = _NUM.search(joined, end)
+    if _PARTIAL_CORRECTION.search(joined[end:nxt.start() if nxt else end + 40]):
+        notes.append("ambiguous_number")   # "0110, no wait, 0101": a correction we cannot complete (AEGIS round 5)
+        return None, False
     distinct = []
-    for number, before in found:
+    for number, before, _ in found:
         if distinct and number != distinct[-1][0] and not _CORRECTION.search(before[-30:]):
             if number not in [d[0] for d in distinct]:
                 notes.append("ambiguous_number")
@@ -328,6 +331,8 @@ def _names(trusted: list[str], confirmations: Optional[list[str]] = None) -> lis
                 continue                   # the lead-in match is case-blind; the name itself must be capitalised
             if any(w.casefold() in _NOT_NAME_WORD for w in words) or _HEALTH.search(cand):
                 continue
+            if re.search(r"'s?$", words[-1]):
+                continue                   # "I'm Ana Reyes's husband": a possessive names someone else (AEGIS round 5)
             if said is not None and not re.search(rf"(?<!\w){re.escape(cand.casefold())}(?!\w)", said):
                 continue                   # nobody confirmed it: a landlord, a business, a mother is never a name
             if cand not in names:
@@ -373,14 +378,17 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
 
     said_911 = any(_said_911(_fold(x)) for x in agent_trusted)
     emergency = said_911
+    # the CHECK NOW net also reads low-confidence words: they are never a fact, but they can still be a warning
     possible = not emergency and any(_EMERGENCY.search(_fold(x)) or _EMERGENCY_WORDS.search(_fold(x))
-                                     for x in trusted)
+                                     for _, x in spoken)
     if possible:
         notes.append("possible_emergency")
     confirmed = ["+1" + "".join(m) for x in agent_trusted for m in _NUM.findall(x)]
     if callback and confirmed and confirmed[-1] != callback:
         notes.append("confirmation_disagrees_with_caller")
     need = _need(trusted, pack, emergency, bool(spoken))
+    if flagged and need == "long_silence":
+        need = "unclear"               # words were spoken but not heard clearly: never "nothing said" (AEGIS round 5)
     urgency = "emergency" if emergency else "routine"
 
     if emergency:
@@ -388,6 +396,9 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
     elif possible:
         action = (f"The caller's words may describe an emergency and no 911 instruction was given; call back now"
                   f"{' at ' + callback if callback else ''}.")
+    elif flagged and (need in ("spam_call", "wrong_number", "long_silence", "unclear") or not callback):
+        action = ("Part of the call could not be heard clearly; review the recording"
+                  f"{' and call back at ' + callback if callback else ''}.")
     elif need in ("spam_call", "wrong_number", "long_silence"):
         action = "No follow-up needed."
     elif callback:
