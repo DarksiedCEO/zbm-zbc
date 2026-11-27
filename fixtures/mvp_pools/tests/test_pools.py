@@ -6,6 +6,7 @@ Run from fixtures/mvp_pools:  python3 -B -m unittest discover -s tests -v
 from __future__ import annotations
 
 import copy
+import html
 import json
 import re
 import sys
@@ -92,12 +93,13 @@ class Determinism(unittest.TestCase):
 class FixtureSafety(unittest.TestCase):
     """Every rendered value is fictional: phones in 555-0100..0199, hosts reserved, no IP, email, SSN or card shapes.
 
-    What is read (AEGIS test-verification on b76b94f2 and 2cb71287): every file is JSON lines and every line is
-    parsed, refusing duplicate keys; every string, number and dict key is checked, after NFKC normalisation (so
-    fullwidth, circled and superscript digits and fullwidth dots read as plain ones). Never the raw text, so a JSON
-    escape such as "\n" in front of a number cannot hide it. Every Unicode decimal digit is then read as ASCII, and
-    dot look-alikes as ".". A JSON number is checked for 10- and 11-digit phones and
-    card shapes; a 7-digit JSON number is a count or a time, not a local phone.
+    What is read (AEGIS test-verification on b76b94f2, 2cb71287, 7dc6a8a1 and 4d5c7b0c): every file is JSON lines
+    and every line is parsed, refusing duplicate keys; every string, number and dict key is checked, decoded, never
+    the raw text, so a JSON escape such as "\n" in front of a number cannot hide it. A value may contain only
+    printable ASCII and the Spanish letters and marks the call bank uses; any other character fails outright, which
+    closes other-script and dingbat digits, look-alike dots and invisible characters as one class. A value that
+    changes under URL percent-decoding or HTML-entity decoding is scanned again as decoded. A JSON number is checked
+    for 10- and 11-digit phones and card shapes; a 7-digit JSON number is a count or a time, not a local phone.
     Numbers: any run of digit groups joined by up to five non-alphanumeric characters; every 7-, 10- or 11-digit span
     of whole groups that is a dialable North American number (area code and exchange start 2-9) must be in
     555-0100..0199 (a 7-digit local span must end in a 4-digit group, so "1-602-555"
@@ -105,13 +107,14 @@ class FixtureSafety(unittest.TestCase):
     Luhn check is a card shape and fails.
     Hosts: every domain-shaped token (any script) and every host after a "scheme://" must be reserved (".test" or
     "example.com"), so a second address, "www." and bare forms, "//host", "localhost", IPv6 and integer IPs are read.
-    IPv4 literals (a sentence-final dot included), any email address and SSN shapes fail outright.
+    IPv4 literals (a sentence-final dot included), any email address, SSN shapes and any "+" international number
+    with a country code other than 1 fail outright.
     Generated id fields are the one exemption, from the number scan only: each must match its field's exact
     generated shape (prefix and hex length), so an arbitrary value such as "lead-2138675309" fails.
     Residual, by construction: numbers spelled in words; digits joined by letters ("213x867x5309") or by six or
     more separators; hosts written with spaces or "[.]"; an SSN with no separators; any 12-digit number; a card
-    number that fails the Luhn check; a bare IPv6 address such as "::1"; and a value in an id field with exactly the generated shape whose hex happens
-    to contain digits (hash output, not something the generator could copy from a real record)."""
+    number that fails the Luhn check; a bare IPv6 address such as "::1"; an international number written without its
+    "+"; and a value in an id field with exactly the generated shape whose hex happens to contain digits (hash output, not something the generator could copy from a real record)."""
 
     HEX16 = r"[0-9a-f]{16}"
     ID_SHAPES = {
@@ -234,22 +237,27 @@ class FixtureSafety(unittest.TestCase):
             if url.lower().startswith(("http:", "https:", "ftp:", "ws:", "wss:")) or host:
                 yield (host or "").lower()          # an unreadable or empty host is not reserved either
 
-    DOT_LIKE = re.compile("[\u3002\uff61\u00b7\u2219\u06d4\u2024\u2027\u30fb]")
+    # The only characters a rendered value may contain: printable ASCII and the Spanish letters and marks the call
+    # bank uses. Anything else (other-script or dingbat digits, look-alike dots, invisible or control characters)
+    # fails outright, so no Unicode trick needs its own rule (AEGIS 7dc6a8a1 and 4d5c7b0c High findings).
+    ALLOWED = frozenset(map(chr, range(0x20, 0x7F))) | frozenset("\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1\u00fc"
+                                                                   "\u00c1\u00c9\u00cd\u00d3\u00da\u00d1\u00dc"
+                                                                   "\u00bf\u00a1")
+    INTERNATIONAL = re.compile(r"(?<![\w+])\+[\W_]{0,3}[02-9]")     # "+" then a country code other than 1
 
     @classmethod
-    def normalise(cls, value: str) -> str:
-        """NFKC, then every Unicode decimal digit to ASCII (NFKC leaves Arabic-Indic, Thai, Bengali, Devanagari and
-        other script digits alone: AEGIS 7dc6a8a1 High 1), then dot look-alikes to "." and runs of dots to one."""
-        value = unicodedata.normalize("NFKC", value)
-        value = "".join(str(unicodedata.decimal(c)) if not c.isascii() and unicodedata.decimal(c, None) is not None
-                        else c for c in value)
-        return re.sub(r"\.{2,}", ".", cls.DOT_LIKE.sub(".", value))
+    def disallowed(cls, value: str) -> list:
+        return sorted({f"U+{ord(c):04X} {unicodedata.name(c, 'unnamed')}" for c in value if c not in cls.ALLOWED})
 
     @classmethod
     def offending(cls, key: str, value: str) -> list:
         """Everything in one decoded value that is not fictional, empty when the value is safe."""
-        value = cls.normalise(value)
-        bad = []
+        bad = cls.disallowed(value)
+        decoded = html.unescape(urllib.parse.unquote(value))    # "%2E", "%20", "&#46;" read as what they encode
+        if decoded != value:
+            bad += [f"encoded: {b}" for b in cls.offending(key, decoded)]
+        if bad:
+            return bad
         if key in cls.ID_FIELDS and not cls.id_ok(key, value):
             bad.append(f"not a generated {key}")
         digits = cls.phone_text(key, value)
@@ -258,6 +266,7 @@ class FixtureSafety(unittest.TestCase):
         bad += list(cls.cards(digits))
         bad += [h or "(no host)" for h in cls.hosts(value) if not (h and common.is_fixture_domain(h))]
         bad += cls.IPV4.findall(value) + cls.EMAIL.findall(value) + cls.SSN.findall(digits)
+        bad += cls.INTERNATIONAL.findall(value)
         return bad
 
     def test_every_rendered_value_is_fictional(self):
@@ -302,7 +311,14 @@ class FixtureSafety(unittest.TestCase):
                   "\u0968\u0967\u0969\u096e\u096c\u096d\u096b\u0969\u0966\u096f", "213 \u0668\u0666\u0667 5309",
                   "realbiz\u2025com", "realbiz\u00b7com", "realbiz\u2219com", "realbiz\u06d4com", "realbiz\uff61com",
                   "x.contest", "123-----45-----6789", "4222222222222", "4111 1111 1111 1111 003", "6200000000000000000",
-                  "http:///path", "see /biz/8675309a"]
+                  "http:///path", "see /biz/8675309a",
+                  # found by the 4d5c7b0c pass: now refused by the character allowlist or the decoded re-scan
+                  "\u2777\u2776\u2778 \u277d\u277b\u277c \u277a\u2778\u2776\u277e",
+                  "\u2781\u2780\u2782 \u2787\u2785\u2786 \u2784\u2782\u2780\u2788", "213-555-01\u24ff0",
+                  "realbiz.c\u00adom", "realbiz.c\u200bom", "realbiz.c\u2060om", "realbiz\u00ad.com",
+                  "realbiz.c\u200dom", "realbiz.com\ufe0f", "realbiz\u2027com", "realbiz\u30fbcom",
+                  "realbiz&#46;com", "realbiz%2Ecom", "213%20867%205309", "realbiz%252Ecom", "+44 20 7946 0958",
+                  "+33 1 23 45 67 89", "Mon\u00b7Fri", "line\nbreak"]
         for form in unsafe:
             with self.subTest(form=form):
                 line = common.canonical_json({**row, "note": form})
@@ -311,7 +327,8 @@ class FixtureSafety(unittest.TestCase):
         safe = ["213-555-0142", "+12135550100", "+1 (213) 555-0199", "555-0156", "https://shop-1.test/book",
                 "www.example.com", "$1,500 per month", "2026-12-25", "08:00-17:00", "Suite 210",
                 "shop.example.com", "a.b.test", "1795777200", "version 1.2.3", "Unit 2. 555-0101 is ours.",
-                "123-056-7890", "213-056-7890", "1-123-056-7890", "1234 5678 9012 3456", "86 75309"]
+                "123-056-7890", "213-056-7890", "1-123-056-7890", "1234 5678 9012 3456", "86 75309",
+                "Hello...world", "\u00bfQu\u00e9 tal?", "100% sure", "Fish & Chips", "+1 213 555 0101"]
         for form in safe:
             with self.subTest(form=form):
                 line = common.canonical_json({**row, "note": form})
