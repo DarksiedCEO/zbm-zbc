@@ -334,3 +334,36 @@ def test_si_after_stop_keeps_the_block_with_the_start_reason():
 def test_an_allow_carries_the_consent_it_rests_on():
     d = ck.ConsentKeeper().replay([ev("opt_in", 1, consent="express_written"), send(6, mclass="marketing")])[0]
     assert (d.decision, d.evidence) == ("allow", (0, 1))
+
+
+# ---------------------------------------------------------------- AEGIS round 2 (Inquisitor, e5f545e0)
+@pytest.mark.parametrize("text", ["Do not ever call me", "I don't want any calls", "No calls",
+                                  "I don't want to be called", "do not telephone me", "dont cal me", "d0nt c4ll me",
+                                  "N0 ME LLAMEN", "No me llame", "No llamar", "dejen de llamarme",
+                                  "no quiero que me llamen", "no me contacten", "nao me liguem", "ne m'appelez plus",
+                                  "D.N.C.", "d-n-c"])
+def test_more_calls_only_revocations_block(text):
+    assert one([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text=text),
+                send(6, mclass="marketing")]) == ("block", "opted_out")
+
+
+@pytest.mark.parametrize("text", ["No problem, call me back", "I called earlier", "Thanks for calling",
+                                  "Did you call me?", "Hola, llamo por mi cita", "No, llame mañana por favor"])
+def test_ordinary_calling_words_are_not_a_revocation(text):
+    assert one([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text=text),
+                send(6, mclass="marketing")]) == ("allow", None)
+
+
+@pytest.mark.parametrize("mark", ["⁦", "⁩", "‪", "‮", "͏", "᠎", "️",
+                                  "\U000e0041", "؜"])
+def test_every_invisible_in_a_client_id_is_removed(mark):
+    assert one([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="STOP", client="client-a" + mark),
+                send(6)]) == ("block", "opted_out")
+
+
+@pytest.mark.parametrize("a, b", [("strasse-dental", "straße-dental"), ("acme2", "acme²"),
+                                  ("k-plumbing", "\uff4b-plumbing")])
+def test_two_different_clients_never_merge(a, b):
+    got = decide([ev("inbound_sms", 1, text="STOP", client=a), ev("opt_in", 5, consent="express_written", client=b),
+                  send(9, sid="a", client=a)])
+    assert got[("a", 9)] == ("block", "opted_out")      # b's consent never lifts a's STOP

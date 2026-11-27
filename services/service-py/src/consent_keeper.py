@@ -9,8 +9,11 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings, ADR 0014):
   Service already uses, so the whole company reads "STOP" one way. ``exact`` -> ``opted_out``; ``suspected`` (one
   typo of stop / unsubscribe) -> ``possible_opt_out``; both block (STOP typos count as an opt-out: fail toward
   suppression).
-- Calls are decided here too, so calls-only revocations ("do not call me", "DNC", "no me llamen") and the wording
-  Customer Service hands to a human ("opt me out") also block (``opted_out`` / ``possible_opt_out``).
+- Calls are decided here too, so calls-only revocations also block (``opted_out``): inside one clause, a refusal word
+  ("don't", "no", "never", "stop", "dejen", "nao", "ne" ...) within five words before a calling word ("call", "calls",
+  "phone", "contact", "llamar" and its forms, "ligar", "appeler" ...), read after leet and doubled letters are undone,
+  and "DNC" on its own. This fails toward suppression: "no calls on Sunday" blocks. The wording Customer Service
+  hands to a human ("opt me out") blocks too (``possible_opt_out``).
 - A state-changing event (opt-in, inbound text, carrier opt-out, reassignment) for a number that cannot be read, a
   non-object event, or a send_id used twice refuses the whole replay (``ValueError``): an opt-out is never dropped.
   Numbers are read after NFKC with any script's digits, dash look-alikes and invisibles folded, so one person never
@@ -52,12 +55,41 @@ RESTART_WORDS = frozenset({"start", "unstop", "yes", "subscribe", "resume", "res
 CONSENT_SOURCES = frozenset({"web_form", "paper_form", "keyword_join", "signed_agreement", "esign"})
 # Revocations the text classifier deliberately leaves to the phone side: this keeper decides texts AND calls, so any
 # of these blocks both (fail toward suppression). Matched on the normalised text, as whole words.
-_NO_CONTACT = re.compile(
-    r"\b(?:do ?n[o']?t|dont|never|no more|stop|quit)\s+(?:call|calling|ring|phone|contact)(?:ing)?\b|\bdnc\b|"
-    r"\bdo not call\b|\bno me (?:llamen|llames|marquen|manden|env[ií]en|escriban)\b|\bno (?:llamen|marquen)\b|"
-    r"\bya no me (?:llamen|escriban|manden)\b|\bno quiero (?:llamadas|mensajes)\b")
+# Calls-only revocations (AEGIS round 2: "I don't want any calls", "no me llame", "d0nt c4ll", PT/FR): inside one
+# clause, a refusal word within five words before a calling word. Read after leet and repeated letters are undone.
+_CALL_WORD = re.compile(r"^(?:call|calls|called|calling|cal|cals|caling|phone|phoned|phoning|telephone|ring|ringing|"
+                        r"contact|contacted|contacting|dial|llam\w*|contact\w*|marqu\w*|telefon\w*|ligu\w*|ligar|"
+                        r"lig\w*|appel\w*|mensaj\w*|escrib\w*|manden|mandes|env[ií]en|text|texts|texting|message|messages)$")
+_REFUSAL = frozenset({"dont", "don't", "do", "not", "no", "never", "stop", "quit", "cease", "nao", "não", "ne", "nunca",
+                      "dejen", "deje", "deja", "basta", "without", "dnc", "nada"})
+_CLAUSE = re.compile(r"[.!?;,\n\u3002\uff0c]+")
+
+
+def _no_contact(text: str) -> bool:
+    if re.fullmatch(r"\W*d\W*n\W*c\W*", channels.normalise(_ascii_digits(text)).strip() or "x"):
+        return True                                       # "DNC", "D.N.C.", "d-n-c" on their own
+    for raw_clause in _CLAUSE.split(_ascii_digits(text)):
+        folded = channels.normalise(channels._leet(raw_clause))
+        if re.search(r"\bd\s*n\s*c\b", folded):
+            return True
+        words = folded.split()
+        for i, w in enumerate(words):
+            calls = _CALL_WORD.match(w) or _CALL_WORD.match(re.sub(r"(.)\1+", r"\1", w)) \
+                or re.match(r"^m(?:appel|ap+el)", w)                      # French "m'appelez" folds to "mappelez"
+            if calls and any(x in _REFUSAL for x in words[max(0, i - 5):i]):
+                return True
+    return False
+
+
 _DASHES = dict.fromkeys(map(ord, "\u2010\u2011\u2012\u2013\u2014\u2015\u2212\ufe63\uff0d"), "-")
 _INVISIBLE = re.compile("[\u00ad\u200b-\u200f\u2060-\u2064\ufeff]")
+
+
+def _strip_invisible(text: str) -> str:
+    """Every format character (Unicode Cf: bidi marks and isolates, joiners, tags, U+061C, U+180E ...), the
+    combining grapheme joiner and the variation selectors."""
+    return "".join(c for c in text if unicodedata.category(c) != "Cf" and c != "\u034f"
+                   and not ("\ufe00" <= c <= "\ufe0f" or "\U000e0100" <= c <= "\U000e01ef"))
 REASONS = ("opted_out", "possible_opt_out", "start_keyword_does_not_restore", "carrier_opt_out", "number_reassigned",
            "no_written_consent", "invalid_number", "unknown_message_class")
 _E164 = re.compile(r"\+1[2-9][0-9]{2}[2-9][0-9]{6}")
@@ -71,8 +103,11 @@ def _ascii_digits(text: str) -> str:
 
 
 def normalise_client(raw: str) -> str:
-    """One client id, however it was typed upstream: NFKC, dashes folded, invisibles removed, trimmed, case-folded."""
-    return _INVISIBLE.sub("", unicodedata.normalize("NFKC", raw)).translate(_DASHES).strip().casefold()
+    """One client id, however it was typed upstream: NFC (not NFKC, so "acme2" and "acme\u00b2" stay two clients),
+    every invisible removed, dashes folded, trimmed, lower-cased (not case-folded, so "strasse" and "stra\u00dfe" stay
+    two clients)."""
+    folded = _strip_invisible(unicodedata.normalize("NFC", raw)).translate(_DASHES).strip()
+    return "".join(c.lower() if c.isascii() else c for c in folded)     # only ASCII letters change case
 
 
 def normalise_number(raw: object) -> Optional[str]:
@@ -108,8 +143,7 @@ def opt_out_reading(text: str) -> Optional[str]:
         return "opted_out"
     if level == "suspected" or channels.possible_opt_out(text):
         return "possible_opt_out"
-    folded = channels.normalise(_ascii_digits(text))
-    if _NO_CONTACT.search(folded) or _NO_CONTACT.search(" ".join(folded.split())):
+    if _no_contact(text):
         return "opted_out"
     return None
 

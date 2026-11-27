@@ -457,8 +457,8 @@ front desk read "STOP" the same way.
 | Rule | Behaviour |
 |---|---|
 | Every send is checked | A send with an unreadable number (`invalid_number`) or an unknown message class (`unknown_message_class`) is blocked; a malformed event (not an object, an unknown kind, a missing field, a send_id used twice, or an opt-in / inbound text / carrier / reassignment for a number that cannot be read) refuses the whole replay (`ValueError`), so an opt-out is never dropped |
-| One record per person | Numbers are read after NFKC with any script's digits, dash look-alikes and invisibles folded, and a `tel:` prefix removed; client ids are folded and case-folded the same way. Every `replay` is the whole history: nothing carries over between calls |
-| Calls too | The keeper decides calls as well as texts, so calls-only revocations ("do not call me", "DNC", "no me llamen", "no me manden mensajes") block (`opted_out`), and wording Customer Service hands to a human ("opt me out") blocks (`possible_opt_out`) |
+| One record per person | Numbers are read after NFKC with any script's digits, dash look-alikes and invisibles folded, and a `tel:` prefix removed; client ids are read with NFC (not NFKC), every invisible format character removed, dashes folded and ASCII letters lower-cased, so one client typed differently is one record and two different clients ("strasse" / "straße", "acme2" / "acme²") never merge. Every `replay` is the whole history: nothing carries over between calls |
+| Calls too | The keeper decides calls as well as texts, so calls-only revocations block (`opted_out`): in one clause, a refusal word ("don't", "no", "never", "stop", "dejen", "nao", "ne" ...) within five words before a calling or messaging word ("call", "calls", "phone", "contact", "llamar" and its forms, "ligar", "appeler", "mensajes" ...), read after leet and doubled letters are undone, and "DNC" on its own. It fails toward suppression ("no calls on Sunday" blocks). Wording Customer Service hands to a human ("opt me out") blocks too (`possible_opt_out`) |
 | Consent sources | Express written consent counts only from a web form, paper form, keyword join, signed agreement or e-sign; a START reply is never consent |
 | Opt-out wins | `exact` -> `opted_out`, `suspected` (one typo of stop / unsubscribe) -> `possible_opt_out`; both block (Nov 26 ruling: STOP typos count) |
 | Same instant | All state changes at an instant apply before any send at it, opt-ins before opt-outs, whatever the input order |
@@ -484,3 +484,11 @@ sends) gave 0 wrong decisions. All fixed as above (commit "RR-F5 round-1 fixes")
 (`tests/test_consent_keeper.py`, "AEGIS round 1" section). Mutation by hand, not committed as an artifact: 10 of 11
 targeted mutants on the fixes killed; the survivor (the opt-in time guard) cannot change a sorted single replay. The
 certification seeds are dev-style (all five are in the repo); the held-out draw stays with the reviewer lane.
+
+AEGIS round 2 (Nov 26 2026, Inquisitor on e5f545e0): the round-1 fixes held (0 sends after an opt-out for every
+earlier repro; the opt-in time-guard mutant confirmed equivalent over 20,000 histories). New High: 20 more calls-only
+phrasings ("I don't want any calls", "no me llame", "d0nt c4ll me", Portuguese and French) were read as nothing; the
+clause rule above replaces the narrow pattern. Review: client ids kept nine invisible characters and case-folding
+merged distinct ids; both fixed as above. Accepted, by design: ordinary wording that reads as an opt-out ("don't
+call after 9pm", "Stop by anytime") blocks; that is the fail-toward-suppression rule, and a human can restore consent
+only through new written consent. Regression tests: "AEGIS round 2" section.
