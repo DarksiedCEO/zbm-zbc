@@ -19,7 +19,7 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings, TCPA practice):
 - The text is informational only (a way to continue the call), never marketing, and always says how to opt out. It
   is one of four fixed wordings (English or Spanish, with or without a callback number) and never carries record
   text: no business name (AEGIS round 4), only a callback number that reads as a North American number and is not a
-  premium-rate (900, 976) or N11 code. The number's format is checked, not who owns it: the wiring passes the
+  premium-rate (900 area, 976 exchange), N11 or international-rate (Caribbean) number. The number's format is checked, not who owns it: the wiring passes the
   client's own number.
 - A send-now decision must reach the caller within 30 s (the bar); the deadline travels with the decision.
 - Anything this module cannot read (line type, consent state, zone, local time, last-text time) fails closed: no
@@ -57,6 +57,17 @@ class TextBackDecision:
 
 
 _NOT_A_CALLBACK_AREA = frozenset({"900", "976"})
+# +1 numbers billed at international rates (Caribbean and Atlantic NANP members; US territories stay offerable)
+_INTERNATIONAL_RATE_AREAS = frozenset({"242", "246", "264", "268", "284", "345", "441", "473", "649", "658", "664",
+                                       "721", "758", "767", "784", "809", "829", "849", "868", "869", "876"})
+
+
+def _offerable(number: str) -> bool:
+    """+1 NPA NXX XXXX: no premium-rate area (900) or exchange (976, the pay-per-call exchange; AEGIS round 6: the check
+    read 976 only as an area code), no N11 area or exchange, no international-rate area."""
+    area, exchange = number[2:5], number[5:8]
+    return not (area in _NOT_A_CALLBACK_AREA or exchange == "976" or area[1:] == "11" or exchange[1:] == "11"
+                or area in _INTERNATIONAL_RATE_AREAS)
 
 
 def message(business_name: Optional[str] = None, callback_number: Optional[str] = None,
@@ -67,8 +78,8 @@ def message(business_name: Optional[str] = None, callback_number: Optional[str] 
     caller knows whom they called; a branded name needs an approved-name registry signed off by a person (not
     built). A callback number that is not a readable +1 number is left out."""
     number = normalise_number(callback_number) if callback_number is not None else None
-    if number is not None and (number[2:5] in _NOT_A_CALLBACK_AREA or number[3:5] == "11"):
-        number = None                  # premium-rate (900, 976), N11 service codes: never offered as a callback
+    if number is not None and not _offerable(number):
+        number = None                  # premium-rate, N11 or international-rate: never offered as a callback
     if spanish:
         who = "Perdimos su llamada."
         back = f"Responda a este mensaje o llamenos al {number}." if number else "Responda a este mensaje."

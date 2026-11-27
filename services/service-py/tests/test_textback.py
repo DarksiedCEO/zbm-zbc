@@ -396,3 +396,16 @@ def test_a_premium_rate_or_n11_callback_is_never_offered(number):
 
 def test_an_ordinary_callback_is_offered():
     assert "+16025550111" in tb.message(None, "+16025550111")
+
+
+# ---------------------------------------------------------------- AEGIS round 6 (Inquisitor, eed8ea3c)
+@pytest.mark.parametrize("number", ["+12139761234", "+13109760001", "+12139111234", "+12134111234", "+18765550101",
+                                    "+18095550101", "+14735550101", "+12425550101"])
+def test_a_976_or_n11_exchange_or_an_international_rate_area_is_never_offered(number):
+    for spanish in (False, True):
+        assert tb.message(None, number, spanish) == tb.message(None, None, spanish)
+
+
+@pytest.mark.parametrize("number", ["+17875550101", "+13405550101", "+16025550111", "+14165550101"])
+def test_us_territory_and_canadian_callbacks_are_offered(number):
+    assert number in tb.message(None, number)

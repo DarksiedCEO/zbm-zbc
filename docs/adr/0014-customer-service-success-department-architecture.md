@@ -639,3 +639,8 @@ AEGIS round 5 (Nov 26 2026, Inquisitor on e3f85f7d): no High; every kill criteri
 the callback number was only format-checked, so a premium-rate 900 or 976 number or an N11 code could be offered; those
 are now left out (the wiring passes the client's own number; who owns it is not checked here). The 59 s in the round-4
 note was corrected to 29 s. Regression tests: "AEGIS round 5".
+
+AEGIS round 6 (Nov 27 2026, Inquisitor on eed8ea3c): 1 High, fixed: 976 was checked only as an area code, but the
+pay-per-call 976 is an exchange (213-976-xxxx); a callback is now left out for a 900 area, a 976 exchange, an N11 area
+or exchange, or an international-rate Caribbean or Atlantic +1 area (US territories and Canada stay). Regression
+tests: "AEGIS round 6".
