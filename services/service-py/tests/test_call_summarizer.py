@@ -1452,3 +1452,12 @@ def test_a_caller_turn_of_controls_or_spaces_after_the_question_is_not_the_yes(f
                    {"speaker": "agent", "confidence": 0.97, "text": line},
                    {"speaker": "caller", "confidence": 0.95, "text": "Yes."}]
     assert cs.summarize(t, PACK).callback_number is None
+
+
+@pytest.mark.parametrize("label", ["x", "Agent", "receptionist", None])
+@pytest.mark.parametrize("filler", ["\x1c", "\x85", " ", "　"])
+def test_an_unknown_label_turn_of_controls_or_spaces_is_a_turn(label, filler):
+    t = tr("I need a repair.", "602 555 0101.", agent=rb("602 555 0101"))
+    t["turns"] += [{"speaker": label, "confidence": 0.95, "text": filler},
+                   {"speaker": "caller", "confidence": 0.95, "text": "Yes."}]
+    assert cs.summarize(t, PACK).callback_number is None

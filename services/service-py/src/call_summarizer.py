@@ -10,7 +10,8 @@ Rules (spec v0.1, the front-desk shared rules, the Nov 26 spec-freeze rulings):
   wording is not checked), never used as the source. A turn below 0.6 that has words is flagged and never used as a fact. A silent turn carries nothing and is
   not flagged (Nov 26 ruling): silence means re-ask, never guess.
 - A callback number is reported only when a trusted receptionist turn is the fixed consent question for one
-  number (matched as a whole turn after NFKC, any case, any spacing and number format) ("Is 602 555 0101 the best number to call you back?", "¿Es el 602 555 0101 el mejor número para
+  number (matched as a whole turn after NFKC, any case, the number written 602 555 0101, (602) 555-0101 or 602.555.0101;
+  a +1 or 1- prefix is not read, so it gives no callback) ("Is 602 555 0101 the best number to call you back?", "¿Es el 602 555 0101 el mejor número para
   devolverle la llamada?"), the caller gave that number in a trusted turn, and everything the caller says after the
   question is a trusted yes (Andre's ruling, Nov 27 2026, option (a)): the very next spoken turn after the question is
   the caller's yes, and after it the receptionist says nothing but the 911 instruction in one of its two fixed forms
@@ -560,7 +561,7 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
             speaker = "caller"         # "Caller" is the caller; the receptionist label stays exact (AEGIS round 6)
         if speaker not in ("caller", "agent"):
             notes.append("unknown_speaker_ignored")   # never read as the receptionist (AEGIS F3 round 4)
-            if (t.get("text") or "").strip():
+            if (t.get("text") or "").strip(_EDGES):   # the same filter as the consent rules (AEGIS F3 round 23)
                 unknown_text.append(t.get("text"))  # never a fact, but never "nothing said" either (round 8)
                 ordered.append(("unknown", Fraction(0), t.get("text")))   # ... and never a yes (round 12)
             continue

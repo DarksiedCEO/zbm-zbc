@@ -404,6 +404,8 @@ MUTANTS: list[tuple[str, str, str, str, str | None]] = [
      "    after = [(sp, c, x) for sp, c, x in ordered[i + 1:] if x.strip()]", None),
     ("call_summarizer", "a caller turn of controls dropped by the yes check",
      'if sp in ("caller", "unknown") and x.strip(_EDGES)]', 'if sp in ("caller", "unknown") and x.strip()]', None),
+    ("call_summarizer", "an unknown-label turn of controls dropped as silence",
+     '            if (t.get("text") or "").strip(_EDGES):', '            if (t.get("text") or "").strip():', None),
     ("call_summarizer", "a number-only confirmation not checked",
      " or _CONFIRM_NUMBER_LINE.fullmatch(_fold(x).strip())", "", None),
     ("call_summarizer", "controls trimmed from the after-yes lines", "_fold(x).strip(_EDGES) not in _FIXED_911",
