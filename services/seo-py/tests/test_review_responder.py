@@ -215,3 +215,8 @@ def test_the_grader_fails_a_drafter_that_replies_to_fakes(monkeypatch):
     monkeypatch.setattr(rr, "draft", replies_anyway)
     _, wrong = _grade("dev-a")
     assert any(w[1] == "reply_to_a_suspected_fake" for w in wrong)
+
+
+@pytest.mark.parametrize("sign", ["₹", "₩", "₽", "₱", "₪", "₿", "฿", "₫", "﷼"])
+def test_every_currency_sign_routes(sign):
+    assert rr.draft(review(text=f"Five hundred {sign} now.", stars=1)).route_to_owner
