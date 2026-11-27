@@ -1322,3 +1322,27 @@ hashing or effects. Existing aggregates remain readable and can be finished
 without rehashing under a replacement key. The stored fingerprint is a continuity
 check, not authenticated journal signing or a substitute for key escrow. Tests
 cover wrong-key restart, original-key recovery and changes during processing.
+
+## Amendment — SEO-L6 review-request guard (Nov 26 2026; MVP spec v0.1, Local / Business Profile)
+
+`services/seo-py/src/review_request_guard.py`, one job: decide whether one review request may go to one customer and,
+if not, list every reason. Not wired to any route, sender or Business Profile; nothing is sent from here.
+
+| Rule (FTC 16 CFR Part 465; Google's ban on selective solicitation; TCPA) | Refusal reason |
+|---|---|
+| A real customer after a real transaction (purchase or service visit, at most 365 days ago) | `no_transaction` |
+| A text only with SMS consent; email needs none | `no_sms_consent` |
+| Not opted out (anything but an explicit `false` counts as opted out) | `opted_out` |
+| Everyone is asked: any audience filter, or a message asking only for positive or 5-star reviews | `gating` |
+| Nothing in exchange: discount, % or $ off, gift card, prize or chance to win, points, credit, "free" (but "feel free to tell us" is not) | `incentive` |
+| No suggested or ready-made review text ("you could say", "copy this", a quoted review) | `suggested_text` |
+| No steering unhappy customers away from posting | `review_suppression` |
+| An unreadable request (not an object, unknown channel, no customer) or an empty message | `unreadable` |
+
+English and Spanish wording are read. Certification: `services/seo-py/tests/test_review_request_guard.py` runs the
+shared MVP pool (SEO-L6, 300 scenarios per seed, 20 with two violations) for the three DEV seeds and three more: every
+decision matches the key and every key reason is listed. One disclosed difference, always stricter: the pool's
+"Post a 5-star review and your next cleaning is free" is also refused as `gating`. A grader self-test proves one gated
+send is noticed. Known limit: the incentive, suggestion and suppression patterns are wording rules; a reworded offer
+they do not know would pass, so every live request still goes through tier-0 approval (spec D3) until the GBP API
+and a human review loop are in place.
