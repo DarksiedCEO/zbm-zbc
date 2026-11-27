@@ -663,3 +663,28 @@ arbitrary object that says "landline" but compares equal to "mobile" is never te
 
 AEGIS Inquisitor round 10 on e0a46247 (RR-F2): the plain-data rule covers keys too: a record key that is not plain
 text (an object that hashes like "line_type" and shadows it after the record is built) makes the record unreadable.
+
+59 s after 21:00; the clock path already gives that minute up. Regression tests: "AEGIS round 4".
+
+(RR-F3 commit), which anyone can rerun.
+deadline and message class matches the planted key. A grader self-test proves one wrong text is noticed. 10 of 10
+planted mutants killed.
+
+## Amendment — RR-F4 warm-transfer router (Nov 26 2026; MVP spec v0.1, front-desk team)
+
+`services/service-py/src/transfer_router.py`, one job: when the pack says a live caller needs a human, decide who to
+ring (`plan`) and turn what happened into the outcome (`resolve`): `connected` (to whom, after the whisper summary),
+`fallback_message_and_text_back`, or `caller_hung_up_log_and_text_back`. Nothing is dialled from here.
+
+| Rule | Behaviour |
+|---|---|
+| Hours and on-call | Outside business hours (anything but an explicit `true`) or with nobody on call: straight to the fallback, nobody rung |
+| Ringing | Simultaneous for everyone on call (Nov 26 ruling), duplicates rung once; a sequential plan is rung at once too and noted |
+| 30 s | A ring timeout above 30 s, or one that cannot be read, is cut to 30 s; every outcome lands within it |
+| Who connects | The first in the on-call order who answers live; never someone not on call |
+| Whisper | Required to connect; a missing one still connects (the caller is never held for it) and is recorded (`whisper_missing`) |
+| No dropped caller | Any unreadable outcome is "no answer", so every path ends connected or in a fallback; fallbacks and late answers ask RR-F2 for a text-back (which still applies consent and quiet hours) |
+
+Certification: `services/service-py/tests/test_transfer_router.py` runs the shared MVP pool (F4, 200 cases per seed)
+for the three DEV seeds and three more: path, person, whisper requirement, text-back and the 30 s limit match the key
+on every case. A grader self-test proves one dropped caller is noticed. 9 of 9 planted mutants killed.
