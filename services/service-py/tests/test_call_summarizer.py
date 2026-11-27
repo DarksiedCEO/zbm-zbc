@@ -28,13 +28,18 @@ def tr(*caller, agent=None, conf=0.95):
     return {"transcript_id": "tr-1", "turns": turns}
 
 
+def ok(name):
+    """The receptionist's confirmation line: a name is reported only when it is confirmed (AEGIS F3 round 3)."""
+    return [f"Let me confirm: {name}."]
+
+
 def low(text, conf=0.4):
     return {"speaker": "caller", "confidence": conf, "text": text}
 
 
 def test_the_key_facts_come_from_the_caller():
-    s = cs.summarize(tr("Hi, I'd like to book a drain cleaning.", "My name is Ana Reyes.", "Reach me at 602 555 0101."),
-                     PACK)
+    s = cs.summarize(tr("Hi, I'd like to book a drain cleaning.", "My name is Ana Reyes.", "Reach me at 602 555 0101.",
+                        agent=ok("Ana Reyes")), PACK)
     assert (s.name, s.callback_number, s.need, s.urgency) == ("Ana Reyes", "+16025550101", "repair", "routine")
     assert "Ana Reyes" in s.text and "+16025550101" in s.text
 
@@ -43,7 +48,7 @@ def test_the_key_facts_come_from_the_caller():
                                   "It's Ana Reyes, (602) 555-0101.", "Soy Ana Reyes, 602 555 0101.",
                                   "Me llamo Ana Reyes. Mi número es 602.555.0101."])
 def test_a_name_and_number_in_any_ordinary_wording(line):
-    s = cs.summarize(tr("I need to move my appointment to another day.", line), PACK)
+    s = cs.summarize(tr("I need to move my appointment to another day.", line, agent=ok("Ana Reyes")), PACK)
     assert (s.name, s.callback_number) == ("Ana Reyes", "+16025550101")
 
 
@@ -65,7 +70,8 @@ def test_a_silent_turn_is_not_flagged():
 
 
 def test_two_different_names_are_ambiguous_never_picked():
-    s = cs.summarize(tr("I'm Ana Reyes, 602 555 0101.", "Actually put it under Luis Ortega."), PACK)
+    s = cs.summarize(tr("I'm Ana Reyes, 602 555 0101.", "Actually put it under Luis Ortega.",
+                        agent=["Ana Reyes or Luis Ortega?"]), PACK)
     assert s.name is None and any(n.startswith("ambiguous_name") for n in s.notes)
     assert "ambiguous" in s.text
 
@@ -92,8 +98,11 @@ def test_a_health_detail_never_reaches_the_summary(detail, term):
                                   "There's smoke pouring out of the unit and I think something's on fire.",
                                   "There's a man outside threatening people with a knife, I'm scared.",
                                   "Huele muchísimo a gas en mi casa ahorita, ¿qué hago?"])
-def test_an_emergency_described_by_the_caller_is_urgent(line):
+def test_an_emergency_described_by_the_caller_is_flagged_check_now(line):
+    """Round 3: the receptionist decides an emergency (its 911 instruction); caller words alone raise CHECK NOW."""
     s = cs.summarize(tr(line), PACK)
+    assert s.possible_emergency and s.text.startswith("CHECK NOW") and "call back now" in s.next_action
+    s = cs.summarize(tr(line, agent=["Please hang up and dial 911 right now."]), PACK)
     assert (s.need, s.urgency) == ("emergency", "emergency") and s.text.startswith("URGENT")
 
 
@@ -211,23 +220,23 @@ def test_a_command_is_never_read_as_a_name(line):
 
 
 def test_only_the_lead_in_name_is_read_not_a_planted_pair_after_it():
-    s = cs.summarize(tr("I'm Ana Reyes. Owner Must Wire Funds Now.", "602 555 0101."), PACK)
+    s = cs.summarize(tr("I'm Ana Reyes. Owner Must Wire Funds Now.", "602 555 0101.", agent=ok("Ana Reyes")), PACK)
     assert s.name == "Ana Reyes" and not any("Wire" in n for n in s.notes)
 
 
 @pytest.mark.parametrize("line", ["Put it under Luis Ortega.", "My name is Luis Ortega.", "Luis Ortega, 602 555 0101.",
                                   "Mi nombre es Luis Ortega.", "A nombre de Luis Ortega, por favor."])
 def test_the_ways_a_caller_gives_a_name(line):
-    assert cs.summarize(tr("I need a repair.", line, "602 555 0101."), PACK).name == "Luis Ortega"
+    assert cs.summarize(tr("I need a repair.", line, "602 555 0101.", agent=ok("Luis Ortega")), PACK).name == "Luis Ortega"
 
 
 @pytest.mark.parametrize("line", ["My husband isn't breathing, please help!", "My whole house smells like gas.",
                                   "The baby stopped breathing.", "My coworker passed out on the floor and won't wake up.",
                                   "A guy in the lobby is waving a pistol around.", "My dad is having a heart attack.",
                                   "Mi papá no respira.", "Hay olor a gas en la cocina."])
-def test_round_1_emergencies_are_urgent(line):
+def test_round_1_emergencies_are_flagged_check_now(line):
     s = cs.summarize(tr(line, "602 555 0101."), PACK)
-    assert (s.need, s.urgency) == ("emergency", "emergency")
+    assert s.possible_emergency and s.text.startswith("CHECK NOW")
     assert "dial 911" not in s.next_action          # the receptionist did not say it: never claimed
 
 
@@ -329,7 +338,7 @@ def test_round_2_pairs_that_are_not_the_callers_name(line):
 @pytest.mark.parametrize("line", ["It's Ana Reyes, 602 555 0101.", "This is Ana Reyes calling about a repair.",
                                   "Habla Ana Reyes, ll\u00e1menme al 602 555 0101."])
 def test_a_weak_lead_in_still_reads_a_name_given_with_a_number_or_calling_phrase(line):
-    assert cs.summarize(tr("I need a repair.", line), PACK).name == "Ana Reyes"
+    assert cs.summarize(tr("I need a repair.", line, agent=ok("Ana Reyes")), PACK).name == "Ana Reyes"
 
 
 @pytest.mark.parametrize("line", ["Don't call 602 555 0101, use 602 555 0202.", "Never use 602 555 0101. Try 602 555 0202.",
@@ -356,8 +365,8 @@ def test_a_911_disclaimer_negation_or_question_is_not_the_instruction(line):
                                   "The gas is leaking in the basement.", "I smell natural gas.",
                                   "My son is having a seizure right now.", "I think my dad is having a stroke.",
                                   "The fire pit spread and the fence is burning.", "He's barely breathing."])
-def test_round_2_emergencies_are_urgent(line):
-    assert cs.summarize(tr(line, "602 555 0101."), PACK).urgency == "emergency"
+def test_round_2_emergencies_are_flagged_check_now(line):
+    assert cs.summarize(tr(line, "602 555 0101."), PACK).possible_emergency
 
 
 @pytest.mark.parametrize("line", ["My furnace won't fire up.", "Can you sharpen my kitchen knife?",
@@ -390,6 +399,94 @@ def test_a_huge_integer_confidence_is_low_not_an_error():
 
 
 def test_a_pack_category_naming_a_condition_is_not_spoken():
-    s = cs.summarize(tr("I'd like to book an appointment.", "I'm Ana Reyes, 602 555 0101."),
+    s = cs.summarize(tr("I'd like to book an appointment.", "I'm Ana Reyes, 602 555 0101.", agent=ok("Ana Reyes")),
                      {"services": {}, "reason_categories": ["allergy_testing", "reschedule"]})
     assert s.name == "Ana Reyes" and "allerg" not in s.text.lower()
+
+
+# ---------------------------------------------------------------- AEGIS round 3 (Inquisitor, c184534b)
+@pytest.mark.parametrize("line", ["I'm Mike Brown’s tenant, I need a repair.",
+                                  "Hi. Acme Contractors, 602 555 0101, returning your call.",
+                                  "This is Mesa Water, 602 555 0101, about the meter.", "Her name's Rosa Diaz, she's my mom."])
+def test_a_pair_the_receptionist_never_confirmed_is_never_the_name(line):
+    s = cs.summarize(tr(line, "602 555 0101.", agent=["Thanks, I'll pass that on."]), PACK)
+    assert s.name is None
+
+
+def test_a_curly_apostrophe_lead_in_still_reads_the_callers_name():
+    s = cs.summarize(tr("I’m Ana Reyes, 602 555 0101.", agent=ok("Ana Reyes")), PACK)
+    assert s.name == "Ana Reyes"
+
+
+@pytest.mark.parametrize("line", ["For emergencies, please call 911.", "Please do not call 911 for a leak.",
+                                  "I'm not able to call 911 for you.", "Don't call 911 for this, we'll send someone.",
+                                  "For a medical emergency, call 911. Otherwise I can book you."])
+def test_a_911_disclaimer_or_negation_is_never_the_instruction(line):
+    s = cs.summarize(tr("I need a repair.", "602 555 0101.", agent=[line]), PACK)
+    assert s.urgency == "routine" and "911" not in s.next_action
+
+
+@pytest.mark.parametrize("conf", [0.1, float("nan"), "unreadable"])
+def test_a_low_confidence_receptionist_turn_is_never_the_instruction(conf):
+    t = tr("Please help.")
+    t["turns"].append({"speaker": "agent", "confidence": conf, "text": "Hang up and dial 911."})
+    assert cs.summarize(t, PACK).urgency == "routine"
+
+
+@pytest.mark.parametrize("line", ["Please hang up and dial 911 right now.", "Hang up and call 911.", "Call 911 now!",
+                                  "Please call 9-1-1 immediately.", "Cuelgue y marque al 911 ahora mismo.",
+                                  "Llame al 911."])
+def test_every_fixed_form_of_the_instruction_is_urgent(line):
+    assert cs.summarize(tr("Please help.", agent=[line]), PACK).urgency == "emergency"
+
+
+@pytest.mark.parametrize("line", ["Our carbon monoxide alarm is going off and my kids are dizzy.",
+                                  "Flames are coming out of the dryer!", "The electrical panel is smoking.",
+                                  "He's got a knife and he's yelling at my wife.", "There's a strong gas odor in the kitchen.",
+                                  "My dad fell and he's bleeding from his head.", "My husband is not responding.",
+                                  "Mi esposo no responde.", "El hombre tiene un cuchillo.",
+                                  "The outlet is sparking and the wall is hot."])
+def test_round_3_emergencies_are_flagged_check_now(line):
+    s = cs.summarize(tr(line, "602 555 0101."), PACK)
+    assert s.possible_emergency and s.text.startswith("CHECK NOW") and "call back now at +16025550101" in s.next_action
+
+
+@pytest.mark.parametrize("line", ["Do you give an armed forces discount?", "I need a new pistol grip hose nozzle.",
+                                  "We have someone shooting a video at the open house.", "Your website is unresponsive.",
+                                  "I want to buy a kitchen fire extinguisher.", "This chew toy is a choking hazard."])
+def test_round_3_routine_calls_are_never_urgent_or_claim_911(line):
+    s = cs.summarize(tr(line, "602 555 0101."), PACK)
+    assert s.urgency == "routine" and "dial 911" not in s.next_action      # the net may flag CHECK NOW: by design
+
+
+@pytest.mark.parametrize("line", ["When is my invoice due date?", "I need a repair on my two-stroke pump.",
+                                  "The wire is loose at the terminal block.", "Can you clean my kidney-shaped pool?",
+                                  "We have a chronic leak under the sink.", "There's a depression in the lawn by the drain.",
+                                  "Can you transplant the tree near the sewer line?", "Perdí mi riñonera en su tienda.",
+                                  "Dutch elm disease killed the tree over my pipe."])
+def test_round_3_ordinary_words_are_not_a_health_need(line):
+    assert cs.summarize(tr(line, "602 555 0101."), PACK).need != "treatment_question"
+
+
+@pytest.mark.parametrize("line", ["I have depression, is the treatment safe?", "I had a stroke last year.",
+                                  "My due date is in March, can I still come in?"])
+def test_a_personal_health_matter_with_an_ordinary_word_is_still_a_health_need(line):
+    s = cs.summarize(tr("I want to book a botox consult.", line, "602 555 0101."), SPA)
+    assert s.need == "treatment_question"
+
+
+def test_a_long_run_of_greetings_returns_a_summary():
+    s = cs.summarize(tr("hello? " * 200 + "is anyone there"), PACK)
+    assert s.need in ("unclear", "long_silence")
+
+
+@pytest.mark.parametrize("marker", ["[Silence]", "[SILENCE]", "[silence 8s]"])
+def test_a_silence_marker_in_any_case_is_not_flagged(marker):
+    s = cs.summarize(tr("Hello?", {"speaker": "caller", "confidence": 0.0, "text": marker}), PACK)
+    assert not s.low_confidence_flagged
+
+
+@pytest.mark.parametrize("cat", ["vasectomy_consult", "colonoscopy_prep", "iud_insertion", "ozempic_refill"])
+def test_an_unknown_pack_category_is_never_spoken(cat):
+    s = cs.summarize(tr("I'd like to book an appointment.", "602 555 0101."), {"reason_categories": [cat]})
+    assert cat.split("_")[0] not in s.text.lower() and "appointment request" in s.text

@@ -12,20 +12,24 @@ Rules (spec v0.1, the front-desk shared rules, the Nov 26 spec-freeze rulings):
   later one wins only when a correction cue sits between them ("no wait", "sorry", "actually", "I mean", "perdón",
   "mejor", "quiero decir"); two numbers with no cue ("my cell is ... and my office is ...") are ambiguous: no callback
   number is reported and the owner sees ``ambiguous_number``.
-- A name is read only where the caller gives their own: right after a lead-in ("I'm", "this is", "my name is", "put it
-  under", "soy", "habla", "me llamo" ...) or as "First Last" opening a sentence and followed straight by a phone
-  number ("Ana Reyes, 602 555 0101"). Any other capitalised pair (a city, a landlord, a business) is never a name, nor
-  a pair holding a command word ("Approve Refund"), a place or business word, or a health word. A name is reported
-  only when exactly one was given; two different names are ambiguous, never picked between.
+- A name is reported only when the caller gave it AND the receptionist confirmed it: the caller says it after a
+  lead-in ("I'm", "my name is", "put it under", "soy", "me llamo" ...; "this is", "it's", "habla" only before a number
+  or a calling phrase) or as "First Last" opening a sentence before a number, and a trusted receptionist turn repeats
+  it ("Let me confirm: Ana Reyes ..."). A pair nobody confirmed (a landlord, a business, a mother, a city) is never a
+  name (AEGIS F3 round 3: word lists alone kept missing them). Never a pair holding a command, place, business or
+  health word. Exactly one confirmed name, or none; two are ambiguous, never picked between.
 - No health detail ever reaches the summary: the summary is built only from the name, the number, a category from
   the fixed list and the urgency, never from the caller's free text, and it is checked against the health lexicon
   (whole words and word stems, so "archive" is not "hiv"); a name that would carry a health word is left out, and the
   summary is still returned.
-- Urgency is "emergency" when the receptionist gave the 911 instruction (a dial / call / marque verb with 911, never
-  911 inside a phone number or an address) or the caller described an emergency (someone not breathing, collapsed,
-  passed out or having a heart attack, gas, smoke or fire, a weapon, someone threatening people); equipment and chores
-  ("fire alarm inspection", "smoke detector", "caulk gun", "bleeding the radiator") are not emergencies. Otherwise
-  "routine".
+- Urgency is "emergency" only when a trusted receptionist turn gave the 911 instruction in one of its fixed forms
+  ("Please hang up and dial 911 right now.", "Cuelgue y marque al 911 ahora mismo." ...); a disclaimer, a negation, a
+  question or a low-confidence turn is not the instruction. The receptionist decides an emergency on the call; the
+  summary reports what it did. Separately, and on purpose too broadly, any caller wording that might describe one
+  (fire, smoke, gas, a smell, sparks, a weapon, blood, breathing, fainting, a seizure ... in English or Spanish) sets
+  ``possible_emergency``: the text starts "CHECK NOW" and the owner is told to call back now. That net over-flags
+  ("gun safe", "fire my plumber") by design: a word list cannot tell an emergency apart (AEGIS F3 round 3), so the
+  summary never calls a call routine-and-safe on its own say-so; it only flags. Otherwise "routine".
 - A transcript that is not an object, or has no id or no turn list, is refused (ValueError). A confidence that is not
   a finite number from 0 to 1 (NaN, infinity, text) counts as low: the turn is flagged, never used.
 - The need is one label: the pack's own category (its booking category for a booking, ``treatment_question`` for a
@@ -43,7 +47,15 @@ from fractions import Fraction
 from dataclasses import dataclass, field
 from typing import Optional
 
+_APOSTROPHES = dict.fromkeys(map(ord, "\u2018\u2019\u201b\u0060\u00b4\u02b9\u02bb\u02bc\u02bd\u02be\u02c8\u02ca\u02cb"
+                                      "\u2032\u2035\u05f3\ua78c\uff07\uff40\u0384\u055a\u1fbd\u1fbf\u1fef\u1ffd"), "'")
 LOW_CONFIDENCE = Fraction(3, 5)      # 0.6, kept exact: this service has no float literals (guardrail test)
+# Pack categories that may be spoken in the summary text as written (every category the shipped packs use); any other
+# pack category is spoken as "appointment request" (AEGIS F3 round 3: a pack could name a procedure).
+KNOWN_PACK_LABELS = frozenset({"billing", "book_appointment", "book_consult", "catering", "claim", "complaint", "drain",
+                               "existing_case_update", "hours", "insurance_question", "legal_question", "maintenance",
+                               "new_case", "new_quote", "policy_change", "pricing", "quote", "repair", "reschedule",
+                               "reservation", "sales_inquiry", "service_appointment", "status_check", "booking"})
 FIXED_NEEDS = ("emergency", "complaint", "existing_customer", "reschedule", "hours", "vendor", "wrong_number",
                "spam_call", "long_silence", "pricing", "pricing_question", "treatment_question", "unclear")
 
@@ -64,7 +76,7 @@ _WORD = r"[A-ZÁÉÍÓÚÑÜ][a-záéíóúñü'\-]+"
 # where a caller gives their own name: a strong lead-in, then First Last; or a weak lead-in ("this is", "it's",
 # "habla") only when the name is followed straight by a number or a calling phrase (AEGIS F3 round 2: "It's Christmas
 # Eve", "This is Long Beach")
-_LEAD_NAME = re.compile(rf"(?:\bI'?m|\bI am|\bmy name is|\bthe name is|\bname'?s|\bput it under|\bunder the name(?: of)?|"
+_LEAD_NAME = re.compile(rf"(?:\bI'?m|\bI am|\bmy name is|\bthe name is|\bput it under|\bunder the name(?: of)?|"
                         rf"\bme llamo|\bsoy|\bmi nombre es|\ba nombre de|\bp[oó]ngalo a nombre de)\s+({_WORD} {_WORD})"
                         rf"(?![\w'])", re.IGNORECASE)
 _WEAK_LEAD_NAME = re.compile(rf"(?:\bit'?s|\bit is|\bthis is|\bhabla)\s+({_WORD} {_WORD}),?\s+(?=\(?[2-9]\d{{2}}|"
@@ -96,7 +108,13 @@ _NOT_NAME_WORD = {
     "doctor", "dr", "sir", "madam", "ma'am", "god", "jesus", "lord", "happy", "good", "great", "merry", "buenos",
     "buenas", "feliz",
 }
-_GREETING = re.compile(r"^(?:\W*(?:hello|hi|hey|hola|bueno|al[oó]|yes|s[ií]|okay|ok)\W*)+$", re.IGNORECASE)
+_GREETINGS = frozenset({"hello", "hi", "hey", "hola", "bueno", "alo", "aló", "yes", "si", "sí", "okay", "ok"})
+
+
+def _is_greeting(text: str) -> bool:
+    """Only greeting words (a word scan, linear in the text: the old nested pattern backtracked for minutes)."""
+    words = re.findall(r"\w+", text.lower())
+    return bool(words) and all(w in _GREETINGS for w in words)
 # An emergency is read only in context: a fire burning, smoke filling, someone holding a weapon, someone not breathing.
 # Bare "fire", "smoke", "knife", "gun", "shooting" are not enough (AEGIS F3 round 2: "furnace won't fire up", "sharpen
 # my knife", "gun safe", "shooting a video", "smoke-free", "fire my plumber").
@@ -116,9 +134,20 @@ _EMERGENCY = re.compile(
     r"\bdesmay|\bno est[aá] respirando|\bno respira|\bdej[oó] de respirar|\bsin respirar|\bataque (?:al|card)|"
     r"\bhuele .*gas|\bolor a gas|\bfuga de gas|\bsale humo|\bmucho humo|\bhumo (?:por|en) todas|\bse est[aá] quemando|"
     r"\bincendio|\bfuego\b|\bcon un (?:cuchillo|arma|pistola)|\bpistola|\bdisparo|\bamenazando a", re.IGNORECASE)
-# the 911 instruction: an imperative in a sentence with no condition, negation or question
-_SAID_911 = re.compile(r"\b(?:dial|call|calling|ring|llame|marque|llamar|marcar|hang up and dial)(?:\s+(?:al|el))?\s+"
-                       r"(?:9-1-1|911)(?![\d\-])", re.IGNORECASE)
+# A deliberately broad net: any word that might be part of describing an emergency. It only ever ADDS a flag.
+_EMERGENCY_WORDS = re.compile(
+    r"\b(?:fire|flame|burn|smok|spark|gas\b|odou?r|smell|fume|carbon monoxide|co alarm|co detector|explo|knife|gun|"
+    r"weapon|armed|shoot|shot|blood|bleed|breath|chok|unconscious|not respond|unresponsive|faint|collaps|seizure|"
+    r"stroke|heart|chest|overdos|dizzy|hurt|injur|emergenc|911|9-1-1|ambulance|police|threat|attack|electrocut|"
+    r"drown|fuego|llama[s]?\b|humo|incendi|quem|chispa|olor|huele|sangr|respir|desmay|cuchillo|pistola|arma\b|"
+    r"disparo|herid|ayuda|emergencia|ambulancia|polic|amenaz|no responde|inconscien|ataque|explot|mareado)",
+    re.IGNORECASE)
+# the 911 instruction, in its fixed forms only (a whole sentence)
+_SAID_911 = re.compile(
+    r"(?:please,?\s+)?(?:hang up(?:\s+now)?,?\s+and\s+)?(?:dial|call)\s+(?:9-1-1|911)"
+    r"(?:\s+(?:right now|now|immediately|right away))?(?:,?\s+please)?[.!]?|"
+    r"(?:por favor,?\s+)?(?:cuelgue(?:\s+ahora)?\s+y\s+)?(?:marque|llame)(?:\s+al)?\s+(?:9-1-1|911)"
+    r"(?:\s+(?:ahora mismo|ahora|de inmediato|ya))?(?:,?\s+por favor)?[.!]?", re.IGNORECASE)
 _HEALTH = re.compile(
     r"\b(?:pregnan|embaraz|blood thinner|anticoagul|diabet|seizure|convulsi|c[aá]ncer|hiv\b|vih\b|aids\b|sida\b|"
     r"medicat|medicament|surger|cirug|allerg|al[eé]rgi|crohn|sclerosis|esclerosis|disease|enfermedad|"
@@ -131,6 +160,27 @@ _HEALTH = re.compile(
     r"chronic|cr[oó]nic|terminal|hospice|psychiatr|psiqui|schizo|esquizo|ptsd|adhd|tdah|ocd\b|"
     r"fibromyalg|migraine|migra[ñn]a|cholesterol|colesterol|thyroid|tiroides|herpes|std\b|sti\b|ets\b)",
     re.IGNORECASE)
+# Health words that also have ordinary meanings ("depression in the lawn", "due date on the invoice", "two-stroke",
+# "Dutch elm disease"): a health NEED only right after a personal word (I, my, me, tengo ...). They still keep a name
+# or label out of the text wherever they appear (_HEALTH).
+_HEALTH_PLAIN = re.compile(r"\b(?:chronic|cr[oó]nic|terminal|transplant|trasplante|kidney|ri[ñn][oó]n|due date|"
+                           r"stroke|derrame|disease|enfermedad|depression|depressed|anxiety|ansiedad|tumou?r|hernia|"
+                           r"aids|std|sti|ets|aborto|fertility|fertilidad|trimester|hospice|autism|autistic)",
+                           re.IGNORECASE)
+_PERSONAL = re.compile(r"\b(?:i|i'm|i am|i have|i've|i had|i've had|my|me|mi|tengo|tuve|tomo|estoy|soy|he has|she has|"
+                       r"he had|she had|he's|she's)\s+(?:a\s+|an\s+)?$", re.IGNORECASE)
+
+
+def _health_need(text: str) -> bool:
+    for m in _HEALTH.finditer(text):
+        if not _HEALTH_PLAIN.fullmatch(m.group(0)):
+            return True
+        whole = re.match(r"[\w\-]*", text[m.end():]).group(0) == ""      # "kidney-shaped", "riñonera" are not it
+        if whole and _PERSONAL.search(text[max(0, m.start() - 40):m.start()]):
+            return True
+    return False
+
+
 _RULES = (   # (label, pattern) in precedence order; the first that matches a trusted caller turn wins
     ("spam_call", r"congratulations|qualif(y|ies) for|free government grant|press one|felicidades|califica para|"
                   r"beca del gobierno|marque uno"),
@@ -159,10 +209,12 @@ class Summary:
     corrected_value_used: bool
     text: str
     notes: tuple = field(default_factory=tuple)
+    possible_emergency: bool = False  # caller wording that might describe one, with no 911 instruction: CHECK NOW
 
 
 def _fold(text: str) -> str:
-    return unicodedata.normalize("NFKC", text)
+    """NFKC, then every apostrophe look-alike as "'" (before and after NFKC: some only appear after it)."""
+    return unicodedata.normalize("NFKC", text.translate(_APOSTROPHES)).translate(_APOSTROPHES)
 
 
 def _need(trusted: list[str], pack: dict, emergency: bool, any_words: bool) -> str:
@@ -170,7 +222,7 @@ def _need(trusted: list[str], pack: dict, emergency: bool, any_words: bool) -> s
         return "emergency"
     joined = " \n ".join(_fold(t) for t in trusted)
     low = joined.lower()
-    if _HEALTH.search(joined):
+    if _health_need(joined):
         return "treatment_question"
     for label, pat in _RULES:
         if re.search(pat, joined, re.IGNORECASE):
@@ -183,23 +235,15 @@ def _need(trusted: list[str], pack: dict, emergency: bool, any_words: bool) -> s
                 cats = [c for c in raw if isinstance(c, str) and c] if isinstance(raw, (list, tuple)) else []
                 return cats[0] if cats else "booking"
             return label
-    if not any_words or all(_GREETING.fullmatch(t.strip()) for t in trusted):
+    if not any_words or all(_is_greeting(t) for t in trusted):
         return "long_silence"      # nothing but a greeting into silence
     return "unclear"
 
 
-_NOT_AN_INSTRUCTION = re.compile(r"\b(?:if|in case|whenever|should|no need|don'?t (?:have|need)|do not (?:have|need)|"
-                                 r"not necessary|did you|have you|has anyone|were you|ever|si (?:es|hay|tiene)|no tiene que|"
-                                 r"no necesita|ya llam[oó])\b|\?", re.IGNORECASE)
-
-
 def _said_911(agent_text: str) -> bool:
-    """The receptionist told the caller to call 911: a sentence with the instruction and no condition, negation or
-    question ("If this is ever an emergency, call 911", "No need to call 911", "Did you call 911?" are not)."""
-    for sentence in re.split(r"(?<=[.!?¿¡])\s+|\n", agent_text):
-        if _SAID_911.search(sentence) and not _NOT_AN_INSTRUCTION.search(sentence):
-            return True
-    return False
+    """The receptionist told the caller to call 911: one sentence that is exactly one of the instruction's fixed forms
+    ("For emergencies, please call 911", "Do not call 911 for a leak", "Did you call 911?" are not)."""
+    return any(_SAID_911.fullmatch(sentence.strip()) for sentence in re.split(r"(?<=[.!?])\s+|\n", agent_text))
 
 
 def _confidence(raw: object) -> Fraction:
@@ -241,7 +285,9 @@ def _callback(trusted: list[str], notes: list[str]) -> tuple[Optional[str], bool
     return distinct[-1][0], len({d[0] for d in distinct}) > 1
 
 
-def _names(trusted: list[str]) -> list[str]:
+def _names(trusted: list[str], confirmations: Optional[list[str]] = None) -> list[str]:
+    """Names the caller gave; with ``confirmations`` (the trusted receptionist turns), only those it repeated."""
+    said = " \n ".join(_fold(x).casefold() for x in confirmations) if confirmations is not None else None
     names: list[str] = []
     for x in trusted:
         x = _fold(x)
@@ -253,6 +299,8 @@ def _names(trusted: list[str]) -> list[str]:
                 continue                   # the lead-in match is case-blind; the name itself must be capitalised
             if any(w.casefold() in _NOT_NAME_WORD for w in words) or _HEALTH.search(cand):
                 continue
+            if said is not None and not re.search(rf"(?<!\w){re.escape(cand.casefold())}(?!\w)", said):
+                continue                   # nobody confirmed it: a landlord, a business, a mother is never a name
             if cand not in names:
                 names.append(cand)
     return names
@@ -275,20 +323,28 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
             raise ValueError("every turn needs a text")
         (caller if t.get("speaker") == "caller" else agent).append((_confidence(t.get("confidence")),
                                                                     t.get("text") or ""))
-    spoken = [(c, x) for c, x in caller if x.strip() and not re.fullmatch(r"\[silence[^\]]*\]", x.strip())]
+    spoken = [(c, x) for c, x in caller
+              if x.strip() and not re.fullmatch(r"\[silence[^\]]*\]", x.strip(), re.IGNORECASE)]
     trusted = [x for c, x in spoken if c >= LOW_CONFIDENCE]
     flagged = any(c < LOW_CONFIDENCE for c, _ in spoken)
     if flagged:
         notes.append("low_confidence_turn_not_used")
 
     callback, corrected = _callback(trusted, notes)
-    names = _names(trusted)
+    agent_trusted = [x for c, x in agent if c >= LOW_CONFIDENCE]       # a receptionist turn is checked too
+    names = _names(trusted, agent_trusted)
+    if not names and _names(trusted):
+        notes.append("name_not_confirmed")
     name = names[0] if len(names) == 1 else None
     if len(names) > 1:
         notes.append("ambiguous_name:" + "|".join(names))
 
-    said_911 = any(_said_911(_fold(x)) for _, x in agent)
-    emergency = said_911 or any(_EMERGENCY.search(_fold(x)) for x in trusted)
+    said_911 = any(_said_911(_fold(x)) for x in agent_trusted)
+    emergency = said_911
+    possible = not emergency and any(_EMERGENCY.search(_fold(x)) or _EMERGENCY_WORDS.search(_fold(x))
+                                     for x in trusted)
+    if possible:
+        notes.append("possible_emergency")
     confirmed = ["+1" + "".join(m) for _, x in agent for m in _NUM.findall(x)]
     if callback and confirmed and confirmed[-1] != callback:
         notes.append("confirmation_disagrees_with_caller")
@@ -296,8 +352,10 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
     urgency = "emergency" if emergency else "routine"
 
     if emergency:
-        action = ("Caller was told to hang up and dial 911; alert the owner now." if said_911 else
-                  "Caller described an emergency; alert the owner now.")
+        action = "Caller was told to hang up and dial 911; alert the owner now."
+    elif possible:
+        action = (f"The caller's words may describe an emergency and no 911 instruction was given; call back now"
+                  f"{' at ' + callback if callback else ''}.")
     elif need in ("spam_call", "wrong_number", "long_silence"):
         action = "No follow-up needed."
     elif callback:
@@ -308,13 +366,14 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
     def render(who_name: Optional[str]) -> str:
         who = who_name or ("caller (ambiguous name)" if len(names) > 1 else "caller (no name given)")
         label = need.replace("_", " ")
-        if _HEALTH.search(label):      # a pack category that names a condition ("allergy_testing") is not spoken
-            label = "treatment question"
-        return (f"{'URGENT: ' if emergency else ''}{who}"
+        if need not in FIXED_NEEDS and need not in KNOWN_PACK_LABELS or _HEALTH.search(label) or \
+                (pack.get("health_sensitive") is True and need not in FIXED_NEEDS):
+            label = "appointment request"   # a health pack's own category names are never spoken
+        return (f"{'URGENT: ' if emergency else 'CHECK NOW: ' if possible else ''}{who}"
                 f"{', ' + callback if callback else ''} - {label}. {action}"
                 f"{' A low-confidence turn was ignored.' if flagged else ''}")
     text = render(name)
     if _HEALTH.search(text):           # a name the filters missed: leave it out, never refuse the summary
         name, text = None, render(None)
         notes.append("name_withheld_health_term")
-    return Summary(tid, name, callback, need, urgency, action, flagged, corrected, text, tuple(notes))
+    return Summary(tid, name, callback, need, urgency, action, flagged, corrected, text, tuple(notes), possible)
