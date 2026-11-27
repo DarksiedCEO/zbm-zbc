@@ -557,3 +557,9 @@ AEGIS Inquisitor round 9 on 96301ba2 (RR-F5): client ids now fold apostrophe loo
 every Greek sigma as one (an upper-case name typed lower-case is one client); a reviewer name needs a letter that is
 not a modifier mark (tatweel, the Japanese long-vowel mark and similar no longer count) or a digit; the ADR row on
 client ids now says what the code does (every letter lower-cased, not only ASCII).
+
+AEGIS Inquisitor round 10 on cd44d89c (RR-F5): the client id now inverts the default too. A replay refuses (ValueError)
+a client id holding anything but visible letters (not modifier marks or blank fillers), digits, combining accents,
+spaces and a few punctuation marks: a blank letter that looks like a space, a symbol or a superscript is never read
+as a client. Invisibles are removed before accents are composed (an invisible between "e" and its accent no longer
+makes a second client); lunate sigmas fold with the others and a dotted capital I reads as "i".

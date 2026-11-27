@@ -167,18 +167,42 @@ def _ascii_digits(text: str) -> str:
 
 
 def normalise_client(raw: str) -> str:
-    """One client id, however it was typed upstream: NFC (not NFKC, so "acme2" and "acme\u00b2" stay two clients),
-    every invisible removed, dashes folded, trimmed, lower-cased letter by letter (\u00c9cole and \u00e9cole are one client;
-    not case-folded, so "strasse" and "stra\u00dfe" stay two clients; a letter whose lower case is longer than one
-    letter keeps its case)."""
-    folded = _strip_invisible(unicodedata.normalize("NFC", raw)).translate(_DASHES).translate(_APOSTROPHES)
+    """One client id, however it was typed upstream: every invisible removed, then NFC (not NFKC: "acme\u00b2" is not
+    "acme2"; a replay refuses such an id, see ``client_id_readable``), dashes and apostrophes folded, spaces collapsed,
+    trimmed, lower-cased letter by letter (\u00c9cole and \u00e9cole are one client; not case-folded, so "strasse" and
+    "stra\u00dfe" stay two clients); every Greek sigma one sigma and a dotted capital I is "i"."""
+    # invisibles go BEFORE composing, so one between a letter and its accent cannot keep them apart (AEGIS round 10)
+    folded = unicodedata.normalize("NFC", _strip_invisible(raw)).translate(_DASHES).translate(_APOSTROPHES)
     folded = re.sub(r"\s+", " ", folded).strip()   # any run of spaces (tab, NBSP, U+3000 ...) is one space (AEGIS round 8)
     # apostrophe look-alikes ("Joe\u2019s" typed by a phone) are one apostrophe, and every Greek sigma one sigma
     # ("\u039f\u0394\u039f\u03a3" and "\u03bf\u03b4\u03bf\u03c2" are one client) (AEGIS round 9)
+    folded = folded.translate(_SIGMAS)
     return "".join(c.lower() if len(c.lower()) == 1 else c for c in folded).replace("\u03c2", "\u03c3")
 
 
-_FILLERS = {"\u115f", "\u1160", "\u3164", "\uffa0"}     # Hangul fillers: letters by category, blank on screen
+# every Greek sigma, lunate ones included, is one sigma; a dotted capital I is "i" (AEGIS round 10)
+_SIGMAS = str.maketrans({"\u03f2": "\u03c3", "\u03f9": "\u03c3", "\u03c2": "\u03c3", "\u0130": "i"})
+_CLIENT_PUNCT = set(" -'&.,_/+#@()")
+
+
+def client_id_readable(raw: str) -> bool:
+    """A client id is made of letters a person can see (not modifier marks or blank fillers), digits, combining
+    accents on them, spaces and a few punctuation marks. Anything else (a blank letter that looks like a space, a
+    symbol) refuses the replay instead of risking one client read as two (AEGIS round 10: the inverted default)."""
+    text = unicodedata.normalize("NFC", _strip_invisible(raw))
+    for c in text:
+        cat = unicodedata.category(c)
+        if c in _CLIENT_PUNCT or c.isspace() or c in _DASHES_SET or c in _APOSTROPHE_SET:
+            continue
+        if cat in ("Lu", "Ll", "Lt", "Lo", "Nd", "Mn", "Mc") and c not in _FILLERS:
+            continue
+        return False
+    return True
+
+
+_FILLERS = {"\u115f", "\u1160", "\u3164", "\uffa0"}
+_DASHES_SET = set(map(chr, _DASHES))
+_APOSTROPHE_SET = set(map(chr, _APOSTROPHES))     # Hangul fillers: letters by category, blank on screen
 
 
 def _is_named(reviewer: object) -> bool:
@@ -294,6 +318,8 @@ class ConsentKeeper:
             raise ValueError(f"event {i}: t must be an integer")
         if not isinstance(e.get("client_id"), str) or not e["client_id"]:
             raise ValueError(f"event {i}: client_id is required")
+        if not client_id_readable(e["client_id"]) or not normalise_client(e["client_id"]):
+            raise ValueError(f"event {i}: client_id holds characters that are not letters, digits or plain marks")
         if kind == "send_attempt" and (not isinstance(e.get("send_id"), str) or not e["send_id"]):
             raise ValueError(f"event {i}: send_id is required")
         if kind == "opt_in" and e.get("source") is not None and not isinstance(e["source"], str):

@@ -363,8 +363,7 @@ def test_every_invisible_in_a_client_id_is_removed(mark):
                 send(6)]) == ("block", "opted_out")
 
 
-@pytest.mark.parametrize("a, b", [("strasse-dental", "straße-dental"), ("acme2", "acme²"),
-                                  ("k-plumbing", "\uff4b-plumbing")])
+@pytest.mark.parametrize("a, b", [("strasse-dental", "straße-dental"), ("k-plumbing", "\uff4b-plumbing")])
 def test_two_different_clients_never_merge(a, b):
     got = decide([ev("inbound_sms", 1, text="STOP", client=a), ev("opt_in", 5, consent="express_written", client=b),
                   send(9, sid="a", client=a)])
@@ -610,3 +609,30 @@ def test_a_real_reviewer_name_in_any_script_counts(name):
     events = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="Can I come at 4?"),
               ev("staff_review", 6, reviewer=name, ruling="not_an_opt_out"), send(7)]
     assert ck.ConsentKeeper().replay(events)[0].decision == "allow"
+
+
+def test_a_client_id_with_a_superscript_refuses_the_replay():
+    # round 10 inverted the default: a character that is not a letter, digit or plain mark refuses (never merges)
+    with pytest.raises(ValueError):
+        decide([ev("inbound_sms", 1, text="STOP", client="acme2"), ev("opt_in", 5, consent="express_written",
+                                                                       client="acme\u00b2"), send(9, sid="a", client="acme2")])
+
+
+# ---------------------------------------------------------------- AEGIS round 10 (Inquisitor, cd44d89c)
+@pytest.mark.parametrize("mark", ["\u200d", "\u200b", "\u2060", "\ufe0f", "\u034f"])
+def test_an_invisible_between_a_letter_and_its_accent_is_still_one_client(mark):
+    assert ck.normalise_client("Cafe" + mark + "\u0301 Rosa") == ck.normalise_client("Caf\u00e9 Rosa")
+    events = [ev("opt_in", 1, client="Caf\u00e9 Rosa", consent="express_written"),
+              ev("inbound_sms", 2, client="Caf\u00e9 Rosa", text="STOP"), send(3, client="Cafe" + mark + "\u0301 Rosa")]
+    assert ck.ConsentKeeper().replay(events)[0].decision == "block"
+
+
+@pytest.mark.parametrize("blank", ["\u3164", "\uffa0", "\u2800", "\u115f", "\u1160"])
+def test_a_blank_letter_in_a_client_id_refuses_the_replay(blank):
+    with pytest.raises(ValueError):
+        ck.ConsentKeeper().replay([ev("opt_in", 1, client="Acme" + blank + "Dental", consent="express_written")])
+
+
+@pytest.mark.parametrize("x, y", [("\u03f9AFE", "\u03c3afe"), ("\u03f2afe", "\u03c3afe"), ("\u0130stanbul Dental", "istanbul dental")])
+def test_lunate_sigma_and_dotted_capital_i_are_one_client(x, y):
+    assert ck.normalise_client(x) == ck.normalise_client(y)
