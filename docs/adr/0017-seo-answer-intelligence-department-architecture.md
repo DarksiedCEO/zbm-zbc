@@ -1440,7 +1440,7 @@ proposal the owner approves first.
 | Case | Verdict |
 |---|---|
 | Formatting only (name case, "&"/"and", punctuation, legal suffixes; street abbreviations and unit styles; phone punctuation, a leading 1, other scripts' digits; http/https/www; a full state name; ZIP+4), or the owner's own toll-free number | `correct` |
-| Listed closed (any status but "open", case aside) while the business is open / listed open while it is closed | `closed_listing` / `wrong_status` |
+| Listed closed (any status but "open", case aside; no status at all reads as open) while the business is open / listed open while it is closed | `closed_listing` / `wrong_status` |
 | Otherwise the first real difference, in this order | `wrong_name`, `wrong_address` (street, unit, city, state, ZIP), `wrong_phone` |
 | A different website | listed in `differences`, not a fault on its own; a missing website is not a fault |
 | A listing with no name, street or readable phone, or one that cannot be read at all | `unreadable` (never `correct`); the rest of the audit goes on |
@@ -1452,4 +1452,10 @@ listings each, about 5,400 listings per seed) for the three DEV seeds and three 
 the key. A grader self-test proves one missed fault is noticed. It uses the shared NAP keys (`nap.py`, hardened in SEO-L5
 AEGIS round 1: every script kept in names, trailing legal suffixes only, full state names, unit kinds).
 **Known limits:** a business that legitimately lists a second local number (a fax, a second line) shows `wrong_phone`
-unless the record carries it; names are compared exactly after formatting. Not yet reviewed by AEGIS at this commit.
+unless the record carries it; names are compared exactly after formatting.
+
+AEGIS round 1 for SEO-L4 (Nov 27 2026, Inquisitor on L5+L4 at 4ce895db, shared with SEO-L5 round 2): the NAP fixes
+above apply here too ("Mt"/"Mount", "St." as Saint, numeric ZIPs, "D.C."/"Nev.", any-script digits), so a correct
+listing is not reported wrong. A record that carries a street line AND a suite field now uses both (a suite that names
+its kind, "Ste 4" or "Floor 2", is used as written; a bare one is a suite); a suite that is neither text nor a number
+refuses the audit. The docstring now says what the code does: a listing with no status reads as open.

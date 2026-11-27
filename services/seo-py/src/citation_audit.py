@@ -8,8 +8,8 @@ Rules:
 - Formatting is never a fault (``nap``): case, "&" / "and", punctuation and legal suffixes in the name; street
   abbreviations and unit styles; phone punctuation and a leading 1; http / https / www and a trailing slash. The
   owner's own toll-free number, when the record has one, is a correct phone.
-- A listing marked closed (any status but "open", case and spaces aside, or no status) while the record says the
-  business is open is ``closed_listing``; a listing shown open while the record says it is closed is
+- A listing marked closed (any status but "open", case and spaces aside; a listing with no status at all reads as
+  open, since many directories carry none) while the record says the business is open is ``closed_listing``; a listing shown open while the record says it is closed is
   ``wrong_status``. Otherwise the first field that really differs names the fault, in this order: ``wrong_name``,
   ``wrong_address`` (street, unit, city, state or ZIP), ``wrong_phone``; ``differences`` lists every field that
   differs, so a listing with two faults shows both.
@@ -37,17 +37,29 @@ class CitationVerdict:
     proposed: dict              # field -> the record's value, for the owner to approve; empty when correct
 
 
+def _with_suite(street: str, suite: object) -> str:
+    """The record's street with its suite field: a suite that already names its kind ("Ste 4", "#4", "Floor 2") is
+    used as written, a bare one ("4") is a suite; a street that already ends in a unit keeps it (AEGIS L4 round 1)."""
+    if suite is None or (isinstance(suite, str) and not suite.strip()) or nap.street_key(street)[1] is not None:
+        return street
+    text = str(suite).strip()
+    if nap.street_key("1 x " + text)[1] is None:   # no unit word of its own
+        text = f"Suite {text}"
+    return f"{street}, {text}"
+
+
 def _record_street(rec: dict) -> str:
-    street = " ".join(str(rec.get(k) or "") for k in ("street_number", "street_name", "street_type")).strip()
-    if rec.get("suite"):
-        street += f", Suite {rec['suite']}"
-    return street
+    return " ".join(str(rec.get(k) or "") for k in ("street_number", "street_name", "street_type")).strip()
 
 
 def _record(rec: object) -> dict:
     if not isinstance(rec, dict):
         raise ValueError("the confirmed record must be an object")
     street = rec.get("street") if isinstance(rec.get("street"), str) else _record_street(rec)
+    suite = rec.get("suite")
+    if suite is not None and type(suite) not in (str, int):
+        raise ValueError("the confirmed record's suite must be text or a number")
+    street = _with_suite(street, suite)                # a street line plus a suite field: both count
     out = {"name": rec.get("name"), "street": street, "city": rec.get("city"), "state": rec.get("state"),
            "zip": rec.get("zip"), "phone": rec.get("phone"), "toll_free": rec.get("toll_free"),
            "website": rec.get("website"), "open": rec.get("open")}

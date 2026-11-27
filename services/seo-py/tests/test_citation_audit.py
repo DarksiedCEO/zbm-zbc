@@ -146,3 +146,44 @@ def test_a_hostile_listing_is_unreadable_and_the_audit_goes_on():
             raise RuntimeError("boom")
     out = ca.audit({"canonical": RECORD, "listings": [Boom(), listing()]})
     assert [v.verdict for v in out] == ["unreadable", "correct"]
+
+
+# ---------------------------------------------------------------- AEGIS round 1 (Inquisitor, L5+L4 at 4ce895db)
+def _biz(canonical, listing):
+    return {"canonical": canonical, "listings": [dict(listing, citation_id="c1")]}
+
+
+_REC = {"name": "Desert Sky Plumbing", "street": "12 Main St", "city": "Las Vegas", "state": "NV", "zip": "89101",
+        "phone": "(702) 555-0102", "website": "https://desert-sky.test/", "open": True}
+_LIST = {"name": "Desert Sky Plumbing", "street": "12 Main St", "city": "Las Vegas", "state": "NV", "zip": "89101",
+         "phone": "702-555-0102", "status": "open"}
+
+
+@pytest.mark.parametrize("suite, listed", [("4", "12 Main St Suite 4"), (4, "12 Main Street #4"), ("Ste 4", "12 Main St Unit 4"),
+                                           ("Floor 2", "12 Main St Fl 2")])
+def test_a_record_street_and_suite_field_are_both_used(suite, listed):
+    v = ca.audit(_biz(dict(_REC, suite=suite), dict(_LIST, street=listed)))[0]
+    assert v.verdict == "correct"
+    v = ca.audit(_biz(dict(_REC, suite=suite), _LIST))[0]
+    assert v.verdict == "wrong_address"
+
+
+def test_a_suite_that_is_not_text_or_a_number_refuses_the_audit():
+    with pytest.raises(ValueError):
+        ca.audit(_biz(dict(_REC, suite=["4"]), _LIST))
+
+
+@pytest.mark.parametrize("kw", [{"street": "12 Main St."}, {"state": "Nev."}, {"zip": 89101}, {"phone": "٧٠٢ 555 0102"}])
+def test_formatting_in_a_listing_is_still_correct(kw):
+    assert ca.audit(_biz(_REC, dict(_LIST, **kw)))[0].verdict == "correct"
+
+
+def test_mount_and_mt_are_one_street():
+    rec = dict(_REC, street="5 Mount Vernon Road")
+    assert ca.audit(_biz(rec, dict(_LIST, street="5 Mt. Vernon Rd")))[0].verdict == "correct"
+
+
+def test_no_status_reads_as_open():
+    lst = {k: v for k, v in _LIST.items() if k != "status"}
+    assert ca.audit(_biz(_REC, lst))[0].verdict == "correct"
+    assert ca.audit(_biz(dict(_REC, open=False), lst))[0].verdict == "wrong_status"
