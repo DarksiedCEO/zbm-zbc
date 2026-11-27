@@ -1396,3 +1396,9 @@ fraction keeps its house number apart ("100½" = "100 1/2", never NFKC's "1001�
 order; a hyphen with a letter on one side is formatting in names, streets and cities ("A-1" = "A1"; "1-10" stays);
 city apostrophes ("O'Fallon") and more abbreviations (Twp, Hgts ...). **The inverted default for cities:** the same
 street address, state and ZIP with city words that still differ is `owner_review` (L4: `address_needs_review`).
+
+AEGIS round 7 (Nov 27 2026, Inquisitor on L5 25c20c24 / L4 570b349a): every dash reads as "-"; a unit joined to its
+value by a dash ("Suite-B", "Apt-C") keeps the unit; every vulgar fraction ("⅜", "⅕" ...) keeps the house number apart;
+a dash in a city is a space ("Winston-Salem" = "Winston Salem"), and two city names that differ only in spacing are
+one city. **The inverted default for names:** two names with the same letters and other spacing
+("Mercedes-Benz" / "Mercedes Benz") are `owner_review` (L4: `name_needs_review`), never a merge or a fault on a guess.

@@ -395,3 +395,28 @@ def test_more_city_formatting(x, y):
 def test_an_unknown_city_spelling_with_the_same_zip_asks_the_owner():
     v = dl.check(pair(listing(city="Las Vegas"), listing(city="Lss Vegas")))
     assert (v.is_duplicate, v.action) == (False, "owner_review")
+
+
+# ---------------------------------------------------------------- AEGIS round 7 (Inquisitor, L5 25c20c24 / L4 570b349a)
+@pytest.mark.parametrize("x, y", [("Mercedes-Benz of Las Vegas", "Mercedes Benz of Las Vegas"),
+                                  ("Mercedes–Benz of Las Vegas", "Mercedes Benz of Las Vegas")])
+def test_a_name_that_differs_only_in_spacing_asks_the_owner(x, y):
+    v = dl.check(pair(listing(name=x), listing(name=y)))
+    assert (v.is_duplicate, v.action) == (False, "owner_review")
+
+
+@pytest.mark.parametrize("x, y", [("100 Main St Suite-B", "100 Main St Suite B"), ("100 Main St Apt-C", "100 Main St Apt C"),
+                                  ("100 Main St Bldg-A", "100 Main St Bldg A")])
+def test_a_unit_joined_by_a_dash_is_still_a_unit(x, y):
+    assert nap.street_key(x) == nap.street_key(y) and nap.street_key(x)[1]
+
+
+@pytest.mark.parametrize("x, y", [("100⅜ Main St", "100 3/8 Main St"), ("100⅝ Main St", "100 5/8 Main St"),
+                                  ("100⅕ Main St", "100 1/5 Main St")])
+def test_every_vulgar_fraction_keeps_the_house_number(x, y):
+    assert nap.street_key(x) == nap.street_key(y)
+
+
+def test_a_hyphenated_city_without_a_zip_is_one_city():
+    v = dl.check(pair(listing(city="Winston-Salem", state="NC", zip=None), listing(city="Winston Salem", state="NC", zip=None)))
+    assert v.action == "merge_or_remove_duplicate"

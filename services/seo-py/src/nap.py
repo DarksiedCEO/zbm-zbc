@@ -88,6 +88,7 @@ _APOSTROPHE_LIKE = "'\u2018\u2019\u201b\u0060\u00b4\u02b9\u02bb\u02bc\u02bd\u203
 
 def _inner_punct(text: str) -> str:
     """Punctuation inside a word is formatting: "Joe's" is "joes", "A.A.A." is "aaa" (AEGIS L5 round 3)."""
+    text = "".join("-" if unicodedata.category(c) == "Pd" else c for c in text)   # every dash is "-" (round 7)
     text = re.sub(rf"(?<=\w)[{_APOSTROPHE_LIKE}](?=\w)", "", text)               # "Joe's" (AEGIS L5 round 3)
     # a hyphen with a letter on at least one side ("A-1", "Desert-Sky"); "1-10" between digits stays (round 6)
     text = re.sub(r"(?<=[^\W\d_])[\-‐‑](?=\w)|(?<=\w)[\-‐‑](?=[^\W\d_])", "", text)
@@ -125,6 +126,18 @@ _FRACTIONS = str.maketrans({"½": " 1/2", "¼": " 1/4", "¾": " 3/4", "⅓": " 1
                             "⁄": "/"})
 
 
+def _fractions(text: str) -> str:
+    """Every vulgar fraction character ("½", "⅜", "⅕" ...) is " n/d", so NFKC never glues it to the house number
+    ("100⅜" is "100 3/8", never "1003⁄8"; AEGIS L5 rounds 6-7)."""
+    out = []
+    for c in text.translate(_FRACTIONS):
+        if unicodedata.category(c) == "No" and unicodedata.numeric(c, 1) % 1:
+            out.append(" " + unicodedata.normalize("NFKC", c).replace("⁄", "/"))
+        else:
+            out.append(c)
+    return "".join(out)
+
+
 def _unit_value(v: str) -> bool:
     """A unit number: it holds a digit, or is one or two letters that are not a street suffix ("Suite A", "Ste B")."""
     if any(c.isdigit() for c in v):
@@ -137,9 +150,12 @@ def street_key(street: object) -> tuple[str, Optional[str]]:
     read as one, while a floor, building or room keeps its kind ("floor:2" is not "unit:2"). Trailing punctuation is
     formatting ("Ste 4."), several unit parts are all kept ("Suite 400, Fl 4"), "4th Floor" is "floor:4", and street
     names of every script are kept ("100 東京通り" is not "100 大阪通り") (AEGIS L5 round 3)."""
-    raw_street = street.translate(_FRACTIONS) if isinstance(street, str) else street
+    raw_street = _fractions(street) if isinstance(street, str) else street
     text = _fold(raw_street).replace("#", " # ")
     text = re.sub(r"^\s*(\d+)\s*-\s*([a-z])\b", r"\1\2", text)    # "1200-B" is house number "1200b" (round 6)
+    text = "".join("-" if unicodedata.category(c) == "Pd" else c for c in text)
+    # a unit word joined to its value by a dash ("Suite-B", "Apt-C") keeps the unit (AEGIS L5 round 7)
+    text = re.sub(r"(?<![^\W\d_])(" + "|".join(k for k in UNIT_KIND if k != "#") + r")-(?=\w)", r"\1 ", text)
     text = _inner_punct(text)
     text = re.sub(r"\b(" + "|".join(_ORDINALS) + r")\b", lambda m: _ORDINALS[m.group(1)], text)   # "Fourth Floor"
     units = []
@@ -180,6 +196,11 @@ def same_number_other_words(a: tuple[str, Optional[str]], b: tuple[str, Optional
     know, or another street. The data cannot tell, so a person decides (AEGIS L5 round 4: the inverted default)."""
     wa, wb = a[0].split(), b[0].split()
     return bool(wa and wb) and a != b and a[1] == b[1] and wa[0] == wb[0] and any(c.isdigit() for c in wa[0])
+
+
+def loose(key: str) -> str:
+    """A key with its spaces taken out: "desert sky" and "desertsky" differ only in spacing (AEGIS L5 round 7)."""
+    return key.replace(" ", "")
 
 
 def same_zip_other_city_words(a: tuple[str, str, str], b: tuple[str, str, str]) -> bool:
@@ -258,5 +279,6 @@ def city_key(city: object, state: object, zip_code: object) -> tuple[str, str, s
     if type(zip_code) is int and 0 <= zip_code <= 99999:
         zip_code = f"{zip_code:05d}"   # a ZIP stored as a number lost its leading zero (AEGIS L5 round 2)
     z = re.sub(r"[^0-9]", "", _fold(zip_code))[:5]
-    words = [CITY_WORDS.get(w, w) for w in re.findall(r"[^\W_]+", _inner_punct(_fold(city)))]
+    folded = "".join(" " if unicodedata.category(c) == "Pd" else c for c in _fold(city))   # "Winston-Salem" (round 7)
+    words = [CITY_WORDS.get(w, w) for w in re.findall(r"[^\W_]+", _inner_punct(folded))]
     return " ".join(words), state_key(state), z

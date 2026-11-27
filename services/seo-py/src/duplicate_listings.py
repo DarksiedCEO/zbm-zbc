@@ -103,6 +103,9 @@ def _check(pair: dict) -> PairVerdict:
         if _DEPARTMENT.search(str(y.get("name") or "")) and not _DEPARTMENT.search(str(x.get("name") or "")):
             return leave("department_listing")
     if na != nb:
+        if nap.loose(na) == nap.loose(nb):
+            # "Mercedes-Benz" / "Mercedes Benz": the same letters with other spacing; a person decides (round 7)
+            return PairVerdict(pid, False, "owner_review", False, "names_differ_only_in_spacing")
         return leave("different_name")
     same_phone = bool(pa) and pa == pb
     same_site = bool(wa) and wa == wb
@@ -112,6 +115,9 @@ def _check(pair: dict) -> PairVerdict:
         return leave("same_name_but_no_shared_phone_or_website")
     # the same city: the same city name and state when both have them, and the same ZIP when both have one
     same_city = all(x == y for x, y in zip(ca, cb) if x and y) and (ca[0] == cb[0] or (ca[2] and ca[2] == cb[2]))
+    if not same_city and ca[0] != cb[0] and nap.loose(ca[0]) == nap.loose(cb[0]) and \
+            all(x == y for x, y in zip(ca[1:], cb[1:]) if x and y):
+        same_city = True               # "Winstonsalem" / "Winston Salem": spacing only (AEGIS L5 round 7)
     if same_city and street_a == street_b:
         return PairVerdict(pid, True, "merge_or_remove_duplicate", True, "same_business_same_address")
     if street_a == street_b and nap.same_zip_other_city_words(ca, cb):
