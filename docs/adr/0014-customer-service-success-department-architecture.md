@@ -950,3 +950,17 @@ phrased without any of these words ("Not that one. 602 ...") is a known residual
 The health lexicon adds gout, rehab, methadone, Ozempic and related terms. The harness now fails a mutant that is
 marked equivalent but killed (the RR-F5 "opt-in time guard removed" reason was wrong). Mutation harness (whole stack):
 170 mutants, 140 killed, 30 equivalent; call_summarizer 79 (57 killed, 22 equivalent).
+
+### RR-F3 — Andre's ruling, Nov 27 2026: the callback consent question (option a)
+
+After 15 Inquisitor rounds the one open High was structural: a caller can reject a number in free words *before*
+giving it ("Not that one. 602 555 0101.") and then say "Yes" to a read-back, and every shared-pool call describes its
+need in free words before the number, so no fail-closed word rule could close it without breaking certification.
+Andre ruled for option (a): the receptionist asks the fixed consent question ("Is 602 555 0101 the best number to
+call you back?" / "¿Es el 602 555 0101 el mejor número para devolverle la llamada?"), and only a trusted yes to it,
+with nothing else said by the caller afterwards, sets the callback. The explicit yes settles what came before or
+after; when the caller's own words had rejected or corrected that number, the note
+`caller_doubted_this_number_earlier` is added and the yes stands. The read-back line still confirms the name. The
+plain-words and phone-word fences around the callback are removed. The shared MVP F3 pool now has the consent
+question after every read-back (fixtures/mvp_pools: generator, oracle and the three dev-seed f3 transcript pins);
+the answer keys are unchanged. Mutation harness (call_summarizer): 77 mutants, 58 killed, 19 equivalent.

@@ -8,11 +8,14 @@ Rules (spec v0.1, the front-desk shared rules, the Nov 26 spec-freeze rulings):
   trusts (confidence >= 0.6); the receptionist's own confirmation line is checked against them, never used as the
   source. A turn below 0.6 that has words is flagged and never used as a fact. A silent turn carries nothing and is
   not flagged (Nov 26 ruling): silence means re-ask, never guess.
-- A callback number is reported only when the receptionist read it back in the fixed form ("Let me confirm: ...,
-  at 602 555 0101."), the caller gave that number in a sentence of plain words only, every caller sentence after it (in that
-  turn and later ones) is plain words too, so nothing can reject it ("602 555 0101. That phone doesn't work
-  anymore."; AEGIS round 13), and the caller then only affirmed (AEGIS round 10). Anything else is no callback, and the summary says to check the recording. The
-  caller-side readings (rejections, correction cues, doubt after the number) still run as a second fence.
+- A callback number is reported only when a trusted receptionist turn is exactly the fixed consent question for one
+  number ("Is 602 555 0101 the best number to call you back?", "¿Es el 602 555 0101 el mejor número para
+  devolverle la llamada?"), the caller gave that number in a trusted turn, and everything the caller says after the
+  question is a trusted yes (Andre's ruling, Nov 27 2026, option (a)). The explicit yes settles anything the caller
+  said about the number before it; when the caller's own words had rejected or corrected that number, the note
+  ``caller_doubted_this_number_earlier`` is added and the yes still stands. Anything else (no question, another
+  wording, "No", "Yes, but text my other number", a low-confidence yes) is no callback, and the summary says to
+  check the recording. The caller-side readings (rejections, correction cues) still decide ``corrected_value_used``.
 - A name is reported only when the caller gave it AND the receptionist confirmed it: the caller says it after a
   lead-in ("I'm", "my name is", "soy", "me llamo", "mi nombre es"; "this is", "it's", "habla" only before a number
   or a calling phrase) or as "First Last" opening a sentence before a number (a bare name only when the receptionist asked for
@@ -385,10 +388,13 @@ _NUM_TEXT = r"\(?[2-9]\d{2}\)?[ .\-]?[2-9]\d{2}[ .\-]?\d{4}"
 # ..." passed a start-only check): "Let me confirm: Ana Reyes.", "Let me confirm: Ana Reyes, at 602 555 0101.",
 # "Let me confirm: at 602 555 0101.", "Confirmo: Ana Reyes, al 602 555 0101."
 _CONFIRM_LINE = re.compile(rf"{_CUE}\s*[:,]?\s*({_WORD} {_WORD})(?:,?\s+(?:at|al)\s+{_NUM_TEXT})?\s*[.!]?", re.IGNORECASE)
-_READ_BACK = re.compile(rf"{_CUE}\s*[:,]?\s*(?:{_WORD} {_WORD},?\s+)?(?:at|al)\s+({_NUM_TEXT})\s*[.!]?", re.IGNORECASE)
 
 
 
+# the fixed consent question, the whole turn (Andre's ruling, Nov 27 2026): only a yes to this sets the callback
+_CONSENT = re.compile(rf"(?:is\s+({_NUM_TEXT})\s+the\s+best\s+number\s+to\s+call\s+you\s+back|"
+                      rf"¿\s*es\s+(?:el\s+)?({_NUM_TEXT})\s+el\s+mejor\s+n[uú]mero\s+para\s+devolverle\s+la\s+"
+                      rf"llamada)\s*\?", re.IGNORECASE)
 _AFFIRM = re.compile(r"(?:(?:yes|yeah|yep|yup|correct|right|that'?s right|that'?s correct|exactly|ok|okay|uh-?huh|"
                      r"s[ií]|correcto|exacto|as[ií] es|eso es|claro)[\s,.!]*)+(?:thanks?|thank you|gracias)?[\s.!]*",
                      re.IGNORECASE)
@@ -409,38 +415,8 @@ _PLAIN_WORDS = re.compile(
     re.IGNORECASE)
 
 
-# what a caller calls a phone or where it rings (AEGIS rounds 14-15: "telephone", "at home", "my work", "mi casa");
-# "call" itself is not here, since "service call" and "nobody calls me back" are needs, not phones
-_PHONE_TOPIC = re.compile(r"\b(?:phones?|cell|cellphone|cellular|numbers?|lines?|landline|mobile|texts?|texting|"
-                          r"voicemail|telephone|tel|home|house|work|office|job|desk|contact\w*|reach|celular|"
-                          r"m[oó]vil|n[uú]mero|tel[eé]fono|l[ií]nea|mensajes?|casa|trabajo|oficina)\b", re.IGNORECASE)
 
 
-def _only_plainly_given(number: str, trusted: list[str], names: Optional[list[str]] = None) -> bool:
-    """No caller sentence before the number speaks of a phone in other than plain words, and every trusted caller
-    sentence from the first that holds ``number`` to the end of the call holds nothing else but
-    plain words, names and numbers. A sentence after the number ("That phone doesn't work anymore.", "That line got
-    shut off in May.") may reject it, in the same turn or a later one, so it must be plain too (AEGIS round 13: the
-    inverted default; a caller who describes the problem after giving the number gets "check the recording")."""
-    seen = False
-    for x in trusted:
-        for sentence in re.split(r"[!?\n]|\.(?!\d)", _fold(x)):     # "602.555.0101" stays one number
-            nums = ["+1" + "".join(m.groups()) for m in _NUM.finditer(sentence)]
-            if number not in nums and not seen:
-                # a sentence before the number that speaks of a phone in other than plain words ("Never call this
-                # number.", "My cell got shut off last week.") may reject it (AEGIS round 14)
-                if _PHONE_TOPIC.search(sentence) and \
-                        any(not _PLAIN_WORDS.fullmatch(w) for w in re.findall(r"[^\W\d_][\w']*", _NUM.sub(" ", sentence))):
-                    return False
-                continue
-            seen = True
-            rest = _NUM.sub(" ", sentence)
-            for n in names or ():           # the caller's own name, as read
-                rest = re.sub(rf"(?<!\w){re.escape(n)}(?!\w)", " ", rest, flags=re.IGNORECASE)
-            words = re.findall(r"[^\W\d_][\w']*", rest)
-            if any(not _PLAIN_WORDS.fullmatch(w) for w in words):
-                return False
-    return seen
 
 
 def _clean_confirmation(text: str) -> bool:
@@ -620,28 +596,26 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
         _EMERGENCY.search(_fold(x)) or _EMERGENCY_WORDS.search(_fold(x)) for x in [x for _, x in spoken] + unknown_text))
     if possible:
         notes.append("possible_emergency")
-    # the callback is the number the receptionist read back in the fixed confirmation, that the caller gave and
-    # then affirmed; anything else (no read-back, a read-back the caller did not affirm, a number the caller never
-    # gave) is no callback and a person checks the recording (AEGIS round 10: the inverted default, after nine rounds
-    # of phrase lists for rejected and corrected numbers)
+    # the callback is the number the receptionist asked about in the fixed consent question ("Is 602 555 0101 the best
+    # number to call you back?"), that the caller gave, and that the caller then only affirmed; anything else is no
+    # callback and a person checks the recording (Andre's ruling, Nov 27 2026, option (a): an explicit yes to "call
+    # you back at this number" settles what the caller said about it before or after, which no word list could)
     said_numbers = {"+1" + "".join(m.groups()) for x in trusted for m in _NUM.finditer(_fold(x))}
-    read_back = None
+    consent = None
     for i, (sp, c, x) in enumerate(ordered):
-        fx = _fold(x).strip()
-        nums = {"+1" + "".join(m.groups()) for m in _NUM.finditer(fx)}
-        if sp == "agent" and c >= LOW_CONFIDENCE and _READ_BACK.fullmatch(fx) and _clean_confirmation(fx) and \
-                len(nums) == 1:
-            read_back = (nums.pop(), i)
-    if read_back and read_back[0] in said_numbers and read_back[0] not in rejected_numbers and \
-            _only_plainly_given(read_back[0], trusted, _names(trusted)) and \
-            _affirmed(ordered, read_back[1]) and \
-            (callback == read_back[0] or (callback is None and "ambiguous_number" not in notes)):
-        # a caller-side doubt (an uncompletable correction, doubt after the number) is never overridden (round 11)
-        if callback != read_back[0]:
-            notes.append("callback_from_affirmed_read_back")
-        callback = read_back[0]
-    elif callback is not None:
-        notes.append("callback_not_confirmed")
+        m = _CONSENT.fullmatch(_fold(x).strip())
+        if sp == "agent" and c >= LOW_CONFIDENCE and m:
+            nums = {"+1" + "".join(n.groups()) for n in _NUM.finditer(m.group(1) or m.group(2))}
+            consent = (nums.pop(), i) if len(nums) == 1 else None
+    if consent and consent[0] in said_numbers and _affirmed(ordered, consent[1]):
+        if callback != consent[0]:
+            notes.append("callback_from_consent_question")
+        if consent[0] in rejected_numbers or (callback is not None and callback != consent[0]):
+            notes.append("caller_doubted_this_number_earlier")   # the yes stands; a person may want to listen
+        callback = consent[0]
+    else:
+        if callback is not None:
+            notes.append("callback_not_confirmed")
         callback = None
     confirmed = ["+1" + "".join(m) for x in agent_trusted for m in _NUM.findall(x)]
     if callback and confirmed and confirmed[-1] != callback:

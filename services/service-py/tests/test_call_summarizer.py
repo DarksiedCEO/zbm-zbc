@@ -33,13 +33,14 @@ def tr(*caller, agent=None, conf=0.95, yes=False):
 
 
 def ok(name, number=None):
-    """The receptionist's confirmation line: a name is reported only when it is confirmed (AEGIS F3 round 3)."""
-    return [f"Let me confirm: {name}" + (f", at {number}." if number else ".")]
+    """The receptionist's confirmation line (a name is reported only when it is confirmed; AEGIS F3 round 3), and
+    with a number the fixed consent question (Andre's ruling, Nov 27 2026: only a yes to it sets the callback)."""
+    return [f"Let me confirm: {name}" + (f", at {number}." if number else ".")] + (rb(number) if number else [])
 
 
 def rb(number):
-    """The receptionist reading back a number in the fixed form."""
-    return [f"Let me confirm: at {number}."]
+    """The receptionist's fixed consent question for a callback number."""
+    return [f"Is {number} the best number to call you back?"]
 
 
 def low(text, conf=0.4):
@@ -906,9 +907,6 @@ def test_a_confirmation_the_receptionist_takes_back_confirms_nothing():
     assert s.name is None
 
 
-def test_a_rejected_number_read_back_and_affirmed_is_still_not_used():
-    s = cs.summarize(tr("I need a repair.", "Not 602 555 0101.", agent=rb("602 555 0101"), yes=True), PACK)
-    assert s.callback_number is None
 
 
 def test_a_lead_in_inside_reported_speech_is_not_the_callers_name():
@@ -917,9 +915,6 @@ def test_a_lead_in_inside_reported_speech_is_not_the_callers_name():
 
 
 
-@pytest.mark.parametrize("line", ["Don't call my work number, 602 555 0101.", "602 555 0101 is my old number."])
-def test_a_rejected_number_read_back_and_affirmed_is_never_the_callback(line):
-    assert cs.summarize(tr("I need a repair.", line, agent=rb("602 555 0101"), yes=True), PACK).callback_number is None
 
 
 # ---------------------------------------------------------------- AEGIS round 11 (Inquisitor, 00e101c3)
@@ -962,9 +957,6 @@ def test_a_name_must_end_where_the_lead_in_name_ends():
     assert s.name is None
 
 
-def test_an_affirmed_read_back_never_overrides_a_caller_correction():
-    s = cs.summarize(tr("I need a repair.", "602 555 0101, no wait, it ends in 0110.", agent=rb("602 555 0101"), yes=True), PACK)
-    assert s.callback_number is None
 
 
 def test_a_read_back_with_anything_after_the_number_is_not_the_fixed_form():
@@ -974,11 +966,6 @@ def test_a_read_back_with_anything_after_the_number_is_not_the_fixed_form():
 
 
 # ---------------------------------------------------------------- AEGIS round 12 (Inquisitor, 5e05de29)
-@pytest.mark.parametrize("line", ["602 555 0101 stopped working.", "Stop calling 602 555 0101.", "Avoid 602 555 0101.",
-                                  "602 555 0101 got shut off.", "El 602 555 0101 ya lo cancelé."])
-def test_a_number_given_with_any_other_words_is_never_taken_on_a_yes(line):
-    s = cs.summarize(tr("I need a repair.", line, agent=rb("602 555 0101"), yes=True), PACK)
-    assert s.callback_number is None
 
 
 @pytest.mark.parametrize("line", ["My number is 602 555 0101.", "You can reach me at 602.555.0101.",
@@ -1031,12 +1018,6 @@ def test_angle_brackets_or_no_end_mark_on_the_instruction_raise_check_now_not_ur
     assert s.urgency == "routine" and "possible_emergency" in s.notes and "No follow-up needed" not in s.text
 
 
-@pytest.mark.parametrize("caller", [(f"I need a repair. My cell is {N13}. That phone doesn't work anymore.",),
-                                    (f"I need a repair. My cell is {N13}. That line got shut off.",),
-                                    (f"I need a repair. My cell is {N13}.", "That line got shut off in May.")])
-def test_any_later_words_about_the_number_withhold_it_even_after_a_yes(caller):
-    s = cs.summarize(tr(*caller, agent=rb(N13), yes=True), PACK)
-    assert s.callback_number is None and "check the recording" in s.text
 
 
 def test_a_plain_number_read_back_and_affirmed_is_still_the_callback():
@@ -1080,10 +1061,6 @@ def test_the_instruction_ending_in_anything_but_one_end_mark_raises_check_now(en
     assert s.urgency == "routine" and "possible_emergency" in s.notes
 
 
-@pytest.mark.parametrize("before", ["Never call this number.", "Don't use my cell.", "My cell got shut off last week."])
-def test_phone_talk_before_the_number_withholds_it(before):
-    s = cs.summarize(tr(f"I need a repair. {before} It's {N13}.", agent=rb(N13), yes=True), PACK)
-    assert s.callback_number is None and "check the recording" in s.text
 
 
 @pytest.mark.parametrize("after", ["He's my son, he needs a repair.", "She is my tenant and her sink leaks."])
@@ -1095,10 +1072,6 @@ def test_someone_else_spoken_of_after_the_name_withholds_it(after):
     assert cs.summarize({"transcript_id": "r14", "turns": t}, PACK).name is None
 
 
-def test_any_words_after_the_number_withhold_it_even_harmless_ones():
-    # the inverted default (round 13): a person checks, even when the words only describe the problem
-    s = cs.summarize(tr(f"My cell is {N13}. My sink is leaking.", agent=rb(N13), yes=True), PACK)
-    assert s.callback_number is None and "check the recording" in s.text
 
 
 def test_someone_spoken_of_only_before_a_bare_name_withholds_it():
@@ -1117,11 +1090,6 @@ def test_a_name_that_runs_on_after_the_lead_in_is_not_read(line):
 
 # ---- AEGIS round 15 -------------------------------------------------------------------------------------------------
 
-@pytest.mark.parametrize("before", ["My telephone got shut off last week.", "That telephone is disconnected now.",
-                                    "Don't call me at home.", "Do not call my work.", "Mi casa ya no sirve."])
-def test_talk_of_where_a_phone_rings_before_the_number_withholds_it(before):
-    s = cs.summarize(tr(f"I need a repair. {before} It's {N13}.", agent=rb(N13), yes=True), PACK)
-    assert s.callback_number is None
 
 
 @pytest.mark.parametrize("after", ["That's my nephew.", "He is a client.", "My cousin needs it.", "Es mi sobrino.",
@@ -1151,3 +1119,79 @@ def test_a_confirmed_name_carrying_a_health_word_is_left_out(word):
 def test_words_after_the_name_withhold_it_even_harmless_ones(line):
     # the inverted default (round 15): the words after a name might say it is someone else's, so a person checks
     assert cs.summarize(tr(line, agent=ok("Ana Reyes", "602 555 0101"), yes=True), PACK).name is None
+
+
+# ---- Andre's ruling, Nov 27 2026: option (a), the consent question ---------------------------------------------------
+
+@pytest.mark.parametrize("caller", [("Not 602 555 0101.", "602 555 0101"), ("Don't call my work number, 602 555 0101.",),
+                                    ("602 555 0101 is my old number.",), ("602 555 0101 stopped working.",),
+                                    ("Never call this number. It's 602 555 0101.",),
+                                    ("My cell is 602 555 0101. My sink is leaking.",),
+                                    ("602 555 0101, no wait, it ends in 0110.",)])
+def test_an_explicit_yes_to_the_consent_question_sets_the_callback_whatever_came_before(caller):
+    s = cs.summarize(tr("I need a repair.", *caller, agent=rb("602 555 0101"), yes=True), PACK)
+    assert s.callback_number == "+16025550101"
+
+
+@pytest.mark.parametrize("agent", [["Let me confirm: at 602 555 0101."], ["Let me confirm: Ana Reyes, at 602 555 0101."],
+                                   ["Is 602 555 0101 a good number?"],
+                                   ["Is 602 555 0101 the best number to call you back"],
+                                   ["Is 602 555 0101 the best number to call you back? Or another one?"],
+                                   ["Is 602 555 0101 or 602 555 0110 the best number to call you back?"],
+                                   ["Can I call you back at 602 555 0101?"]])
+def test_only_the_fixed_consent_question_sets_the_callback(agent):
+    s = cs.summarize(tr("I'm Ana Reyes, 602 555 0101.", agent=agent, yes=True), PACK)
+    assert s.callback_number is None and "check the recording" in s.text
+
+
+@pytest.mark.parametrize("reply", ["No.", "Yes, but text my other number, 480 555 0199.", "Not that one.", "Maybe.",
+                                   "Sí, pero mejor el 480 555 0199."])
+def test_anything_but_a_yes_to_the_consent_question_is_no_callback(reply):
+    t = tr("I need a repair.", "602 555 0101.", agent=rb("602 555 0101"))
+    t["turns"].append({"speaker": "caller", "confidence": 0.95, "text": reply})
+    assert cs.summarize(t, PACK).callback_number is None
+
+
+def test_the_consent_question_needs_a_number_the_caller_gave():
+    s = cs.summarize(tr("I need a repair.", "My number is 602 555 0101.", agent=rb("480 555 0199"), yes=True), PACK)
+    assert s.callback_number is None
+
+
+def test_a_low_confidence_yes_or_a_low_confidence_question_is_no_callback():
+    t = tr("I need a repair.", "602 555 0101.", agent=rb("602 555 0101"))
+    t["turns"].append({"speaker": "caller", "confidence": 0.4, "text": "Yes."})
+    assert cs.summarize(t, PACK).callback_number is None
+    t = tr("I need a repair.", "602 555 0101.")
+    t["turns"] += [{"speaker": "agent", "confidence": 0.4, "text": "Is 602 555 0101 the best number to call you back?"},
+                   {"speaker": "caller", "confidence": 0.95, "text": "Yes."}]
+    assert cs.summarize(t, PACK).callback_number is None
+
+
+def test_the_spanish_consent_question():
+    q = ["¿Es el 602 555 0101 el mejor número para devolverle la llamada?"]
+    assert cs.summarize(tr("Necesito una cita.", "Mi número es 602 555 0101.", agent=q), PACK).callback_number is None
+    t = tr("Necesito una cita.", "Mi número es 602 555 0101.", agent=q)
+    t["turns"].append({"speaker": "caller", "confidence": 0.95, "text": "Sí."})
+    assert cs.summarize(t, PACK).callback_number == "+16025550101"
+
+
+def test_a_low_confidence_only_number_is_never_the_callback_even_with_consent():
+    s = cs.summarize(tr("I need a repair.", low("602 555 0101."), agent=rb("602 555 0101"), yes=True), PACK)
+    assert s.callback_number is None
+
+
+def test_a_yes_after_earlier_doubt_stands_with_a_note():
+    s = cs.summarize(tr("I need a repair.", "Not 602 555 0101.", "602 555 0101", agent=rb("602 555 0101"), yes=True), PACK)
+    assert s.callback_number == "+16025550101" and "caller_doubted_this_number_earlier" in s.notes
+
+
+def test_a_consent_question_spoken_by_the_caller_counts_for_nothing():
+    t = tr("I need a repair.", "602 555 0101.", "Is 602 555 0101 the best number to call you back?", "Yes.")
+    assert cs.summarize(t, PACK).callback_number is None
+
+
+def test_a_correction_then_consent_to_the_corrected_number_carries_no_doubt_note():
+    s = cs.summarize(tr("I need a repair.", "602 555 0101, no wait, sorry, 602 555 0110.", agent=rb("602 555 0110"),
+                        yes=True), PACK)
+    assert s.callback_number == "+16025550110" and s.corrected_value_used
+    assert "caller_doubted_this_number_earlier" not in s.notes
