@@ -17,7 +17,8 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings, ADR 0014):
 - A state-changing event (opt-in, inbound text, carrier opt-out, reassignment) for a number that cannot be read, a
   non-object event, or a send_id used twice refuses the whole replay (``ValueError``): an opt-out is never dropped.
   Numbers are read after NFKC with any script's digits, dash look-alikes and invisibles folded, so one person never
-  becomes two records; client ids are folded the same way and case-folded.
+  becomes two records. Client ids are read with NFC (not NFKC), every format character removed, dashes folded and
+  ASCII letters lower-cased: one client typed differently is one record, two different clients never merge.
 - Every ``replay`` is the whole history: no state carries over between calls.
 - Express written consent counts only from a known source (web form, paper form, keyword join, signed agreement,
   e-sign); a START reply is never one.
@@ -59,9 +60,21 @@ CONSENT_SOURCES = frozenset({"web_form", "paper_form", "keyword_join", "signed_a
 # clause, a refusal word within five words before a calling word. Read after leet and repeated letters are undone.
 _CALL_WORD = re.compile(r"^(?:call|calls|called|calling|cal|cals|caling|phone|phoned|phoning|telephone|ring|ringing|"
                         r"contact|contacted|contacting|dial|llam\w*|contact\w*|marqu\w*|telefon\w*|ligu\w*|ligar|"
-                        r"lig\w*|appel\w*|mensaj\w*|escrib\w*|manden|mandes|env[ií]en|text|texts|texting|message|messages)$")
-_REFUSAL = frozenset({"dont", "don't", "do", "not", "no", "never", "stop", "quit", "cease", "nao", "não", "ne", "nunca",
-                      "dejen", "deje", "deja", "basta", "without", "dnc", "nada"})
+                        r"lig\w*|appel\w*|mensaj\w*|escrib\w*|manden|mandes|env[ií]en|text|texts|texting|message|messages|"
+                        r"habl\w*|marc\w*|yam\w*|phonecall\w*|voicemail\w*)$")
+_REFUSAL = frozenset({"dont", "don't", "not", "no", "never", "stop", "quit", "cease", "nao", "não", "ne", "nunca",
+                      "dejen", "deje", "deja", "basta", "without", "dnc", "nada", "paren", "pare", "sin", "cero",
+                      "ninguna", "ninguno", "enough", "nope", "nah", "noo"})
+# Words about being contacted at all, for the whole-message net below (calls, texts, voicemail, lists, numbers, being
+# bothered), English and Spanish, after leet and doubled letters are undone.
+_CONTACT_WORD = re.compile(r"^(?:call\w*|cal|cals|phone\w*|telephone\w*|ring\w*|contact\w*|dial\w*|voicemail\w*|"
+                           r"text\w*|message\w*|msg\w*|sms|list|lists|number|numbers|robocall\w*|"
+                           r"llam\w*|lam\w*|yam\w*|marc\w*|habl\w*|telefon\w*|mensaj\w*|escrib\w*|molest\w*|"
+                           r"list\w*|n[uú]mero\w*|contact\w*|lig\w*|appel\w*|mand\w*|env[ií]\w*)$")
+_SPANISH_REMOVE = re.compile(r"\b(?:s[aá]quen|qu[ií]ten|b[oó]rren|eliminen|borra|quita|saca|den de baja)\w*\b.*"
+                             r"\b(?:lista|n[uú]mero|base de datos|registro)\b|\bno me (?:molest|interes)\w*|"
+                             r"\bno (?:estoy|estamos) interesad", re.IGNORECASE)
+_NO_PHONE_EMOJI = ("\U0001F4F5", "\U0001F515")        # no mobile phones, bell with slash
 _CLAUSE = re.compile(r"[.!?;,\n\u3002\uff0c]+")
 
 
@@ -74,7 +87,7 @@ def _no_contact(text: str) -> bool:
             return True
         words = folded.split()
         for i, w in enumerate(words):
-            calls = _CALL_WORD.match(w) or _CALL_WORD.match(re.sub(r"(.)\1+", r"\1", w)) \
+            calls = _CALL_WORD.match(w) or _CALL_WORD.match(re.sub(r"(.)\1+", r"\1", w)) or w.startswith("dontcal") \
                 or re.match(r"^m(?:appel|ap+el)", w)                      # French "m'appelez" folds to "mappelez"
             if calls and any(x in _REFUSAL for x in words[max(0, i - 5):i]):
                 return True
@@ -134,6 +147,17 @@ def _restart_word(text: str) -> bool:
     return norm in RESTART_WORDS
 
 
+def _refusal_near_contact(text: str) -> bool:
+    """The whole-message net: any refusal word and any contact word anywhere in the same message, in either order
+    ("Call me never", "llamadas no", "I really do not want you or anyone from your office to call me")."""
+    folded = channels.normalise(channels._leet(_ascii_digits(text)))
+    words = [w for raw in folded.split() for w in {raw, re.sub(r"(.)\1+", r"\1", raw)}]
+    # a refusal glued to the contact word ("dontcall", "nocalls", "nevertext")
+    if any(re.match(r"^(?:dont|donot|no|never|stop)(?:call|cal|text|txt|contact|message|phone|ring)", w) for w in words):
+        return True
+    return any(w in _REFUSAL for w in words) and any(_CONTACT_WORD.match(w) for w in words)
+
+
 def opt_out_reading(text: str) -> Optional[str]:
     """``opted_out``, ``possible_opt_out`` or None. Customer Service's SMS classifier first (exact / suspected), then
     the wording it hands to a human (``possible_opt_out``: on SMS that still blocks), then calls-only revocations
@@ -143,8 +167,11 @@ def opt_out_reading(text: str) -> Optional[str]:
         return "opted_out"
     if level == "suspected" or channels.possible_opt_out(text):
         return "possible_opt_out"
-    if _no_contact(text):
+    if _no_contact(text) or any(e in text for e in _NO_PHONE_EMOJI) or \
+            _SPANISH_REMOVE.search(channels.normalise(_ascii_digits(text))):
         return "opted_out"
+    if _refusal_near_contact(text):
+        return "possible_opt_out"     # fail toward suppression: a refusal anywhere near a contact word blocks
     return None
 
 

@@ -347,8 +347,8 @@ def test_more_calls_only_revocations_block(text):
                 send(6, mclass="marketing")]) == ("block", "opted_out")
 
 
-@pytest.mark.parametrize("text", ["No problem, call me back", "I called earlier", "Thanks for calling",
-                                  "Did you call me?", "Hola, llamo por mi cita", "No, llame mañana por favor"])
+@pytest.mark.parametrize("text", ["I called earlier", "Thanks for calling", "Did you call me?", "Hola, llamo por mi cita",
+                                  "Do call me tomorrow", "Please call me back"])
 def test_ordinary_calling_words_are_not_a_revocation(text):
     assert one([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text=text),
                 send(6, mclass="marketing")]) == ("allow", None)
@@ -367,3 +367,28 @@ def test_two_different_clients_never_merge(a, b):
     got = decide([ev("inbound_sms", 1, text="STOP", client=a), ev("opt_in", 5, consent="express_written", client=b),
                   send(9, sid="a", client=a)])
     assert got[("a", 9)] == ("block", "opted_out")      # b's consent never lifts a's STOP
+
+
+# ---------------------------------------------------------------- AEGIS round 3 (Inquisitor, 2554e328)
+ROUND3_LEAKS = ["dontcall", "no phonecalls", "calls? no thanks", "enough with the calls", "\U0001F4F5",
+                "don't leave me voicemails", "Call me never",
+                "I really do not want you or anyone from your office to call me", "no me hablen", "ya no me hablen",
+                "favor de no hablarme", "dejen de marcarme", "no me estén marcando", "paren de llamarme", "no me yamen",
+                "dejen de yamarme", "sin llamadas por favor", "cero llamadas", "ninguna llamada", "llamadas no",
+                "sáquenme de su lista", "quítenme de su lista", "bórrenme de su lista", "eliminen mi número",
+                "no me molesten", "no me interesa"]
+
+
+@pytest.mark.parametrize("text", ROUND3_LEAKS)
+def test_round_3_revocations_block_every_send(text):
+    events = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text=text),
+              send(6, sid="m", mclass="marketing"), send(6, sid="i")]
+    got = decide(events)
+    assert got[("m", 6)][0] == "block" and got[("i", 6)][0] == "block"
+
+
+@pytest.mark.parametrize("text", ["No problem, call me back", "No, llame mañana por favor", "Not now call me later"])
+def test_a_refusal_anywhere_near_a_contact_word_blocks_by_design(text):
+    """Fail toward suppression (ADR 0014 RR-F5 round 3): these lose texts until new written consent; a missed
+    opt-out would be a TCPA violation."""
+    assert one([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text=text), send(6)])[0] == "block"

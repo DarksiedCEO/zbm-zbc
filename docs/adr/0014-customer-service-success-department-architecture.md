@@ -492,3 +492,12 @@ clause rule above replaces the narrow pattern. Review: client ids kept nine invi
 merged distinct ids; both fixed as above. Accepted, by design: ordinary wording that reads as an opt-out ("don't
 call after 9pm", "Stop by anytime") blocks; that is the fail-toward-suppression rule, and a human can restore consent
 only through new written consent. Regression tests: "AEGIS round 2" section.
+
+AEGIS round 3 (Nov 26 2026, Inquisitor on 2554e328): 2 High. Twenty more calls-only phrasings ("dontcall", "no
+phonecalls", "calls? no thanks", "enough with the calls", 📵, "Call me never", "no me hablen", "dejen de marcarme",
+"cero llamadas") and six Spanish list-removal phrasings ("sáquenme de su lista", "eliminen mi número", "no me
+molesten") sent. Fix: list-removal wording and the no-phone emoji read as `opted_out`; and a whole-message net reads
+any refusal word anywhere with any contact word (calling, texting, messaging, voicemail, "hablar", "marcar", "yamar"),
+or a refusal glued to one ("dontcall", "nevertext"), as `possible_opt_out` — every send blocks and Andre sees it.
+Accepted, by design: the net over-blocks ordinary replies ("No problem, call me back"); 4 of the reviewer's 50 benign
+replies block. A missed opt-out is a TCPA violation; a lost text is a missed booking. Regression tests: "AEGIS round 3".
