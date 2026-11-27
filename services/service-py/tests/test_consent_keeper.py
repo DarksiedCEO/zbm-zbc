@@ -392,3 +392,43 @@ def test_a_refusal_anywhere_near_a_contact_word_blocks_by_design(text):
     """Fail toward suppression (ADR 0014 RR-F5 round 3): these lose texts until new written consent; a missed
     opt-out would be a TCPA violation."""
     assert one([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text=text), send(6)])[0] == "block"
+
+
+# ---------------------------------------------------------------- AEGIS round 4 (Inquisitor, e42571ef)
+ROUND4_LEAKS = ["Don‘t text me", "Don`t call me", "Please don´t text me anymore", "Donʼt text me",
+                "Don＇t call me", "I withdraw my consent to receive texts", "I am revoking my consent",
+                "I revoked consent", "Consent revoked", "I'm opting out", "I opted out already",
+                "I no longer wish to receive these", "I do not consent", "I no longer consent",
+                "I rescind my consent", "Kindly refrain from texting me", "I want to be removed", "unsubscribing",
+                "Please cease", "Desuscríbanme", "Desuscribirme por favor", "Retiro mi consentimiento",
+                "Revoco mi consentimiento", "Déjenme en paz", "No más", "Ya basta",
+                "No quiero saber nada de ustedes", "Arrêtez", "Bitte keine SMS mehr", "Non scrivermi", "退订"]
+
+
+@pytest.mark.parametrize("text", ROUND4_LEAKS)
+def test_round_4_revocations_block_every_send(text):
+    events = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text=text),
+              send(6, sid="m", mclass="marketing"), send(6, sid="i")]
+    got = decide(events)
+    assert got[("m", 6)][0] == "block" and got[("i", 6)][0] == "block"
+
+
+@pytest.mark.parametrize("source", [["web_form"], {"x": 1}, 5])
+def test_an_opt_in_source_that_is_not_text_refuses_with_valueerror(source):
+    with pytest.raises(ValueError):
+        ck.ConsentKeeper().replay([ev("opt_in", 1, consent="express_written", source=source), send(2)])
+
+
+@pytest.mark.parametrize("a, b", [("École-Dental", "école-dental"), ("ÑANDÚ-SPA", "ñandú-spa"),
+                                  ("Ørsted-Clinic", "ørsted-clinic")])
+def test_one_client_typed_with_other_capitals_is_one_record(a, b):
+    events = [ev("opt_in", 1, consent="express_written", client=a), ev("inbound_sms", 5, text="STOP", client=a),
+              send(6, client=b)]
+    assert one(events)[0] == "block"
+
+
+def test_stop_and_start_at_one_instant_give_one_reason_in_any_order():
+    a = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="STOP"),
+         ev("inbound_sms", 5, text="START"), send(6)]
+    b = [a[0], a[2], a[1], a[3]]
+    assert one(a) == one(b)

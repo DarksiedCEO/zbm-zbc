@@ -501,3 +501,16 @@ any refusal word anywhere with any contact word (calling, texting, messaging, vo
 or a refusal glued to one ("dontcall", "nevertext"), as `possible_opt_out` — every send blocks and Andre sees it.
 Accepted, by design: the net over-blocks ordinary replies ("No problem, call me back"); 4 of the reviewer's 50 benign
 replies block. A missed opt-out is a TCPA violation; a lost text is a missed booking. Regression tests: "AEGIS round 3".
+
+AEGIS round 4 (Nov 26 2026, Inquisitor on e42571ef): 4 High, all fixed. Look-alike apostrophes ("Don‘t", "Don`t",
+"don´t") split "don't" and read as nothing: every apostrophe look-alike is now read as "'" before any rule runs.
+Revocation wording in other grammatical forms ("I withdraw my consent", "I'm opting out", "I no longer wish to
+receive these", "Kindly refrain", "Retiro mi consentimiento", "Déjenme en paz", "Ya basta") sent: a revocation reading
+(word stems, accents removed; plus common French, German, Italian, Portuguese and Chinese opt-outs) now reads
+`opted_out`. An opt-in `source` that was a list raised TypeError: a non-text source or consent is now a ValueError.
+Review: client ids with non-ASCII capitals ("École" / "école") split into two records: every letter whose lower case
+is one letter is now lower-cased; at one instant a STOP and a START gave a reason that depended on input order: an
+opt-out reading now applies after a restart word. **Open for Andre:** a reassignment is kept per (client, number), as
+the pool is built; a number reassigned under one client does not end another client's consent. Number-level
+reassignment is stricter but contradicts the pool; it needs a ruling. The benign corpus still blocks 4 of 50.
+Regression tests: "AEGIS round 4".

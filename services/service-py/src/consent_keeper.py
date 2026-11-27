@@ -75,6 +75,34 @@ _SPANISH_REMOVE = re.compile(r"\b(?:s[aá]quen|qu[ií]ten|b[oó]rren|eliminen|bo
                              r"\b(?:lista|n[uú]mero|base de datos|registro)\b|\bno me (?:molest|interes)\w*|"
                              r"\bno (?:estoy|estamos) interesad", re.IGNORECASE)
 _NO_PHONE_EMOJI = ("\U0001F4F5", "\U0001F515")        # no mobile phones, bell with slash
+# Every apostrophe look-alike read as "'" before anything else reads the text (AEGIS round 4: "Don\u2018t", "Don`t",
+# "don\u00b4t" split into "don t" and matched no refusal word)
+_APOSTROPHES = dict.fromkeys(map(ord, "\u2018\u2019\u201b\u0060\u00b4\u02b9\u02bb\u02bc\u02bd\u02c8\u2032\u05f3\ua78c"
+                                      "\uff07\u055a\u1fbd\u1fbf"), "'")
+# Revocation wording in any grammatical form (AEGIS round 4: "I withdraw my consent", "I'm opting out", "I no longer
+# wish to receive these", "Retiro mi consentimiento", "Déjenme en paz", "Ya basta"), plus the common French, German,
+# Italian, Portuguese and Chinese opt-outs. Read on the text with accents removed and apostrophes unified. Fails
+# toward suppression: "No more questions, thanks" blocks too.
+_REVOCATION = re.compile(
+    r"\brevok|\brevoc|\bwithdr[ae]w\w*\b.{0,20}\bconsent|\brescind|\bopt(?:s|ing|ed)?[\s\-]*out\b|\bunsub|"
+    r"\bno longer (?:wish|want|consent|interested|need|like)|\b(?:do not|don'?t|dont|no longer) consent\b|"
+    r"\bnot consent\b|\brefrain\b|\bremove me\b|\bbe removed\b|\btake me off\b|\bcease\b|\bleave me alone|"
+    r"\bno more\b|\bstop (?:sending|messaging|bothering|contacting)|\bquit (?:sending|texting|messaging)|"
+    r"\bdesuscri|\bdesinscri|\bdesapunt|\bdar(?:me|nos)? de baja|\bde baja\b|\bretir\w* (?:mi |el )?consentimiento|"
+    r"\b(?:ya )?no (?:doy|autorizo)|\bdej(?:en|e|a)me en paz|\bno mas\b|\bya basta|\bbasta ya|\bno quiero saber nada|"
+    r"\bno quiero (?:recibir|mas)|\bya no (?:quiero|me)|\barret(?:ez|er|e)\b|\bdesabonn|\bdesinscri|\bstopp\b|"
+    r"\bnicht mehr\b|\babmelden|\bkeine (?:nachrichten|sms|anrufe|werbung)|\bnon (?:scrivermi|chiamarmi|contattarmi|"
+    r"voglio)|\bcancellami|\bdisiscriv|\bpar(?:e|em) de\b|\bdescadastr|\bsair da lista|退订|取消订阅|不要再|别再")
+
+
+def _unify(text: str) -> str:
+    return text.translate(_APOSTROPHES)
+
+
+def _plain(text: str) -> str:
+    """Lower-case, apostrophes unified, accents removed: the text the revocation wording is read on."""
+    text = unicodedata.normalize("NFKD", _unify(_ascii_digits(text)).lower())
+    return " ".join("".join(c for c in text if not unicodedata.combining(c)).split())
 _CLAUSE = re.compile(r"[.!?;,\n\u3002\uff0c]+")
 
 
@@ -117,10 +145,11 @@ def _ascii_digits(text: str) -> str:
 
 def normalise_client(raw: str) -> str:
     """One client id, however it was typed upstream: NFC (not NFKC, so "acme2" and "acme\u00b2" stay two clients),
-    every invisible removed, dashes folded, trimmed, lower-cased (not case-folded, so "strasse" and "stra\u00dfe" stay
-    two clients)."""
+    every invisible removed, dashes folded, trimmed, lower-cased letter by letter (\u00c9cole and \u00e9cole are one client;
+    not case-folded, so "strasse" and "stra\u00dfe" stay two clients; a letter whose lower case is longer than one
+    letter keeps its case)."""
     folded = _strip_invisible(unicodedata.normalize("NFC", raw)).translate(_DASHES).strip()
-    return "".join(c.lower() if c.isascii() else c for c in folded)     # only ASCII letters change case
+    return "".join(c.lower() if len(c.lower()) == 1 else c for c in folded)
 
 
 def normalise_number(raw: object) -> Optional[str]:
@@ -162,12 +191,13 @@ def opt_out_reading(text: str) -> Optional[str]:
     """``opted_out``, ``possible_opt_out`` or None. Customer Service's SMS classifier first (exact / suspected), then
     the wording it hands to a human (``possible_opt_out``: on SMS that still blocks), then calls-only revocations
     ("do not call me", "DNC", "no me llamen"), which this keeper must honour because it also decides calls."""
+    text = _unify(text)
     level = channels.opt_out_level(text)
     if level == "exact":
         return "opted_out"
     if level == "suspected" or channels.possible_opt_out(text):
         return "possible_opt_out"
-    if _no_contact(text) or any(e in text for e in _NO_PHONE_EMOJI) or \
+    if _no_contact(text) or any(e in text for e in _NO_PHONE_EMOJI) or _REVOCATION.search(_plain(text)) or \
             _SPANISH_REMOVE.search(channels.normalise(_ascii_digits(text))):
         return "opted_out"
     if _refusal_near_contact(text):
@@ -215,6 +245,10 @@ class ConsentKeeper:
             raise ValueError(f"event {i}: client_id is required")
         if kind == "send_attempt" and (not isinstance(e.get("send_id"), str) or not e["send_id"]):
             raise ValueError(f"event {i}: send_id is required")
+        if kind == "opt_in" and e.get("source") is not None and not isinstance(e["source"], str):
+            raise ValueError(f"event {i}: source must be text")
+        if kind == "opt_in" and e.get("consent") is not None and not isinstance(e["consent"], str):
+            raise ValueError(f"event {i}: consent must be text")
         if kind == "inbound_sms" and not isinstance(e.get("text"), str):
             raise ValueError(f"event {i}: text is required")
         if kind != "send_attempt" and normalise_number(e.get("number")) is None:
@@ -235,7 +269,9 @@ class ConsentKeeper:
                 seen.add(e["send_id"])
         # AEGIS Inquisitor c08c3f3f H2: every replay is the whole history; nothing carries over from an earlier call
         self._records = {}
-        order = sorted(range(len(rows)), key=lambda i: (rows[i]["t"], _ORDER[rows[i]["kind"]], i))
+        # at one instant an opt-out reading applies after a restart word, so the reason does not depend on input order
+        rank = {i: 1 if e["kind"] == "inbound_sms" and opt_out_reading(e["text"]) else 0 for i, e in enumerate(rows)}
+        order = sorted(range(len(rows)), key=lambda i: (rows[i]["t"], _ORDER[rows[i]["kind"]], rank[i], i))
         out: list[Decision] = []
         for i in order:
             e = rows[i]
