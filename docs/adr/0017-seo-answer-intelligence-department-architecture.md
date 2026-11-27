@@ -1332,7 +1332,7 @@ mark needs the owner's approval and proof of ownership (spec v0.1 "Must never").
 
 | Case | Decision |
 |---|---|
-| Same name (case, accents, "&"/"and", punctuation and legal suffixes set aside) and the same local phone, or the same website at the same address | duplicate: `merge_or_remove_duplicate` at the same address (street abbreviations and unit styles set aside), `mark_old_listing_moved` at another address with the same local phone; `old_listing` is the one the owner touched longest ago, or None when the ages cannot tell |
+| Same name (case, accents, "&"/"and", punctuation and legal suffixes set aside) and the same local phone, or the same website at the same address | duplicate: `merge_or_remove_duplicate` at the same address (street abbreviations and unit styles set aside), `mark_old_listing_moved` at another address with the same local phone; `old_listing` is the one marked closed, else the one the owner touched longest ago, or None when neither tells |
 | Same name and website at two addresses with different local phones, or a shared toll-free number at two addresses | `leave_both` (`possible_other_location`: a chain, never a move) |
 | A practitioner's listing inside a practice ("Dr. ..., DDS"), a department ("... - Service Department") | `leave_both` |
 | Different businesses at one address; the same name with no shared phone or website | `leave_both` |
@@ -1357,3 +1357,14 @@ never do now (`different_phones`). A missing city and ZIP on both listings count
 Review: "Nevada"/"NV", "St. Louis"/"Saint Louis" and "Ste #4"/"Suite 4" read as different places (a false move):
 fixed; a unit on one side only still reads as another address (a move the owner must approve; known limit). The
 department pattern was bounded (it backtracked on long names). Regression tests: "AEGIS round 1".
+
+AEGIS round 2 (Nov 27 2026, Inquisitor on L5+L4 at 4ce895db): the NAP keys read formatting more fully, so a real
+duplicate is no longer missed and two places never merge. "St." before a name is Saint ("100 St. Charles Ave" =
+"100 Saint Charles Avenue") while "St" at the end (or before a direction) is Street; "N.W." and "D.C." read as one
+word; "Mt"/"Ft" are Mount/Fort; a word that only starts with a unit word ("Northwest", "Norwood") is not a unit. A ZIP
+stored as a number keeps its leading zero (2108 is "02108"). A state with periods or an AP abbreviation ("D.C.",
+"Nev.", "Calif.") reads as its code. Accents are set aside only on Latin letters: a Japanese voicing mark makes another
+name ("ガス屋" is not "カス屋"). Phone digits of any script are read. On a move, a listing marked closed is the old one.
+Every field is read before any comparison, so an unreadable pair is always `unreadable`. **Known limit, disclosed:**
+two chain locations that list the same local number at two addresses look exactly like a move and are reported as one;
+the data cannot tell them apart, and the owner's approval is required for every move.

@@ -228,3 +228,50 @@ def test_state_city_and_zip_formatting_is_still_the_same_place(kw):
 
 def test_saint_and_st_are_one_city():
     assert nap.city_key("St. Louis", "MO", None) == nap.city_key("Saint Louis", "Missouri", None)
+
+
+# ---------------------------------------------------------------- AEGIS round 2 (Inquisitor, L5+L4 at 4ce895db)
+@pytest.mark.parametrize("x, y", [("100 St. Charles Ave", "100 Saint Charles Avenue"), ("12 Main St. N.W.", "12 Main Street NW"),
+                                  ("12 Main St N", "12 Main Street North"), ("5 Mt Vernon Rd", "5 Mount Vernon Road"),
+                                  ("9 Ft. Union Blvd", "9 Fort Union Boulevard"), ("12 Main St", "12 Main Street")])
+def test_street_abbreviations_in_any_position_are_formatting(x, y):
+    assert nap.street_key(x) == nap.street_key(y)
+
+
+def test_a_street_word_starting_with_a_unit_word_is_not_a_unit():
+    assert nap.street_key("12 Main Street Northwest") == ("12 main street northwest", None)
+    assert nap.street_key("12 Norwood Ave") == ("12 norwood avenue", None)
+
+
+@pytest.mark.parametrize("raw, want", [("D.C.", "dc"), ("Nev.", "nv"), ("N. H.", "nh"), ("Calif.", "ca"), ("wash", "wa"),
+                                       ("NV", "nv"), ("Nevada", "nv")])
+def test_state_punctuation_and_ap_abbreviations(raw, want):
+    assert nap.state_key(raw) == want
+
+
+def test_a_zip_stored_as_a_number_keeps_its_leading_zero():
+    assert nap.city_key("Boston", "MA", 2108) == nap.city_key("Boston", "MA", "02108")
+    assert nap.city_key("Boston", "MA", True)[2] == ""
+
+
+@pytest.mark.parametrize("x, y", [("ガス屋", "カス屋"), ("パン屋", "ハン屋")])
+def test_marks_on_other_scripts_make_another_name(x, y):
+    assert nap.name_key(x) != nap.name_key(y)
+    assert nap.name_key("Café Rosa") == nap.name_key("CAFE ROSA")
+
+
+def test_phone_digits_of_any_script_are_read():
+    assert nap.phone_key("٧٠٢ ٥٥٥ ٠١٠٢") == "7025550102"
+
+
+def test_a_closed_listing_is_the_old_one_on_a_move():
+    v = dl.check(pair(listing(street="9000 Mockridge Way", last_owner_update_days_ago=900),
+                      listing(status="permanently_closed", last_owner_update_days_ago=5)))
+    assert (v.action, v.old_listing) == ("mark_old_listing_moved", "b")
+
+
+def test_an_unreadable_listing_is_unreadable_before_any_comparison():
+    v = dl.check(pair(listing(), listing(name="Other Co", street=None)))
+    assert (v.action, v.reason) == ("unreadable", "missing_street")
+    v = dl.check(pair(listing(), listing(name="Other Co", city=None, zip=None)))
+    assert (v.action, v.reason) == ("unreadable", "missing_city")
