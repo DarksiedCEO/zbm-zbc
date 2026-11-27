@@ -60,13 +60,17 @@ FIXED_NEEDS = ("emergency", "complaint", "existing_customer", "reschedule", "hou
                "spam_call", "long_silence", "pricing", "pricing_question", "treatment_question", "unclear")
 
 _NUM = re.compile(r"(?<!\d)\(?([2-9]\d{2})\)?[ .\-]?([2-9]\d{2})[ .\-]?(\d{4})(?!\d)")
-_REJECTED_NUMBER = re.compile(r"(?:\bnot|\bno es el|\bno al|\bisn'?t|\bdon'?t (?:call|use|text)|\bdo not (?:call|use|text)|"
-                              r"\bnever (?:call|use|text)|\bno (?:llame|use|marque)(?:n)? al|\bnunca (?:al|llame))"
-                              r"\s*(?:me\s+)?(?:at|on|the|al|el)?\s*$", re.IGNORECASE)
+_REJECTED_NUMBER = re.compile(
+    r"(?:\bnot|\bno es el|\bno al|\bisn'?t|\b(?:don'?t|do not|never)\b[^.!?\d]{0,40}\b(?:call|use|text|dial|try)|"
+    r"\bno (?:me )?(?:llame|llames|llamen|use|uses|marque|marques)(?:n)?\b[^.!?\d]{0,20}|\bnunca (?:al|llame)|"
+    r"\bya no uso(?: el)?|\bold number(?: was| is)?|\bmi (?:viejo|antiguo) n[uú]mero(?: es| era)?)"
+    r"\s*(?:me\s+)?(?:at|on|the|al|el)?\s*$", re.IGNORECASE)
 # a rejection right after the number ("602 555 0101 is not my number anymore", "... that's disconnected")
 _REJECTED_AFTER = re.compile(r"^\W{0,3}(?:(?:which|that|it|this one|that one)(?:'s| is| was)?\s+|is\s+|was\s+)?"
                              r"(?:not (?:my|mine|the|a good|working|in service)|isn'?t (?:mine|my|working)|no longer|"
                              r"disconnected|out of service|wrong|old|dead|doesn'?t work|not in service|"
+                             r"(?:has been|got|was|is) disconnected|(?:is|was) my old|don'?t use (?:it|that)|"
+                             r"do not use (?:it|that)|never use (?:it|that)|"
                              r"ya no (?:es|sirve|funciona)|no (?:es el m[ií]o|sirve|funciona)|desconectado)",
                              re.IGNORECASE)
 _CORRECTION = re.compile(r"\bno wait\b|\bsorry\b|\bactually\b|\bi mean\b|\bcorrection\b|\bscratch that\b|"
@@ -132,11 +136,17 @@ _EMERGENCY = re.compile(
     r"\bshots? fired|\bsomeone (?:is )?shooting|\bbeing shot|\bgot shot|\bgunshot|\bthreatening (?:people|me|us|"
     r"them|someone|everyone|to (?:kill|hurt|shoot|stab))|"
     r"\bdesmay|\bno est[aá] respirando|\bno respira|\bdej[oó] de respirar|\bsin respirar|\bataque (?:al|card)|"
-    r"\bhuele .*gas|\bolor a gas|\bfuga de gas|\bsale humo|\bmucho humo|\bhumo (?:por|en) todas|\bse est[aá] quemando|"
+    r"\bhuele [^.!?]{0,60}gas|\bolor a gas|\bfuga de gas|\bsale humo|\bmucho humo|\bhumo (?:por|en) todas|\bse est[aá] quemando|"
     r"\bincendio|\bfuego\b|\bcon un (?:cuchillo|arma|pistola)|\bpistola|\bdisparo|\bamenazando a", re.IGNORECASE)
 # A deliberately broad net: any word that might be part of describing an emergency. It only ever ADDS a flag.
 _EMERGENCY_WORDS = re.compile(
-    r"\b(?:fire|flame|burn|smok|spark|gas\b|odou?r|smell|fume|carbon monoxide|co alarm|co detector|explo|knife|gun|"
+    r"fire|\b(?:flame|burn|smok|spark|gas\b|odou?r|smell|fume|carbon monoxide|co alarm|co detector|explo|knife|gun|"
+    r"fell|fall|not moving|won'?t move|can'?t move|swallow|pill|poison|drank|bleach|drain cleaner|overdos|"
+    r"break(?:ing)? in|broke in|broken into|intruder|burglar|kill|suicid|die|dying|dead|stab|turning blue|blue lips|"
+    r"swell|swollen|allergic reaction|anaphyla|epipen|labor|contraction|water broke|head injur|hit (?:his|her|my) head|"
+    r"shock|kick|abuse|entrando|ahog|assault|rape|missing child|kidnap|"
+    r"ca[ií]d|se cay[oó]|me ca[ií]|no se mueve|trag[oó]|pastilla|veneno|cloro|robo|ladr[oó]n|entraron|mat(?:ar|arme)|"
+    r"suicid|morir|muri|apu[ñn]al|labios morados|hinch|parto|contracciones|rompi[oó] (?:la )?fuente|golpe|"
     r"weapon|armed|shoot|shot|blood|bleed|breath|chok|unconscious|not respond|unresponsive|faint|collaps|seizure|"
     r"stroke|heart|chest|overdos|dizzy|hurt|injur|emergenc|911|9-1-1|ambulance|police|threat|attack|electrocut|"
     r"drown|fuego|llama[s]?\b|humo|incendi|quem|chispa|olor|huele|sangr|respir|desmay|cuchillo|pistola|arma\b|"
@@ -217,6 +227,11 @@ def _fold(text: str) -> str:
     return unicodedata.normalize("NFKC", text.translate(_APOSTROPHES)).translate(_APOSTROPHES)
 
 
+# a need word right after a negation ("No complaints", "not calling to reschedule", "I'm not a vendor") is not the need
+_NEGATED = re.compile(r"(?:\bno|\bnot|n't|\bnever|\bnor|\bwithout|\bno es|\bno soy|\bsin)(?:\s+\w+){0,3}\s*$",
+                      re.IGNORECASE)
+
+
 def _need(trusted: list[str], pack: dict, emergency: bool, any_words: bool) -> str:
     if emergency:
         return "emergency"
@@ -225,7 +240,8 @@ def _need(trusted: list[str], pack: dict, emergency: bool, any_words: bool) -> s
     if _health_need(joined):
         return "treatment_question"
     for label, pat in _RULES:
-        if re.search(pat, joined, re.IGNORECASE):
+        if any(not _NEGATED.search(joined[max(0, m.start() - 30):m.start()])
+               for m in re.finditer(pat, joined, re.IGNORECASE)):
             if label == "price":
                 raw = pack.get("services")
                 services = [s.replace("_", " ") for s in raw if isinstance(s, str)] if isinstance(raw, dict) else []
@@ -243,7 +259,13 @@ def _need(trusted: list[str], pack: dict, emergency: bool, any_words: bool) -> s
 def _said_911(agent_text: str) -> bool:
     """The receptionist told the caller to call 911: one sentence that is exactly one of the instruction's fixed forms
     ("For emergencies, please call 911", "Do not call 911 for a leak", "Did you call 911?" are not)."""
+    if _CONDITION.search(agent_text):  # a condition anywhere in the turn ("If anyone is hurt, don't wait. Call 911.")
+        return False
     return any(_SAID_911.fullmatch(sentence.strip()) for sentence in re.split(r"(?<=[.!?])\s+|\n", agent_text))
+
+
+_CONDITION = re.compile(r"\b(?:if|only if|in case|whenever|should|for (?:emergencies|an emergency|a medical emergency)|"
+                        r"otherwise|unless|though|si|en caso|solo si|cuando)\b", re.IGNORECASE)
 
 
 def _confidence(raw: object) -> Fraction:
@@ -265,7 +287,7 @@ def _callback(trusted: list[str], notes: list[str]) -> tuple[Optional[str], bool
     last_end = 0
     for m in _NUM.finditer(joined):
         before = joined[last_end:m.start()]
-        if _REJECTED_NUMBER.search(joined[max(0, m.start() - 20):m.start()]) or \
+        if _REJECTED_NUMBER.search(joined[max(0, m.start() - 60):m.start()]) or \
                 _REJECTED_AFTER.search(joined[m.end():m.end() + 60]):
             last_end = m.end()
             notes.append("rejected_number_not_used")
@@ -285,9 +307,16 @@ def _callback(trusted: list[str], notes: list[str]) -> tuple[Optional[str], bool
     return distinct[-1][0], len({d[0] for d in distinct}) > 1
 
 
+# a receptionist turn confirms a name only when it is a confirmation ("Let me confirm: Ana Reyes"), not any mention
+# ("I'll note your landlord Ana Reyes")
+_CONFIRM_CUE = re.compile(r"\bconfirm|\bconfirmo|\bis that (?:right|correct)|\bdid i get that right|\bcorrect\?|"
+                          r"\b¿?es correcto|\bverify|\bjust to (?:check|be sure)|\bso that'?s", re.IGNORECASE)
+
+
 def _names(trusted: list[str], confirmations: Optional[list[str]] = None) -> list[str]:
     """Names the caller gave; with ``confirmations`` (the trusted receptionist turns), only those it repeated."""
-    said = " \n ".join(_fold(x).casefold() for x in confirmations) if confirmations is not None else None
+    said = " \n ".join(_fold(x).casefold() for x in confirmations if _CONFIRM_CUE.search(_fold(x))) \
+        if confirmations is not None else None
     names: list[str] = []
     for x in trusted:
         x = _fold(x)
@@ -321,8 +350,11 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
     for t in turns:
         if not isinstance(t, dict) or not isinstance(t.get("text", ""), str):
             raise ValueError("every turn needs a text")
-        (caller if t.get("speaker") == "caller" else agent).append((_confidence(t.get("confidence")),
-                                                                    t.get("text") or ""))
+        speaker = t.get("speaker")
+        if speaker not in ("caller", "agent"):
+            notes.append("unknown_speaker_ignored")   # never read as the receptionist (AEGIS F3 round 4)
+            continue
+        (caller if speaker == "caller" else agent).append((_confidence(t.get("confidence")), t.get("text") or ""))
     spoken = [(c, x) for c, x in caller
               if x.strip() and not re.fullmatch(r"\[silence[^\]]*\]", x.strip(), re.IGNORECASE)]
     trusted = [x for c, x in spoken if c >= LOW_CONFIDENCE]
@@ -345,7 +377,7 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
                                      for x in trusted)
     if possible:
         notes.append("possible_emergency")
-    confirmed = ["+1" + "".join(m) for _, x in agent for m in _NUM.findall(x)]
+    confirmed = ["+1" + "".join(m) for x in agent_trusted for m in _NUM.findall(x)]
     if callback and confirmed and confirmed[-1] != callback:
         notes.append("confirmation_disagrees_with_caller")
     need = _need(trusted, pack, emergency, bool(spoken))

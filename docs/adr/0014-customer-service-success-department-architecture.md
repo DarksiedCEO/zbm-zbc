@@ -767,11 +767,11 @@ that wording.
 
 ### Mutation check for the front-desk agents (RR-F5, F2, F4, F3)
 
-`cd services/service-py && python3 devtools/frontdesk_mutants.py [agent]` plants 99 single defects, each in a fresh
+`cd services/service-py && python3 devtools/frontdesk_mutants.py [agent]` plants 110 single defects, each in a fresh
 copy of `src/` and `tests/` (the checkout is never edited), and runs that agent's test file. A mutant whose text no
 longer exists fails the run (`NOT_APPLIED`), so the list cannot rot. A kill counts only when pytest exits 1 (tests
 ran and failed); any other exit code is `RUN_ERROR` and fails the run (AEGIS F3 round 1: a mutant that breaks the
-import is not a test that caught it). Result at this commit: 92 killed; 7 survive and are listed as equivalent with
+import is not a test that caught it). Result at this commit: 103 killed; 7 survive and are listed as equivalent with
 the reason (in the consent keeper: the carrier check in the decision, consent cleared on reassignment, the opt-in
 time guard, the same-instant opt-in order, and a staff review at the reply's own instant, which is applied before
 the reply; in the transfer router: an unreadable case raising inside `plan`, which `resolve`'s catch-all turns into
@@ -824,3 +824,17 @@ request". Also: apostrophe look-alikes are unified before reading; `[Silence]` i
 check is a linear word scan (the nested pattern backtracked for over 30 s on 20 "hello?"s). Review left open: digits
 the caller said that are not their callback (a landlord's number, an account number) can still be the callback.
 Regression tests: "AEGIS round 3".
+
+AEGIS round 4 on RR-F3 (Nov 27 2026, Inquisitor on 8319be2b): every earlier repro held under the new design; 3 High,
+all fixed. The CHECK NOW net missed falls, poisoning, break-ins, suicidal statements, stabbings, labour, shocks and
+"wildfire": it now covers them (English and Spanish), and "fire" matches inside a word. Any turn whose speaker was not
+exactly "caller" was read as the receptionist, so "Call 911!" from an unknown speaker made the call urgent: only
+"agent" turns are the receptionist now; other speakers are ignored and noted. A negated need word ("No complaints",
+"I'm not a vendor") set the need: a need word right after a negation no longer counts. Review, fixed: more rejected
+numbers ("don't ever call", "got disconnected", "is my old number", "No me llames al", "Ya no uso el"); a receptionist
+mention ("I'll note your landlord Ana Reyes") is no longer a confirmation, only a confirming turn is; a condition
+anywhere in the receptionist's turn ("If anyone is hurt, don't wait. Call 911.") means no instruction; the
+disagreement note reads only trusted receptionist turns; a Spanish gas pattern no longer scans to the end of the text.
+**For Andre:** the CHECK NOW net is still a word list and will always miss some wording; it can only add a flag, and
+urgency itself comes from the receptionist's instruction. The summary is advisory to the owner; nothing is decided or
+sent from it. Regression tests: "AEGIS round 4".

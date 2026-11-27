@@ -71,7 +71,7 @@ def test_a_silent_turn_is_not_flagged():
 
 def test_two_different_names_are_ambiguous_never_picked():
     s = cs.summarize(tr("I'm Ana Reyes, 602 555 0101.", "Actually put it under Luis Ortega.",
-                        agent=["Ana Reyes or Luis Ortega?"]), PACK)
+                        agent=["Let me confirm: Ana Reyes or Luis Ortega?"]), PACK)
     assert s.name is None and any(n.startswith("ambiguous_name") for n in s.notes)
     assert "ambiguous" in s.text
 
@@ -494,9 +494,65 @@ def test_an_unknown_pack_category_is_never_spoken(cat):
 
 def test_the_name_filters_still_hold_when_the_receptionist_echoes_a_pair():
     """The confirmation rule is the main fence; the word filters are the second one (each tested on its own)."""
-    s = cs.summarize(tr("Desert Bakery, 602 555 0101.", agent=["Thanks for calling about Desert Bakery."]), PACK)
+    s = cs.summarize(tr("Desert Bakery, 602 555 0101.", agent=["Let me confirm: Desert Bakery?"]), PACK)
     assert s.name is None                                                   # a business word
-    s = cs.summarize(tr("It's Gloria Vance who told me to call.", agent=["Gloria Vance referred you? Great."]), PACK)
+    s = cs.summarize(tr("It's Gloria Vance who told me to call.", agent=["Let me confirm: Gloria Vance referred you?"]), PACK)
     assert s.name is None                                                   # a weak lead-in with no number
-    s = cs.summarize(tr("I'm locked out, 602 555 0101.", agent=["Locked out? We can help."]), PACK)
+    s = cs.summarize(tr("I'm locked out, 602 555 0101.", agent=["Let me confirm: locked out?"]), PACK)
     assert s.name is None                                                   # not capitalised
+
+
+# ---------------------------------------------------------------- AEGIS round 4 (Inquisitor, 8319be2b)
+@pytest.mark.parametrize("line", ["He fell and he's not moving.", "My son swallowed a bottle of pills.",
+                                  "My daughter drank drain cleaner.", "Someone is breaking into my house.",
+                                  "I want to kill myself.", "My brother got stabbed.", "His lips are turning blue.",
+                                  "There's a wildfire behind our house.", "A brushfire is near the fence.",
+                                  "Her throat is swelling up.", "My wife is in labor.", "He hit his head and is confused.",
+                                  "I got a shock from the panel.", "A man is kicking my door in.", "Me quiero matar.",
+                                  "Mi hijo se cayó y no se mueve.", "Se tragó unas pastillas.",
+                                  "Alguien está entrando a mi casa.", "Se está ahogando mi niño."])
+def test_round_4_emergencies_are_flagged_check_now(line):
+    s = cs.summarize(tr(line, "602 555 0101."), PACK)
+    assert s.possible_emergency and s.text.startswith("CHECK NOW")
+
+
+@pytest.mark.parametrize("speaker", [None, "unknown", "Caller", "customer", "speaker_2"])
+def test_a_turn_from_an_unknown_speaker_is_never_the_receptionist(speaker):
+    t = tr("I need a repair.")
+    t["turns"].append({"speaker": speaker, "confidence": 0.97, "text": "Call 911!"})
+    s = cs.summarize(t, PACK)
+    assert s.urgency == "routine" and "unknown_speaker_ignored" in s.notes
+
+
+@pytest.mark.parametrize("line", ["If anyone is ever hurt on a job site, don't wait. Call 911.",
+                                  "Call 911. Only if someone is hurt, though; otherwise I can book you."])
+def test_a_condition_anywhere_in_the_turn_means_no_instruction(line):
+    assert cs.summarize(tr("I need a repair.", agent=[line]), PACK).urgency == "routine"
+
+
+@pytest.mark.parametrize("line, need", [("No complaints, the tech was great, I'd like the same guy next time.", "complaint"),
+                                        ("I'm not calling to reschedule, the time is fine.", "reschedule"),
+                                        ("I don't need an appointment, I'm just returning your ladder.", "repair"),
+                                        ("I'm not a vendor, I'm a homeowner with a leak.", "vendor")])
+def test_a_negated_need_word_is_not_the_need(line, need):
+    assert cs.summarize(tr(line, "602 555 0101."), PACK).need != need
+
+
+@pytest.mark.parametrize("line", ["Please don't ever call 602 555 0101.", "Do not, under any circumstances, call 602 555 0101.",
+                                  "602 555 0101 got disconnected last month.", "602 555 0101 has been disconnected.",
+                                  "602 555 0101 is my old number.", "That number, 602 555 0101? Don't use it.",
+                                  "No me llames al 602 555 0101.", "Ya no uso el 602 555 0101."])
+def test_round_4_rejected_numbers_are_never_the_callback(line):
+    assert cs.summarize(tr("I need a repair.", line), PACK).callback_number is None
+
+
+def test_a_mention_by_the_receptionist_is_not_a_confirmation():
+    s = cs.summarize(tr("I'm calling for my landlord. Ana Reyes, 480 555 0199.", "I need a repair.",
+                        agent=["I'll note your landlord Ana Reyes."]), PACK)
+    assert s.name is None
+
+
+def test_a_low_confidence_receptionist_turn_never_drives_the_disagreement_note():
+    t = tr("I need a repair.", "Ana Reyes, 602 555 0101.")
+    t["turns"].append({"speaker": "agent", "confidence": 0.2, "text": "Let me confirm: Ana Reyes, at 602 555 0199."})
+    assert "confirmation_disagrees_with_caller" not in cs.summarize(t, PACK).notes
