@@ -10,8 +10,8 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings):
 - Simultaneous ringing: every on-call person rings at once (Nov 26 ruling), so the whole transfer fits inside
   30 s for a list of any length. A ring timeout above 30 s, or one that cannot be read, is cut to 30 s.
 - The first person (in the on-call order) who answers while the caller is still on the line is connected. When a
-  whisper summary exists, and it is a line ``whisper_line`` made (anything else is never played: ``whisper_rejected``),
-  it is played to them first; when it is missing the router still connects (the caller is
+  whisper summary exists, and it is a line ``whisper_line`` made whose "Urgent: " start matches the case (urgent
+  exactly ``True``), it is played to them first (anything else is never played: ``whisper_rejected``); when it is missing the router still connects (the caller is
   never left waiting for paperwork) and records ``whisper_missing``. If one person answers live and another only
   after the caller hung up, the live answer wins (the caller was still there for it).
 - A staff member who answers after the caller hung up is logged, and the caller gets a text-back.
@@ -82,7 +82,16 @@ def _staff_id(p: object) -> Optional[str]:
     return None
 
 
+def _plain(d: object) -> object:
+    """A dict subclass is read through ``dict``'s own methods, so an overridden ``get``/``items`` cannot change
+    what the record holds (AEGIS round 7); anything that is not a dict is returned unchanged."""
+    if isinstance(d, dict) and type(d) is not dict:
+        return dict(dict.items(d))
+    return d
+
+
 def _case_id(case: object) -> Optional[str]:
+    case = _plain(case)
     if not isinstance(case, dict):
         return None
     cid = case.get("case_id")
@@ -92,6 +101,7 @@ def _case_id(case: object) -> Optional[str]:
 
 
 def plan(case: dict) -> RingPlan:
+    case = _plain(case)
     cid = _case_id(case)
     if cid is None:
         return RingPlan("unknown", (), MAX_SECONDS, "unreadable_case")
@@ -124,6 +134,7 @@ def resolve(case: dict, behaviour: Optional[dict] = None, whisper: Optional[str]
 def _resolve(case: dict, behaviour: Optional[dict] = None, whisper: Optional[str] = None) -> TransferOutcome:
     """Turn what each rung person did into the outcome. ``behaviour`` maps staff id -> "answers" |
     "answers_after_caller_hung_up" | anything else (no answer); it defaults to the case's ``staff_behavior``."""
+    case = _plain(case)
     p = plan(case)
     if p.reason == "unreadable_case":
         return TransferOutcome(p.case_id, FALLBACK, None, 0, False, False, True, ("unreadable_case",))
@@ -135,7 +146,7 @@ def _resolve(case: dict, behaviour: Optional[dict] = None, whisper: Optional[str
         notes.append("rang_simultaneously_per_policy")
     if not p.ring:
         return TransferOutcome(p.case_id, FALLBACK, None, 0, False, False, True, tuple(notes + [p.reason]))
-    seen = behaviour if behaviour is not None else case.get("staff_behavior")
+    seen = _plain(behaviour if behaviour is not None else case.get("staff_behavior"))
     merged: dict[str, object] = {}
     for k, v in (seen.items() if isinstance(seen, dict) else ()):
         if type(v) is not str:         # only plain text is an outcome; anything else (an object equal to everything)

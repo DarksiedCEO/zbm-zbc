@@ -385,3 +385,32 @@ def test_an_urgent_line_is_never_played_for_a_case_that_is_not_exactly_urgent(ur
 def test_an_urgent_case_plays_only_the_urgent_line():
     assert tr.resolve(case(urgent=True), whisper=tr.whisper_line(None, "repair", urgent=True)).whisper_played
     assert not tr.resolve(case(urgent=True), whisper=tr.whisper_line(None, "repair")).whisper_played
+
+
+# ---------------------------------------------------------------- AEGIS round 7 (Inquisitor, 532d100c)
+class _LyingDict(dict):
+    def get(self, k, d=None):
+        return True if k in ("urgent", "in_business_hours") else dict.get(self, k, d)
+
+    def items(self):
+        return [("staff-a", "answers")]
+
+
+def test_a_dict_subclass_cannot_lie_about_urgency_hours_or_who_answered():
+    c = _LyingDict(case_id="c", in_business_hours=True, on_call_order=["staff-a"],
+                   staff_behavior={"staff-a": "answers"}, urgent="false")
+    o = tr.resolve(c, whisper=tr.whisper_line(None, "repair", urgent=True))
+    assert o.path == tr.CONNECTED and o.whisper_played is False and "whisper_rejected" in o.notes
+    closed = _LyingDict(case_id="c", in_business_hours=False, on_call_order=["staff-a"],
+                        staff_behavior={"staff-a": "answers"})
+    assert tr.plan(closed).reason == "outside_hours" and tr.resolve(closed).path == tr.FALLBACK
+    lying_behaviour = _LyingDict({"staff-a": "no_answer"})
+    o = tr.resolve({"case_id": "c", "in_business_hours": True, "on_call_order": ["staff-a"]}, lying_behaviour)
+    assert o.path != tr.CONNECTED
+
+
+def test_a_line_made_for_the_other_urgency_is_rejected_as_documented():
+    case = {"case_id": "c", "in_business_hours": True, "on_call_order": ["staff-a"],
+            "staff_behavior": {"staff-a": "answers"}, "urgent": False}
+    o = tr.resolve(case, whisper=tr.whisper_line(None, "repair", urgent=True))
+    assert (o.whisper_played, "whisper_rejected" in o.notes) == (False, True)
