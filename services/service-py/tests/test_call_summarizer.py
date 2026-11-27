@@ -313,4 +313,82 @@ def test_an_odd_pack_never_raises(pack):
 
 def test_the_name_reader_itself_drops_a_name_holding_a_health_word():
     assert cs._names(["This is Hope Cancer.", "My name is Ana Diabetes."]) == []
-    assert cs._names(["This is Hope Ortega."]) == ["Hope Ortega"]
+    assert cs._names(["My name is Hope Ortega."]) == ["Hope Ortega"]
+
+
+
+# ---------------------------------------------------------------- AEGIS round 2 (Inquisitor, 585ea682)
+@pytest.mark.parametrize("line", ["It's Christmas Eve and I need a repair.", "This is Long Beach calling about a repair",
+                                  "Desert Bakery, 602 555 0101.", "Cell Phone, 602 555 0101.",
+                                  "Habla Usted Espa\u00f1ol? 602 555 0101"])
+def test_round_2_pairs_that_are_not_the_callers_name(line):
+    assert cs.summarize(tr(line, "602 555 0101."), PACK).name is None
+
+
+@pytest.mark.parametrize("line", ["It's Ana Reyes, 602 555 0101.", "This is Ana Reyes calling about a repair.",
+                                  "Habla Ana Reyes, ll\u00e1menme al 602 555 0101."])
+def test_a_weak_lead_in_still_reads_a_name_given_with_a_number_or_calling_phrase(line):
+    assert cs.summarize(tr("I need a repair.", line), PACK).name == "Ana Reyes"
+
+
+@pytest.mark.parametrize("line", ["Don't call 602 555 0101, use 602 555 0202.", "Never use 602 555 0101. Try 602 555 0202.",
+                                  "602 555 0101 is not my number anymore, it's 602 555 0202.",
+                                  "602 555 0101, that's disconnected. 602 555 0202 works."])
+def test_round_2_rejected_numbers_are_never_the_callback(line):
+    assert cs.summarize(tr("I need a repair.", line), PACK).callback_number == "+16025550202"
+
+
+def test_an_apology_far_from_the_next_number_is_not_a_correction():
+    s = cs.summarize(tr("I need a repair.", "My cell is 602 555 0101, sorry it's loud here, and my office is "
+                        "602 555 0202."), PACK)
+    assert s.callback_number is None and "ambiguous_number" in s.notes
+
+
+@pytest.mark.parametrize("line", ["If this is ever an emergency, please call 911.", "No need to call 911 for this.",
+                                  "You don't have to call 911.", "Did you already call 911?"])
+def test_a_911_disclaimer_negation_or_question_is_not_the_instruction(line):
+    s = cs.summarize(tr("I'd like to book a repair.", "602 555 0101.", agent=[line]), PACK)
+    assert s.urgency == "routine" and "911" not in s.next_action
+
+
+@pytest.mark.parametrize("line", ["The kitchen is in flames!", "The garage is burning.", "My wife fainted.",
+                                  "The gas is leaking in the basement.", "I smell natural gas.",
+                                  "My son is having a seizure right now.", "I think my dad is having a stroke.",
+                                  "The fire pit spread and the fence is burning.", "He's barely breathing."])
+def test_round_2_emergencies_are_urgent(line):
+    assert cs.summarize(tr(line, "602 555 0101."), PACK).urgency == "emergency"
+
+
+@pytest.mark.parametrize("line", ["My furnace won't fire up.", "Can you sharpen my kitchen knife?",
+                                  "We're shooting a video at the shop.", "Is your office smoke-free?",
+                                  "I had to fire my old plumber.", "There's a leak near the fire hydrant.",
+                                  "Can you install a gun safe?", "I had a seizure last month, does that matter?"])
+def test_round_2_routine_calls_are_not_emergencies(line):
+    assert cs.summarize(tr(line, "602 555 0101."), PACK).urgency == "routine"
+
+
+@pytest.mark.parametrize("line, term", [("It's Bell's Palsy, 602 555 0101.", "palsy"),
+                                        ("I'm Tourette Syndrome, 602 555 0101.", "syndrome"),
+                                        ("I'm Expecting Twins, 602 555 0101.", "expecting"),
+                                        ("I have Down Syndrome, is that okay?", "syndrome")])
+def test_round_2_health_details_never_reach_the_summary(line, term):
+    s = cs.summarize(tr("I want to book a botox consult.", line, "602 555 0101."), SPA)
+    assert term not in s.text.lower() and (s.name is None or term not in s.name.lower())
+
+
+@pytest.mark.parametrize("line", ["Hay un derrame de agua debajo del fregadero.",
+                                  "Your tech diagnosed a cracked pipe last week, I need the repair.",
+                                  "The water heater keeps depressurizing."])
+def test_round_2_plumbing_words_are_not_health_matters(line):
+    assert cs.summarize(tr(line, "602 555 0101."), PACK).need != "treatment_question"
+
+
+def test_a_huge_integer_confidence_is_low_not_an_error():
+    s = cs.summarize(tr("I need a repair.", {"speaker": "caller", "confidence": 10 ** 400, "text": "602 555 0155"}), PACK)
+    assert s.low_confidence_flagged and s.callback_number is None
+
+
+def test_a_pack_category_naming_a_condition_is_not_spoken():
+    s = cs.summarize(tr("I'd like to book an appointment.", "I'm Ana Reyes, 602 555 0101."),
+                     {"services": {}, "reason_categories": ["allergy_testing", "reschedule"]})
+    assert s.name == "Ana Reyes" and "allerg" not in s.text.lower()
