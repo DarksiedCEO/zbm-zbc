@@ -175,10 +175,16 @@ class OutreachMixin:
                                                                       brand)
 
     def _spam_paused(self, domain: str | None, today: str) -> bool:
-        """Cold email from ``domain`` pauses while yesterday's or today's complaint rate is at or above 0.30%."""
-        yesterday = (date.fromisoformat(today) - timedelta(days=1)).isoformat()
-        return any(i09_send_cap.must_pause(st["sent"], st["complaint"])
-                   for st in (self._stats(yesterday, domain), self._stats(today, domain)))
+        """Cold email from ``domain`` pauses while the complaint rate is at or above 0.30% on yesterday's sends, on
+        today's, or on the last ``PAUSE_WINDOW_DAYS`` days of sends together (complaints are booked to the send day
+        and arrive late, so the window is what catches them). Reads stats without creating empty rows."""
+        end = date.fromisoformat(today)
+        days = [self.day_stats.get(f"{domain or ''}|{(end - timedelta(days=n)).isoformat()}",
+                                   {"sent": 0, "complaint": 0}) for n in range(i09_send_cap.PAUSE_WINDOW_DAYS)]
+        window = (sum(d["sent"] for d in days), sum(d["complaint"] for d in days))
+        return any(i09_send_cap.must_pause(sent, complaints)
+                   for sent, complaints in ((days[0]["sent"], days[0]["complaint"]),
+                                            (days[1]["sent"], days[1]["complaint"]), window))
 
     def _cap_today(self) -> int:
         s = self.settings
@@ -647,7 +653,7 @@ class OutreachMixin:
                     continue
                 today = self.today()
                 if msg["channel"] == "email" and self._spam_paused(msg["from_domain"], today):
-                    summary["paused_spam_rate"] += 1      # stays queued; resumes after a day under 0.30%
+                    summary["paused_spam_rate"] += 1      # stays queued; resumes once every check is under 0.30%
                     continue
                 if msg["channel"] == "email" and self._stats(today, msg["from_domain"])["sent"] >= self._cap_today():
                     summary["capped"] += 1
@@ -704,10 +710,12 @@ class OutreachMixin:
             held = "AT_FULL_PACE"
         else:
             st = self._stats((today - timedelta(days=1)).isoformat(), domain)
-            if i09_send_cap.may_advance(st["sent"], st["complaint"], st["hard_bounce"]):
-                step += 1
-            else:
+            if not i09_send_cap.may_advance(st["sent"], st["complaint"], st["hard_bounce"]):
                 held = "HELD_BY_YESTERDAY"
+            elif self._spam_paused(domain, today.isoformat()):
+                held = "PAUSED_SPAM_RATE"     # a clean yesterday, but late complaints put the week over 0.30%
+            else:
+                step += 1
         result = {"domain": domain, "step": step + 1, "held": held,
                   "cap_today": i09_send_cap.cap(self.settings.warmup, step, self.settings.daily_send_cap)}
         data = {"domain": domain, "date": today.isoformat() if held is None else w["advanced_on"], "step": step}

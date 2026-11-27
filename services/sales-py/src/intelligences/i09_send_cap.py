@@ -7,9 +7,12 @@ sent anything; the schedule only moves forward one step on a day the ``warmup-re
 arithmetic). 0.10% is Google's sender guideline: "Keep spam rates reported in Postmaster Tools below 0.10% and avoid
 ever reaching a spam rate of 0.30% or higher" (support.google.com/mail/answer/81126, read 2026-11-25). The earlier
 0.3% hold let a domain keep climbing at the rate Gmail treats as the hard limit. The day's cap is min(schedule step, SALES_DAILY_SEND_CAP).
-Send pause (Andre, 2026-11-26): cold email from a domain stops outright while its complaint rate yesterday or so far
-today is at or above 0.30%, Google's "avoid ever reaching" line; queued messages wait, nothing is dropped, and sending
-resumes on its own after a day under the line. Never: sends."""
+Send pause (Andre, 2026-11-26): cold email from a domain stops outright while its complaint rate is at or above 0.30%,
+Google's "avoid ever reaching" line, on yesterday's sends, on today's, or on all sends of the last PAUSE_WINDOW_DAYS
+days together. Complaints are booked to the day the message was sent, and providers report them days late, so the
+window keeps a late complaint counting and stops one idle day from clearing a bad week (AEGIS e41e57b5 follow-up S1/S2).
+Queued messages wait, nothing is dropped, and sending resumes on its own once every check is under the line. The
+warm-up does not advance while the domain is paused. Never: sends."""
 
 from __future__ import annotations
 
@@ -20,6 +23,7 @@ DECIDES = "today's cold-email cap for the outreach domain"
 COMPLAINT_PER_TEN_THOUSAND = 10  # 0.10% (Google sender guidelines)
 BOUNCE_PER_HUNDRED = 5           # 5%
 PAUSE_PER_TEN_THOUSAND = 30      # 0.30%: at or above this, cold email from the domain pauses
+PAUSE_WINDOW_DAYS = 7            # today and the six days before, by send date
 
 
 def cap(schedule: tuple, step: int, ceiling: int) -> int:

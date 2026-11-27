@@ -32,7 +32,7 @@ the check.
 | `python:legal-py` | 843 | pytest collection | — |
 | `python:onboarding-py` | 849 | pytest collection | — |
 | `python:ooh-py` | 212 | pytest collection | — |
-| `python:sales-py` | 891 | pytest collection | — |
+| `python:sales-py` | 898 | pytest collection | — |
 | `python:security-py` | 192 | pytest collection | — |
 | `python:seo-py` | 1383 | pytest collection | — |
 | `python:service-py` | 815 | pytest collection | — |
