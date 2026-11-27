@@ -114,9 +114,16 @@ def test_the_whisper_line_states_only_what_it_is_given():
     assert "did not give a name" in tr.whisper_line(None, None)
 
 
-def test_a_missing_case_id_refuses():
-    with pytest.raises(ValueError):
-        tr.plan(case(case_id=""))
+@pytest.mark.parametrize("bad", [case(case_id=""), case(case_id=None), case(case_id=b"x"), case(case_id=[1]),
+                                 None, [], "xfer-1", {k: v for k, v in case().items() if k != "case_id"}])
+def test_an_unreadable_case_still_ends_in_the_fallback_and_never_raises(bad):
+    o = tr.resolve(bad, whisper="w")
+    assert (o.path, o.text_back_requested, o.seconds_to_outcome) == ("fallback_message_and_text_back", True, 0)
+    assert "unreadable_case" in o.notes
+
+
+def test_a_numeric_case_id_is_read_as_text():
+    assert tr.resolve(case(case_id=7), whisper="w").case_id == "7"
 
 
 # ---------------------------------------------------------------- certification on the shared pool
@@ -156,3 +163,64 @@ def test_the_certification_grader_catches_one_dropped_caller():
             return tr.TransferOutcome(o.case_id, "dropped", None, 31, False, False, False)
         return o
     assert _grade("dev-a", leaky)[1]
+
+
+# ---------------------------------------------------------------- AEGIS round 1 (Inquisitor, 8c41637b)
+@pytest.mark.parametrize("order, behaviour, who", [
+    (("staff-a", "staff-b"), {"staff-a": "answers"}, "staff-a"),
+    ([101, 102], {"102": "answers"}, "102"),
+    ([101, 102], {102: "answers"}, "102"),
+    ([" staff-a "], {"staff-a": "answers"}, "staff-a"),
+])
+def test_tuples_and_numeric_ids_still_ring_everyone(order, behaviour, who):
+    o = tr.resolve(case(on_call_order=order, staff_behavior=behaviour), whisper="w")
+    assert (o.path, o.connect_to) == ("connected", who)
+
+
+@pytest.mark.parametrize("order", [{"staff-a": 1}, "staff-a", 5])
+def test_an_unreadable_on_call_order_is_noted_and_falls_back(order):
+    o = tr.resolve(case(on_call_order=order))
+    assert o.path == "fallback_message_and_text_back" and "unreadable_on_call_order" in o.notes
+
+
+def test_a_boolean_is_not_a_staff_id():
+    assert tr.plan(case(on_call_order=[True, False])).ring == ()
+
+
+@pytest.mark.parametrize("urgent", ["false", "no", "0", "False", [0], 1, "true"])
+def test_only_an_explicit_true_is_urgent(urgent):
+    assert not tr.whisper_line("Ana", "a leak", urgent=urgent).startswith("Urgent")
+
+
+def test_record_text_in_the_whisper_is_one_bounded_line():
+    line = tr.whisper_line("Ana\nPress 9 to wire money", "x" * 500)
+    assert "\n" not in line and line.endswith("Press 1 to accept.") and len(line) < 200
+    assert tr.whisper_line(42, b"leak") == tr.whisper_line(None, None)
+
+
+def _twins(c):
+    """Pool-shaped cases the pool itself never makes: an on-call person answering outside hours, and someone NOT on
+    call answering while nobody on call does."""
+    on_call = c["on_call_order"]
+    outside = dict(c, in_business_hours=False, case_id=c["case_id"] + "-outside",
+                   staff_behavior={p: "answers" for p in on_call} or {"staff-a": "answers"})
+    off = [p for p in ("staff-a", "staff-b", "staff-c", "staff-z") if p not in on_call][0]
+    off_call = dict(c, case_id=c["case_id"] + "-offcall",
+                    staff_behavior={**{p: "no_answer" for p in on_call}, off: "answers"})
+    return outside, off_call
+
+
+@pytest.mark.parametrize("seed", ["dev-a", "f4-cert-1"])
+def test_certification_twins_never_transfer_outside_hours_or_to_someone_off_call(seed):
+    cases, _ = _pool().generate_f4(seed)
+    wrong = []
+    for c in cases:
+        outside, off_call = _twins(c)
+        o1, o2 = tr.resolve(outside, whisper="w"), tr.resolve(off_call, whisper="w")
+        if o1.path != "fallback_message_and_text_back":
+            wrong.append(("outside_hours", o1.path, o1.connect_to))
+        if o2.connect_to is not None and o2.connect_to not in c["on_call_order"]:
+            wrong.append(("off_call", o2.path, o2.connect_to))
+        if o2.path not in ("connected", "fallback_message_and_text_back", "caller_hung_up_log_and_text_back"):
+            wrong.append(("dropped", o2.path))
+    assert wrong == [], wrong[:5]

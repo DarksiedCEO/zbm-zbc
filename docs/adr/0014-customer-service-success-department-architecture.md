@@ -673,18 +673,25 @@ planted mutants killed.
 ## Amendment — RR-F4 warm-transfer router (Nov 26 2026; MVP spec v0.1, front-desk team)
 
 `services/service-py/src/transfer_router.py`, one job: when the pack says a live caller needs a human, decide who to
-ring (`plan`) and turn what happened into the outcome (`resolve`): `connected` (to whom, after the whisper summary),
-`fallback_message_and_text_back`, or `caller_hung_up_log_and_text_back`. Nothing is dialled from here.
+ring (`plan`) and turn what happened into the outcome (`resolve`): `connected` (to whom; the whisper summary first when
+there is one), `fallback_message_and_text_back`, or `caller_hung_up_log_and_text_back`. Nothing is dialled from here.
 
 | Rule | Behaviour |
 |---|---|
 | Hours and on-call | Outside business hours (anything but an explicit `true`) or with nobody on call: straight to the fallback, nobody rung |
-| Ringing | Simultaneous for everyone on call (Nov 26 ruling), duplicates rung once; a sequential plan is rung at once too and noted |
+| Ringing | Simultaneous for everyone on call (Nov 26 ruling), duplicates rung once; a sequential plan is rung at once too and noted. The on-call order may be a list or a tuple of text or whole-number ids; anything else is nobody on call (`unreadable_on_call_order`) |
 | 30 s | A ring timeout above 30 s, or one that cannot be read, is cut to 30 s; every outcome lands within it |
-| Who connects | The first in the on-call order who answers live; never someone not on call |
-| Whisper | Required to connect; a missing one still connects (the caller is never held for it) and is recorded (`whisper_missing`) |
-| No dropped caller | Any unreadable outcome is "no answer", so every path ends connected or in a fallback; fallbacks and late answers ask RR-F2 for a text-back (which still applies consent and quiet hours) |
+| Who connects | The first in the on-call order who answers live; never someone not on call. A live answer beats someone else's late answer (ruling for the spec freeze; the pool's own oracle reads that mix the other way and the pool never generates it) |
+| Whisper | Played first when there is one; a missing one still connects (the caller is never held for it) and is recorded (`whisper_missing`). The whisper line says "Urgent" only for an explicit `True`, and reads the name and reason as one printable line of at most 60 characters |
+| No dropped caller | `resolve` never raises: an unreadable case (not an object, no usable id) ends in the fallback (`unreadable_case`); any unreadable outcome is "no answer", so every path ends connected or in a fallback; fallbacks and late answers ask RR-F2 for a text-back (which still applies consent and quiet hours) |
 
 Certification: `services/service-py/tests/test_transfer_router.py` runs the shared MVP pool (F4, 200 cases per seed)
 for the three DEV seeds and three more: path, person, whisper requirement, text-back and the 30 s limit match the key
-on every case. A grader self-test proves one dropped caller is noticed. 9 of 9 planted mutants killed.
+on every case. Two seeds also get pool-shaped twins the pool never makes (an on-call person answering outside hours,
+someone off call answering): none is ever connected. A grader self-test proves one dropped caller is noticed.
+
+AEGIS round 1 (Nov 26 2026, Inquisitor on 8c41637b): High: a case with an unreadable id raised, so no outcome at all
+(the kill criterion). Also: a tuple or numeric-id on-call order rang nobody; the whisper announced "Urgent" for
+`"false"`; the docs said a whisper was required to connect while the code connected without one; the pool certified
+neither "outside hours" nor "off call"; the mutant count had no artifact. All fixed as above with regression tests
+("AEGIS round 1" section); mutation results now come from `services/service-py/devtools/frontdesk_mutants.py`.

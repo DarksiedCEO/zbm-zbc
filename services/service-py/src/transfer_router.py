@@ -9,12 +9,16 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings):
   to the fallback.
 - Simultaneous ringing: every on-call person rings at once (Nov 26 ruling), so the whole transfer fits inside
   30 s for a list of any length. A ring timeout above 30 s, or one that cannot be read, is cut to 30 s.
-- The first person (in the on-call order) who answers while the caller is still on the line is connected, and only
-  after the whisper summary is played to them. A summary is required to connect; without one the router still
-  connects (the caller is never left waiting for paperwork) and records that the whisper was missing.
+- The first person (in the on-call order) who answers while the caller is still on the line is connected. When a
+  whisper summary exists it is played to them first; when it is missing the router still connects (the caller is
+  never left waiting for paperwork) and records ``whisper_missing``. If one person answers live and another only
+  after the caller hung up, the live answer wins (the caller was still there for it).
 - A staff member who answers after the caller hung up is logged, and the caller gets a text-back.
 - Every path ends in a connected call or a fallback within 30 s. Nothing ends in a dropped caller: any outcome the
-  router cannot read is treated as "no answer", which leads to the fallback.
+  router cannot read is treated as "no answer", which leads to the fallback, and ``resolve`` never raises: a case it
+  cannot read at all (not an object, no usable id) also ends in the fallback, noted ``unreadable_case``.
+- The on-call order may be a list or a tuple; ids are strings or whole numbers (read as text). Anything else is
+  nobody on call, noted ``unreadable_on_call_order``.
 """
 
 from __future__ import annotations
@@ -58,15 +62,36 @@ def _timeout(raw: object) -> tuple[int, Optional[str]]:
     return raw, None
 
 
-def plan(case: dict) -> RingPlan:
+def _staff_id(p: object) -> Optional[str]:
+    if isinstance(p, bool):
+        return None
+    if isinstance(p, int):
+        return str(p)
+    if isinstance(p, str) and p.strip():
+        return p.strip()
+    return None
+
+
+def _case_id(case: object) -> Optional[str]:
+    if not isinstance(case, dict):
+        return None
     cid = case.get("case_id")
-    if not isinstance(cid, str) or not cid:
-        raise ValueError("case_id is required")
+    if isinstance(cid, int) and not isinstance(cid, bool):
+        return str(cid)
+    return cid.strip() if isinstance(cid, str) and cid.strip() else None
+
+
+def plan(case: dict) -> RingPlan:
+    cid = _case_id(case)
+    if cid is None:
+        return RingPlan("unknown", (), MAX_SECONDS, "unreadable_case")
     timeout, _ = _timeout(case.get("ring_timeout_seconds"))
     if case.get("in_business_hours") is not True:
         return RingPlan(cid, (), timeout, "outside_hours")
     order = case.get("on_call_order")
-    staff = tuple(dict.fromkeys(p for p in order if isinstance(p, str) and p)) if isinstance(order, list) else ()
+    if order is not None and not isinstance(order, (list, tuple)):
+        return RingPlan(cid, (), timeout, "unreadable_on_call_order")
+    staff = tuple(dict.fromkeys(x for x in map(_staff_id, order or ()) if x))
     if not staff:
         return RingPlan(cid, (), timeout, "nobody_on_call")
     return RingPlan(cid, staff, timeout, "ring_on_call")
@@ -76,6 +101,8 @@ def resolve(case: dict, behaviour: Optional[dict] = None, whisper: Optional[str]
     """Turn what each rung person did into the outcome. ``behaviour`` maps staff id -> "answers" |
     "answers_after_caller_hung_up" | anything else (no answer); it defaults to the case's ``staff_behavior``."""
     p = plan(case)
+    if p.reason == "unreadable_case":
+        return TransferOutcome(p.case_id, FALLBACK, None, 0, False, False, True, ("unreadable_case",))
     notes = []
     t_note = _timeout(case.get("ring_timeout_seconds"))[1]
     if t_note:
@@ -85,7 +112,7 @@ def resolve(case: dict, behaviour: Optional[dict] = None, whisper: Optional[str]
     if not p.ring:
         return TransferOutcome(p.case_id, FALLBACK, None, 0, False, False, True, tuple(notes + [p.reason]))
     seen = behaviour if behaviour is not None else case.get("staff_behavior")
-    seen = seen if isinstance(seen, dict) else {}
+    seen = {_staff_id(k): v for k, v in seen.items() if _staff_id(k)} if isinstance(seen, dict) else {}
     for person in p.ring:
         if seen.get(person) == ANSWERS:
             played = isinstance(whisper, str) and bool(whisper.strip())
@@ -99,8 +126,18 @@ def resolve(case: dict, behaviour: Optional[dict] = None, whisper: Optional[str]
                            tuple(notes + ["nobody_answered"]))
 
 
+def _spoken(value: object, limit: int) -> Optional[str]:
+    """Record text fit to be read aloud: printable only, one line, bounded; anything else is left out."""
+    if not isinstance(value, str):
+        return None
+    value = " ".join("".join(c for c in value if c.isprintable()).split())[:limit].strip()
+    return value or None
+
+
 def whisper_line(caller_name: Optional[str], reason: Optional[str], urgent: bool = False) -> str:
-    """What the answering person hears before the caller is joined. Facts only from the call record (RR-F3)."""
-    who = caller_name or "a caller who did not give a name"
-    why = reason or "no reason given"
-    return f"{'Urgent: ' if urgent else ''}Transferring {who}, about {why}. Press 1 to accept."
+    """What the answering person hears before the caller is joined. Facts only from the call record (RR-F3): the
+    urgency is announced only when the record says exactly ``True``; name and reason are bounded to 60 characters
+    and read as data (they never change what the person is asked to press)."""
+    who = _spoken(caller_name, 60) or "a caller who did not give a name"
+    why = _spoken(reason, 60) or "no reason given"
+    return f"{'Urgent: ' if urgent is True else ''}Transferring {who}, about {why}. Press 1 to accept."
