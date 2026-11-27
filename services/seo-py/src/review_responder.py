@@ -25,8 +25,8 @@ Rules:
   they made it right"). Routing a review that asks for nothing costs only an owner look.
 - A suspected fake (a one-review account at most 7 days old, posted on a day at least 5 other new accounts reviewed the
   business) gets no public reply: ``reply`` is None, it is flagged for a removal request and routed to the owner.
-- A review that cannot be read (not an object, no id, stars not a whole number 1-5, text not a string, reviewer or
-  pile-up fields missing, not plain whole numbers or negative) gets no reply and goes to the owner; it never raises.
+- A review that cannot be read (not an object, no id, stars not a whole number 1-5 (an int, or a float with no fraction such as 5.0), text not a
+  string, reviewer or pile-up fields missing, not whole numbers in the same sense, or negative) gets no reply and goes to the owner; it never raises.
   A review whose reviewer and pile-up fields meet the fake rule is flagged as a suspected fake even when its id,
   stars or text cannot be read. A review or reviewer object that is not exactly a ``dict`` (a subclass such as
   ``OrderedDict`` included) or that holds a key that is not exactly a ``str`` is unreadable as a whole and is not
@@ -104,7 +104,13 @@ class ReplyDraft:
 
 
 def _whole(x: object) -> Optional[int]:
-    return x if type(x) is int else None
+    """A whole number: an exact int, or an exact float with no fraction ("stars": 5.0 from JSON); a bool, a subclass,
+    NaN, an infinity or 5.5 is not one."""
+    if type(x) is int:
+        return x
+    if type(x) is float and x == x and x not in (float("inf"), float("-inf")) and x.is_integer():
+        return int(x)
+    return None
 
 
 def _sentences(text: str) -> list[str]:

@@ -119,7 +119,7 @@ class Boom(dict):
 
 
 @pytest.mark.parametrize("bad", [None, [], "review", 5, Boom(review_id="x"), review(review_id=""), review(review_id=7),
-                                 review(stars=0), review(stars=6), review(stars=4.0), review(stars=True),
+                                 review(stars=0), review(stars=6), review(stars=4.5), review(stars=float("nan")), review(stars=True),
                                  review(stars="5"), review(text=None), review(reviewer=None),
                                  review(reviewer={"review_count": "1", "account_age_days": 3}),
                                  review(same_day_reviews_from_new_accounts=-1),
@@ -256,3 +256,21 @@ def test_a_fake_with_unreadable_fields_is_still_flagged_for_removal(bad):
     d = rr.draft(r)
     assert d.flag_suspected_fake and d.reply is None and d.route_to_owner and d.owner_approval_before_posting
     assert "unreadable" in d.notes and "suspected_fake_request_removal" in d.notes
+
+
+@pytest.mark.parametrize("stars, band", [(5.0, "high"), (4.0, "high"), (3.0, "mid"), (1.0, "low")])
+def test_a_whole_float_star_rating_is_read_like_the_int(stars, band):
+    d = rr.draft(review(stars=stars))
+    assert d.reply == rr.WORDINGS[(False, band)] and d.owner_approval_before_posting
+
+
+@pytest.mark.parametrize("stars", [4.5, float("inf"), float("-inf"), float("nan"), 0.0, 6.0, True])
+def test_a_fractional_or_odd_float_star_rating_is_unreadable(stars):
+    d = rr.draft(review(stars=stars))
+    assert d.reply is None and "unreadable" in d.notes
+
+
+def test_whole_float_counts_still_meet_the_fake_rule():
+    d = rr.draft(review(stars=1.0, reviewer={"review_count": 1.0, "account_age_days": 3.0},
+                        same_day_reviews_from_new_accounts=6.0))
+    assert d.flag_suspected_fake and d.reply is None
