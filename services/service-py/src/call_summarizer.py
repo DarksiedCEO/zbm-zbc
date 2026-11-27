@@ -430,6 +430,9 @@ def _clean_confirmation(text: str) -> bool:
     return "?" not in text and "¿" not in text and not _RETRACT.search(text)
 
 
+# only spaces, tabs and line breaks at the ends are trimmed; str.strip() would also drop the controls U+001C-U+001F
+# (AEGIS F3 round 20), and "character for character" means every other character counts
+_EDGES = " \t\r\n"
 _FIXED_911 = frozenset({"Please hang up and dial 911 right now.", "Cuelgue y marque al 911 ahora mismo."})
 
 
@@ -445,8 +448,8 @@ def _answers_consent(ordered: list, i: int) -> bool:
     # right."), so the inverted default withholds the callback. Both are matched on the turn as said, with nothing set
     # aside (AEGIS round 18: "Thanks <or is work better?>"; round 19: "...right now. ❓", flag letters or tag characters
     # after the 911 line), and the 911 line only as one of its two fixed forms, character for character
-    if any(sp == "agent" and _CLOSING.fullmatch(_fold(x).strip()) is None and _fold(x).strip() not in _FIXED_911
-           for sp, _, x in after):
+    if any(sp == "agent" and _CLOSING.fullmatch(_fold(x).strip(_EDGES)) is None
+           and _fold(x).strip(_EDGES) not in _FIXED_911 for sp, _, x in after):
         return False
     return _affirmed(ordered, i)
 
@@ -630,7 +633,7 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
     said_numbers = {"+1" + "".join(m.groups()) for x in trusted for m in _NUM.finditer(_fold(x))}
     consent = None
     for i, (sp, c, x) in enumerate(ordered):
-        m = _CONSENT.fullmatch(_fold(x).strip())
+        m = _CONSENT.fullmatch(_fold(x).strip(_EDGES))
         if sp == "agent" and c >= LOW_CONFIDENCE and m:
             nums = {"+1" + "".join(n.groups()) for n in _NUM.finditer(m.group(1) or m.group(2))}
             consent = (nums.pop(), i) if len(nums) == 1 else None
@@ -644,8 +647,12 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
         if callback is not None:
             notes.append("callback_not_confirmed")
         callback = None
-    confirmed = ["+1" + "".join(m) for x in agent_trusted for m in _NUM.findall(_fold(x))]   # NFKC: "602\xa0555"
-    if callback and confirmed and confirmed[-1] != callback:
+    # the receptionist's fixed confirmation line ("Let me confirm: Ana Reyes, at 602 555 0202.") is checked against
+    # the callback: any number it names that is not the callback is flagged (AEGIS F3 round 20: compared with the
+    # last receptionist number, which is always the consent question's, the check could never fire)
+    confirmed = ["+1" + "".join(m) for x in agent_trusted if _CONFIRM_LINE.fullmatch(_fold(x).strip())
+                 for m in _NUM.findall(_fold(x))]                                  # NFKC: "602\xa0555"
+    if callback and any(n != callback for n in confirmed):
         notes.append("confirmation_disagrees_with_caller")
     need = _need(trusted, pack, emergency, bool(spoken))
     if (flagged or unknown_text) and need == "long_silence":

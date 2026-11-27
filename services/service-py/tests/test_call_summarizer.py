@@ -1380,3 +1380,42 @@ def test_a_consent_number_with_a_no_break_space_is_the_last_confirmed_number():
     t["turns"].insert(2, {"speaker": "agent", "confidence": 0.97, "text": "Let me confirm: at 602 555 0202."})
     s = cs.summarize(t, {"reason_categories": ["repair"]})
     assert s.callback_number == "+16025550101" and "confirmation_disagrees_with_caller" not in s.notes
+
+
+def test_a_confirmation_line_naming_another_number_is_flagged():
+    t = _consent_call("I'm Ana Reyes. I need a repair. My cell is 602 555 0101.")
+    t["turns"].insert(2, {"speaker": "agent", "confidence": 0.97, "text": "Let me confirm: Ana Reyes, at 602 555 0202."})
+    t["turns"].insert(3, {"speaker": "caller", "confidence": 0.95, "text": "Yes."})
+    s = cs.summarize(t, {"reason_categories": ["repair"]})
+    assert s.callback_number == "+16025550101" and "confirmation_disagrees_with_caller" in s.notes
+
+
+def test_a_low_confidence_confirmation_line_is_not_checked():
+    t = _consent_call("I'm Ana Reyes. I need a repair. My cell is 602 555 0101.")
+    t["turns"].insert(2, {"speaker": "agent", "confidence": 0.3, "text": "Let me confirm: Ana Reyes, at 602 555 0202."})
+    s = cs.summarize(t, {"reason_categories": ["repair"]})
+    assert s.callback_number == "+16025550101" and "confirmation_disagrees_with_caller" not in s.notes
+
+
+def test_a_confirmation_line_naming_the_callback_is_not_flagged():
+    t = _consent_call("I'm Ana Reyes. I need a repair. My cell is 602 555 0101.")
+    t["turns"].insert(2, {"speaker": "agent", "confidence": 0.97, "text": "Let me confirm: Ana Reyes, at 602 555 0101."})
+    t["turns"].insert(3, {"speaker": "caller", "confidence": 0.95, "text": "Yes."})
+    assert "confirmation_disagrees_with_caller" not in cs.summarize(t, {"reason_categories": ["repair"]}).notes
+
+
+@pytest.mark.parametrize("follow", ["Please hang up and dial 911 right now.\x1f", "\x1cThanks.", "Thanks.\x1d", "\x1eThanks."])
+def test_after_the_yes_a_control_character_is_a_character(follow):
+    t = tr("I need a repair.", "602 555 0101.", agent=rb("602 555 0101"))
+    t["turns"] += [{"speaker": "caller", "confidence": 0.95, "text": "Yes."},
+                   {"speaker": "agent", "confidence": 0.97, "text": follow}]
+    assert cs.summarize(t, PACK).callback_number is None
+
+
+def test_an_earlier_confirmation_of_another_number_is_flagged_even_if_a_later_one_matches():
+    t = _consent_call("I'm Ana Reyes. I need a repair. My cell is 602 555 0101.")
+    t["turns"][2:2] = [{"speaker": "agent", "confidence": 0.97, "text": "Let me confirm: Ana Reyes, at 602 555 0202."},
+                       {"speaker": "caller", "confidence": 0.95, "text": "Yes."},
+                       {"speaker": "agent", "confidence": 0.97, "text": "Let me confirm: Ana Reyes, at 602 555 0101."},
+                       {"speaker": "caller", "confidence": 0.95, "text": "Yes."}]
+    assert "confirmation_disagrees_with_caller" in cs.summarize(t, {"reason_categories": ["repair"]}).notes
