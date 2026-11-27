@@ -660,3 +660,6 @@ number).
 AEGIS Inquisitor round 9 on 105e828c (RR-F2): the round-8 subclass check became an allowlist: any record value that
 is not plain data (`str`, `int`, `float`, `bool`, `None`, `list`, `tuple`, `dict`) makes the record unreadable, so an
 arbitrary object that says "landline" but compares equal to "mobile" is never texted.
+
+AEGIS Inquisitor round 10 on e0a46247 (RR-F2): the plain-data rule covers keys too: a record key that is not plain
+text (an object that hashes like "line_type" and shadows it after the record is built) makes the record unreadable.

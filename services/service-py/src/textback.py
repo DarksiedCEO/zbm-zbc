@@ -24,7 +24,8 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings, TCPA practice):
 - A send-now decision must reach the caller within 30 s (the bar); the deadline travels with the decision.
 - Anything this module cannot read (line type, consent state, zone, local time, last-text time) fails closed: no
   text, with the reason. Records are read as plain data: a dict subclass through ``dict``'s own methods, any value
-  that is not plain data (str, int, float, bool, None, list, tuple, dict) makes the record unreadable
+  that is not plain data (str, int, float, bool, None, list, tuple, dict), or a key that is not plain text,
+  makes the record unreadable
   (``unreadable_record``, AEGIS rounds 8-9), a last-text
   time only as a plain ``int``, a clock only as a real ``datetime`` whose offset is read once (AEGIS round 7). A
   consent keeper that raises an ``Exception`` reads as ``consent_unknown``; a ``KeyboardInterrupt`` or
@@ -165,7 +166,7 @@ def decide(call: dict, now: Optional[datetime] = None,
     # (AEGIS round 8: a str subclass holding "landline" compared equal to "mobile"), so the record is unreadable
     # only plain data types are read at all: any other object (one that says "landline" but equals "mobile") makes the
     # record unreadable (AEGIS round 9: the inverted default; a subclass check alone missed plain objects)
-    if any(type(v) not in _PLAIN for v in call.values()):
+    if any(type(k) is not str or type(v) not in _PLAIN for k, v in call.items()):   # keys too (AEGIS round 10)
         return no("unreadable_record")
 
     number = normalise_number(call.get("caller_id"))

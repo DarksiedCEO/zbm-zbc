@@ -500,3 +500,25 @@ def test_a_plain_object_that_equals_mobile_is_never_texted():
     g = tb.TextBackGate().decide(call(line_type=_SaysLandline()), now=datetime(2026, 11, 27, 18, 0, tzinfo=timezone.utc),
                                  opted_out=lambda n: False)
     assert g.action == "do_not_send"
+
+
+# ---------------------------------------------------------------- AEGIS round 10 (Inquisitor, e0a46247)
+class _ShadowKey:
+    armed = False
+
+    def __hash__(self):
+        return hash("line_type")
+
+    def __eq__(self, other):
+        return _ShadowKey.armed and other == "line_type"
+
+
+def test_a_key_that_is_not_plain_text_makes_the_record_unreadable():
+    c = call(line_type="landline")
+    c[_ShadowKey()] = "mobile"          # stored beside the real key while it matches nothing ...
+    _ShadowKey.armed = True             # ... then it shadows "line_type" on every lookup
+    try:
+        d = tb.decide(c, opted_out=lambda n: False)
+    finally:
+        _ShadowKey.armed = False
+    assert (d.action, d.reason) == ("do_not_send", "unreadable_record")
