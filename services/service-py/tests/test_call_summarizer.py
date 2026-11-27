@@ -490,3 +490,13 @@ def test_a_silence_marker_in_any_case_is_not_flagged(marker):
 def test_an_unknown_pack_category_is_never_spoken(cat):
     s = cs.summarize(tr("I'd like to book an appointment.", "602 555 0101."), {"reason_categories": [cat]})
     assert cat.split("_")[0] not in s.text.lower() and "appointment request" in s.text
+
+
+def test_the_name_filters_still_hold_when_the_receptionist_echoes_a_pair():
+    """The confirmation rule is the main fence; the word filters are the second one (each tested on its own)."""
+    s = cs.summarize(tr("Desert Bakery, 602 555 0101.", agent=["Thanks for calling about Desert Bakery."]), PACK)
+    assert s.name is None                                                   # a business word
+    s = cs.summarize(tr("It's Gloria Vance who told me to call.", agent=["Gloria Vance referred you? Great."]), PACK)
+    assert s.name is None                                                   # a weak lead-in with no number
+    s = cs.summarize(tr("I'm locked out, 602 555 0101.", agent=["Locked out? We can help."]), PACK)
+    assert s.name is None                                                   # not capitalised

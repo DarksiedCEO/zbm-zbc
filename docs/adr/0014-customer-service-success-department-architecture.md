@@ -751,9 +751,9 @@ name, callback number, one need label, urgency and the next action. Not wired; d
 | Nothing invented | Facts come only from the caller's turns that speech recognition trusts (confidence >= 0.6). The receptionist's confirmation line is checked against them (`confirmation_disagrees_with_caller`), never used as the source |
 | Low confidence | A spoken turn below 0.6 is flagged and never used; a silent turn is not flagged (Nov 26 ruling); a confidence that is not a finite number from 0 to 1 (NaN, infinity, text) counts as low; 0.6 itself is trusted (read as written, not as the binary float) |
 | Corrections | A number the caller rejects ("not 602 ...") is never used. A later different number wins only after a correction cue ("no wait", "sorry", "actually", "perdón", "mejor" ...); two numbers with no cue are ambiguous: no callback number, `ambiguous_number` |
-| Names | Read only where the caller gives their own: after a lead-in ("I'm", "this is", "my name is", "put it under", "soy", "habla", "me llamo" ...) or as "First Last" opening a sentence and followed straight by a number. Never a city, landlord or business pair, a command ("Approve Refund"), or a pair with a health word. Reported only when exactly one was given; two are ambiguous, never picked |
+| Names | Reported only when the receptionist confirmed the name (a trusted receptionist turn repeats it; AEGIS round 3), and read only where the caller gives their own: after a lead-in ("I'm", "this is", "my name is", "put it under", "soy", "habla", "me llamo" ...) or as "First Last" opening a sentence and followed straight by a number. Never a city, landlord or business pair, a command ("Approve Refund"), or a pair with a health word. Reported only when exactly one was given; two are ambiguous, never picked |
 | No health detail | The summary is built only from the name, the number, a fixed label and the urgency, never the caller's words. The health lexicon matches whole words and stems ("archive" is not "hiv"); a name with a health word is dropped and the summary is still returned (never an exception) |
-| Urgency | Emergency when the receptionist gave the 911 instruction (a dial / call / marque verb with 911; never 911 inside a phone number or address) or the caller described someone not breathing, collapsed, passed out or having a heart attack, gas, smoke or fire, a weapon, or someone threatening people; equipment and chores ("fire alarm inspection", "smoke detector", "caulk gun", "bleeding the radiator") are not. The next action claims the 911 instruction only when it was given |
+| Urgency | Emergency only when a trusted receptionist turn gave the 911 instruction in one of its fixed forms (AEGIS round 3); any caller wording that might describe one sets `possible_emergency` ("CHECK NOW", call back now) on purpose too broadly. Before round 3: emergency also when the caller described someone not breathing, collapsed, passed out or having a heart attack, gas, smoke or fire, a weapon, or someone threatening people; equipment and chores ("fire alarm inspection", "smoke detector", "caulk gun", "bleeding the radiator") are not. The next action claims the 911 instruction only when it was given |
 | Need | One label: the pack's own category (its booking category for a booking; `treatment_question` for a health matter; `pricing_question` for a service the pack prices, `pricing` for one it does not) or a fixed front-desk label (emergency, complaint, existing_customer, reschedule, hours, vendor, wrong_number, spam_call, long_silence); `unclear` when nothing matches, never a guess |
 
 Certification: `services/service-py/tests/test_call_summarizer.py` runs the shared MVP pool (F3, 300 transcripts per
@@ -767,16 +767,16 @@ that wording.
 
 ### Mutation check for the front-desk agents (RR-F5, F2, F4, F3)
 
-`cd services/service-py && python3 devtools/frontdesk_mutants.py [agent]` plants 85 single defects, each in a fresh
+`cd services/service-py && python3 devtools/frontdesk_mutants.py [agent]` plants 99 single defects, each in a fresh
 copy of `src/` and `tests/` (the checkout is never edited), and runs that agent's test file. A mutant whose text no
 longer exists fails the run (`NOT_APPLIED`), so the list cannot rot. A kill counts only when pytest exits 1 (tests
 ran and failed); any other exit code is `RUN_ERROR` and fails the run (AEGIS F3 round 1: a mutant that breaks the
-import is not a test that caught it). Result at this commit: 79 killed; 6 survive and are listed as equivalent with
+import is not a test that caught it). Result at this commit: 92 killed; 7 survive and are listed as equivalent with
 the reason (in the consent keeper: the carrier check in the decision, consent cleared on reassignment, the opt-in
-time guard, and the same-instant opt-in order; in the transfer router: an unreadable case raising inside `plan`,
-which `resolve`'s catch-all turns into the same fallback; in the summarizer: the final health check on the text,
-which the name reader and the label check already enforce), each covered by another rule that cannot be told apart
-from outside.
+time guard, the same-instant opt-in order, and a staff review at the reply's own instant, which is applied before
+the reply; in the transfer router: an unreadable case raising inside `plan`, which `resolve`'s catch-all turns into
+the same fallback; in the summarizer: the final health check on the text, which the name reader and the label check
+already enforce), each covered by another rule that cannot be told apart from outside.
 The summarizer's 0.6 confidence line is the exact fraction 3/5: this service allows no float literals. This replaces the hand-run mutant counts in the RR-F5, F2 and F4 commit messages.
 
 AEGIS round 1 on RR-F3 (Nov 26 2026, Inquisitor on 0aaf8411): 6 High, all fixed as above. Any capitalised pair was
@@ -806,3 +806,21 @@ it now counts as low. Review: "sorry" anywhere between two numbers read as a cor
 30 characters before the next number. **Known limit (unchanged):** these readings are wording rules on free speech;
 they are certified on the pool and on every reviewer paraphrase, not on real callers. The summary is advisory to the
 owner; nothing is sent or decided from it. Regression tests: "AEGIS round 2" section.
+
+AEGIS round 3 on RR-F3 (Nov 26 2026, Inquisitor on c184534b): the round-1 and round-2 repros held; 7 High, and the
+reviewer's note that another round of word lists would just bring a round 4. So three readings changed shape rather
+than grew. **Names** are reported only when the receptionist confirmed them (every name in the pool is confirmed);
+a landlord, a business, a mother or a city that nobody confirmed is never a name, and "her name's" is no longer a
+lead-in. **Urgency** is "emergency" only when a trusted receptionist turn (confidence >= 0.6) gave the 911 instruction
+in one of its fixed sentence forms; disclaimers ("For emergencies, please call 911"), negations and low-confidence
+turns are not the instruction. The receptionist decides an emergency on the call; the summary reports what it did.
+Caller wording that might describe an emergency now sets `possible_emergency` through a deliberately broad net
+(fire, smoke, gas, smell, sparks, weapons, blood, breathing, fainting, CO alarm ... English and Spanish): the text
+starts "CHECK NOW" and the owner is told to call back now. It over-flags ("gun safe", "armed forces discount") by
+design and never claims a 911 instruction. **Health** words with ordinary meanings ("due date", "kidney-shaped",
+"two-stroke", "chronic leak", "Dutch elm disease") count as a health need only as whole words right after a personal
+word ("I have depression", "my due date"); a pack category the shipped packs do not use is spoken as "appointment
+request". Also: apostrophe look-alikes are unified before reading; `[Silence]` in any case is silence; the greeting
+check is a linear word scan (the nested pattern backtracked for over 30 s on 20 "hello?"s). Review left open: digits
+the caller said that are not their callback (a landlord's number, an account number) can still be the callback.
+Regression tests: "AEGIS round 3".
