@@ -295,17 +295,18 @@ def _said_911(agent_text: str, previous: Optional[str] = None) -> Optional[str]:
     instruction's fixed forms and the receptionist's turn before it ended a sentence. Anything said with it ("In an
     emergency. Call 911.", "We are not an emergency line. Call 911.") is not the instruction (AEGIS round 5).
     Quotes, an opening "¡", inner punctuation and digit spacing ("9 1 1") are formatting; the final "." or "!" is not:
-    without it the turn may have been cut off, and with angle brackets in it words may have been set aside, so both
+    without it (an ellipsis, a dash, ";" or ":" instead, or nothing) the turn may have been cut off, and with angle brackets in it words may have been set aside, so both
     are "ambiguous" (CHECK NOW; AEGIS round 13). When the turn before did not end a
     sentence ("There's no need to" / "Call 911."), the two turns may be one sentence: "ambiguous", which raises
     CHECK NOW instead of URGENT (AEGIS round 8: neither reading is safe on its own). Otherwise None."""
     # every quote mark and the opening "¡" are formatting wherever they sit (AEGIS rounds 8-9: „…“, ‹…›, ¡"…!")
     text = _unmarked(agent_text)
     text = re.sub(r"(?<!\d)9[\s.\-‐-―−]?1[\s.\-‐-―−]?1(?!\d)", "911", text)   # "9 1 1", "9-1-1", "9–1–1"
-    ended = bool(re.search(r"[.!]$", text))
-    if not ended:
-        text += "."
-    text = re.sub(r"[.!]+$", ".", re.sub(r"\s+", " ", text.replace(",", " "))).replace(" .", ".")
+    # only a single "." or "!" (or "!!") ends the turn; any other ending ("...", " —", ";", ":", "‼", none) may be a
+    # cut-off or a sentence that goes on, so the fixed form then raises CHECK NOW (AEGIS rounds 13-14)
+    core = re.sub(r"[\W_]+$", "", text)
+    ended = re.fullmatch(r"(?:\.|!+)", text[len(core):].strip()) is not None
+    text = re.sub(r"\s+", " ", core.replace(",", " ")).strip() + "."
     if _SAID_911.fullmatch(text) is None:
         return None
     # the fixed form with no end mark may have been cut off, and anything inside angle brackets was set aside:
@@ -405,8 +406,13 @@ _PLAIN_WORDS = re.compile(
     re.IGNORECASE)
 
 
+_PHONE_TOPIC = re.compile(r"\b(?:phone|phones|cell|cellphone|number|numbers|line|landline|mobile|text|texts|texting|"
+                          r"voicemail|celular|n[uú]mero|tel[eé]fono|l[ií]nea|mensajes?)\b", re.IGNORECASE)
+
+
 def _only_plainly_given(number: str, trusted: list[str], names: Optional[list[str]] = None) -> bool:
-    """Every trusted caller sentence from the first that holds ``number`` to the end of the call holds nothing else but
+    """No caller sentence before the number speaks of a phone in other than plain words, and every trusted caller
+    sentence from the first that holds ``number`` to the end of the call holds nothing else but
     plain words, names and numbers. A sentence after the number ("That phone doesn't work anymore.", "That line got
     shut off in May.") may reject it, in the same turn or a later one, so it must be plain too (AEGIS round 13: the
     inverted default; a caller who describes the problem after giving the number gets "check the recording")."""
@@ -415,6 +421,11 @@ def _only_plainly_given(number: str, trusted: list[str], names: Optional[list[st
         for sentence in re.split(r"[!?\n]|\.(?!\d)", _fold(x)):     # "602.555.0101" stays one number
             nums = ["+1" + "".join(m.groups()) for m in _NUM.finditer(sentence)]
             if number not in nums and not seen:
+                # a sentence before the number that speaks of a phone in other than plain words ("Never call this
+                # number.", "My cell got shut off last week.") may reject it (AEGIS round 14)
+                if _PHONE_TOPIC.search(sentence) and \
+                        any(not _PLAIN_WORDS.fullmatch(w) for w in re.findall(r"[^\W\d_][\w']*", _NUM.sub(" ", sentence))):
+                    return False
                 continue
             seen = True
             rest = _NUM.sub(" ", sentence)
@@ -570,13 +581,17 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
             x = _fold(x)[:at_name.end()]   # what the caller said up to the name
             prev_agent = next((y for sp2, _, y in reversed(ordered[:i]) if sp2 == "agent" and y.strip()), "")
             full = _fold(ordered[i][2])
+            said_after = _fold(ordered[i][2])[at_name.end():] + " " + \
+                " ".join(_fold(y) for sp2, _, y in ordered[i + 1:] if sp2 in ("caller", "unknown"))
             lead = any(m.group(1).casefold() == name.casefold() and m.start(1) == at_name.start()
                        for m in list(_LEAD_NAME.finditer(full)) + list(_WEAK_LEAD_NAME.finditer(full)))
             first_agent = next((y for sp2, _, y in ordered if sp2 == "agent" and y.strip()), "")
             said_before = " ".join(_fold(y) for sp2, _, y in ordered[:i] if sp2 in ("caller", "unknown")) + " " + x
             bare_ok = _ASKS_OWN.search(_fold(prev_agent)) or \
                 (prev_agent == first_agent and not _OTHER_PERSON.search(said_before))
-            if _THIRD_PARTY.search(_fold(x)) or _ASKS_OTHER.search(_ASKS_OWN.sub(" ", _fold(prev_agent))) or (not lead and not bare_ok):
+            # anyone else spoken of after the name, in that turn or later ("Mark Diaz, 602 ... He's my son"): the
+            # name may be theirs (AEGIS round 14)
+            if _OTHER_PERSON.search(said_after) or _THIRD_PARTY.search(_fold(x)) or _ASKS_OTHER.search(_ASKS_OWN.sub(" ", _fold(prev_agent))) or (not lead and not bare_ok):
                 name = None
                 notes.append("name_of_someone_else")
             break

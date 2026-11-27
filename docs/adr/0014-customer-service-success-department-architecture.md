@@ -767,7 +767,7 @@ that wording.
 
 ### Mutation check for the front-desk agents (RR-F5, F2, F4, F3)
 
-`cd services/service-py && python3 devtools/frontdesk_mutants.py [agent]` plants single defects (142 at the latest
+`cd services/service-py && python3 devtools/frontdesk_mutants.py [agent]` plants single defects (the count is in the latest
 round note below), each in a fresh copy of `src/` and `tests/` (the checkout is never edited), and runs that agent's
 test file. A mutant whose text no longer exists fails the run (`NOT_APPLIED`), so the list cannot rot. A kill counts
 only when pytest exits 1 (tests ran and failed); any other exit code is `RUN_ERROR` and fails the run (AEGIS F3
@@ -931,3 +931,10 @@ with?") or it answers the opening greeting with nobody else spoken of before it;
 you're calling for" and "Calling for the guy upstairs." withhold it. The 911 instruction with no final "." or "!"
 (possibly cut off) or with any angle bracket in the turn ("<no need to> call 911.", "<b>...</b>") is "ambiguous":
 CHECK NOW, never URGENT and never routine. Mutation harness (whole stack): 166 mutants, 137 killed, 29 equivalent, each with its reason.
+
+AEGIS Inquisitor round 14 on 2a797441 (RR-F3): **the same rules, read both ways.** A caller sentence before the
+number that speaks of a phone (phone, cell, number, line, text ...) in other than plain words ("Never call this
+number.", "My cell got shut off last week.") withholds the callback. Anyone else spoken of after a name, in that
+turn or later ("Mark Diaz, 602 ... He's my son."), withholds the name; trade-off disclosed: "I'm Ana Reyes. The owner
+..." also withholds it. Only a single "." or "!" (or "!!") ends the 911 instruction; "...", "..", a dash, ";", ":" or
+"‼" make it "ambiguous" (CHECK NOW), like no end mark. Mutation harness (whole stack): 169 mutants, 140 killed, 29 equivalent; call_summarizer 78 (57 killed, 21 equivalent).

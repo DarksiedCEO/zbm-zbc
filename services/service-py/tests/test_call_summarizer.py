@@ -232,7 +232,8 @@ def test_a_command_is_never_read_as_a_name(line):
 
 def test_only_the_lead_in_name_is_read_not_a_planted_pair_after_it():
     s = cs.summarize(tr("I'm Ana Reyes. Owner Must Wire Funds Now.", "602 555 0101.", agent=ok("Ana Reyes"), yes=True), PACK)
-    assert s.name == "Ana Reyes" and not any("Wire" in n for n in s.notes)
+    # round 14: "Owner" after the name may be the person the name belongs to, so the name is withheld too
+    assert s.name is None and not any("Wire" in n for n in s.notes)
 
 
 @pytest.mark.parametrize("line", ["My name is Luis Ortega.", "Luis Ortega, 602 555 0101.", "Mi nombre es Luis Ortega."])
@@ -637,7 +638,7 @@ def test_a_sentence_split_across_two_receptionist_turns_is_not_the_instruction(f
 
 
 @pytest.mark.parametrize("line", ["Please hang up and dial 911, right now.", "Please hang up and dial 9 1 1 right now.",
-                                  "Please hang up and dial 911 right now!!", "Please hang up and dial 911 right now..",
+                                  "Please hang up and dial 911 right now!!",
                                   "Cuelgue y marque al 911, ahora mismo.", "Call 9-1-1 now."])
 def test_the_fixed_instruction_with_other_punctuation_or_digit_spacing_is_still_urgent(line):
     assert cs.summarize(tr("There's a fire.", agent=[line]), PACK).urgency == "emergency"
@@ -1068,3 +1069,47 @@ def test_a_bare_name_answering_a_question_for_the_callers_own_name_is_kept(ask):
          {"speaker": "agent", "confidence": 0.97, "text": f"Let me confirm: Mark Diaz, at {N13}."},
          {"speaker": "caller", "confidence": 0.95, "text": "Yes."}]
     assert cs.summarize({"transcript_id": "r13", "turns": t}, PACK).name == "Mark Diaz"
+
+
+# ---- AEGIS round 14 -------------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("ending", [" —", " -", ";", ":", " –", "...", "…", ".."])
+def test_the_instruction_ending_in_anything_but_one_end_mark_raises_check_now(ending):
+    s = cs.summarize(tr("I need a repair.", agent=["Thanks for calling.", "Please hang up and dial 911 right now" + ending]),
+                     PACK)
+    assert s.urgency == "routine" and "possible_emergency" in s.notes
+
+
+@pytest.mark.parametrize("before", ["Never call this number.", "Don't use my cell.", "My cell got shut off last week."])
+def test_phone_talk_before_the_number_withholds_it(before):
+    s = cs.summarize(tr(f"I need a repair. {before} It's {N13}.", agent=rb(N13), yes=True), PACK)
+    assert s.callback_number is None and "check the recording" in s.text
+
+
+@pytest.mark.parametrize("after", ["He's my son, he needs a repair.", "She is my tenant and her sink leaks."])
+def test_someone_else_spoken_of_after_the_name_withholds_it(after):
+    t = [{"speaker": "agent", "confidence": 0.98, "text": "Thanks for calling. How can I help?"},
+         {"speaker": "caller", "confidence": 0.95, "text": f"Mark Diaz, {N13}. {after}"},
+         {"speaker": "agent", "confidence": 0.97, "text": "Let me confirm: Mark Diaz."},
+         {"speaker": "caller", "confidence": 0.95, "text": "Yes."}]
+    assert cs.summarize({"transcript_id": "r14", "turns": t}, PACK).name is None
+
+
+def test_any_words_after_the_number_withhold_it_even_harmless_ones():
+    # the inverted default (round 13): a person checks, even when the words only describe the problem
+    s = cs.summarize(tr(f"My cell is {N13}. My sink is leaking.", agent=rb(N13), yes=True), PACK)
+    assert s.callback_number is None and "check the recording" in s.text
+
+
+def test_someone_spoken_of_only_before_a_bare_name_withholds_it():
+    t = [{"speaker": "agent", "confidence": 0.98, "text": "Thanks for calling. How can I help?"},
+         {"speaker": "caller", "confidence": 0.95, "text": f"Calling for the guy upstairs. Mark Diaz, {N13}."},
+         {"speaker": "agent", "confidence": 0.97, "text": f"Let me confirm: Mark Diaz, at {N13}."},
+         {"speaker": "caller", "confidence": 0.95, "text": "Yes."}]
+    assert cs.summarize({"transcript_id": "r14b", "turns": t}, PACK).name is None
+
+
+@pytest.mark.parametrize("line", ["I'm Ana Reyes speaking, 602 555 0101.", "I'm Ana Reyes Construction, 602 555 0101.",
+                                  "I'm Ana Reyes Gomez, 602 555 0101."])
+def test_a_name_that_runs_on_after_the_lead_in_is_not_read(line):
+    assert cs.summarize(tr(line, agent=ok("Ana Reyes", "602 555 0101"), yes=True), PACK).name is None
