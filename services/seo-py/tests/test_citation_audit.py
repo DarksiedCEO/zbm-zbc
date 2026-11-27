@@ -214,9 +214,60 @@ def test_inner_punctuation_in_a_name_is_still_correct(kw):
 
 def test_a_non_latin_street_is_another_street():
     rec = dict(_REC, street="100 東京通り")
-    assert ca.audit(_biz(rec, dict(_LIST, street="100 大阪通り")))[0].verdict == "wrong_address"
+    # same house number, other street words: never "correct"; a person checks (round 3: the inverted default)
+    assert ca.audit(_biz(rec, dict(_LIST, street="100 大阪通り")))[0].verdict == "address_needs_review"
 
 
 def test_west_virginia_ap_style_is_the_state():
     rec = dict(_REC, state="WV", city="Charleston", zip="25301")
     assert ca.audit(_biz(rec, dict(_LIST, state="W.Va.", city="Charleston", zip="25301")))[0].verdict == "correct"
+
+
+
+# ---------------------------------------------------------------- AEGIS round 3 (Inquisitor, 52231682)
+def test_a_suite_field_counts_beside_another_unit_in_the_street_line():
+    rec = dict(_REC, street="12 Main St, Suite 400", suite="Fl 4")
+    assert ca.audit(_biz(rec, dict(_LIST, street="12 Main St, Suite 400, Fl 4")))[0].verdict == "correct"
+    assert ca.audit(_biz(rec, dict(_LIST, street="12 Main St, Suite 400")))[0].verdict == "wrong_address"
+
+
+@pytest.mark.parametrize("missing", ["state", "zip"])
+def test_a_record_without_state_or_zip_refuses(missing):
+    with pytest.raises(ValueError):
+        ca.audit(_biz({k: v for k, v in _REC.items() if k != missing}, _LIST))
+
+
+@pytest.mark.parametrize("site", [5, ["https://x.test/"]])
+def test_a_record_website_that_is_not_text_refuses(site):
+    with pytest.raises(ValueError):
+        ca.audit(_biz(dict(_REC, website=site), _LIST))
+
+
+def test_an_empty_status_reads_as_open():
+    assert ca.audit(_biz(_REC, dict(_LIST, status="")))[0].verdict == "correct"
+
+
+def test_a_hostile_business_refuses_with_value_error():
+    class Boom(dict):
+        def get(self, *a, **k):
+            raise RuntimeError("boom")
+    with pytest.raises(ValueError):
+        ca.audit(Boom())
+
+
+@pytest.mark.parametrize("listed", ["100 S St", "12 Main Strete"])
+def test_the_same_number_with_other_street_words_needs_review(listed):
+    rec = dict(_REC, street="100 South St" if listed.startswith("100") else "12 Main St")
+    assert ca.audit(_biz(rec, dict(_LIST, street=listed)))[0].verdict == "address_needs_review"
+
+
+@pytest.mark.parametrize("kw", [{"street": "12 Main St Ext"}, {"city": "N Las Vegas"}, {"name": "J. R. Plumbing"}])
+def test_round_4_formatting_is_correct(kw):
+    rec = dict(_REC)
+    if "street" in kw:
+        rec["street"] = "12 Main Street Extension"
+    if "city" in kw:
+        rec["city"] = "North Las Vegas"
+    if "name" in kw:
+        rec["name"] = "J.R. Plumbing"
+    assert ca.audit(_biz(rec, dict(_LIST, **kw)))[0].verdict == "correct"

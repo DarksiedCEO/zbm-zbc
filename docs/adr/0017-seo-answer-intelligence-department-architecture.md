@@ -1465,3 +1465,11 @@ fixes apply here (every script in street names, "Joe's" = "Joes", "Ste 4.", "4th
 names its kind anywhere ("4th Floor", "Ste 4.") is used as written; only a bare one becomes "Suite N". A record field
 that cannot be read as text now refuses the audit with ValueError, as documented. `proposed` is empty only when
 nothing differs: a correct listing whose website differs still proposes the record's website.
+
+AEGIS round 3 for SEO-L4 (Nov 27 2026, Inquisitor on 52231682, shared with SEO-L5 round 4): the USPS suffix and unit
+lists, lettered streets, city abbreviations and spaced initials of SEO-L5 round 4 apply here. A record's suite field
+counts even when its street line already names another unit ("Suite 400" + "Fl 4"). The confirmed record must carry
+a state and a ZIP, and a website that is text; an empty listing status reads as open; anything about the business
+that cannot be read refuses with ValueError. **The inverted default:** a listing with the record's house number, unit
+and city whose street words still differ is `address_needs_review` (a person checks), never `correct` and never
+`wrong_address` on a guess.

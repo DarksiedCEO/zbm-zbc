@@ -27,7 +27,8 @@ from typing import Optional
 
 import nap
 
-VERDICTS = ("correct", "closed_listing", "wrong_status", "wrong_name", "wrong_address", "wrong_phone", "unreadable")
+VERDICTS = ("correct", "closed_listing", "wrong_status", "wrong_name", "wrong_address", "address_needs_review",
+            "wrong_phone", "unreadable")
 
 
 @dataclass(frozen=True)
@@ -42,7 +43,7 @@ class CitationVerdict:
 def _with_suite(street: str, suite: object) -> str:
     """The record's street with its suite field: a suite that already names its kind ("Ste 4", "#4", "Floor 2") is
     used as written, a bare one ("4") is a suite; a street that already ends in a unit keeps it (AEGIS L4 round 1)."""
-    if suite is None or (isinstance(suite, str) and not suite.strip()) or nap.street_key(street)[1] is not None:
+    if suite is None or (isinstance(suite, str) and not suite.strip()):
         return street
     text = str(suite).strip().rstrip(".,;: ")
     # a suite that names its kind anywhere ("Ste 4", "#4", "4th Floor", "Floor 2") is used as written; a bare one is a
@@ -51,7 +52,10 @@ def _with_suite(street: str, suite: object) -> str:
             r"(?<![^\W\d_])(?:suite|ste|unit|apt|apartment|bldg|building|fl|floor|rm|room|no)(?![^\W\d_])|#", text,
             re.IGNORECASE):
         text = f"Suite {text}"
-    return f"{street}, {text}"
+    have = set((nap.street_key(street)[1] or "").split("|")) - {""}
+    if set((nap.street_key("1 x, " + text)[1] or "").split("|")) <= have:
+        return street                  # the street line already names this unit
+    return f"{street}, {text}"         # both count, even when the street line has another unit (AEGIS L4 round 3)
 
 
 def _record_street(rec: dict) -> str:
@@ -78,14 +82,27 @@ def _read_record(rec: object) -> dict:
     out = {"name": rec.get("name"), "street": street, "city": rec.get("city"), "state": rec.get("state"),
            "zip": rec.get("zip"), "phone": rec.get("phone"), "toll_free": rec.get("toll_free"),
            "website": rec.get("website"), "open": rec.get("open")}
+    ck = nap.city_key(out["city"], out["state"], out["zip"])
     if not nap.name_key(out["name"]) or not nap.street_key(street)[0] or nap.phone_key(out["phone"]) is None \
-            or not nap.city_key(out["city"], out["state"], out["zip"])[0] or out["open"] not in (True, False):
-        raise ValueError("the confirmed record is missing its name, street, city, phone or open state")
+            or not ck[0] or not ck[1] or not ck[2] or out["open"] not in (True, False):
+        raise ValueError("the confirmed record is missing its name, street, city, state, ZIP, phone or open state")
+    if out["website"] is not None and type(out["website"]) is not str:
+        raise ValueError("the confirmed record's website must be text")     # (AEGIS L4 round 3)
     return out
 
 
 def audit(business: dict) -> list[CitationVerdict]:
-    """Judge every listing of one business against its confirmed record (``canonical``)."""
+    """Judge every listing of one business against its confirmed record (``canonical``). Anything about the business
+    that cannot be read refuses with ValueError (AEGIS L4 round 3: a hostile object raised RuntimeError)."""
+    try:
+        return _audit(business)
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError("the business cannot be read") from exc
+
+
+def _audit(business: dict) -> list[CitationVerdict]:
     if not isinstance(business, dict):
         raise ValueError("a business must be an object")
     rec = _record(business.get("canonical"))
@@ -110,7 +127,8 @@ def _judge(rec: dict, x: object) -> CitationVerdict:
         return CitationVerdict(cid, "unreadable", (), {})
     diffs, proposed = [], {}
     status = x.get("status")
-    closed = not (status is None or (isinstance(status, str) and status.strip().casefold() == "open"))
+    # no status, or an empty one, reads as open (AEGIS L4 round 3: "" was read as closed)
+    closed = not (status is None or (isinstance(status, str) and status.strip().casefold() in ("open", "")))
     if closed == rec["open"]:      # listed closed while open, or listed open (or with no status) while closed
         diffs.append("status")
         proposed["status"] = "open" if rec["open"] else "closed"
@@ -137,7 +155,12 @@ def _judge(rec: dict, x: object) -> CitationVerdict:
     elif "name" in diffs:
         verdict = "wrong_name"
     elif "address" in diffs:
-        verdict = "wrong_address"
+        # the same house number, unit and city with street words that still differ: an unknown spelling or another
+        # street; the data cannot tell, so a person checks (AEGIS L4 round 3: the inverted default)
+        same_city = nap.city_key(x.get("city"), x.get("state"), x.get("zip")) == \
+            nap.city_key(rec["city"], rec["state"], rec["zip"])
+        verdict = "address_needs_review" if same_city and nap.same_number_other_words(
+            nap.street_key(x.get("street")), nap.street_key(rec["street"])) else "wrong_address"
     elif "phone" in diffs:
         verdict = "wrong_phone"
     else:
