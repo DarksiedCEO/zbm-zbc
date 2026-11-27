@@ -656,3 +656,7 @@ AEGIS Inquisitor round 8 on c485c5b9 (RR-F2): any text or number value in a miss
 subclass holding "landline" could compare equal to "mobile". Disclosed for Andre: the callback check is a format
 check; non-geographic ranges such as 456, 500, 600, 700 and 880 are not refused (the wiring passes the client's own
 number).
+
+AEGIS Inquisitor round 9 on 105e828c (RR-F2): the round-8 subclass check became an allowlist: any record value that
+is not plain data (`str`, `int`, `float`, `bool`, `None`, `list`, `tuple`, `dict`) makes the record unreadable, so an
+arbitrary object that says "landline" but compares equal to "mobile" is never texted.

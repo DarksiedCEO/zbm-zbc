@@ -479,3 +479,24 @@ def test_a_subclass_value_makes_the_record_unreadable(field, value):
     g = tb.TextBackGate().decide(call(**{field: value}), now=datetime(2026, 11, 27, 18, 0, tzinfo=timezone.utc),
                                  opted_out=lambda n: False)
     assert g.action == "do_not_send"
+
+
+# ---------------------------------------------------------------- AEGIS round 9 (Inquisitor, 105e828c)
+class _SaysLandline:
+    def __eq__(self, other):
+        return other == "mobile"
+
+    def __hash__(self):
+        return hash("mobile")
+
+    def __str__(self):
+        return "landline"
+
+
+def test_a_plain_object_that_equals_mobile_is_never_texted():
+    from datetime import datetime, timezone
+    d = tb.decide(call(line_type=_SaysLandline()), opted_out=lambda n: False)
+    assert (d.action, d.reason) == ("do_not_send", "unreadable_record")
+    g = tb.TextBackGate().decide(call(line_type=_SaysLandline()), now=datetime(2026, 11, 27, 18, 0, tzinfo=timezone.utc),
+                                 opted_out=lambda n: False)
+    assert g.action == "do_not_send"

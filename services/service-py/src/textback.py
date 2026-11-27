@@ -23,8 +23,9 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings, TCPA practice):
   client's own number.
 - A send-now decision must reach the caller within 30 s (the bar); the deadline travels with the decision.
 - Anything this module cannot read (line type, consent state, zone, local time, last-text time) fails closed: no
-  text, with the reason. Records are read as plain data: a dict subclass through ``dict``'s own methods, any text
-  or number value that is a subclass makes the record unreadable (``unreadable_record``, AEGIS round 8), a last-text
+  text, with the reason. Records are read as plain data: a dict subclass through ``dict``'s own methods, any value
+  that is not plain data (str, int, float, bool, None, list, tuple, dict) makes the record unreadable
+  (``unreadable_record``, AEGIS rounds 8-9), a last-text
   time only as a plain ``int``, a clock only as a real ``datetime`` whose offset is read once (AEGIS round 7). A
   consent keeper that raises an ``Exception`` reads as ``consent_unknown``; a ``KeyboardInterrupt`` or
   ``SystemExit`` is not caught, on purpose, and nothing is sent.
@@ -93,6 +94,9 @@ def message(business_name: Optional[str] = None, callback_number: Optional[str] 
     return f"{who} {back} Reply STOP to opt out."
 
 
+_PLAIN = (str, int, float, bool, type(None), list, tuple, dict)
+
+
 def _plain(d: object) -> object:
     """A dict subclass is read through ``dict``'s own methods, so an overridden ``get`` cannot change what the record
     holds (AEGIS round 7); anything else is returned unchanged."""
@@ -159,7 +163,9 @@ def decide(call: dict, now: Optional[datetime] = None,
 
     # every value is read as plain data: a subclass of str or a number can answer == / in / < however it likes
     # (AEGIS round 8: a str subclass holding "landline" compared equal to "mobile"), so the record is unreadable
-    if any(isinstance(v, (str, int, float)) and type(v) not in (str, int, float, bool) for v in call.values()):
+    # only plain data types are read at all: any other object (one that says "landline" but equals "mobile") makes the
+    # record unreadable (AEGIS round 9: the inverted default; a subclass check alone missed plain objects)
+    if any(type(v) not in _PLAIN for v in call.values()):
         return no("unreadable_record")
 
     number = normalise_number(call.get("caller_id"))
