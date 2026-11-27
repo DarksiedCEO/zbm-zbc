@@ -220,3 +220,10 @@ def test_the_grader_fails_a_drafter_that_replies_to_fakes(monkeypatch):
 @pytest.mark.parametrize("sign", ["₹", "₩", "₽", "₱", "₪", "₿", "฿", "₫", "﷼"])
 def test_every_currency_sign_routes(sign):
     assert rr.draft(review(text=f"Five hundred {sign} now.", stars=1)).route_to_owner
+
+
+def test_every_number_character_of_any_script_routes():
+    import unicodedata
+    chars = [chr(i) for i in range(0x110000) if unicodedata.category(chr(i)) in ("Nd", "Nl", "No") or chr(i).isdigit()]
+    missed = [c for c in chars if not rr.draft(review(text=f"Send me {c} now.", stars=1)).route_to_owner]
+    assert not missed, [hex(ord(c)) for c in missed[:5]]
