@@ -1315,3 +1315,68 @@ def test_a_low_confidence_name_confirmation_is_not_a_confirmation():
     t["turns"].insert(2, {"speaker": "agent", "confidence": 0.3, "text": "Let me confirm: Dana Ortiz."})
     s = cs.summarize(t, {"reason_categories": ["repair"]})
     assert s.notes.count("name_not_confirmed") == 1 and "name_denied" not in s.notes
+
+
+@pytest.mark.parametrize("follow", ["Please hang up and dial 911 right now. \U0001f1f4\U0001f1f7 \U0001f1fc\U0001f1f4\U0001f1f7\U0001f1f0 ❓",
+                                    "Please hang up and dial 911 right now. ❓",
+                                    "Please hang up and dial 911 right now." + "".join(chr(0xE0000 + ord(c)) for c in " Or is work better?"),
+                                    "Cuelgue y marque al 911 ahora mismo. ❔"])
+def test_after_the_yes_a_911_line_with_anything_hidden_in_it_drops_the_callback(follow):
+    t = tr("I need a repair.", "602 555 0101.", agent=rb("602 555 0101"))
+    t["turns"] += [{"speaker": "caller", "confidence": 0.95, "text": "Yes."},
+                   {"speaker": "agent", "confidence": 0.97, "text": follow},
+                   {"speaker": "caller", "confidence": 0.95, "text": "Yes."}]
+    assert cs.summarize(t, PACK).callback_number is None
+
+
+def test_after_the_yes_the_spanish_911_line_keeps_the_callback():
+    t = tr("I need a repair.", "602 555 0101.", agent=rb("602 555 0101"))
+    t["turns"] += [{"speaker": "caller", "confidence": 0.95, "text": "Yes."},
+                   {"speaker": "agent", "confidence": 0.97, "text": "Cuelgue y marque al 911 ahora mismo."}]
+    assert cs.summarize(t, PACK).callback_number == "+16025550101"
+
+
+def _named(caller_text, name, extra=()):
+    return {"transcript_id": "names", "turns": [
+        {"speaker": "agent", "confidence": 0.98, "text": "Thanks for calling. How can I help?"},
+        {"speaker": "caller", "confidence": 0.95, "text": caller_text}, *extra,
+        {"speaker": "agent", "confidence": 0.97, "text": f"Let me confirm: {name}."},
+        {"speaker": "caller", "confidence": 0.95, "text": "Yes."}]}
+
+
+@pytest.mark.parametrize("caller_text,name", [
+    ("Hi, this is Ana Reyes.", "Ana Reyes"),                 # a weak lead-in needs a number or a calling phrase after
+    ("I'm Doctor Reyes.", "Doctor Reyes"),                   # a title is not a first name
+    ("I'm ana reyes.", "ana reyes"),                         # a name must be capitalised
+    ("I'm Ana Reyes thanks.", "Ana Reyes"),                  # the name must end there
+    ("Can you call me? Ana Reyes, 602 555 0101.", "Ana Reyes"),  # a question before a weak name
+    ("I'm Ana Reyes's.", "Ana Reyes's"),                     # a possessive names someone else
+])
+def test_a_confirmed_pair_is_still_not_a_name_when_the_caller_side_rule_withholds_it(caller_text, name):
+    assert cs.summarize(_named(caller_text, name), {"reason_categories": ["repair"]}).name is None
+
+
+def test_a_retracted_confirmation_is_a_denied_name():
+    t = _named("I'm Ana Wrong.", "Ana Wrong")
+    s = cs.summarize(t, {"reason_categories": ["repair"]})
+    assert s.name is None and "name_denied" in s.notes
+
+
+def test_a_confirmation_inside_a_longer_turn_does_not_confirm():
+    extra = [{"speaker": "agent", "confidence": 0.97, "text": "So, let me confirm: Mark Diaz is your tenant."},
+             {"speaker": "caller", "confidence": 0.95, "text": "I'm Ana Reyes."}]
+    s = cs.summarize(_named("Mark Diaz, 602 555 0101.", "Ana Reyes", extra), {"reason_categories": ["repair"]})
+    assert "name_of_someone_else" in s.notes and not any(n.startswith("ambiguous_name") for n in s.notes)
+
+
+def test_a_digit_word_cut_by_a_window_is_not_a_correction():
+    t = _consent_call("My cell is 602 555 0101 and I would rather keep all of these private details to oneself.")
+    assert "ambiguous_number" not in cs.summarize(t, {"reason_categories": ["repair"]}).notes
+
+
+def test_a_consent_number_with_a_no_break_space_is_the_last_confirmed_number():
+    t = _consent_call("I need a repair. My cell is 602 555 0101.")
+    t["turns"][2]["text"] = "Is 602 555 0101 the best number to call you back?"
+    t["turns"].insert(2, {"speaker": "agent", "confidence": 0.97, "text": "Let me confirm: at 602 555 0202."})
+    s = cs.summarize(t, {"reason_categories": ["repair"]})
+    assert s.callback_number == "+16025550101" and "confirmation_disagrees_with_caller" not in s.notes

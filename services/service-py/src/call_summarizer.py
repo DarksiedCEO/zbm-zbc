@@ -12,10 +12,11 @@ Rules (spec v0.1, the front-desk shared rules, the Nov 26 spec-freeze rulings):
   number ("Is 602 555 0101 the best number to call you back?", "¿Es el 602 555 0101 el mejor número para
   devolverle la llamada?"), the caller gave that number in a trusted turn, and everything the caller says after the
   question is a trusted yes (Andre's ruling, Nov 27 2026, option (a)): the very next spoken turn after the question is
-  the caller's yes, and after it the receptionist says nothing but the fixed 911 instruction (exactly, with its end
-  mark) or a fixed closing line as said, with nothing set aside ("Thank you, we'll call you back soon.", "Gracias,
+  the caller's yes, and after it the receptionist says nothing but the 911 instruction in one of its two fixed forms
+  ("Please hang up and dial 911 right now.", "Cuelgue y marque al 911 ahora mismo.", character for character) or a
+  fixed closing line as said, with nothing set aside ("Thank you, we'll call you back soon.", "Gracias,
   le llamaremos pronto."); anything else, a question or not, means no callback (a yes to a later question is never
-  consent; AEGIS rounds 16-18). The explicit yes settles anything the caller said about the number before it. When this module's own
+  consent; AEGIS rounds 16-19). The explicit yes settles anything the caller said about the number before it. When this module's own
   rejection and correction rules (a word list, so not every phrasing) had marked that number as rejected or
   replaced, the note ``caller_doubted_this_number_earlier`` is added and the yes still stands. Anything else (no question, another
   wording, "No", "Yes, but text my other number", a low-confidence yes) is no callback, and the summary says to
@@ -100,9 +101,6 @@ _DOUBT_AFTER = re.compile(r"\b(?:no|not|nope|nah|never|don'?t|do not|wrong|oops|
                           r"sorry|digits?|last|ending|ends|mistake|scratch|mind|disconnected|instead|email|text me|"
                           r"equivocad[oa]|incorrecto|perd[oó]n|espere|n[uú]mero|mejor|olvide|desconectado)\b|"
                           r"\b" + _DIGIT_WORD + r"\b", re.IGNORECASE)
-_PARTIAL_CORRECTION = re.compile(
-    r"(?:" + _CORRECTION_CUE + r"|\bwait\b|\bhold on\b|\bno\b\s*[,.!]|\bending in\b|\bends in\b|\blast (?:four|4|digits)\b|"
-    r"…|\.\.\.|\bespere\b|\btermina en\b)[^\n]{0,40}?\b" + _DIGIT_WORD + r"\b", re.IGNORECASE)
 _WORD = r"[A-ZÁÉÍÓÚÑÜ][a-záéíóúñü'\-]+"
 # where a caller gives their own name: a strong lead-in, then First Last; or a weak lead-in ("this is", "it's",
 # "habla") only when the name is followed straight by a number or a calling phrase (AEGIS F3 round 2: "It's Christmas
@@ -365,11 +363,11 @@ def _callback(trusted: list[str], notes: list[str], rejected_out: Optional[set] 
     if not found:
         return None, False
     end = found[-1][2]
-    nxt = _NUM.search(joined, end)
     # after the last accepted number, any doubt at all (also around a later number the caller rejected), or that
     # same number rejected elsewhere, makes it ambiguous (AEGIS round 8: "Scratch that", "do not call ...")
-    if _PARTIAL_CORRECTION.search(joined[end:nxt.start() if nxt else end + 60]) or \
-            _DOUBT_AFTER.search(joined[end:]) or any(n in rejected for n, _, _ in found):
+    # (a separate partial-correction pattern over a window after it was removed in AEGIS F3 round 19: every digit
+    # word it read is a digit word _DOUBT_AFTER reads over all the rest, and its window cut words: "one|self")
+    if _DOUBT_AFTER.search(joined[end:]) or any(n in rejected for n, _, _ in found):
         notes.append("ambiguous_number")   # "0110, no wait, 0101": a correction we cannot complete (AEGIS round 5)
         return None, False
     distinct = []
@@ -432,6 +430,9 @@ def _clean_confirmation(text: str) -> bool:
     return "?" not in text and "¿" not in text and not _RETRACT.search(text)
 
 
+_FIXED_911 = frozenset({"Please hang up and dial 911 right now.", "Cuelgue y marque al 911 ahora mismo."})
+
+
 def _answers_consent(ordered: list, i: int) -> bool:
     """The very next spoken turn after the consent question (turn ``i``) is the caller's trusted yes, every later
     caller turn is a trusted yes too, and the receptionist asks nothing after it (AEGIS F3 round 16: a yes to a later
@@ -441,10 +442,10 @@ def _answers_consent(ordered: list, i: int) -> bool:
         return False
     # after it the receptionist may say only the fixed 911 instruction or a fixed closing line: anything else might
     # be another question, with or without a question mark (AEGIS round 17: "？", "؟", "Let me know if that's not
-    # right."), so the inverted default withholds the callback. The closing line is matched on the turn as said, with
-    # nothing set aside (AEGIS round 18: "Thanks <or is work better?>"), and a 911 turn counts only when it is the
-    # instruction as such ("urgent"), not one read as "ambiguous" (brackets, a "?" or no end mark)
-    if any(sp == "agent" and _CLOSING.fullmatch(_fold(x).strip()) is None and _said_911(_fold(x)) != "urgent"
+    # right."), so the inverted default withholds the callback. Both are matched on the turn as said, with nothing set
+    # aside (AEGIS round 18: "Thanks <or is work better?>"; round 19: "...right now. ❓", flag letters or tag characters
+    # after the 911 line), and the 911 line only as one of its two fixed forms, character for character
+    if any(sp == "agent" and _CLOSING.fullmatch(_fold(x).strip()) is None and _fold(x).strip() not in _FIXED_911
            for sp, _, x in after):
         return False
     return _affirmed(ordered, i)
@@ -643,7 +644,7 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
         if callback is not None:
             notes.append("callback_not_confirmed")
         callback = None
-    confirmed = ["+1" + "".join(m) for x in agent_trusted for m in _NUM.findall(x)]
+    confirmed = ["+1" + "".join(m) for x in agent_trusted for m in _NUM.findall(_fold(x))]   # NFKC: "602\xa0555"
     if callback and confirmed and confirmed[-1] != callback:
         notes.append("confirmation_disagrees_with_caller")
     need = _need(trusted, pack, emergency, bool(spoken))

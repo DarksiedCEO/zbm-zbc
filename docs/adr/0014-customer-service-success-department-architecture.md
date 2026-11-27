@@ -970,8 +970,15 @@ words were set aside before the match) and a 911 line read as "ambiguous" (brack
 the instruction, so a yes to the question inside them set the callback. The closing line is now matched on the turn
 as said, and a 911 turn counts only when it reads as the instruction itself. Six mutants marked equivalent were
 killable: the doubt note, the ambiguous-number note and a low-confidence name confirmation now have tests, and the
-equivalence reasons that named the removed read-back are rewritten. Mutation harness (call_summarizer): 82 mutants,
-69 killed, 13 equivalent.
+equivalence reasons that named the removed read-back are rewritten.
+
+AEGIS F3 round 19 (Nov 27 2026): the 911 line was still read with symbols and format characters set aside, so
+"Please hang up and dial 911 right now. ❓", flag letters or tag characters after it kept the callback; after the yes
+the 911 line now counts only as one of its two fixed forms, character for character (as the pool oracle reads it).
+Ten more mutants marked equivalent were killable (eight name rules a second fence did not in fact cover, a
+correction window that cut words, a consent number with a no-break space): the name rules have tests, the redundant
+partial-correction pattern is removed (every digit word it read, the doubt rule reads over all the rest), and
+receptionist numbers are read after NFKC. Mutation harness (call_summarizer): 81 mutants, 77 killed, 4 equivalent.
 
 AEGIS Inquisitor round 16 on 84d856e2 (RR-F3): a yes to a later receptionist question ("Is that a no?", "Or should
 we use your work number?") was read as consent. Now the very next spoken turn after the consent question must be the
