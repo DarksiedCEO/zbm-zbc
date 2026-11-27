@@ -1368,3 +1368,9 @@ name ("ガス屋" is not "カス屋"). Phone digits of any script are read. On a
 Every field is read before any comparison, so an unreadable pair is always `unreadable`. **Known limit, disclosed:**
 two chain locations that list the same local number at two addresses look exactly like a move and are reported as one;
 the data cannot tell them apart, and the owner's approval is required for every move.
+
+AEGIS round 3 (Nov 27 2026, Inquisitor on L5 6c0e86f3 / L4 fa92b095): street names of every script are kept (a
+Japanese or Cyrillic street was dropped, so "100 東京通り" read as "100 大阪通り", a false merge); punctuation inside a
+name is formatting ("Joe's" = "Joes", "A.A.A." = "AAA"); a unit with trailing punctuation ("Ste 4.") is still a unit,
+every unit part is kept ("Suite 400, Fl 4"), and "4th Floor" is floor 4; "W.Va.", "N.Mex." and "S.Dak." read as their
+codes. Regression tests: "AEGIS round 3".

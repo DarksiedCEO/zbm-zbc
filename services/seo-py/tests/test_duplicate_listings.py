@@ -275,3 +275,33 @@ def test_an_unreadable_listing_is_unreadable_before_any_comparison():
     assert (v.action, v.reason) == ("unreadable", "missing_street")
     v = dl.check(pair(listing(), listing(name="Other Co", city=None, zip=None)))
     assert (v.action, v.reason) == ("unreadable", "missing_city")
+
+
+# ---------------------------------------------------------------- AEGIS round 3 (Inquisitor, L5 6c0e86f3 / L4 fa92b095)
+def test_street_names_of_every_script_are_kept():
+    assert nap.street_key("100 東京通り") != nap.street_key("100 大阪通り")
+    v = dl.check(pair(listing(street="100 東京通り"), listing(street="100 大阪通り")))
+    assert v.action != "merge_or_remove_duplicate"
+
+
+@pytest.mark.parametrize("x, y", [("Joe's Pizza", "Joes Pizza"), ("Joe’s Pizza", "Joes Pizza"), ("A.A.A. Locksmith", "AAA Locksmith")])
+def test_punctuation_inside_a_name_is_formatting(x, y):
+    assert nap.name_key(x) == nap.name_key(y)
+    assert dl.check(pair(listing(name=x), listing(name=y))).action == "merge_or_remove_duplicate"
+
+
+@pytest.mark.parametrize("x, y", [("12 Main St Ste 4.", "12 Main Street Suite 4"), ("12 Main St, Suite 4,", "12 Main St #4"),
+                                  ("12 Main St, Suite 400, Fl 4", "12 Main Street Floor 4 Suite 400"),
+                                  ("12 Main St, 4th Floor", "12 Main St Fl 4"), ("7 St. Mary's Rd", "7 Saint Marys Road")])
+def test_trailing_punctuation_and_several_unit_parts_are_formatting(x, y):
+    assert nap.street_key(x) == nap.street_key(y)
+    assert dl.check(pair(listing(street=x), listing(street=y))).action == "merge_or_remove_duplicate"
+
+
+def test_a_missing_unit_part_is_another_place():
+    assert nap.street_key("12 Main St, Suite 400, Fl 4") != nap.street_key("12 Main St, Suite 400")
+
+
+@pytest.mark.parametrize("raw, want", [("W.Va.", "wv"), ("W. Va.", "wv"), ("N.Mex.", "nm"), ("S.Dak.", "sd")])
+def test_more_ap_state_abbreviations(raw, want):
+    assert nap.state_key(raw) == want

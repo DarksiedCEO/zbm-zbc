@@ -51,10 +51,19 @@ def _join_initials(text: str) -> str:
     return re.sub(r"\b([a-z])\.\s?([a-z])\b\.?", r"\1\2", text)
 
 
+_APOSTROPHE_LIKE = "'\u2018\u2019\u201b\u0060\u00b4\u02b9\u02bb\u02bc\u02bd\u2032"
+
+
+def _inner_punct(text: str) -> str:
+    """Punctuation inside a word is formatting: "Joe's" is "joes", "A.A.A." is "aaa" (AEGIS L5 round 3)."""
+    text = re.sub(rf"(?<=\w)[{_APOSTROPHE_LIKE}](?=\w)", "", text)
+    return re.sub(r"(?<!\w)(?:[^\W\d_]\.){2,}", lambda m: m.group(0).replace(".", ""), text)
+
+
 def name_key(name: object) -> str:
     """Case, accents, punctuation, "&" / "and", a leading "the" and trailing legal suffixes (LLC, Inc ...) do not
     change a name. Letters of every script are kept ("Sushi 東京" is not "Sushi 大阪"; AEGIS L5 round 1)."""
-    words = re.findall(r"\w+", _fold(name).replace("&", " and "))
+    words = re.findall(r"[^\W_]+", _inner_punct(_fold(name)).replace("&", " and "))
     while len(words) > 1 and words[-1] in LEGAL_SUFFIXES:
         words.pop()
     if len(words) > 1 and words[0] == "the":
@@ -62,16 +71,32 @@ def name_key(name: object) -> str:
     return " ".join(words)
 
 
+_UNIT = re.compile(r"(?:,\s*|\s)((?:suite|ste|unit|apt|apartment|bldg|building|fl|floor|rm|room|no)(?![^\W\d_])|#)\.?\s*"
+                   r"(?:#\s*)?([^\W_][\w\-]*)$")
+_ORDINAL_FLOOR = re.compile(r"(?:,\s*|\s)(\d+)(?:st|nd|rd|th)?\s+(?:floor|fl)\.?$")
+
+
 def street_key(street: object) -> tuple[str, Optional[str]]:
     """(street line, unit) with abbreviations spelled out; unit styles of one kind ("Ste 4", "Ste #4", "#4", "Unit 4")
-    read as one, while a floor, building or room keeps its kind ("floor:2" is not "unit:2")."""
-    text = _fold(street).replace("#", " # ")
-    unit = None
-    m = re.search(r"(?:,\s*|\s)((?:suite|ste|unit|apt|apartment|bldg|building|fl|floor|rm|room|no)(?![a-z])|#)\.?\s*(?:#\s*)?"
-                  r"([a-z0-9\-]+)\s*$", text)
-    if m:
-        unit, text = f"{UNIT_KIND[m.group(1)]}:{m.group(2)}", text[:m.start()]
-    raw = re.findall(r"[a-z0-9]+", _join_initials(text))
+    read as one, while a floor, building or room keeps its kind ("floor:2" is not "unit:2"). Trailing punctuation is
+    formatting ("Ste 4."), several unit parts are all kept ("Suite 400, Fl 4"), "4th Floor" is "floor:4", and street
+    names of every script are kept ("100 東京通り" is not "100 大阪通り") (AEGIS L5 round 3)."""
+    text = _inner_punct(_fold(street)).replace("#", " # ")
+    units = []
+    while True:
+        text = re.sub(r"[\s.,;:]+$", "", text)
+        m = _ORDINAL_FLOOR.search(text)
+        if m:
+            units.append(f"floor:{m.group(1)}")
+            text = text[:m.start()]
+            continue
+        m = _UNIT.search(text)
+        if not m:
+            break
+        units.append(f"{UNIT_KIND[m.group(1)]}:{m.group(2)}")
+        text = text[:m.start()]
+    unit = "|".join(sorted(units)) or None
+    raw = re.findall(r"[^\W_]+", _join_initials(text))
     words = []
     for i, w in enumerate(raw):
         rest = raw[i + 1:]
@@ -126,7 +151,8 @@ AP_STATES = {"ala": "al", "ariz": "az", "ark": "ar", "calif": "ca", "cal": "ca",
              "del": "de", "fla": "fl", "ill": "il", "ind": "in", "kan": "ks", "kans": "ks", "mass": "ma",
              "mich": "mi", "minn": "mn", "miss": "ms", "mont": "mt", "neb": "ne", "nebr": "ne", "nev": "nv",
              "okla": "ok", "ore": "or", "oreg": "or", "penn": "pa", "penna": "pa", "tenn": "tn", "tex": "tx",
-             "wash": "wa", "wis": "wi", "wisc": "wi", "wyo": "wy", "wva": "wv", "d c": "dc", "washington dc": "dc",
+             "wash": "wa", "wis": "wi", "wisc": "wi", "wyo": "wy", "wva": "wv", "w va": "wv", "n mex": "nm", "n dak": "nd", "s dak": "sd",
+             "n car": "nc", "s car": "sc", "d c": "dc", "washington dc": "dc",
              "washington d c": "dc"}
 CITY_WORDS = {"st": "saint", "ste": "sainte", "ft": "fort", "mt": "mount", "pt": "point"}
 
