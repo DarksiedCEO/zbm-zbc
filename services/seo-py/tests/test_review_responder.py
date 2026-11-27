@@ -88,16 +88,28 @@ def test_any_money_word_routes_to_the_owner_and_needs_approval(text, stars):
                                   "I almost asked for a refund but they made it right."])
 def test_the_fixed_non_requests_in_a_happy_review_do_not_route(text):
     d = rr.draft(review(text=text, stars=5))
-    assert not d.route_to_owner and not d.owner_approval_before_posting
+    assert not d.route_to_owner and d.owner_approval_before_posting
 
 
 def test_a_non_request_form_in_a_low_review_still_routes():
     assert rr.draft(review(text="No need for a refund, they fixed it the same day!", stars=2)).route_to_owner
 
 
-@pytest.mark.parametrize("stars, approval", [(1, True), (2, True), (3, True), (4, False), (5, False)])
-def test_low_reviews_need_approval(stars, approval):
-    assert rr.draft(review(stars=stars)).owner_approval_before_posting is approval
+@pytest.mark.parametrize("stars", [1, 2, 3, 4, 5])
+@pytest.mark.parametrize("vertical", ["plumbing", "restaurant", "dental"])
+def test_every_reply_needs_the_owners_approval(stars, vertical):
+    assert rr.draft(review(stars=stars, vertical=vertical)).owner_approval_before_posting is True
+
+
+@pytest.mark.parametrize("text", ["I want my $200 back.", "Make this right financially.", "See you in court.",
+                                  "Nos vemos en la corte.", "Devuelvanme lo que pague.", "I'm filing a claim.",
+                                  "Reverse the transaction.", "Give me back what I paid.", "They owe me 300 dollars.",
+                                  "No need for a refund, they fixed it but I still want my money back.",
+                                  "I almost asked for a refund but they made it right. Actually, refund me."])
+@pytest.mark.parametrize("stars", [1, 5])
+def test_money_and_claim_paraphrases_route_and_are_never_posted_unseen(text, stars):
+    d = rr.draft(review(text=text, stars=stars))
+    assert d.route_to_owner and d.owner_approval_before_posting
 
 
 # ---------------------------------------------------------------- hostile input
@@ -131,9 +143,11 @@ def _grade(seed):
     wrong = []
     for r in reviews:
         k, d = by_id[r["review_id"]], rr.draft(r)
-        got = (d.flag_suspected_fake, d.route_to_owner, d.owner_approval_before_posting)
-        if got != (k["flag_suspected_fake"], k["route_to_owner"], k["owner_approval_before_posting"]):
-            wrong.append((r["review_id"], got, k))
+        # the key states minimums: a fake must be flagged and never a genuine review; a route or an approval the key
+        # asks for must be there, while an extra route or approval only costs the owner a look (the inverted default)
+        if d.flag_suspected_fake != k["flag_suspected_fake"] or (k["route_to_owner"] and not d.route_to_owner) or \
+                (k["owner_approval_before_posting"] and not d.owner_approval_before_posting):
+            wrong.append((r["review_id"], (d.flag_suspected_fake, d.route_to_owner, d.owner_approval_before_posting), k))
         if d.reply is not None:
             low = d.reply.lower()
             if any(t in low for t in k["detail_terms_never_in_reply"]):
@@ -158,3 +172,32 @@ def test_the_grader_fails_a_drafter_that_breaks_the_rules(monkeypatch):
     monkeypatch.setattr(rr, "WORDINGS", {k: "Sorry about your root canal visit, we will refund you." for k in rr.WORDINGS})
     _, wrong = _grade("dev-a")
     assert wrong
+
+
+class CollidingKey:
+    def __hash__(self):
+        return hash("review_id")
+
+    def __eq__(self, other):
+        raise RuntimeError("boom")
+
+
+class RaisingList(list):
+    def __iter__(self):
+        raise RuntimeError("boom")
+
+
+def test_hostile_keys_and_batches_never_raise_anything_but_value_error():
+    d = rr.draft({CollidingKey(): 1, "stars": 5})
+    assert d.reply is None and "unreadable" in d.notes
+    d = rr.draft(review(reviewer={CollidingKey(): 1}))
+    assert d.reply is None and "unreadable" in d.notes
+    with pytest.raises(ValueError):
+        rr.draft_all(RaisingList([review()]))
+
+
+def test_the_pool_routes_are_kept_and_extra_routes_are_counted():
+    reviews, key = _pool().generate("dev-a")
+    by_id = {k["review_id"]: k for k in key}
+    extra = sum(rr.draft(r).route_to_owner and not by_id[r["review_id"]]["route_to_owner"] for r in reviews)
+    assert extra < len(reviews) // 2         # the broad money net must not route most of a normal review mix

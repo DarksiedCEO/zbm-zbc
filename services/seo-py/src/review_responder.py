@@ -12,14 +12,16 @@ Rules:
   "appointment", "case", "care", "see you again" or any word that says the reviewer was served. Every such review needs
   the owner's approval before posting.
 - No wording argues, apologises for a specific act, admits fault, or promises a refund, credit, discount or remedy.
-  A review that may ask for money back goes to the owner (``route_to_owner``): any money word ("refund", "money back",
-  "reimburse", "compensate", "credit", "chargeback", "dispute", "lawyer" ...) routes it, except in a 4- or 5-star
-  review whose every sentence holding the word is one of the fixed non-request forms ("No need for a refund", "I
-  almost asked for a refund but ..."). A miss in the other direction (routing a happy review) costs only an owner look.
+- **Every reply needs the owner's approval before it is posted** (AEGIS L7 round 1: the inverted default; a money ask
+  or a claim can be phrased without any word a list knows, "I want my $200 back", "see you in court", so no list
+  decides what is posted unseen). ``route_to_owner`` is an extra flag that the review may ask for money or threaten a
+  claim: any money, price or legal word, a currency sign or amount, "back", "court" ... raises it, except a 4- or
+  5-star review whose every sentence holding such a word is exactly one of the fixed non-request sentences ("No need
+  for a refund, they fixed it the same day", "I almost asked for a refund but they made it right"). Routing a review
+  that asks for nothing costs only an owner look.
 - A suspected fake (a one-review account at most 7 days old, posted on a day at least 5 other new accounts reviewed the
   business) gets no public reply: ``reply`` is None, it is flagged for a removal request and routed to the owner.
-- The owner approves before posting any review of 3 stars or fewer, any regulated or unknown vertical, any review
-  routed for money, and any suspected fake. A review that cannot be read (not an object, no id, stars not a whole number 1-5, reviewer fields
+- A review that cannot be read (not an object, no id, stars not a whole number 1-5, reviewer fields
   missing or not plain numbers) gets no reply and goes to the owner; it never raises. Only a non-list batch raises
   ValueError.
 """
@@ -57,13 +59,15 @@ NEVER_WORDS = re.compile(r"\b(?:refund\w*|money|credit\w*|discount\w*|free|compe
                          r"fix (?:it|this)|promise\w*|guarantee\w*|sorry|apolog\w*|fault|mistake|actually|however|but|"
                          r"unfortunately|false|untrue|lie|lying|fake|wrong|policy|policies|terms)\b", re.IGNORECASE)
 
-_MONEY = re.compile(r"\b(?:refund\w*|money|reimburs\w*|compensat\w*|credit\w*|chargeback\w*|charge ?back|dispute\w*|"
-                    r"lawyer\w*|attorney\w*|sue|suing|lawsuit\w*|small claims|bbb|paid|pay\w*|cost\w*|charg\w*|"
-                    r"reembols\w*|dinero|devoluci\w*|abogad\w*|demand\w*)\b", re.IGNORECASE)
+_MONEY = re.compile(r"[$€£¥¢]|\d|\b(?:refund\w*|money|reimburs\w*|compensat\w*|credit\w*|chargeback\w*|charge ?back|"
+                    r"dispute\w*|lawyer\w*|attorney\w*|sue|sued|suing|lawsuit\w*|court\w*|judge|claims?|small claims|"
+                    r"bbb|paid|pay\w*|cost\w*|charg\w*|price\w*|fee|fees|bill\w*|invoice\w*|dollars?|bucks|cents?|"
+                    r"cash|financial\w*|back|return\w*|revers\w*|cancel\w*|owe\w*|deposit\w*|warrant\w*|legal\w*|"
+                    r"reembols\w*|dinero|devol\w*|devuelv\w*|abogad\w*|corte|demanda\w*|pag\w*|cobr\w*|"
+                    r"demand\w*)\b", re.IGNORECASE)
 # the only sentences holding a money word that are not a request, in a 4- or 5-star review (the pool's traps)
-_NOT_A_REQUEST = re.compile(r"(?:no need for a refund,? (?:they|we|it) (?:fixed|made|was) [\w\s,'-]*|"
-                            r"i almost asked for a refund,? but (?:they|it) (?:made it right|fixed it)[\w\s,'-]*)",
-                            re.IGNORECASE)
+_NOT_A_REQUEST = re.compile(r"no need for a refund, they fixed it the same day|"
+                            r"i almost asked for a refund but they made it right", re.IGNORECASE)
 
 
 def _check_wordings() -> None:
@@ -108,13 +112,12 @@ def draft(review: object) -> ReplyDraft:
     """The reply draft for one review. Never raises: anything unreadable is no reply, routed to the owner."""
     try:
         return _draft(review)
-    except Exception:                  # a hostile object in one review: no reply, the owner looks
-        rid = review.get("review_id") if type(review) is dict else None
-        return ReplyDraft(rid if type(rid) is str and rid else "unknown", None, False, True, True, ("unreadable",))
+    except Exception:                  # a hostile object in one review: no reply, the owner looks; nothing in the
+        return ReplyDraft("unknown", None, False, True, True, ("unreadable",))   # object is touched again (round 1)
 
 
 def _draft(review: object) -> ReplyDraft:
-    if type(review) is not dict:
+    if type(review) is not dict or any(type(k) is not str for k in list(dict.keys(review))):
         return ReplyDraft("unknown", None, False, True, True, ("unreadable",))
     rid = review.get("review_id")
     rid = rid if type(rid) is str and rid else None
@@ -122,6 +125,8 @@ def _draft(review: object) -> ReplyDraft:
     text = review.get("text")
     reviewer = review.get("reviewer")
     pile = _whole(review.get("same_day_reviews_from_new_accounts"))
+    if type(reviewer) is dict and any(type(k) is not str for k in list(dict.keys(reviewer))):
+        reviewer = None
     count = _whole(reviewer.get("review_count")) if type(reviewer) is dict else None
     age = _whole(reviewer.get("account_age_days")) if type(reviewer) is dict else None
     if rid is None or stars is None or not 1 <= stars <= 5 or type(text) is not str or None in (pile, count, age) \
@@ -138,10 +143,10 @@ def _draft(review: object) -> ReplyDraft:
     if money:
         notes.append("may_ask_for_money_or_claim")
     band = "high" if stars >= 4 else "mid" if stars == 3 else "low"
-    return ReplyDraft(rid, WORDINGS[(regulated, band)], False, money, stars <= 3 or regulated or money, tuple(notes))
+    return ReplyDraft(rid, WORDINGS[(regulated, band)], False, money, True, tuple(notes))
 
 
 def draft_all(reviews: object) -> list[ReplyDraft]:
-    if not isinstance(reviews, list):
+    if type(reviews) is not list:      # exactly a list: a subclass could raise while iterating (AEGIS L7 round 1)
         raise ValueError("reviews must be a list")
     return [draft(r) for r in reviews]

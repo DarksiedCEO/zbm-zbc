@@ -1333,13 +1333,21 @@ case detail, argue with the reviewer, or carry an injected instruction. Regulate
 personal-injury law) and every vertical the module does not know get wordings with no relationship word ("visit",
 "patient", "treatment", "appointment", "case", "see you again" ...); the wordings are checked against the
 relationship and never-say lists at import and in the tests. A suspected fake (one review, account at most 7 days old,
-5 or more same-day reviews from new accounts) gets no reply and goes to the owner for a removal request. Any money or
-claim word routes the review to the owner, except the fixed non-request forms in a 4- or 5-star review. The owner
-approves before posting any review of 3 stars or fewer, any regulated or unknown vertical, any routed review and any
-fake. An unreadable review gets no reply and goes to the owner; only a non-list batch raises ValueError.
+5 or more same-day reviews from new accounts) gets no reply and goes to the owner for a removal request. Any money,
+price or legal word, a currency sign or a digit routes the review to the owner, except the two exact non-request
+sentences in a 4- or 5-star review. An unreadable review gets no reply and goes to the owner; only a non-list batch
+raises ValueError.
 
-Certified on the shared MVP L7 pool (300 reviews per seed; DEV seeds and three cert seeds): every flag, route and
-approval matches the key, no reply holds a detail term, a relationship word or a never-say word. Disclosed: the
+AEGIS L7 round 1 (Nov 27 2026, Inquisitor on 977df49e): money asks and claims were phrased past every list ("I want my
+$200 back", "see you in court", "make this right financially"), so **every reply now needs the owner's approval before
+posting** (the inverted default; the pool key's approval rule is a minimum and is always met). The money net is
+broad and over-routes (advisory: it costs an owner look, and the tests bound it below half of a normal review mix); the
+non-request exemption is the two exact sentences only; `draft` no longer touches a hostile object in its fallback, and
+`draft_all` takes exactly a list. The certification grader counts a missing fake flag, a genuine review flagged fake,
+or a missing route or approval the key asks for; an extra route or approval is allowed.
+
+Certified on the shared MVP L7 pool (300 reviews per seed; DEV seeds and three cert seeds): every fake flag matches the
+key and every route and approval the key asks for is there, no reply holds a detail term, a relationship word or a never-say word. Disclosed: the
 "approve as-is" rate from a blind human grader (spec bar >= 90%) is not measured here; the wordings are short and the
 same for every review of a band, which a human grader may rate below a tailored reply. Business voice is not applied
 (no per-client wording yet; a vetted per-client set in config would be the extension).
