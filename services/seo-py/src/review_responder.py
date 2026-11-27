@@ -20,7 +20,7 @@ Rules:
   of the casefolded text ("overcharged", "countersued", "court", "abogado" ...) raises it. The stems are a word list
   and miss words they do not know, and amounts written in plain ASCII words ("two hundred"): disclosed; the owner
   approves every reply anyway. A 4- or 5-star review is not routed when every sentence holding such a word is exactly one of the
-  fixed non-request sentences ("No need for a refund, they fixed it the same day", "I almost asked for a refund but
+  fixed non-request sentences (letter case and outer spaces aside) ("No need for a refund, they fixed it the same day", "I almost asked for a refund but
   they made it right"). Routing a review that asks for nothing costs only an owner look.
 - A suspected fake (a one-review account at most 7 days old, posted on a day at least 5 other new accounts reviewed the
   business) gets no public reply: ``reply`` is None, it is flagged for a removal request and routed to the owner.
@@ -112,7 +112,7 @@ def _money_route(text: str, stars: int) -> bool:
     # any character outside printable ASCII routes: a currency sign or number of any script ("₹", "፪"), a look-alike
     # letter ("RЕFUND" with a Cyrillic Е), an invisible or filler character (AEGIS L7 rounds 3-6: every narrower
     # reading of "look-alike" or "invisible" was out-spelled); so does any ASCII digit or "$"
-    if any(not (" " <= c <= "~") for c in text.replace("\n", " ")) or re.search(r"[0-9$]", text):
+    if any(not (" " <= c <= "~") for c in text) or re.search(r"[0-9$]", text):    # a newline too (round 7)
         return True
     holding = [s for s in _sentences(text) if any(stem in s.casefold() for stem in _MONEY_STEMS)]
     if not holding:

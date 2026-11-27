@@ -242,3 +242,8 @@ def test_money_and_legal_word_stems_route_anywhere_in_a_word(text):
                                   "impagada", "latefees"])
 def test_any_non_ascii_character_or_substring_stem_routes(text):
     assert rr.draft(review(text=text, stars=5)).route_to_owner
+
+
+def test_every_non_printable_ascii_character_routes_too():
+    for c in [chr(i) for i in range(32)] + ["\x7f"]:
+        assert rr.draft(review(text=f"Great job{c}thanks", stars=5)).route_to_owner, hex(ord(c))
