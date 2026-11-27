@@ -435,3 +435,26 @@ def test_a_practitioner_inside_a_practice_is_still_left_alone():
 
 def test_zero_thirds_keeps_the_house_number():
     assert nap.street_key("100↉ Main St") == nap.street_key("100 0/3 Main St")
+
+
+# ---------------------------------------------------------------- AEGIS round 9 (Inquisitor, L5 5802246c / L4 1109b645)
+@pytest.mark.parametrize("x, y", [("100 Main St Suite E", "100 Main St Suite W"), ("100 Main St Apt N", "100 Main St Apt S"),
+                                  ("4533 Testwell Drive #E", "4533 Testwell Drive E")])
+def test_a_one_letter_unit_that_is_also_a_direction_is_a_unit(x, y):
+    assert nap.street_key(x) != nap.street_key(y)
+    assert dl.check(pair(listing(street=x), listing(street=y))).action != "merge_or_remove_duplicate"
+
+
+@pytest.mark.parametrize("x, y", [("100 1/2 Main St", "100 Main St"), ("100-102 Main St", "100 Main St")])
+def test_another_house_number_is_never_only_other_street_words(x, y):
+    assert not nap.same_number_other_words(nap.street_key(x), nap.street_key(y))
+
+
+@pytest.mark.parametrize("x, y", [("Riley Juniper DDS", "RileyJuniper D.D.S."), ("Dr. Riley Juniper", "Dr.RileyJuniper"),
+                                  ("Desert Sky Plumbing - Repair", "DesertSky Plumbing Repair")])
+def test_spacing_variants_are_asked_of_the_owner_not_set_aside_by_patterns(x, y):
+    assert dl.check(pair(listing(name=x), listing(name=y))).action == "owner_review"
+
+
+def test_superscript_fractions_keep_the_house_number():
+    assert nap.street_key("100¹⁄₂ Main St") == nap.street_key("100 1/2 Main St")

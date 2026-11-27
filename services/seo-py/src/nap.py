@@ -133,6 +133,8 @@ def _fractions(text: str) -> str:
     for c in text.translate(_FRACTIONS):
         if unicodedata.category(c) == "No" and "⁄" in unicodedata.normalize("NFKC", c):   # "↉" too (round 8)
             out.append(" " + unicodedata.normalize("NFKC", c).replace("⁄", "/"))
+        elif unicodedata.category(c) == "No" and unicodedata.normalize("NFKC", c).isdigit():
+            out.append(" " + unicodedata.normalize("NFKC", c))    # "100¹⁄₂" is "100 1/ 2", never "1001" (round 9)
         else:
             out.append(c)
     return "".join(out)
@@ -142,7 +144,9 @@ def _unit_value(v: str) -> bool:
     """A unit number: it holds a digit, or is one or two letters that are not a street suffix ("Suite A", "Ste B")."""
     if any(c.isdigit() for c in v):
         return True
-    return len(v) <= 2 and v not in STREET_WORDS and v not in SUFFIXES
+    if len(v) == 1:
+        return True                    # "Suite E", "Apt N": one letter after a unit word is a unit (AEGIS L5 round 9)
+    return len(v) == 2 and v not in STREET_WORDS and v not in SUFFIXES
 
 
 def street_key(street: object) -> tuple[str, Optional[str]]:
@@ -191,11 +195,22 @@ def street_key(street: object) -> tuple[str, Optional[str]]:
     return " ".join(words), unit
 
 
+def _house(words: list[str]) -> list[str]:
+    """The leading words of a street line that hold a digit: the house number with any fraction or range."""
+    out = []
+    for w in words:
+        if not any(c.isdigit() for c in w):
+            break
+        out.append(w)
+    return out
+
+
 def same_number_other_words(a: tuple[str, Optional[str]], b: tuple[str, Optional[str]]) -> bool:
     """Two street keys with the same house number and unit whose street words differ: formatting this module does not
     know, or another street. The data cannot tell, so a person decides (AEGIS L5 round 4: the inverted default)."""
     wa, wb = a[0].split(), b[0].split()
-    return bool(wa and wb) and a != b and a[1] == b[1] and wa[0] == wb[0] and any(c.isdigit() for c in wa[0])
+    ha, hb = _house(wa), _house(wb)    # the whole house number ("100 1 2", "100 102"), not only its first word (round 9)
+    return bool(ha) and a != b and a[1] == b[1] and ha == hb and wa[len(ha):] != wb[len(hb):]
 
 
 def loose(key: str) -> str:

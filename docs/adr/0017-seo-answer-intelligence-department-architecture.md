@@ -1406,3 +1406,8 @@ one city. **The inverted default for names:** two names with the same letters an
 AEGIS round 8 (Nov 27 2026, Inquisitor on L5 c9324159 / L4 8b4b2b4b): the practitioner and department patterns are
 read only when the two names differ once formatting is set aside, so "Riley Juniper DDS" / "Riley Juniper DDS PLLC" is
 one name, not a practitioner inside a practice; "↉" is a fraction like the others.
+
+AEGIS round 9 (Nov 27 2026, Inquisitor on L5 5802246c / L4 1109b645): one letter after a unit word is a unit even
+when it is also a direction ("Suite E" is not "Suite W"; "#E" is not "Drive E"); "same house number" compares the whole
+leading number ("100 1/2" and "100-102" are not "100"); the practitioner and department patterns are skipped also when
+the names differ only in spacing (then `owner_review`); superscript and subscript digits keep the house number apart.

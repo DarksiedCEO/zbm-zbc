@@ -99,7 +99,7 @@ def _check(pair: dict) -> PairVerdict:
 
     # a practitioner inside a practice, or a department, has another name; two names that already read as one
     # ("Riley Juniper DDS" / "Riley Juniper DDS PLLC") are never set aside by those patterns (AEGIS L5 round 8)
-    for x, y in (((a, b), (b, a)) if na != nb else ()):
+    for x, y in (((a, b), (b, a)) if na != nb and nap.loose(na) != nap.loose(nb) else ()):   # (rounds 8-9)
         if _PRACTITIONER.search(str(y.get("name") or "")) and not _PRACTITIONER.search(str(x.get("name") or "")):
             return leave("practitioner_listing")
         if _DEPARTMENT.search(str(y.get("name") or "")) and not _DEPARTMENT.search(str(x.get("name") or "")):
