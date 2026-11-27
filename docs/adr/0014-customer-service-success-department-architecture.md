@@ -445,3 +445,28 @@ regression cases (`fixed`).
 | SHOULD (quoted tail) | Below an unmarked Outlook quote, "Dont call me or email me anymore" or "I want to be removed from your email list" raised nothing, though R2 says any other opt-out wording raises `OPT_OUT_IN_QUOTED_TEXT` | `quoted_tail_opt_out` also answers `alert` (never `revoke`) for the sentence-shaped opt-outs the own-words rules read: a direct no-contact command, `_REMOVE_ME`, `_NEG_WANT` and the possible-opt-out wording. Single words and loose pairs in our own quoted mail still raise nothing (M-1) |
 | SHOULD (quoted tail, seeds 1-3) | Below an unmarked quote, `Stop the texts and the emails please`, a bare `STOP` line after a sign-off (`Thanks,\nSTOP`, cut with the signature) and leet alert wording (`D0n7 text or email m3`) still raised nothing | `quoted_tail_opt_out` alerts (never revokes) on a clause that STARTS with an imperative stop / quit / cease naming a channel or a contacting verb right after it (`_TAIL_STOP_CHANNEL`: a mailer's `Stop by anytime!` or `You can stop these emails at any time` still raises nothing); on a line after the sign-off that is nothing but exact opt-out words; and reads the alert phrases on the leet view too, as the strong-wording check already did |
 | SHOULD (long middle), not changed | An opt-out in the middle of an email over the 20,000-character inbound cap is dropped: `models.cut_head_tail` keeps the head and the last 2,000 characters before the service sees the text | Not local: the cut is the gateway model's (AEGIS L2), and keeping a middle clause means running the opt-out rules inside request validation. The documented promise stays an opt-out at the start or the end of a long message; the war room keeps scoring it as SHOULD. For Andre: a fix is to scan the dropped middle with `opt_out_level` in `_lenient_inbound` and carry the matching lines into the kept text |
+
+## Amendment — RR-F5 consent / STOP keeper (Nov 27 2026; MVP spec v0.1, front-desk team)
+
+`services/service-py/src/consent_keeper.py`, one job: hold the single consent and opt-out record per (client business,
+phone number) and decide every text or call the front-desk team sends (`allow` / `block` and the reason, with the
+events the decision rests on). Not wired to any route or provider: like the rest of this service it decides, it never
+sends. It reads inbound texts with this ADR's own classifier (`channels.opt_out_level`), so Customer Service and the
+front desk read "STOP" the same way.
+
+| Rule | Behaviour |
+|---|---|
+| Every send is checked | A send with an unreadable number (`invalid_number`) or an unknown message class (`unknown_message_class`) is blocked; a malformed event refuses the whole replay (`ValueError`) |
+| Opt-out wins | `exact` -> `opted_out`, `suspected` (one typo of stop / unsubscribe) -> `possible_opt_out`; both block (Nov 26 ruling: STOP typos count) |
+| Same instant | All state changes at an instant apply before any send at it, opt-ins before opt-outs, whatever the input order |
+| HELP, look-alike words | Change nothing (`Spot`, `Post`, `Stay`, `STAR`, `OK`, `Thanks`) |
+| START does not restore | START / UNSTOP / YES and similar keep the block; the reason becomes `start_keyword_does_not_restore`. Only a new express written consent recorded after the opt-out restores |
+| Carrier opt-out | Blocks; never lifted by our own records |
+| Reassigned number | Kills consent; a new express written consent recorded after it restores |
+| Marketing | Needs express written consent (`no_written_consent`); an informational reply does not, but every block applies |
+
+Certification: `services/service-py/tests/test_consent_keeper.py` replays the shared MVP pool (`fixtures/mvp_pools`,
+F5, about 10,000 events per seed) for the three DEV seeds and two more, and requires every decision to match the
+planted key (0 wrong decisions on all five). Reasons match the key except one disclosed relabelling: `stopp`, `st0p`
+and `Stop pls` are read as exact opt-outs (`opted_out`) where the key says `possible_opt_out`; both block. A grader
+self-test proves one leaked send is noticed. The test never imports the pool's oracle.
