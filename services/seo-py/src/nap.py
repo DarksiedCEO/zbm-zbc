@@ -18,13 +18,45 @@ STREET_WORDS = {"st": "street", "str": "street", "ave": "avenue", "av": "avenue"
                 "hwy": "highway", "cir": "circle", "ter": "terrace", "trl": "trail", "sq": "square",
                 "n": "north", "s": "south", "e": "east", "w": "west", "ne": "northeast", "nw": "northwest",
                 "se": "southeast", "sw": "southwest", "mt": "mount", "ft": "fort"}
+# USPS Publication 28, Appendix C1: the common street suffix abbreviations (AEGIS L5 round 4: Plz, Ctr, Ext ...)
+STREET_WORDS.update({
+    "aly": "alley", "anx": "annex", "arc": "arcade", "byu": "bayou", "bch": "beach", "bnd": "bend", "blf": "bluff",
+    "btm": "bottom", "br": "branch", "brg": "bridge", "brk": "brook", "byp": "bypass", "cp": "camp", "cyn": "canyon",
+    "cpe": "cape", "cswy": "causeway", "ctr": "center", "cntr": "center", "clf": "cliff", "clb": "club",
+    "cmn": "common", "cor": "corner", "crse": "course", "cv": "cove", "crk": "creek", "cres": "crescent",
+    "crst": "crest", "xing": "crossing", "xrd": "crossroad", "curv": "curve", "dl": "dale", "dm": "dam",
+    "dv": "divide", "est": "estate", "expy": "expressway", "ext": "extension", "fls": "falls", "fry": "ferry",
+    "fld": "field", "flds": "fields", "flt": "flat", "frd": "ford", "frst": "forest", "frg": "forge", "frk": "fork",
+    "fwy": "freeway", "gdn": "garden", "gdns": "gardens", "gtwy": "gateway", "gln": "glen", "grn": "green",
+    "grv": "grove", "hbr": "harbor", "hvn": "haven", "hts": "heights", "hl": "hill", "hls": "hills",
+    "holw": "hollow", "inlt": "inlet", "is": "island", "jct": "junction", "ky": "key", "knl": "knoll", "lk": "lake",
+    "lks": "lakes", "lndg": "landing", "lgt": "light", "lck": "lock", "ldg": "lodge", "mnr": "manor",
+    "mdw": "meadow", "mdws": "meadows", "ml": "mill", "msn": "mission", "mtwy": "motorway", "mtn": "mountain",
+    "nck": "neck", "orch": "orchard", "opas": "overpass", "pkwy": "parkway", "psge": "passage", "pne": "pine",
+    "pnes": "pines", "pln": "plain", "plz": "plaza", "pt": "point", "prt": "port", "pr": "prairie", "radl": "radial",
+    "rnch": "ranch", "rpd": "rapid", "rst": "rest", "rdg": "ridge", "riv": "river", "rte": "route", "shl": "shoal",
+    "shr": "shore", "skwy": "skyway", "spg": "spring", "spgs": "springs", "sta": "station", "stra": "stravenue",
+    "strm": "stream", "smt": "summit", "trwy": "throughway", "trce": "trace", "trak": "track", "tunl": "tunnel",
+    "tpke": "turnpike", "upas": "underpass", "un": "union", "vly": "valley", "via": "viaduct", "vw": "view",
+    "vlg": "village", "vl": "ville", "vis": "vista", "wy": "way", "wl": "well", "pk": "park", "pky": "parkway",
+    "bl": "boulevard", "blv": "boulevard", "crt": "court", "drv": "drive", "hwy": "highway", "ave": "avenue"})
+SUFFIXES = set(STREET_WORDS.values()) - {"north", "south", "east", "west", "northeast", "northwest", "southeast",
+                                         "southwest", "mount", "fort"} | {"street", "loop", "mall", "oval", "pass",
+                                                                         "path", "pike", "row", "run", "walk", "wall"}
+_ORDINALS = {"first": "1", "second": "2", "third": "3", "fourth": "4", "fifth": "5", "sixth": "6", "seventh": "7",
+             "eighth": "8", "ninth": "9", "tenth": "10", "eleventh": "11", "twelfth": "12"}
 _DIRECTIONS = {"n", "s", "e", "w", "ne", "nw", "se", "sw", "north", "south", "east", "west", "northeast", "northwest",
                "southeast", "southwest"}
 # unit words by kind: suite, unit, apartment and "#" are styles of one kind (the pool's formatting variants); a floor,
 # a building and a room are other kinds, so "Floor 2" is never "Suite 2" (AEGIS L5 round 1)
 UNIT_KIND = {"suite": "unit", "ste": "unit", "unit": "unit", "apt": "unit", "apartment": "unit", "#": "unit",
              "no": "unit", "bldg": "building", "building": "building", "fl": "floor", "floor": "floor",
-             "rm": "room", "room": "room"}
+             "rm": "room", "room": "room",
+             # USPS Publication 28, Appendix C2 secondary unit designators that take a number (AEGIS L5 round 4)
+             "spc": "space", "space": "space", "lot": "lot", "trlr": "trailer", "trailer": "trailer",
+             "ofc": "office", "office": "office", "dept": "department", "department": "department",
+             "hngr": "hangar", "hangar": "hangar", "pier": "pier", "slip": "slip", "ph": "penthouse",
+             "penthouse": "penthouse"}
 # legal suffixes, set aside only at the END of a name ("PC Repair Pros" keeps "pc"); a leading "the" is set aside too
 LEGAL_SUFFIXES = {"llc", "inc", "co", "corp", "corporation", "company", "ltd", "pllc", "pc", "lp", "llp", "pa"}
 
@@ -64,6 +96,16 @@ def name_key(name: object) -> str:
     """Case, accents, punctuation, "&" / "and", a leading "the" and trailing legal suffixes (LLC, Inc ...) do not
     change a name. Letters of every script are kept ("Sushi 東京" is not "Sushi 大阪"; AEGIS L5 round 1)."""
     words = re.findall(r"[^\W_]+", _inner_punct(_fold(name)).replace("&", " and "))
+    joined: list[str] = []             # single letters in a row are one set of initials ("J. R." = "J.R." = "JR")
+    in_initials = False                # (AEGIS L5 round 4)
+    for w in words:
+        single = len(w) == 1 and w.isalpha()
+        if single and in_initials:
+            joined[-1] += w
+        else:
+            joined.append(w)
+        in_initials = single
+    words = joined
     while len(words) > 1 and words[-1] in LEGAL_SUFFIXES:
         words.pop()
     if len(words) > 1 and words[0] == "the":
@@ -71,8 +113,8 @@ def name_key(name: object) -> str:
     return " ".join(words)
 
 
-_UNIT = re.compile(r"(?:,\s*|\s)((?:suite|ste|unit|apt|apartment|bldg|building|fl|floor|rm|room|no)(?![^\W\d_])|#)\.?\s*"
-                   r"(?:#\s*)?([^\W_][\w\-]*)$")
+_UNIT = re.compile(r"(?:,\s*|\s)((?:" + "|".join(sorted((k for k in UNIT_KIND if k != "#"), key=len, reverse=True)) +
+                   r")(?![^\W\d_])|#)\.?\s*(?:#\s*)?([^\W_][\w\-]*)$")
 _ORDINAL_FLOOR = re.compile(r"(?:,\s*|\s)(\d+)(?:st|nd|rd|th)?\s+(?:floor|fl)\.?$")
 
 
@@ -82,6 +124,7 @@ def street_key(street: object) -> tuple[str, Optional[str]]:
     formatting ("Ste 4."), several unit parts are all kept ("Suite 400, Fl 4"), "4th Floor" is "floor:4", and street
     names of every script are kept ("100 東京通り" is not "100 大阪通り") (AEGIS L5 round 3)."""
     text = _inner_punct(_fold(street)).replace("#", " # ")
+    text = re.sub(r"\b(" + "|".join(_ORDINALS) + r")\b", lambda m: _ORDINALS[m.group(1)], text)   # "Fourth Floor"
     units = []
     while True:
         text = re.sub(r"[\s.,;:]+$", "", text)
@@ -93,18 +136,28 @@ def street_key(street: object) -> tuple[str, Optional[str]]:
         m = _UNIT.search(text)
         if not m:
             break
-        units.append(f"{UNIT_KIND[m.group(1)]}:{m.group(2)}")
+        units.append(f"{UNIT_KIND[m.group(1)]}:{m.group(2).replace('-', '')}")     # "4-B" is "4b"
         text = text[:m.start()]
     unit = "|".join(sorted(units)) or None
     raw = re.findall(r"[^\W_]+", _join_initials(text))
     words = []
     for i, w in enumerate(raw):
         rest = raw[i + 1:]
-        if w == "st" and rest and not all(x in _DIRECTIONS for x in rest):
-            words.append("saint")      # "St. Charles Ave": St before a name is Saint (AEGIS L5 round 2)
+        tail_only = bool(rest) and all(x in _DIRECTIONS or STREET_WORDS.get(x, x) in SUFFIXES for x in rest)
+        if w == "st" and rest and not tail_only:
+            words.append("saint")      # "St. Charles Ave": St before a name is Saint (AEGIS L5 round 2); not "St Ext"
+        elif w in ("n", "s", "e", "w") and i == 1 and raw[0].isdigit() and tail_only:
+            words.append(w)            # "100 S St" is a lettered street, never "South Street" (AEGIS L5 round 4)
         else:
             words.append(STREET_WORDS.get(w, w))
     return " ".join(words), unit
+
+
+def same_number_other_words(a: tuple[str, Optional[str]], b: tuple[str, Optional[str]]) -> bool:
+    """Two street keys with the same house number and unit whose street words differ: formatting this module does not
+    know, or another street. The data cannot tell, so a person decides (AEGIS L5 round 4: the inverted default)."""
+    wa, wb = a[0].split(), b[0].split()
+    return bool(wa and wb) and a != b and a[1] == b[1] and wa[0] == wb[0] and wa[0].isdigit()
 
 
 def phone_key(phone: object) -> Optional[str]:
@@ -154,7 +207,10 @@ AP_STATES = {"ala": "al", "ariz": "az", "ark": "ar", "calif": "ca", "cal": "ca",
              "wash": "wa", "wis": "wi", "wisc": "wi", "wyo": "wy", "wva": "wv", "w va": "wv", "n mex": "nm", "n dak": "nd", "s dak": "sd",
              "n car": "nc", "s car": "sc", "d c": "dc", "washington dc": "dc",
              "washington d c": "dc"}
-CITY_WORDS = {"st": "saint", "ste": "sainte", "ft": "fort", "mt": "mount", "pt": "point"}
+CITY_WORDS = {"st": "saint", "ste": "sainte", "ft": "fort", "mt": "mount", "pt": "point", "n": "north", "s": "south",
+              "e": "east", "w": "west", "bch": "beach", "hts": "heights", "spgs": "springs", "spg": "spring",
+              "vly": "valley", "cyn": "canyon", "lk": "lake", "pk": "park", "hls": "hills", "crk": "creek",
+              "ctr": "center", "vlg": "village", "is": "island", "pnes": "pines"}
 
 
 def state_key(state: object) -> str:

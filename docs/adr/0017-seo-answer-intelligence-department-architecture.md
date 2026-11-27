@@ -1336,6 +1336,7 @@ mark needs the owner's approval and proof of ownership (spec v0.1 "Must never").
 | Same name and website at two addresses with different local phones, or a shared toll-free number at two addresses | `leave_both` (`possible_other_location`: a chain, never a move) |
 | A practitioner's listing inside a practice ("Dr. ..., DDS"), a department ("... - Service Department") | `leave_both` |
 | Different businesses at one address; the same name with no shared phone or website | `leave_both` |
+| One house number in one city with street words that still differ ("100 S St" / "100 South St", an unknown spelling) | `owner_review`: neither a merge nor a move |
 | A listing missing its name, street, or both phone and website; anything not an object | `unreadable`, never a duplicate; `check` never raises |
 
 Certification: `services/seo-py/tests/test_duplicate_listings.py` runs the shared MVP pool (SEO-L5, 200 pairs per
@@ -1374,3 +1375,11 @@ Japanese or Cyrillic street was dropped, so "100 東京通り" read as "100 大�
 name is formatting ("Joe's" = "Joes", "A.A.A." = "AAA"); a unit with trailing punctuation ("Ste 4.") is still a unit,
 every unit part is kept ("Suite 400, Fl 4"), and "4th Floor" is floor 4; "W.Va.", "N.Mex." and "S.Dak." read as their
 codes. Regression tests: "AEGIS round 3".
+
+AEGIS round 4 (Nov 27 2026, Inquisitor on L5 52246b7b / L4 52231682): the street key now carries the USPS
+Publication 28 suffix abbreviations (Appendix C1: Plz, Ctr, Ext, Xing ...) and the numbered unit designators
+(Appendix C2: Spc, Lot, Trlr, Ofc, Ph ...); ordinal words ("Fourth Floor") and "4-B" are formatting; "St" before
+only suffixes or directions is Street ("St Ext"). A lettered street ("100 S St") is never a directional one
+("100 South St"). City abbreviations (N, W, Bch, Hts, Spgs ...) and spaced initials in names ("J. R.") are formatting.
+**The inverted default:** one house number in one city whose street words still differ is `owner_review` (neither a
+merge nor a move): the data cannot tell an unknown spelling from another street, so a person decides.

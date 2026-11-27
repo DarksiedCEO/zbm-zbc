@@ -305,3 +305,37 @@ def test_a_missing_unit_part_is_another_place():
 @pytest.mark.parametrize("raw, want", [("W.Va.", "wv"), ("W. Va.", "wv"), ("N.Mex.", "nm"), ("S.Dak.", "sd")])
 def test_more_ap_state_abbreviations(raw, want):
     assert nap.state_key(raw) == want
+
+
+# ---------------------------------------------------------------- AEGIS round 4 (Inquisitor, L5 52246b7b / L4 52231682)
+@pytest.mark.parametrize("x, y", [("100 S St", "100 South St"), ("100 N St", "100 North Street")])
+def test_a_lettered_street_is_never_a_directional_one(x, y):
+    assert nap.street_key(x) != nap.street_key(y)
+    v = dl.check(pair(listing(street=x), listing(street=y)))
+    assert v.is_duplicate is False and v.action == "owner_review"
+
+
+@pytest.mark.parametrize("x, y", [("5 Main St Ext", "5 Main Street Extension"), ("5 Civic Plz", "5 Civic Plaza"),
+                                  ("5 Town Ctr", "5 Town Center"), ("5 Main St Ste 4-B", "5 Main St Suite 4B"),
+                                  ("5 Main St Spc 12", "5 Main St Space 12"), ("5 Main St, Fourth Floor", "5 Main St 4th Floor")])
+def test_usps_suffixes_and_units_are_formatting(x, y):
+    assert nap.street_key(x) == nap.street_key(y)
+    assert dl.check(pair(listing(street=x), listing(street=y))).action == "merge_or_remove_duplicate"
+
+
+@pytest.mark.parametrize("x, y", [("N Las Vegas", "North Las Vegas"), ("W. Hollywood", "West Hollywood"),
+                                  ("Redondo Bch", "Redondo Beach")])
+def test_city_abbreviations_are_formatting(x, y):
+    assert nap.city_key(x, "NV", None)[0] == nap.city_key(y, "NV", None)[0]
+
+
+@pytest.mark.parametrize("x, y", [("J. R. Plumbing", "J.R. Plumbing"), ("A. A. A. Locksmith", "A.A.A. Locksmith"),
+                                  ("A.J Plumbing", "AJ Plumbing")])
+def test_spaced_initials_are_formatting(x, y):
+    assert nap.name_key(x) == nap.name_key(y)
+    assert dl.check(pair(listing(name=x), listing(name=y))).action == "merge_or_remove_duplicate"
+
+
+def test_an_unknown_street_spelling_at_one_number_asks_the_owner():
+    v = dl.check(pair(listing(street="4533 Testwell Drv"), listing(street="4533 Testwell Dryve")))
+    assert (v.is_duplicate, v.action, v.requires_owner_approval) == (False, "owner_review", False)

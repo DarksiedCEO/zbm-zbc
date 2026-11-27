@@ -21,6 +21,8 @@ Rules:
   the move is still reported but ``old_listing`` is None and the owner decides. Known limit (AEGIS L5 round 2): two
   locations of a chain that list the SAME local number at two addresses look exactly like a move and are reported as
   one; the data cannot tell them apart, which is one reason every move needs the owner's approval.
+- One house number in one city whose street words differ ("100 S St" / "100 South St", "Plz" spelled some way this
+  module does not know) is ``owner_review``: neither a merge nor a move is safe on that evidence (AEGIS L5 round 4).
 - Anything that cannot be read (a listing missing its name, street or city/ZIP, or neither phone nor website readable)
   is ``unreadable`` (checked before any comparison): never a duplicate. ``check`` never raises: an input it cannot read at all is ``unreadable``.
 """
@@ -44,7 +46,8 @@ _DEPARTMENT = re.compile(r"\s[-–—|:]\s*(?:service|parts|billing|sales|collis
 class PairVerdict:
     pair_id: str
     is_duplicate: bool
-    action: str                        # merge_or_remove_duplicate | mark_old_listing_moved | leave_both | unreadable
+    action: str                        # merge_or_remove_duplicate | mark_old_listing_moved | leave_both | owner_review
+    #                                    | unreadable
     requires_owner_approval: bool
     reason: str
     old_listing: Optional[str] = None  # "a" | "b" on a move, when the update ages tell
@@ -111,6 +114,10 @@ def _check(pair: dict) -> PairVerdict:
     same_city = all(x == y for x, y in zip(ca, cb) if x and y) and (ca[0] == cb[0] or (ca[2] and ca[2] == cb[2]))
     if same_city and street_a == street_b:
         return PairVerdict(pid, True, "merge_or_remove_duplicate", True, "same_business_same_address")
+    if same_city and nap.same_number_other_words(street_a, street_b):
+        # one house number, other street words ("100 S St" / "100 South St", or a suffix this module does not know):
+        # neither a merge nor a move is safe, so the owner is asked (AEGIS L5 round 4)
+        return PairVerdict(pid, False, "owner_review", False, "same_number_street_words_differ")
     # two addresses: a move only on the same local (not toll-free) phone; a shared site or a central number is a chain
     if not same_phone or nap.is_toll_free(pa):
         return leave("possible_other_location")
