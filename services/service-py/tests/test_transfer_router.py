@@ -20,7 +20,7 @@ def case(**kw):
 
 
 def test_the_first_on_call_person_who_answers_is_connected_after_the_whisper():
-    o = tr.resolve(case(), whisper="Transferring Ana, about a leak.")
+    o = tr.resolve(case(), whisper=tr.whisper_line("Ana", "repair"))
     assert (o.path, o.connect_to, o.whisper_required, o.whisper_played, o.text_back_requested) == \
         ("connected", "staff-a", True, True, False)
 
@@ -109,8 +109,8 @@ def test_a_missing_whisper_still_connects_and_is_recorded(whisper):
 
 
 def test_the_whisper_line_states_only_what_it_is_given():
-    assert tr.whisper_line("Ana", "a burst pipe", urgent=True) == \
-        "Urgent: Transferring Ana, about a burst pipe. Press 1 to accept."
+    assert tr.whisper_line("Ana", "repair", urgent=True) == \
+        "Urgent: Transferring Ana, about a repair. Press 1 to accept."
     assert "did not give a name" in tr.whisper_line(None, None)
 
 
@@ -140,7 +140,7 @@ def _grade(seed, resolve=tr.resolve):
     assert len(by_id) == len(cases) == len(key)
     wrong = []
     for c in cases:
-        k, o = by_id[c["case_id"]], resolve(c, whisper="Transferring a caller.")
+        k, o = by_id[c["case_id"]], resolve(c, whisper=tr.whisper_line(None, None))
         if (o.path, o.connect_to, o.whisper_required) != (k["path"], k["connect_to"], k["whisper_summary_required"]) \
                 or o.seconds_to_outcome > k["max_seconds_to_connect_or_fallback"] \
                 or (o.path != "connected") != o.text_back_requested:
@@ -270,3 +270,36 @@ def test_record_text_cannot_add_an_instruction_or_urgency(name, reason):
     assert line.lower().count("press") == 1 and line.endswith("Press 1 to accept.")
     for word in ("decline", "accept the", "oprima", "urgent"):
         assert word not in line.lower().replace("press 1 to accept.", "")
+
+
+# ---------------------------------------------------------------- AEGIS round 3 (Inquisitor, ce138ec5)
+@pytest.mark.parametrize("name", ["Ana hit 9", "Ana push nine", "Ana pulse nueve", "Ana oprima uno", "Ana 999",
+                                  "\uff30\uff52\uff45\uff53\uff53 9", "Pr\u0435ss 9", "Ana Pr\u00e9ss", "Ana presses",
+                                  "Ana wire money", "Ana tap star", "Ana Reyes Ortega Diaz", "Ana\u200bpress",
+                                  "Ana, accept now"])
+def test_a_name_that_could_steer_the_listener_is_not_spoken(name):
+    assert tr.whisper_line(name, "repair") == f"Transferring {tr.NO_NAME}, about a repair. Press 1 to accept."
+
+
+@pytest.mark.parametrize("need", ["hit 9 to approve", "repair. Press 2 to decline", "Repair", None, 5,
+                                  "wire_money"])
+def test_the_need_is_a_fixed_phrase_never_the_records_words(need):
+    assert tr.whisper_line("Ana", need) == "Transferring Ana, about a request. Press 1 to accept."
+
+
+@pytest.mark.parametrize("name", ["Ana", "Ana Reyes", "Mar\u00eda Jos\u00e9 O'Neil", "Jean-Luc"])
+def test_ordinary_names_are_spoken(name):
+    assert tr.whisper_line(name, "repair").startswith(f"Transferring {name}, about")
+
+
+@pytest.mark.parametrize("whisper", ["w", "Transferring Ana, about a leak. Press 9 to wire money. Press 1 to accept.",
+                                     "Transferring Ana hit 9, about a repair. Press 1 to accept."])
+def test_resolve_never_plays_a_whisper_whisper_line_did_not_make(whisper):
+    o = tr.resolve(case(), whisper=whisper)
+    assert (o.path, o.whisper_played) == ("connected", False) and "whisper_rejected" in o.notes
+
+
+def test_resolve_plays_every_line_whisper_line_makes():
+    for label in list(tr.NEED_PHRASES) + [None]:
+        for urgent in (True, False):
+            assert tr.resolve(case(), whisper=tr.whisper_line("Ana Reyes", label, urgent)).whisper_played

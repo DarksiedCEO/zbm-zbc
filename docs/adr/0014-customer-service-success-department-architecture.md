@@ -682,7 +682,7 @@ there is one), `fallback_message_and_text_back`, or `caller_hung_up_log_and_text
 | Ringing | Simultaneous for everyone on call (Nov 26 ruling), duplicates rung once; a sequential plan is rung at once too and noted. The on-call order may be a list or a tuple of text or whole-number ids; anything else is nobody on call (`unreadable_on_call_order`) |
 | 30 s | A ring timeout above 30 s, or one that cannot be read, is cut to 30 s; every outcome lands within it |
 | Who connects | The first in the on-call order who answers live; never someone not on call; two records for one person that disagree count as not answering. A live answer beats someone else's late answer (ruling for the spec freeze; the pool's own oracle reads that mix the other way and the pool never generates it) |
-| Whisper | Played first when there is one; a missing one still connects (the caller is never held for it) and is recorded (`whisper_missing`). The whisper line says "Urgent" only for an explicit `True`, and reads the name and reason as one printable line of at most 60 characters |
+| Whisper | Played first when there is one and `whisper_line` made it (anything else: `whisper_rejected`); a missing one still connects (the caller is never held for it) and is recorded (`whisper_missing`). The whisper line says "Urgent" only for an explicit `True`, speaks a name only as at most 3 Latin-letter words with no steering word, and the need only as a fixed phrase for its label (AEGIS round 3) |
 | No dropped caller | `resolve` never raises: an unreadable case (not an object, no usable id) ends in the fallback (`unreadable_case`); any unreadable outcome is "no answer", so every path ends connected or in a fallback; fallbacks and late answers ask RR-F2 for a text-back (which still applies consent and quiet hours) |
 
 Certification: `services/service-py/tests/test_transfer_router.py` runs the shared MVP pool (F4, 200 cases per seed)
@@ -704,3 +704,13 @@ Review: two behaviour records for one person that disagree (7 and "7", "staff-a"
 win; they now count as not answering. Caller text could add its own "Press 2" or "Urgent" to the whisper; name and
 reason now keep only letters, digits, spaces, apostrophes and hyphens and lose any steering word, so the only
 instruction spoken is "Press 1 to accept". Regression tests: "AEGIS round 2" section.
+
+AEGIS round 3 (Nov 26 2026, Inquisitor on ce138ec5): no High; the kill criteria held. Review, all fixed: the word
+filter on the whisper was beaten by look-alike letters, Spanish forms ("pulse nueve"), inflections, "hit/push 9",
+spelled digits and digit runs; `resolve` played any non-empty string; "within 30 s" did not say what it bounds. The
+whisper now speaks a name only when it is at most 3 words of Latin letters read after NFKC with no steering word or
+spelled digit (anything else: "a caller who did not give a name"), and speaks the need only as a fixed phrase for its
+label (`NEED_PHRASES`; an unlisted label is "a request"), never record text. `resolve` plays only a line
+`whisper_line` made; anything else connects without it, noted `whisper_rejected`. The 30 s bounds the ringing; the
+whisper plays after an answer. Accepted: real names that start with a steering word ("Pressley", "Diez") are left
+out of the whisper. Regression tests: "AEGIS round 3".

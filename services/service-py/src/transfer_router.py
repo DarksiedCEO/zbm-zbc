@@ -10,11 +10,13 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings):
 - Simultaneous ringing: every on-call person rings at once (Nov 26 ruling), so the whole transfer fits inside
   30 s for a list of any length. A ring timeout above 30 s, or one that cannot be read, is cut to 30 s.
 - The first person (in the on-call order) who answers while the caller is still on the line is connected. When a
-  whisper summary exists it is played to them first; when it is missing the router still connects (the caller is
+  whisper summary exists, and it is a line ``whisper_line`` made (anything else is never played: ``whisper_rejected``),
+  it is played to them first; when it is missing the router still connects (the caller is
   never left waiting for paperwork) and records ``whisper_missing``. If one person answers live and another only
   after the caller hung up, the live answer wins (the caller was still there for it).
 - A staff member who answers after the caller hung up is logged, and the caller gets a text-back.
-- Every path ends in a connected call or a fallback within 30 s. Nothing ends in a dropped caller: any outcome the
+- Every path ends in a connected call or a fallback within 30 s of ringing starting (the 30 s bounds the ringing;
+  the whisper, about 5 s, is played after someone answers, and the fallback message is RR-F2's job). Nothing ends in a dropped caller: any outcome the
   router cannot read is treated as "no answer", which leads to the fallback, and ``resolve`` never raises: a case it
   cannot read at all (not an object, no usable id) also ends in the fallback, noted ``unreadable_case``.
 - The on-call order may be a list or a tuple; ids are strings (outer spaces trimmed) or whole numbers up to 10**18
@@ -25,6 +27,7 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings):
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -129,9 +132,10 @@ def resolve(case: dict, behaviour: Optional[dict] = None, whisper: Optional[str]
     seen = merged
     for person in p.ring:
         if seen.get(person) == ANSWERS:
-            played = isinstance(whisper, str) and bool(whisper.strip())
+            played = _is_whisper_line(whisper)
             if not played:
-                notes.append("whisper_missing")
+                notes.append("whisper_rejected" if isinstance(whisper, str) and whisper.strip() else
+                             "whisper_missing")
             return TransferOutcome(p.case_id, CONNECTED, person, p.timeout_seconds, True, played, False,
                                    tuple(notes))
     if any(seen.get(person) == ANSWERS_LATE for person in p.ring):
@@ -140,25 +144,67 @@ def resolve(case: dict, behaviour: Optional[dict] = None, whisper: Optional[str]
                            tuple(notes + ["nobody_answered"]))
 
 
-_COMMAND_WORDS = re.compile(r"\b(?:press|presione|oprima|marque|dial|urgent|urgente|emergency|accept|decline|"
-                            r"reject|hang|transfer)\b", re.IGNORECASE)
+# What the answering person hears about the need: a fixed phrase per need label (RR-F3's labels and the packs' reason
+# categories). A label not listed is spoken as "a request", never as its own text, so record text cannot steer the
+# listener (AEGIS round 3: "hit 9", "pulse nueve", look-alike letters and spelled digits all got through a word filter).
+NEED_PHRASES = {
+    "emergency": "an emergency", "booking": "a booking", "book_appointment": "booking an appointment",
+    "book_consult": "booking a consult", "service_appointment": "a service appointment", "reservation": "a reservation",
+    "catering": "catering", "repair": "a repair", "drain": "a drain problem", "maintenance": "maintenance",
+    "quote": "a quote", "new_quote": "a new quote", "pricing": "pricing", "pricing_question": "pricing",
+    "billing": "billing", "reschedule": "rescheduling", "status_check": "a status check", "hours": "hours",
+    "complaint": "a complaint", "existing_customer": "an existing account", "existing_case_update": "an existing case",
+    "new_case": "a new case", "claim": "a claim", "policy_change": "a policy change",
+    "insurance_question": "an insurance question", "legal_question": "a legal question",
+    "treatment_question": "a treatment question", "sales_inquiry": "a sales question", "vendor": "a vendor call",
+    "unclear": "something they did not make clear",
+}
+DEFAULT_NEED = "a request"
+# words that would steer the listener, keys and digits spelled out: a name holding one is not spoken at all
+_STEER = {"press", "presione", "presiona", "oprima", "oprime", "pulse", "pulsa", "marque", "marca", "dial", "hit",
+          "push", "tap", "key", "enter", "select", "choose", "urgent", "urgente", "emergency", "emergencia", "accept",
+          "acepte", "decline", "reject", "hang", "transfer", "wire", "send", "pay", "zero", "one", "two", "three",
+          "four", "five", "six", "seven", "eight", "nine", "ten", "cero", "uno", "dos", "tres", "cuatro", "cinco",
+          "seis", "siete", "ocho", "nueve", "diez", "star", "pound", "hash", "asterisk", "button", "boton", "tecla"}
+_NAME_WORD = re.compile(r"[A-Za-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u00ff][A-Za-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u00ff'-]{0,19}")
+NO_NAME = "a caller who did not give a name"
 
 
-def _spoken(value: object, limit: int) -> Optional[str]:
-    """Record text fit to be read aloud as data: letters, digits, spaces, apostrophes and hyphens only (no sentence
-    breaks), none of the words that steer the listener ("press", "urgent", "accept", ...), bounded."""
+def _spoken_name(value: object) -> Optional[str]:
+    """A caller name fit to be read aloud: at most 3 words of Latin letters (apostrophes and hyphens inside), read
+    after NFKC, none of them a steering word or a spelled digit (folded: "Préss", "PRESS" and "press" alike).
+    Anything else is not spoken at all, rather than spoken in part."""
     if not isinstance(value, str):
         return None
-    value = "".join(c if (c.isalnum() or c in " '-") else " " for c in value if c.isprintable() or c.isspace())
-    value = " ".join(_COMMAND_WORDS.sub(" ", value).split())[:limit].strip()
-    return value or None
+    words = unicodedata.normalize("NFKC", value).split()
+    if not 1 <= len(words) <= 3 or not all(_NAME_WORD.fullmatch(w) for w in words):
+        return None
+    for w in words:
+        plain = "".join(c for c in unicodedata.normalize("NFKD", w) if not unicodedata.combining(c)).casefold()
+        # exact for short words ("hit", "one"), a prefix for longer ones ("presses", "accepted", "Pressley": a real
+        # name can be left out, which costs only the name)
+        if any(part in _STEER or any(len(x) >= 4 and part.startswith(x) for x in _STEER)
+               for part in re.split(r"['-]", plain)):
+            return None
+    return " ".join(words)
 
 
-def whisper_line(caller_name: Optional[str], reason: Optional[str], urgent: bool = False) -> str:
+def whisper_line(caller_name: Optional[str], need: Optional[str], urgent: bool = False) -> str:
     """What the answering person hears before the caller is joined. Facts only from the call record (RR-F3): the
-    urgency is announced only when the record says exactly ``True``; name and reason are bounded to 60 characters,
-    keep only letters, digits, spaces, apostrophes and hyphens, and lose any word that would steer the listener
-    ("press", "urgent", "accept", "decline" ...), so the only instruction spoken is "Press 1 to accept"."""
-    who = _spoken(caller_name, 60) or "a caller who did not give a name"
-    why = _spoken(reason, 60) or "no reason given"
+    urgency is announced only when the record says exactly ``True``; the name is spoken only when it passes
+    ``_spoken_name``; the need is a fixed phrase for its label (``NEED_PHRASES``), never the record's own words. So
+    the only instruction ever spoken is "Press 1 to accept"."""
+    who = _spoken_name(caller_name) or NO_NAME
+    why = NEED_PHRASES.get(need, DEFAULT_NEED) if isinstance(need, str) else DEFAULT_NEED
     return f"{'Urgent: ' if urgent is True else ''}Transferring {who}, about {why}. Press 1 to accept."
+
+
+_WHISPER_FORM = re.compile(r"(?:Urgent: )?Transferring (.+), about (.+)\. Press 1 to accept\.")
+
+
+def _is_whisper_line(text: object) -> bool:
+    m = _WHISPER_FORM.fullmatch(text) if isinstance(text, str) else None
+    if not m:
+        return False
+    who, why = m.groups()
+    return (who == NO_NAME or _spoken_name(who) == who) and (why == DEFAULT_NEED or why in NEED_PHRASES.values())
