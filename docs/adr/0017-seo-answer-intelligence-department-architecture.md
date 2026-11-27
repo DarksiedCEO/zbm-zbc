@@ -1345,4 +1345,15 @@ every pair. A grader self-test proves one wrong merge is noticed. **Known limits
 formatting is set aside, so a renamed business ("Desert Sky Plumbing" / "Desert Sky Plumbing & Air") is not a
 duplicate; a look-alike letter in a name makes two names different (never a false merge). The catch-all that keeps
 `check` from raising also hides any coding error as `unreadable`; the tests cover every rule directly so a hidden
-error would fail certification. Not yet reviewed by AEGIS at this commit.
+error would fail certification.
+
+AEGIS round 1 (Nov 27 2026, Inquisitor on f04cd609): 6 High, all fixed in the shared NAP keys and the decision. The
+name key dropped every non-Latin letter ("Sushi 東京" = "Sushi 大阪"): letters of every script are kept now. Legal
+suffixes were removed anywhere ("PC Repair Pros" = "Repair Pros"): only trailing suffixes and a leading "the" are set
+aside. The state was cut to two letters (Mississippi = Michigan): full state names map to their codes and anything
+else is kept whole. The unit kind was dropped ("Floor 2" = "Suite 2"): suite, unit, apartment and "#" are one kind,
+floor, building and room are others. Two different readable local phones could still merge on a shared site: they
+never do now (`different_phones`). A missing city and ZIP on both listings counted as the same city: `unreadable` now.
+Review: "Nevada"/"NV", "St. Louis"/"Saint Louis" and "Ste #4"/"Suite 4" read as different places (a false move):
+fixed; a unit on one side only still reads as another address (a move the owner must approve; known limit). The
+department pattern was bounded (it backtracked on long names). Regression tests: "AEGIS round 1".

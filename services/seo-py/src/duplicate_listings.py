@@ -5,8 +5,9 @@ duplicate, mark the old listing of a business that moved, or leave both alone. D
 here, and every removal or merge needs the owner's approval and proof of ownership (spec v0.1 "Must never").
 
 Rules:
-- Same business = the same name once formatting is set aside (case, "&" / "and", punctuation, legal suffixes) AND
-  either the same local phone, or the same website at the same address. A matching address alone never makes a
+- Same business = the same name once formatting is set aside (case, "&" / "and", punctuation, a leading "the", trailing
+  legal suffixes) AND either the same local phone, or the same website at the same address with no conflicting phone:
+  two listings with two different readable phones are never one business. A matching address alone never makes a
   duplicate (two businesses can share a building), and a matching name alone never does either. Two locations of a
   chain share a name and a website, and often a central toll-free number: the same name and website at two street
   addresses with different local phones, or a shared toll-free number at two addresses, is ``leave_both``
@@ -18,7 +19,8 @@ Rules:
   street address is a move: ``mark_old_listing_moved``, the old listing being the one the owner touched longest ago
   (``old_listing`` says which). When the update ages cannot tell (missing or equal), the move is still reported but
   ``old_listing`` is None and the owner decides.
-- Anything that cannot be read (a listing missing its name, or neither phone nor website readable) is ``unreadable``:
+- Anything that cannot be read (a listing missing its name, street or city/ZIP, or neither phone nor website readable)
+  is ``unreadable``:
   never a duplicate. ``check`` never raises: an input it cannot read at all is ``unreadable``.
 """
 
@@ -33,7 +35,7 @@ import nap
 _PRACTITIONER = re.compile(r"^\s*dr\.?\s|\b(?:dds|dmd|md|do|dc|pa-c|np|esq|cpa|od|dpm|phd)\b\.?\s*$|"
                            r"\b(?:attorney at law|abogad[oa])\b", re.IGNORECASE)
 _DEPARTMENT = re.compile(r"\s[-–—|:]\s*(?:service|parts|billing|sales|collision|finance|accounting|"
-                         r"leasing|body shop|warranty|repair|claims)\b[\w ]*(?:department|dept\.?|office|center|desk)?"
+                         r"leasing|body shop|warranty|repair|claims)\b[\w ]{0,60}?(?:department|dept\.?|office|center|desk)?"
                          r"\s*$|\b(?:department|dept\.?)\s*$", re.IGNORECASE)
 
 
@@ -86,10 +88,16 @@ def _check(pair: dict) -> PairVerdict:
         return leave("different_name")
     same_phone = bool(pa) and pa == pb
     same_site = bool(wa) and wa == wb
+    if pa and pb and pa != pb:         # two different local phones are two businesses or two lines: never merged
+        return leave("different_phones")
     if not (same_phone or same_site):
         return leave("same_name_but_no_shared_phone_or_website")
-    same_city = nap.city_key(a.get("city"), a.get("state"), a.get("zip")) == \
-        nap.city_key(b.get("city"), b.get("state"), b.get("zip"))
+    ca = nap.city_key(a.get("city"), a.get("state"), a.get("zip"))
+    cb = nap.city_key(b.get("city"), b.get("state"), b.get("zip"))
+    if not (ca[0] or ca[2]) or not (cb[0] or cb[2]):
+        return PairVerdict(pid, False, "unreadable", False, "missing_city")
+    # the same city: the same city name and state when both have them, and the same ZIP when both have one
+    same_city = all(x == y for x, y in zip(ca, cb) if x and y) and (ca[0] == cb[0] or (ca[2] and ca[2] == cb[2]))
     street_a, street_b = nap.street_key(a.get("street")), nap.street_key(b.get("street"))
     if not street_a[0] or not street_b[0]:
         return PairVerdict(pid, False, "unreadable", False, "missing_street")

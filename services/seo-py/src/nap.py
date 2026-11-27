@@ -18,8 +18,13 @@ STREET_WORDS = {"st": "street", "str": "street", "ave": "avenue", "av": "avenue"
                 "hwy": "highway", "cir": "circle", "ter": "terrace", "trl": "trail", "sq": "square",
                 "n": "north", "s": "south", "e": "east", "w": "west", "ne": "northeast", "nw": "northwest",
                 "se": "southeast", "sw": "southwest"}
-UNIT_WORDS = ("suite", "ste", "unit", "apt", "apartment", "bldg", "building", "fl", "floor", "rm", "room", "#")
-NAME_NOISE = {"the", "llc", "inc", "co", "corp", "corporation", "company", "ltd", "pllc", "pc"}
+# unit words by kind: suite, unit, apartment and "#" are styles of one kind (the pool's formatting variants); a floor,
+# a building and a room are other kinds, so "Floor 2" is never "Suite 2" (AEGIS L5 round 1)
+UNIT_KIND = {"suite": "unit", "ste": "unit", "unit": "unit", "apt": "unit", "apartment": "unit", "#": "unit",
+             "no": "unit", "bldg": "building", "building": "building", "fl": "floor", "floor": "floor",
+             "rm": "room", "room": "room"}
+# legal suffixes, set aside only at the END of a name ("PC Repair Pros" keeps "pc"); a leading "the" is set aside too
+LEGAL_SUFFIXES = {"llc", "inc", "co", "corp", "corporation", "company", "ltd", "pllc", "pc", "lp", "llp", "pa"}
 
 
 def _fold(text: object) -> str:
@@ -30,26 +35,32 @@ def _fold(text: object) -> str:
 
 
 def name_key(name: object) -> str:
-    """Case, accents, punctuation, "&" / "and" and legal suffixes (LLC, Inc ...) do not change a name."""
-    words = re.findall(r"[a-z0-9]+", _fold(name).replace("&", " and "))
-    return " ".join(w for w in words if w not in NAME_NOISE)
+    """Case, accents, punctuation, "&" / "and", a leading "the" and trailing legal suffixes (LLC, Inc ...) do not
+    change a name. Letters of every script are kept ("Sushi 東京" is not "Sushi 大阪"; AEGIS L5 round 1)."""
+    words = re.findall(r"\w+", _fold(name).replace("&", " and "))
+    while len(words) > 1 and words[-1] in LEGAL_SUFFIXES:
+        words.pop()
+    if len(words) > 1 and words[0] == "the":
+        words.pop(0)
+    return " ".join(words)
 
 
 def street_key(street: object) -> tuple[str, Optional[str]]:
-    """(street line, unit) with abbreviations spelled out and any unit style ("Ste 4", "#4", "Unit 4") read as one."""
+    """(street line, unit) with abbreviations spelled out; unit styles of one kind ("Ste 4", "Ste #4", "#4", "Unit 4")
+    read as one, while a floor, building or room keeps its kind ("floor:2" is not "unit:2")."""
     text = _fold(street).replace("#", " # ")
     unit = None
-    m = re.search(r"(?:,\s*|\s)(suite|ste|unit|apt|apartment|bldg|building|fl|floor|rm|room|#)\.?\s*([a-z0-9\-]+)\s*$",
-                  text)
+    m = re.search(r"(?:,\s*|\s)(suite|ste|unit|apt|apartment|bldg|building|fl|floor|rm|room|no|#)\.?\s*(?:#\s*)?"
+                  r"([a-z0-9\-]+)\s*$", text)
     if m:
-        unit, text = m.group(2), text[:m.start()]
+        unit, text = f"{UNIT_KIND[m.group(1)]}:{m.group(2)}", text[:m.start()]
     words = [STREET_WORDS.get(w, w) for w in re.findall(r"[a-z0-9]+", text)]
     return " ".join(words), unit
 
 
 def phone_key(phone: object) -> Optional[str]:
     """Ten digits of a North American number, or None."""
-    digits = re.sub(r"\D", "", _fold(phone))
+    digits = re.sub(r"[^0-9]", "", _fold(phone))          # NFKC first, so other scripts' digits read as ASCII
     if len(digits) == 11 and digits.startswith("1"):
         digits = digits[1:]
     return digits if len(digits) == 10 and digits[0] in "23456789" and digits[3] in "23456789" else None
@@ -76,6 +87,27 @@ def website_key(url: object) -> Optional[str]:
     return host + parts.path.rstrip("/")
 
 
+STATES = {"alabama": "al", "alaska": "ak", "arizona": "az", "arkansas": "ar", "california": "ca", "colorado": "co",
+          "connecticut": "ct", "delaware": "de", "district of columbia": "dc", "florida": "fl", "georgia": "ga",
+          "hawaii": "hi", "idaho": "id", "illinois": "il", "indiana": "in", "iowa": "ia", "kansas": "ks",
+          "kentucky": "ky", "louisiana": "la", "maine": "me", "maryland": "md", "massachusetts": "ma",
+          "michigan": "mi", "minnesota": "mn", "mississippi": "ms", "missouri": "mo", "montana": "mt",
+          "nebraska": "ne", "nevada": "nv", "new hampshire": "nh", "new jersey": "nj", "new mexico": "nm",
+          "new york": "ny", "north carolina": "nc", "north dakota": "nd", "ohio": "oh", "oklahoma": "ok",
+          "oregon": "or", "pennsylvania": "pa", "rhode island": "ri", "south carolina": "sc", "south dakota": "sd",
+          "tennessee": "tn", "texas": "tx", "utah": "ut", "vermont": "vt", "virginia": "va", "washington": "wa",
+          "west virginia": "wv", "wisconsin": "wi", "wyoming": "wy", "puerto rico": "pr"}
+CITY_WORDS = {"st": "saint", "ste": "sainte", "ft": "fort", "mt": "mount", "pt": "point"}
+
+
+def state_key(state: object) -> str:
+    """A US state as its two-letter code ("Nevada", "NV", "nv." all read "nv"); anything else as written in full, never
+    cut (AEGIS L5 round 1: cutting to two letters read Mississippi and Michigan as one state)."""
+    text = " ".join(re.findall(r"[a-z]+", _fold(state)))
+    return STATES.get(text, text)
+
+
 def city_key(city: object, state: object, zip_code: object) -> tuple[str, str, str]:
-    z = re.sub(r"\D", "", _fold(zip_code))[:5]
-    return " ".join(re.findall(r"[a-z]+", _fold(city))), _fold(state).strip()[:2], z
+    z = re.sub(r"[^0-9]", "", _fold(zip_code))[:5]
+    words = [CITY_WORDS.get(w, w) for w in re.findall(r"\w+", _fold(city))]
+    return " ".join(words), state_key(state), z

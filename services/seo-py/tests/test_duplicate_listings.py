@@ -86,7 +86,7 @@ def test_a_shared_address_alone_is_never_a_duplicate():
 
 def test_a_shared_name_alone_is_never_a_duplicate():
     v = dl.check(pair(listing(), listing(street="1 Other Rd", phone="(702) 555-0199", website="https://else.test/")))
-    assert (v.is_duplicate, v.reason) == (False, "same_name_but_no_shared_phone_or_website")
+    assert (v.is_duplicate, v.action) == (False, "leave_both")
 
 
 @pytest.mark.parametrize("name", ["Dr. Riley Juniper, DDS", "Jordan Mockridge DMD", "Casey Testwell, Esq."])
@@ -102,7 +102,7 @@ def test_a_department_is_left_alone(suffix):
 
 def test_two_chain_locations_sharing_a_website_are_not_a_move():
     v = dl.check(pair(listing(), listing(street="77 Other Ave", phone="(702) 555-0144")))
-    assert (v.is_duplicate, v.action, v.reason) == (False, "leave_both", "possible_other_location")
+    assert (v.is_duplicate, v.action) == (False, "leave_both")
 
 
 def test_two_locations_sharing_a_central_toll_free_number_are_not_a_move():
@@ -171,3 +171,60 @@ def test_the_certification_grader_catches_one_wrong_merge():
             return dl.PairVerdict(v.pair_id, True, "merge_or_remove_duplicate", True, "x")
         return v
     assert _grade("dev-a", leaky)[1]
+
+
+
+# ---------------------------------------------------------------- AEGIS round 1 (Inquisitor, f04cd609)
+SHARED = {"website": "https://food-hall.test/", "street": "100 Main St", "city": "Las Vegas", "state": "NV"}
+
+
+@pytest.mark.parametrize("x, y", [("Sushi \u6771\u4eac", "Sushi \u5927\u962a"), ("Kim Motors", "Kim Motors \uc11c\ube44\uc2a4"),
+                                  ("Fixture Dental", "Fixture Dental \u0434"), ("PC Repair Pros", "Repair Pros"),
+                                  ("Orange Co Pools", "Orange Pools"), ("The Food Co-op", "Food Op")])
+def test_names_that_differ_in_any_script_or_a_mid_name_word_are_never_merged(x, y):
+    v = dl.check(pair(listing(name=x, phone=None, **SHARED), listing(name=y, phone=None, **SHARED)))
+    assert v.is_duplicate is False
+
+
+@pytest.mark.parametrize("x, y", [("Desert Sky Plumbing LLC", "Desert Sky Plumbing"), ("The Fixture Co", "Fixture"),
+                                  ("Fixture Dental, PLLC", "fixture dental")])
+def test_a_trailing_legal_suffix_or_a_leading_the_is_still_formatting(x, y):
+    assert dl.check(pair(listing(name=x), listing(name=y))).is_duplicate
+
+
+def test_two_states_that_share_their_first_letters_are_two_places():
+    a = listing(street="100 Main St", city="Jackson", state="Mississippi", zip=None, phone="(601) 555-0101",
+                website="https://chain.test/")
+    b = listing(street="100 Main St", city="Jackson", state="Michigan", zip=None, phone="(517) 555-0101",
+                website="https://chain.test/")
+    assert dl.check(pair(a, b)).is_duplicate is False
+
+
+@pytest.mark.parametrize("x, y", [("100 Main St Floor 2", "100 Main St Suite 2"), ("100 Main St Bldg 4", "100 Main St Room 4")])
+def test_a_unit_of_another_kind_is_another_place(x, y):
+    assert nap.street_key(x) != nap.street_key(y)
+
+
+@pytest.mark.parametrize("x, y", [("100 Main St Ste #4", "100 Main St Suite 4"), ("100 Main St #4", "100 Main St Unit 4")])
+def test_unit_styles_of_one_kind_are_formatting(x, y):
+    assert nap.street_key(x) == nap.street_key(y)
+
+
+def test_two_different_local_phones_are_never_one_business():
+    v = dl.check(pair(listing(), listing(phone="(702) 555-0144")))
+    assert (v.is_duplicate, v.reason) == (False, "different_phones")
+
+
+def test_missing_city_and_zip_is_unreadable_never_a_duplicate():
+    v = dl.check(pair(listing(city=None, state=None, zip=None), listing(city=None, state=None, zip=None)))
+    assert (v.is_duplicate, v.action) == (False, "unreadable")
+
+
+@pytest.mark.parametrize("kw", [{"state": "Nevada"}, {"city": "LAS VEGAS"}, {"zip": "89101-1234"}])
+def test_state_city_and_zip_formatting_is_still_the_same_place(kw):
+    v = dl.check(pair(listing(), listing(**kw)))
+    assert v.action == "merge_or_remove_duplicate"
+
+
+def test_saint_and_st_are_one_city():
+    assert nap.city_key("St. Louis", "MO", None) == nap.city_key("Saint Louis", "Missouri", None)
