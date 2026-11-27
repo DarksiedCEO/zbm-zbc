@@ -102,7 +102,7 @@ MUTANTS: list[tuple[str, str, str, str, str | None]] = [
      "the suppression blocks every send until a new opt-in, which sets consent again"),
     ("consent_keeper", "opt-in time guard removed",
      '            if (rec.suppressed_at is None or e["t"] > rec.suppressed_at) and rec.suppressed in',
-     "            if rec.suppressed in", "a single sorted replay always applies an earlier opt-in before the opt-out"),
+     "            if rec.suppressed in", None),   # killed: not equivalent (AEGIS F3 round 15)
     # ---- RR-F2 text-back
     ("textback", "300 s blocks", "        if since < REPEAT_WINDOW_SECONDS:", "        if since <= REPEAT_WINDOW_SECONDS:",
      None),
@@ -311,7 +311,7 @@ MUTANTS: list[tuple[str, str, str, str, str | None]] = [
      '(callback == read_back[0] or (callback is None and "ambiguous_number" not in notes)):',
      '(callback == read_back[0] or callback is None):', "a second fence since round 12: a read-back counts only for a number the caller gave in a sentence of plain words"),
     ("call_summarizer", "a name may run on after the lead-in", "            if m.re is _LEAD_NAME and not re.match(", "            if False and not re.match(",
-     None),
+     "a second fence since round 15: anything but plain words after the name withholds it"),
     ("call_summarizer", "any reply after the confirmation keeps the name",
      "_AFFIRM.fullmatch(_fold(x).strip()) for c, x in later)", "True for c, x in later)", None),
     ("call_summarizer", "a caller-only number is the callback", "    elif callback is not None:\n        notes.append(\"callback_not_confirmed\")\n        callback = None",
@@ -331,7 +331,7 @@ MUTANTS: list[tuple[str, str, str, str, str | None]] = [
     ("call_summarizer", "unknown-label words after the read-back ignored", 'if sp in ("caller", "unknown") and x.strip()]',
      'if sp == "caller" and x.strip()]', None),
     ("call_summarizer", "a name of someone else kept",
-     "            if _OTHER_PERSON.search(said_after) or _THIRD_PARTY.search(_fold(x)) or _ASKS_OTHER.search(_ASKS_OWN.sub(\" \", _fold(prev_agent))) or (not lead and not bare_ok):",
+     "            if not after_plain or _THIRD_PARTY.search(_fold(x)) or _ASKS_OTHER.search(_ASKS_OWN.sub(\" \", _fold(prev_agent))) or (not lead and not bare_ok):",
      "            if False:", None),
     ("call_summarizer", "a bare name kept without an own-name question",
      "or (not lead and not bare_ok):", "or False:", None),
@@ -350,11 +350,13 @@ MUTANTS: list[tuple[str, str, str, str, str | None]] = [
     ("call_summarizer", "punctuation breaks the fixed form",
      '    text = re.sub(r"\\s+", " ", core.replace(",", " ")).strip() + "."', '    text = core.strip() + "."', None),
     ("call_summarizer", "any ending read as an end mark",
-     '    ended = re.fullmatch(r"(?:\\.|!+)", text[len(core):].strip()) is not None', '    ended = True', None),
+     '    ended = re.fullmatch(r"(?:\\.|!{1,2})", text[len(core):].strip()) is not None', '    ended = True', None),
+    ("call_summarizer", "three exclamation marks end the instruction",
+     '    ended = re.fullmatch(r"(?:\\.|!{1,2})", text[len(core):].strip()) is not None', '    ended = re.fullmatch(r"(?:\\.|!+)", text[len(core):].strip()) is not None', None),
     ("call_summarizer", "phone talk before the number ignored",
      "                if _PHONE_TOPIC.search(sentence) and \\", "                if False and \\", None),
-    ("call_summarizer", "someone spoken of after the name ignored",
-     "            if _OTHER_PERSON.search(said_after) or _THIRD_PARTY", "            if _THIRD_PARTY", None),
+    ("call_summarizer", "anything said after the name ignored",
+     "            if not after_plain or _THIRD_PARTY", "            if _THIRD_PARTY", None),
     ("call_summarizer", "an answer is a greeting", '_GREETINGS = frozenset({"hello", "hi", "hey", "hola", "bueno", "alo", "aló", "oiga"})',
      '_GREETINGS = frozenset({"hello", "hi", "hey", "hola", "bueno", "alo", "aló", "oiga", "yes", "si", "sí", "okay", "ok"})',
      None),
@@ -416,6 +418,9 @@ def run(only: str | None = None) -> int:
             else:
                 state = "killed" if killed else ("survived (equivalent)" if equivalent else "SURVIVED")
             if not killed and not (equivalent and proc.returncode == 0):
+                bad += 1
+            if killed and equivalent:      # a mutant called equivalent that the tests kill: the reason is wrong (round 15)
+                state = "KILLED BUT MARKED EQUIVALENT"
                 bad += 1
             rows.append((module, label, state, equivalent))
     width = max(len(r[1]) for r in rows) if rows else 10

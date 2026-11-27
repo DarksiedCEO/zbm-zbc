@@ -17,7 +17,7 @@ Rules (spec v0.1, the front-desk shared rules, the Nov 26 spec-freeze rulings):
   lead-in ("I'm", "my name is", "soy", "me llamo", "mi nombre es"; "this is", "it's", "habla" only before a number
   or a calling phrase) or as "First Last" opening a sentence before a number (a bare name only when the receptionist asked for
   the caller's own name, or it is the answer to the opening greeting with nobody else spoken of before it; AEGIS
-  round 13), and a trusted receptionist turn confirms
+  round 13), the caller says nothing after it but plain words (round 15), and a trusted receptionist turn confirms
   exactly that pair in the fixed form, right after the cue ("Let me confirm: Ana Reyes, at ...", "Confirmo: ...";
   AEGIS round 7). A pair nobody confirmed (a landlord, a business, a mother, a city) is never a
   name (AEGIS F3 round 3: word lists alone kept missing them). Never a pair holding a command, place, business or
@@ -190,6 +190,8 @@ _HEALTH = re.compile(
     r"palsy|par[aá]lisis|syndrome|s[ií]ndrome|tourette|expecting (?:a baby|twins|triplets)|due date|trimester|"
     r"miscarri|aborto|ivf\b|fertility|fertilidad|hiv\b|transplant|trasplante|sclero|pacemaker|marcapasos|"
     r"chronic|cr[oó]nic|terminal|hospice|psychiatr|psiqui|schizo|esquizo|ptsd|adhd|tdah|ocd\b|"
+    r"gout\b|gota\b|rehab|methadon|metadona|ozempic|wegovy|mounjaro|semaglut|suboxone|naloxon|narcan|opioid|"
+    r"opi[aá]ceo|overdose|sobredosis|addict|adicci|detox|desintox|"
     r"fibromyalg|migraine|migra[ñn]a|cholesterol|colesterol|thyroid|tiroides|herpes|std\b|sti\b|ets\b)",
     re.IGNORECASE)
 # Health words that also have ordinary meanings ("depression in the lawn", "due date on the invoice", "two-stroke",
@@ -302,10 +304,11 @@ def _said_911(agent_text: str, previous: Optional[str] = None) -> Optional[str]:
     # every quote mark and the opening "¡" are formatting wherever they sit (AEGIS rounds 8-9: „…“, ‹…›, ¡"…!")
     text = _unmarked(agent_text)
     text = re.sub(r"(?<!\d)9[\s.\-‐-―−]?1[\s.\-‐-―−]?1(?!\d)", "911", text)   # "9 1 1", "9-1-1", "9–1–1"
-    # only a single "." or "!" (or "!!") ends the turn; any other ending ("...", " —", ";", ":", "‼", none) may be a
+    # only a single "." or "!" (or "!!", which "‼" folds to) ends the turn; any other ending ("...", " —", ";", ":",
+    # "!!!", none) may be a
     # cut-off or a sentence that goes on, so the fixed form then raises CHECK NOW (AEGIS rounds 13-14)
     core = re.sub(r"[\W_]+$", "", text)
-    ended = re.fullmatch(r"(?:\.|!+)", text[len(core):].strip()) is not None
+    ended = re.fullmatch(r"(?:\.|!{1,2})", text[len(core):].strip()) is not None   # "‼" is "!!" once folded
     text = re.sub(r"\s+", " ", core.replace(",", " ")).strip() + "."
     if _SAID_911.fullmatch(text) is None:
         return None
@@ -406,8 +409,11 @@ _PLAIN_WORDS = re.compile(
     re.IGNORECASE)
 
 
-_PHONE_TOPIC = re.compile(r"\b(?:phone|phones|cell|cellphone|number|numbers|line|landline|mobile|text|texts|texting|"
-                          r"voicemail|celular|n[uú]mero|tel[eé]fono|l[ií]nea|mensajes?)\b", re.IGNORECASE)
+# what a caller calls a phone or where it rings (AEGIS rounds 14-15: "telephone", "at home", "my work", "mi casa");
+# "call" itself is not here, since "service call" and "nobody calls me back" are needs, not phones
+_PHONE_TOPIC = re.compile(r"\b(?:phones?|cell|cellphone|cellular|numbers?|lines?|landline|mobile|texts?|texting|"
+                          r"voicemail|telephone|tel|home|house|work|office|job|desk|contact\w*|reach|celular|"
+                          r"m[oó]vil|n[uú]mero|tel[eé]fono|l[ií]nea|mensajes?|casa|trabajo|oficina)\b", re.IGNORECASE)
 
 
 def _only_plainly_given(number: str, trusted: list[str], names: Optional[list[str]] = None) -> bool:
@@ -589,9 +595,13 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
             said_before = " ".join(_fold(y) for sp2, _, y in ordered[:i] if sp2 in ("caller", "unknown")) + " " + x
             bare_ok = _ASKS_OWN.search(_fold(prev_agent)) or \
                 (prev_agent == first_agent and not _OTHER_PERSON.search(said_before))
-            # anyone else spoken of after the name, in that turn or later ("Mark Diaz, 602 ... He's my son"): the
-            # name may be theirs (AEGIS round 14)
-            if _OTHER_PERSON.search(said_after) or _THIRD_PARTY.search(_fold(x)) or _ASKS_OTHER.search(_ASKS_OWN.sub(" ", _fold(prev_agent))) or (not lead and not bare_ok):
+            # after the name the caller may say only plain words (a number, a correction, a yes): anything else may
+            # say the name is someone else's ("Mark Diaz, 602 ... He's my son", "That's my nephew"; AEGIS rounds
+            # 14-15: the inverted default, after a list of relation words was out-named)
+            after_plain = all(_PLAIN_WORDS.fullmatch(w) for sentence in re.split(r"[!?\n]|\.(?!\d)", said_after)
+                              for w in re.findall(r"[^\W\d_][\w']*", _NUM.sub(" ", sentence.replace(name.casefold(), " ")
+                                                                                .replace(name, " "))))
+            if not after_plain or _THIRD_PARTY.search(_fold(x)) or _ASKS_OTHER.search(_ASKS_OWN.sub(" ", _fold(prev_agent))) or (not lead and not bare_ok):
                 name = None
                 notes.append("name_of_someone_else")
             break

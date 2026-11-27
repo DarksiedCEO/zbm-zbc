@@ -937,4 +937,16 @@ number that speaks of a phone (phone, cell, number, line, text ...) in other tha
 number.", "My cell got shut off last week.") withholds the callback. Anyone else spoken of after a name, in that
 turn or later ("Mark Diaz, 602 ... He's my son."), withholds the name; trade-off disclosed: "I'm Ana Reyes. The owner
 ..." also withholds it. Only a single "." or "!" (or "!!") ends the 911 instruction; "...", "..", a dash, ";", ":" or
-"‼" make it "ambiguous" (CHECK NOW), like no end mark. Mutation harness (whole stack): 169 mutants, 140 killed, 29 equivalent; call_summarizer 78 (57 killed, 21 equivalent).
+"!!!" make it "ambiguous" (CHECK NOW), like no end mark ("‼" folds to "!!"). Mutation harness (whole stack): 169
+mutants, 140 killed, 29 equivalent; call_summarizer 78 (57 killed, 21 equivalent).
+
+AEGIS Inquisitor round 15 on ef494ec6 (RR-F3): **after a name, only plain words.** Anything the caller says after a
+name other than plain words (a number, a correction, a yes) withholds the name, so "That's my nephew", "He is a
+client" or "Es mi sobrino" can never leave someone else's name in place; trade-off disclosed: "I'm Ana Reyes, 602 ...
+I need a repair." also withholds it (every pool call gives the name last). Before the number, the list of what a
+caller calls a phone or where it rings now holds "telephone", "home", "work", "office", "casa", "trabajo" ...; this
+side stays a word list, because every pool call describes the need before the number in free words, so a rejection
+phrased without any of these words ("Not that one. 602 ...") is a known residual (High by the kill criteria; open for Andre).
+The health lexicon adds gout, rehab, methadone, Ozempic and related terms. The harness now fails a mutant that is
+marked equivalent but killed (the RR-F5 "opt-in time guard removed" reason was wrong). Mutation harness (whole stack):
+170 mutants, 140 killed, 30 equivalent; call_summarizer 79 (57 killed, 22 equivalent).

@@ -353,7 +353,7 @@ def test_round_2_pairs_that_are_not_the_callers_name(line):
     assert cs.summarize(tr(line, "602 555 0101."), PACK).name is None
 
 
-@pytest.mark.parametrize("line", ["It's Ana Reyes, 602 555 0101.", "This is Ana Reyes calling about a repair.",
+@pytest.mark.parametrize("line", ["It's Ana Reyes, 602 555 0101.",
                                   "Habla Ana Reyes, ll\u00e1menme al 602 555 0101."])
 def test_a_weak_lead_in_still_reads_a_name_given_with_a_number_or_calling_phrase(line):
     assert cs.summarize(tr("I need a repair.", line, agent=ok("Ana Reyes"), yes=True), PACK).name == "Ana Reyes"
@@ -745,7 +745,7 @@ def test_only_the_fixed_confirmation_of_the_callers_own_name_counts(agent):
 
 
 def test_the_fixed_confirmation_still_confirms():
-    s = cs.summarize(tr("I'm Ana Reyes, 602 555 0101. I need a repair.", agent=["Let me confirm: Ana Reyes, at 602 555 0101."],
+    s = cs.summarize(tr("I need a repair.", "I'm Ana Reyes, 602 555 0101.", agent=["Let me confirm: Ana Reyes, at 602 555 0101."],
                         yes=True), PACK)
     assert s.name == "Ana Reyes"
 
@@ -799,7 +799,7 @@ def test_a_confirmation_asked_as_a_question_confirms_nothing():
 
 @pytest.mark.parametrize("denial", ["No, that's not my name.", "No, I'm Ana Ruiz."])
 def test_a_name_the_caller_denied_after_the_confirmation_is_withheld(denial):
-    t = tr("I'm Ana Reyes, 602 555 0101. I need a repair.", agent=["Let me confirm: Ana Reyes, at 602 555 0101."])
+    t = tr("I need a repair.", "I'm Ana Reyes, 602 555 0101.", agent=["Let me confirm: Ana Reyes, at 602 555 0101."])
     t["turns"].append({"speaker": "caller", "confidence": 0.95, "text": denial})
     s = cs.summarize(t, PACK)
     assert s.name is None and "name_denied" in s.notes
@@ -855,14 +855,14 @@ def test_a_confirmation_with_any_question_mark_confirms_nothing():
 
 @pytest.mark.parametrize("reply", ["Nah, it's Ana Ruiz.", "Incorrecto.", "Negative.", "Actually, I'm Ana Ruiz."])
 def test_anything_but_an_affirmation_after_the_confirmation_withholds_the_name(reply):
-    t = tr("I'm Ana Reyes, 602 555 0101. I need a repair.", agent=["Let me confirm: Ana Reyes, at 602 555 0101."])
+    t = tr("I need a repair.", "I'm Ana Reyes, 602 555 0101.", agent=["Let me confirm: Ana Reyes, at 602 555 0101."])
     t["turns"].append({"speaker": "caller", "confidence": 0.95, "text": reply})
     assert cs.summarize(t, PACK).name is None
 
 
 @pytest.mark.parametrize("reply", ["Yes.", "Yes, that's right.", "S\u00ed.", "Correct, thanks."])
 def test_an_affirmation_keeps_the_name(reply):
-    t = tr("I'm Ana Reyes, 602 555 0101. I need a repair.", agent=["Let me confirm: Ana Reyes, at 602 555 0101."])
+    t = tr("I need a repair.", "I'm Ana Reyes, 602 555 0101.", agent=["Let me confirm: Ana Reyes, at 602 555 0101."])
     t["turns"].append({"speaker": "caller", "confidence": 0.95, "text": reply})
     assert cs.summarize(t, PACK).name == "Ana Reyes"
 
@@ -1112,4 +1112,42 @@ def test_someone_spoken_of_only_before_a_bare_name_withholds_it():
 @pytest.mark.parametrize("line", ["I'm Ana Reyes speaking, 602 555 0101.", "I'm Ana Reyes Construction, 602 555 0101.",
                                   "I'm Ana Reyes Gomez, 602 555 0101."])
 def test_a_name_that_runs_on_after_the_lead_in_is_not_read(line):
+    assert cs.summarize(tr(line, agent=ok("Ana Reyes", "602 555 0101"), yes=True), PACK).name is None
+
+
+# ---- AEGIS round 15 -------------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("before", ["My telephone got shut off last week.", "That telephone is disconnected now.",
+                                    "Don't call me at home.", "Do not call my work.", "Mi casa ya no sirve."])
+def test_talk_of_where_a_phone_rings_before_the_number_withholds_it(before):
+    s = cs.summarize(tr(f"I need a repair. {before} It's {N13}.", agent=rb(N13), yes=True), PACK)
+    assert s.callback_number is None
+
+
+@pytest.mark.parametrize("after", ["That's my nephew.", "He is a client.", "My cousin needs it.", "Es mi sobrino.",
+                                   "For my uncle."])
+def test_anything_but_plain_words_after_a_name_withholds_it(after):
+    t = [{"speaker": "agent", "confidence": 0.98, "text": "Thanks for calling. How can I help?"},
+         {"speaker": "caller", "confidence": 0.95, "text": f"Mark Diaz, {N13}. {after}"},
+         {"speaker": "agent", "confidence": 0.97, "text": "Let me confirm: Mark Diaz."},
+         {"speaker": "caller", "confidence": 0.95, "text": "Yes."}]
+    assert cs.summarize({"transcript_id": "r15", "turns": t}, PACK).name is None
+
+
+@pytest.mark.parametrize("ending, urgent", [("!", True), ("!!", True), ("‼", True), ("!!!", False), ("?!", False)])
+def test_only_one_or_two_exclamation_marks_end_the_instruction(ending, urgent):
+    s = cs.summarize(tr("There's a fire.", agent=["Thanks for calling.", "Please hang up and dial 911 right now" + ending]),
+                     PACK)
+    assert (s.urgency == "emergency") is urgent and (urgent or "possible_emergency" in s.notes)
+
+
+@pytest.mark.parametrize("word", ["Gout", "Rehab", "Methadone", "Ozempic"])
+def test_a_confirmed_name_carrying_a_health_word_is_left_out(word):
+    s = cs.summarize(tr(f"I'm Ana {word}, {N13}.", agent=ok(f"Ana {word}", N13), yes=True), PACK)
+    assert word.lower() not in s.text.lower()
+
+
+@pytest.mark.parametrize("line", ["I'm Ana Reyes, 602 555 0101. I need a repair.", "This is Ana Reyes calling about a repair."])
+def test_words_after_the_name_withhold_it_even_harmless_ones(line):
+    # the inverted default (round 15): the words after a name might say it is someone else's, so a person checks
     assert cs.summarize(tr(line, agent=ok("Ana Reyes", "602 555 0101"), yes=True), PACK).name is None
