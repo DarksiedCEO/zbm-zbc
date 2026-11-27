@@ -95,7 +95,8 @@ class FixtureSafety(unittest.TestCase):
     What is read (AEGIS test-verification on b76b94f2 and 2cb71287): every file is JSON lines and every line is
     parsed, refusing duplicate keys; every string, number and dict key is checked, after NFKC normalisation (so
     fullwidth, circled and superscript digits and fullwidth dots read as plain ones). Never the raw text, so a JSON
-    escape such as "\n" in front of a number cannot hide it. A JSON number is checked for 10- and 11-digit phones and
+    escape such as "\n" in front of a number cannot hide it. Every Unicode decimal digit is then read as ASCII, and
+    dot look-alikes as ".". A JSON number is checked for 10- and 11-digit phones and
     card shapes; a 7-digit JSON number is a count or a time, not a local phone.
     Numbers: any run of digit groups joined by up to five non-alphanumeric characters; every 7-, 10- or 11-digit span
     of whole groups that is a dialable North American number (area code and exchange start 2-9) must be in
@@ -107,8 +108,9 @@ class FixtureSafety(unittest.TestCase):
     IPv4 literals (a sentence-final dot included), any email address and SSN shapes fail outright.
     Generated id fields are the one exemption, from the number scan only: each must match its field's exact
     generated shape (prefix and hex length), so an arbitrary value such as "lead-2138675309" fails.
-    Residual, by construction: numbers spelled in words; hosts written with spaces or "[.]"; an SSN or a 12-digit
-    number written with no separators; and a value in an id field with exactly the generated shape whose hex happens
+    Residual, by construction: numbers spelled in words; digits joined by letters ("213x867x5309") or by six or
+    more separators; hosts written with spaces or "[.]"; an SSN with no separators; any 12-digit number; a card
+    number that fails the Luhn check; a bare IPv6 address such as "::1"; and a value in an id field with exactly the generated shape whose hex happens
     to contain digits (hash output, not something the generator could copy from a real record)."""
 
     HEX16 = r"[0-9a-f]{16}"
@@ -232,10 +234,21 @@ class FixtureSafety(unittest.TestCase):
             if url.lower().startswith(("http:", "https:", "ftp:", "ws:", "wss:")) or host:
                 yield (host or "").lower()          # an unreadable or empty host is not reserved either
 
+    DOT_LIKE = re.compile("[\u3002\uff61\u00b7\u2219\u06d4\u2024\u2027\u30fb]")
+
+    @classmethod
+    def normalise(cls, value: str) -> str:
+        """NFKC, then every Unicode decimal digit to ASCII (NFKC leaves Arabic-Indic, Thai, Bengali, Devanagari and
+        other script digits alone: AEGIS 7dc6a8a1 High 1), then dot look-alikes to "." and runs of dots to one."""
+        value = unicodedata.normalize("NFKC", value)
+        value = "".join(str(unicodedata.decimal(c)) if not c.isascii() and unicodedata.decimal(c, None) is not None
+                        else c for c in value)
+        return re.sub(r"\.{2,}", ".", cls.DOT_LIKE.sub(".", value))
+
     @classmethod
     def offending(cls, key: str, value: str) -> list:
         """Everything in one decoded value that is not fictional, empty when the value is safe."""
-        value = unicodedata.normalize("NFKC", value).replace("。", ".").replace("｡", ".")
+        value = cls.normalise(value)
         bad = []
         if key in cls.ID_FIELDS and not cls.id_ok(key, value):
             bad.append(f"not a generated {key}")
@@ -281,7 +294,15 @@ class FixtureSafety(unittest.TestCase):
                   "a@localhost", "http://[2001:db8::1]/", "http://134744072/", "4111 1111 1111 1111",
                   "4111-1111-1111-1111", "\u2461\u2460\u2462 \u2467\u2465\u2466 \u2464\u2462\u2460\u2468",
                   "\u00b2\u00b9\u00b3\u2078\u2076\u2077\u2075\u00b3\u2070\u2079", "12 213 867 5309",
-                  "8675309", "myexample.com", "realbiztest.com", "notexample.com", "123  45  6789"]
+                  "8675309", "myexample.com", "realbiztest.com", "notexample.com", "123  45  6789",
+                  # found by the 7dc6a8a1 pass
+                  "\u0662\u0661\u0663 \u0668\u0666\u0667 \u0665\u0663\u0660\u0669",
+                  "\u0e52\u0e51\u0e53 \u0e58\u0e56\u0e57 \u0e55\u0e53\u0e50\u0e59",
+                  "\u09e8\u09e7\u09e9-\u09ee\u09ec\u09ed-\u09eb\u09e9\u09e6\u09ef",
+                  "\u0968\u0967\u0969\u096e\u096c\u096d\u096b\u0969\u0966\u096f", "213 \u0668\u0666\u0667 5309",
+                  "realbiz\u2025com", "realbiz\u00b7com", "realbiz\u2219com", "realbiz\u06d4com", "realbiz\uff61com",
+                  "x.contest", "123-----45-----6789", "4222222222222", "4111 1111 1111 1111 003", "6200000000000000000",
+                  "http:///path", "see /biz/8675309a"]
         for form in unsafe:
             with self.subTest(form=form):
                 line = common.canonical_json({**row, "note": form})
@@ -289,7 +310,8 @@ class FixtureSafety(unittest.TestCase):
                 self.assertTrue(found, form)
         safe = ["213-555-0142", "+12135550100", "+1 (213) 555-0199", "555-0156", "https://shop-1.test/book",
                 "www.example.com", "$1,500 per month", "2026-12-25", "08:00-17:00", "Suite 210",
-                "shop.example.com", "a.b.test", "1795777200", "version 1.2.3", "Unit 2. 555-0101 is ours."]
+                "shop.example.com", "a.b.test", "1795777200", "version 1.2.3", "Unit 2. 555-0101 is ours.",
+                "123-056-7890", "213-056-7890", "1-123-056-7890", "1234 5678 9012 3456", "86 75309"]
         for form in safe:
             with self.subTest(form=form):
                 line = common.canonical_json({**row, "note": form})
@@ -302,8 +324,10 @@ class FixtureSafety(unittest.TestCase):
         name, text = next(iter(build.render(SEED).items()))
         row = json.loads(text.splitlines()[0])
         good_lead = "svc-0123456789abcdef-L001"
-        self.assertEqual([b for _, key, value in self._values({name: common.canonical_json({**row, "lead_id": good_lead})})
-                          for b in self.offending(key, value)], [])
+        for safe in ({"lead_id": good_lead}, {"url": "https://directory-02.test/biz/0123abcd"}):
+            line = common.canonical_json({**row, **safe})
+            self.assertEqual([b for _, key, value in self._values({name: line}) for b in self.offending(key, value)],
+                             [], safe)
         lines = [common.canonical_json({**row, "phone_number": 2138675309}),
                  common.canonical_json({**row, "2138675309": "x"}),
                  common.canonical_json({**row, "realbiz.com": "x"}),
@@ -314,6 +338,10 @@ class FixtureSafety(unittest.TestCase):
                  common.canonical_json({**row, "client_id": "client-0123456789abcde"}),
                  common.canonical_json({**row, "lead_ids": [good_lead, "svc-2138675309"]}),
                  common.canonical_json({**row, "card": 4111111111111111}),
+                 common.canonical_json({**row, "lead_id": "svc-0123456789abcdef-L12"}),
+                 common.canonical_json({**row, "url": "https://directory-02.test/biz/2138675309"}),
+                 common.canonical_json({**row, "note": "https://realbiz.com/biz/0123abcd"}),
+                 common.canonical_json({**row, "note": "see /biz/2138675309"}),
                  common.canonical_json(row)[:-1] + ',"note":"213 867 5309","note":"x"}']
         for line in lines:
             with self.subTest(line=line[-60:]):
