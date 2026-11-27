@@ -378,3 +378,16 @@ def test_a_spelled_house_number_is_correct():
 @pytest.mark.parametrize("street", ["4533 1/2 Testwell Drive, Suite 4", "4533-4535 Testwell Drive, Suite 4"])
 def test_another_house_number_is_a_wrong_address(street):
     assert one(street=street).verdict == "wrong_address"
+
+
+# ---------------------------------------------------------------- AEGIS L4 round 11
+def test_a_hyphenated_fraction_house_is_formatting_and_other_fractions_are_faults():
+    rec = dict(RECORD, street_number="4533 1/2")
+    assert ca.audit({"canonical": rec, "listings": [listing(street="4533-1/2 Testwell Drive, Suite 4")]})[0].verdict == "correct"
+    for street in ("4533-1/3 Testwell Drive, Suite 4", "4533-1 Testwell Drive, Suite 4", "4533 Testwell Drive, Suite 4"):
+        assert ca.audit({"canonical": rec, "listings": [listing(street=street)]})[0].verdict == "wrong_address", street
+
+
+def test_a_spelled_house_number_before_a_numbered_street_is_correct():
+    rec = dict(RECORD, street_number="1", street_name="5th", street_type="Ave")
+    assert ca.audit({"canonical": rec, "listings": [listing(street="One Fifth Ave, Suite 4")]})[0].verdict == "correct"

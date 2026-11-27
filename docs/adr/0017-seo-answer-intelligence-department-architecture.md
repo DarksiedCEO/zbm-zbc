@@ -1428,8 +1428,6 @@ is "100 1/2", never the range "100-1"), and a spelled house number before a numb
 Ave" is "1 5th Ave"). "100 A Main St" / "100A Main St", a unit written before the street, and "One, Main St" are still
 other addresses (disclosed).
 
-error would fail certification. Not yet reviewed by AEGIS at this commit.
-
 ## Amendment — SEO-L4 citation audit (Nov 27 2026; MVP spec v0.1, Local / Business Profile)
 
 `services/seo-py/src/citation_audit.py`, one job: compare every directory listing of one business with the NAP record
@@ -1503,3 +1501,7 @@ AEGIS round 10 for SEO-L4 (Nov 27 2026, Inquisitor on 8b0c2224, shared with SEO-
 round-11 keys, another spelling of a numbered street at the same house number ("100 2nd St" / "100 2d St", "I-35" /
 "IH-35") is `address_needs_review`, a spelled house number ("One Microsoft Way") is `correct`, and "100 1/2" or
 "100-102" against "100" stays `wrong_address`.
+
+AEGIS round 11 for SEO-L4 (Nov 27 2026, Inquisitor on ae8e2b2c, shared with SEO-L5 round 12): "100-1/2" is
+formatting of "100 1/2" (`correct`), and against "100-1/3", "100-1" or "100" it is `wrong_address`, never a review;
+"One Fifth Ave" is `correct` against "1 5th Ave".
