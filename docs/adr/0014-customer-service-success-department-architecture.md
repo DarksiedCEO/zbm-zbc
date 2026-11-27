@@ -767,16 +767,13 @@ that wording.
 
 ### Mutation check for the front-desk agents (RR-F5, F2, F4, F3)
 
-`cd services/service-py && python3 devtools/frontdesk_mutants.py [agent]` plants 110 single defects, each in a fresh
-copy of `src/` and `tests/` (the checkout is never edited), and runs that agent's test file. A mutant whose text no
-longer exists fails the run (`NOT_APPLIED`), so the list cannot rot. A kill counts only when pytest exits 1 (tests
-ran and failed); any other exit code is `RUN_ERROR` and fails the run (AEGIS F3 round 1: a mutant that breaks the
-import is not a test that caught it). Result at this commit: 103 killed; 7 survive and are listed as equivalent with
-the reason (in the consent keeper: the carrier check in the decision, consent cleared on reassignment, the opt-in
-time guard, the same-instant opt-in order, and a staff review at the reply's own instant, which is applied before
-the reply; in the transfer router: an unreadable case raising inside `plan`, which `resolve`'s catch-all turns into
-the same fallback; in the summarizer: the final health check on the text, which the name reader and the label check
-already enforce), each covered by another rule that cannot be told apart from outside.
+`cd services/service-py && python3 devtools/frontdesk_mutants.py [agent]` plants single defects (142 at the latest
+round note below), each in a fresh copy of `src/` and `tests/` (the checkout is never edited), and runs that agent's
+test file. A mutant whose text no longer exists fails the run (`NOT_APPLIED`), so the list cannot rot. A kill counts
+only when pytest exits 1 (tests ran and failed); any other exit code is `RUN_ERROR` and fails the run (AEGIS F3
+round 1: a mutant that breaks the import is not a test that caught it). Every survivor is listed in the harness as
+equivalent, with the reason (another rule that enforces the same thing and cannot be told apart from outside); the
+current counts are in the latest RR-F3 round note.
 The summarizer's 0.6 confidence line is the exact fraction 3/5: this service allows no float literals. This replaces the hand-run mutant counts in the RR-F5, F2 and F4 commit messages.
 
 AEGIS round 1 on RR-F3 (Nov 26 2026, Inquisitor on 0aaf8411): 6 High, all fixed as above. Any capitalised pair was
@@ -872,3 +869,14 @@ confirmation, confirms nothing. The 911 instruction is read with opening marks a
 receptionist turn is skipped; a turn before it that ends in an ellipsis did not end a sentence, but a 911 turn that
 opens with a capital starts one. Mutation harness (whole stack): 137 mutants, 125 killed, 12 equivalent, each with
 its reason.
+
+AEGIS Inquisitor round 8 on 58a42399 (RR-F3): a fixed 911 instruction after a receptionist turn that did not end a
+sentence ("There's no need to" / "Call 911.", or "Thanks for calling Desert Plumbing" with no end mark) is now
+**ambiguous**: it raises CHECK NOW ("call back now"), not URGENT, because neither reading is safe on its own (round 7
+counted the unpunctuated greeting case as a miss; round 8 counted the capitalised split as a false alarm; this is the
+middle, disclosed for Andre). Opening and closing marks in any order are formatting. Words under a speaker label it
+cannot read are never "nothing said" (the summary says to review the recording) and feed the CHECK NOW net. Any doubt
+after the last accepted number, even around a later rejected one, or that number rejected anywhere, makes it
+ambiguous. "Put it under" / "a nombre de" name whoever the booking is for, so they are no longer the caller's own
+name; a confirmation asked as a question confirms nothing; a caller who says no after the confirmation has no name
+reported (`name_denied`). Mutation harness (whole stack): 142 mutants, 128 killed, 14 equivalent with reasons.

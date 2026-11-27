@@ -84,8 +84,9 @@ _DIGIT_WORD = r"(?:\d+|zero|oh|one|two|three|four|five|six|seven|eight|nine|cero
 # after the last number, any no / not / wrong / oops / a digit or a spelled digit means the caller may have taken it
 # back ("No, that's not it.", "Oops, it's 0101 at the end", "Last digit's a one"): the number is ambiguous and a person
 # checks the recording (AEGIS round 7: the inverted default; a list of correction phrases kept missing some)
-_DOUBT_AFTER = re.compile(r"\b(?:no|not|nope|nah|wrong|oops|incorrect|isn'?t|wasn'?t|actually|wait|sorry|digits?|last|"
-                          r"ending|ends|mistake|equivocad[oa]|incorrecto|perd[oó]n|espere|n[uú]mero)\b|"
+_DOUBT_AFTER = re.compile(r"\b(?:no|not|nope|nah|never|don'?t|do not|wrong|oops|incorrect|isn'?t|wasn'?t|actually|wait|"
+                          r"sorry|digits?|last|ending|ends|mistake|scratch|mind|disconnected|instead|email|text me|"
+                          r"equivocad[oa]|incorrecto|perd[oó]n|espere|n[uú]mero|mejor|olvide|desconectado)\b|"
                           r"\b" + _DIGIT_WORD + r"\b", re.IGNORECASE)
 _PARTIAL_CORRECTION = re.compile(
     r"(?:" + _CORRECTION_CUE + r"|\bwait\b|\bhold on\b|\bno\b\s*[,.!]|\bending in\b|\bends in\b|\blast (?:four|4|digits)\b|"
@@ -94,8 +95,9 @@ _WORD = r"[A-ZÁÉÍÓÚÑÜ][a-záéíóúñü'\-]+"
 # where a caller gives their own name: a strong lead-in, then First Last; or a weak lead-in ("this is", "it's",
 # "habla") only when the name is followed straight by a number or a calling phrase (AEGIS F3 round 2: "It's Christmas
 # Eve", "This is Long Beach")
-_LEAD_NAME = re.compile(rf"(?:\bI'?m|\bI am|\bmy name is|\bthe name is|\bput it under|\bunder the name(?: of)?|"
-                        rf"\bme llamo|\bsoy|\bmi nombre es|\ba nombre de|\bp[oó]ngalo a nombre de)\s+({_WORD} {_WORD})"
+# "put it under" / "a nombre de" name whoever the booking is for, not the caller, so they are not lead-ins (round 8)
+_LEAD_NAME = re.compile(rf"(?:\bI'?m|\bI am|\bmy name is|\bthe name is|"
+                        rf"\bme llamo|\bsoy|\bmi nombre es)\s+({_WORD} {_WORD})"
                         rf"(?![\w'])", re.IGNORECASE)
 _WEAK_LEAD_NAME = re.compile(rf"(?:\bit'?s|\bit is|\bthis is|\bhabla)\s+({_WORD} {_WORD}),?\s+(?=\(?[2-9]\d{{2}}|"
                              rf"call me|calling|here\b|speaking|ll[aá]m(?:e|en)me|my number|mi n[uú]mero)",
@@ -275,23 +277,28 @@ def _need(trusted: list[str], pack: dict, emergency: bool, any_words: bool) -> s
     return "unclear"
 
 
-def _said_911(agent_text: str, previous: Optional[str] = None) -> bool:
-    """The receptionist told the caller to call 911: the whole trusted turn is exactly one of the instruction's fixed
-    forms. Anything said with it ("In an emergency. Call 911.", "When in doubt, call 911", "We are not an emergency
-    line. Call 911.") is not the instruction (AEGIS round 5); the caller's own words still raise CHECK NOW.
-    Punctuation and digit spacing are formatting ("dial 911, right now.", "9 1 1", "now!!"); the turn must end a
-    sentence and the receptionist's turn before it must have ended one too, so a sentence split across two turns
-    ("There's no need to" / "call 911.") is never the instruction (AEGIS round 6)."""
-    text = agent_text.strip().strip("\"'“”‘’«»").lstrip("¡").strip()
-    # a sentence split across turns: the turn before must have ended a sentence (an ellipsis does not), unless this
-    # turn opens one with a capital ("Thanks for calling Desert Plumbing" / "Please hang up and dial 911.") (round 7)
-    if previous is not None and not re.search(r"(?<![.…])[.!?]\s*[\"'”’»]?\s*$", previous) and not text[:1].isupper():
-        return False
+def _said_911(agent_text: str, previous: Optional[str] = None) -> Optional[str]:
+    """"urgent" when the receptionist told the caller to call 911: the whole trusted turn is exactly one of the
+    instruction's fixed forms and the receptionist's turn before it ended a sentence. Anything said with it ("In an
+    emergency. Call 911.", "We are not an emergency line. Call 911.") is not the instruction (AEGIS round 5).
+    Punctuation, quotes, an opening "¡" and digit spacing ("9 1 1") are formatting. When the turn before did not end a
+    sentence ("There's no need to" / "Call 911."), the two turns may be one sentence: "ambiguous", which raises
+    CHECK NOW instead of URGENT (AEGIS round 8: neither reading is safe on its own). Otherwise None."""
+    text = agent_text.strip()
+    while True:                        # opening and closing marks in any order: ¡"...!", "¡...!", «...» (round 8)
+        stripped = text.strip("\"'“”‘’«»").lstrip("¡").strip()
+        if stripped == text:
+            break
+        text = stripped
     text = re.sub(r"(?<!\d)9[\s.\-]?1[\s.\-]?1(?!\d)", "911", text)
     if not re.search(r"[.!]$", text):
-        return False
+        return None
     text = re.sub(r"[.!]+$", ".", re.sub(r"\s+", " ", text.replace(",", " "))).replace(" .", ".")
-    return _SAID_911.fullmatch(text) is not None
+    if _SAID_911.fullmatch(text) is None:
+        return None
+    if previous is not None and not re.search(r"(?<![.…])[.!?]\s*[\"'”’»]?\s*$", previous):
+        return "ambiguous"
+    return "urgent"
 
 
 def _confidence(raw: object) -> Fraction:
@@ -309,6 +316,7 @@ def _confidence(raw: object) -> Fraction:
 def _callback(trusted: list[str], notes: list[str]) -> tuple[Optional[str], bool]:
     """(the callback number, whether a correction picked it)."""
     found = []                         # (number, text before it since the previous accepted number)
+    rejected: set[str] = set()
     joined = " \n ".join(_fold(x) for x in trusted)
     last_end = 0
     for m in _NUM.finditer(joined):
@@ -317,6 +325,7 @@ def _callback(trusted: list[str], notes: list[str]) -> tuple[Optional[str], bool
                 _REJECTED_AFTER.search(joined[m.end():m.end() + 60]):
             last_end = m.end()
             notes.append("rejected_number_not_used")
+            rejected.add("+1" + "".join(m.groups()))
             continue
         found.append(("+1" + "".join(m.groups()), before, m.end()))
         last_end = m.end()
@@ -324,8 +333,10 @@ def _callback(trusted: list[str], notes: list[str]) -> tuple[Optional[str], bool
         return None, False
     end = found[-1][2]
     nxt = _NUM.search(joined, end)
+    # after the last accepted number, any doubt at all (also around a later number the caller rejected), or that
+    # same number rejected elsewhere, makes it ambiguous (AEGIS round 8: "Scratch that", "do not call ...")
     if _PARTIAL_CORRECTION.search(joined[end:nxt.start() if nxt else end + 60]) or \
-            (nxt is None and _DOUBT_AFTER.search(joined[end:])):
+            _DOUBT_AFTER.search(joined[end:]) or any(n in rejected for n, _, _ in found):
         notes.append("ambiguous_number")   # "0110, no wait, 0101": a correction we cannot complete (AEGIS round 5)
         return None, False
     distinct = []
@@ -343,7 +354,7 @@ def _callback(trusted: list[str], notes: list[str]) -> tuple[Optional[str], bool
 # the turn ("Let me confirm: Ana Reyes, at ...", "Confirmo: Ana Reyes, al ..."). Anything else ("I can't confirm
 # anything for Ana Reyes", "Let me confirm: your landlord Ana Reyes") confirms nothing (AEGIS round 7)
 _CONFIRM_LINE = re.compile(rf"(?:let me confirm|just to confirm|to confirm|so to confirm|confirmo|para confirmar)"
-                           rf"\s*[:,]?\s*({_WORD} {_WORD})(?=\s*(?:[,.;:!?]|$|\s(?:at|al|en|on)\b))", re.IGNORECASE)
+                           rf"\s*[:,]?\s*({_WORD} {_WORD})(?=\s*(?:[,.;:!]|$|\s(?:at|al|en|on)\b))(?![^?]*\?\s*$)", re.IGNORECASE)
 
 
 
@@ -383,6 +394,8 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
     pack = pack if isinstance(pack, dict) else {}
     notes: list[str] = []
     caller, agent = [], []
+    unknown_text: list[str] = []
+    ordered: list[tuple[str, Fraction, str]] = []
     for t in turns:
         if not isinstance(t, dict) or not isinstance(t.get("text", ""), str):
             raise ValueError("every turn needs a text")
@@ -391,8 +404,11 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
             speaker = "caller"         # "Caller" is the caller; the receptionist label stays exact (AEGIS round 6)
         if speaker not in ("caller", "agent"):
             notes.append("unknown_speaker_ignored")   # never read as the receptionist (AEGIS F3 round 4)
+            if (t.get("text") or "").strip():
+                unknown_text.append(t.get("text"))  # never a fact, but never "nothing said" either (round 8)
             continue
         (caller if speaker == "caller" else agent).append((_confidence(t.get("confidence")), t.get("text") or ""))
+        ordered.append((speaker, _confidence(t.get("confidence")), t.get("text") or ""))
     spoken = [(c, x) for c, x in caller
               if x.strip() and not re.fullmatch(r"\[silence[\s:\-–—]*(?:\d+\s*(?:s|secs?|seconds)?)?\s*\]", x.strip(),
                                                 re.IGNORECASE)]
@@ -408,23 +424,33 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
     if not names and _names(trusted):
         notes.append("name_not_confirmed")
     name = names[0] if len(names) == 1 else None
+    if name:                           # the caller said no after the confirmation ("No, I'm Ana Ruiz"): no name (round 8)
+        at = [i for i, (sp, c, x) in enumerate(ordered) if sp == "agent" and c >= LOW_CONFIDENCE
+              and (m := _CONFIRM_LINE.match(_fold(x).strip())) and m.group(1).casefold() == name.casefold()]
+        if at and any(sp == "caller" and re.search(r"\b(?:no|not|nope|wrong|incorrect|isn'?t)\b", _fold(x), re.IGNORECASE)
+                      for sp, _, x in ordered[at[-1] + 1:]):
+            name = None
+            notes.append("name_denied")
     if len(names) > 1:
         notes.append("ambiguous_name:" + "|".join(names))
 
     spoken_agent = [(c, x) for c, x in agent if x.strip()]      # an empty receptionist turn is not a turn (round 7)
-    said_911 = any(c >= LOW_CONFIDENCE and _said_911(_fold(x), _fold(spoken_agent[i - 1][1]) if i else None)
-                   for i, (c, x) in enumerate(spoken_agent))
-    emergency = said_911
+    readings = [_said_911(_fold(x), _fold(spoken_agent[i - 1][1]) if i else None)
+                for i, (c, x) in enumerate(spoken_agent) if c >= LOW_CONFIDENCE]
+    emergency = "urgent" in readings
+    if not emergency and "ambiguous" in readings:
+        notes.append("911_instruction_after_unfinished_turn")
     # the CHECK NOW net also reads low-confidence words: they are never a fact, but they can still be a warning
-    possible = not emergency and any(_EMERGENCY.search(_fold(x)) or _EMERGENCY_WORDS.search(_fold(x))
-                                     for _, x in spoken)
+    # ... and the words of turns whose speaker label it cannot read (AEGIS round 8), and an ambiguous 911 instruction
+    possible = not emergency and ("ambiguous" in readings or any(
+        _EMERGENCY.search(_fold(x)) or _EMERGENCY_WORDS.search(_fold(x)) for x in [x for _, x in spoken] + unknown_text))
     if possible:
         notes.append("possible_emergency")
     confirmed = ["+1" + "".join(m) for x in agent_trusted for m in _NUM.findall(x)]
     if callback and confirmed and confirmed[-1] != callback:
         notes.append("confirmation_disagrees_with_caller")
     need = _need(trusted, pack, emergency, bool(spoken))
-    if flagged and need == "long_silence":
+    if (flagged or unknown_text) and need == "long_silence":
         need = "unclear"               # words were spoken but not heard clearly: never "nothing said" (AEGIS round 5)
     urgency = "emergency" if emergency else "routine"
 
@@ -436,7 +462,9 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
     elif flagged and (need in ("spam_call", "wrong_number", "long_silence", "unclear") or not callback):
         action = ("Part of the call could not be heard clearly; review the recording"
                   f"{' and call back at ' + callback if callback else ''}.")
-    elif need == "long_silence" and not spoken and not callback and "ambiguous_number" not in notes:
+    elif unknown_text and not callback:
+        action = "Part of the call had a speaker label that could not be read; review the recording."
+    elif need == "long_silence" and not spoken and not unknown_text and not callback and "ambiguous_number" not in notes:
         action = "No follow-up needed."    # only a call where nothing was said (AEGIS round 7: the inverted default)
     elif need in ("spam_call", "wrong_number") and not callback and "ambiguous_number" not in notes:
         action = "Looks like spam or a wrong number; a person should confirm before closing it."

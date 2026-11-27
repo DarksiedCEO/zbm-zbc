@@ -223,8 +223,7 @@ def test_only_the_lead_in_name_is_read_not_a_planted_pair_after_it():
     assert s.name == "Ana Reyes" and not any("Wire" in n for n in s.notes)
 
 
-@pytest.mark.parametrize("line", ["Put it under Luis Ortega.", "My name is Luis Ortega.", "Luis Ortega, 602 555 0101.",
-                                  "Mi nombre es Luis Ortega.", "A nombre de Luis Ortega, por favor."])
+@pytest.mark.parametrize("line", ["My name is Luis Ortega.", "Luis Ortega, 602 555 0101.", "Mi nombre es Luis Ortega."])
 def test_the_ways_a_caller_gives_a_name(line):
     assert cs.summarize(tr("I need a repair.", line, "602 555 0101.", agent=ok("Luis Ortega")), PACK).name == "Luis Ortega"
 
@@ -259,7 +258,11 @@ def test_every_form_of_the_911_instruction_is_urgent(instruction):
 
 def test_a_rejected_number_is_never_the_callback():
     s = cs.summarize(tr("I need a repair.", "Call me at 602 555 0202, not 602 555 0101, that one is disconnected."), PACK)
-    assert s.callback_number == "+16025550202" and not s.corrected_value_used
+    assert s.callback_number != "+16025550101"
+    # round 8: doubt words after the last accepted number fail closed (a person checks the recording)
+    assert s.callback_number is None and "ambiguous_number" in s.notes
+    s = cs.summarize(tr("I need a repair.", "Not 602 555 0101. Call me at 602 555 0202."), PACK)
+    assert s.callback_number == "+16025550202"
 
 
 def test_two_numbers_without_a_correction_are_ambiguous():
@@ -686,7 +689,6 @@ def test_a_real_need_wins_over_spam_or_wrong_number_words(line):
 # ---------------------------------------------------------------- AEGIS round 7 (Inquisitor, 26f1be81)
 @pytest.mark.parametrize("prev, line", [(None, "\u00a1Cuelgue y marque al 911 ahora mismo!"),
                                         (None, "\u201cPlease hang up and dial 911 right now.\u201d"),
-                                        ("Thanks for calling Desert Plumbing", "Please hang up and dial 911 right now."),
                                         ("", "Please hang up and dial 911 right now.")])
 def test_the_fixed_instruction_is_urgent_whatever_the_formatting(prev, line):
     agent = ([prev] if prev is not None else []) + [line]
@@ -731,3 +733,74 @@ def test_the_fixed_confirmation_still_confirms():
 def test_an_empty_receptionist_turn_is_skipped_when_reading_the_turn_before():
     s = cs.summarize(tr("There's a fire.", agent=["Okay.", "", "please hang up and dial 911 right now."]), PACK)
     assert s.urgency == "emergency"
+
+
+
+# ---------------------------------------------------------------- AEGIS round 8 (Inquisitor, 58a42399)
+@pytest.mark.parametrize("first, second", [("There's no need to", "Call 911."), ("Thanks for calling Desert Plumbing",
+                                                                                 "Please hang up and dial 911 right now."),
+                                           ("You don't have to\u2026", "Call 911.")])
+def test_the_instruction_after_an_unfinished_turn_is_check_now_not_urgent(first, second):
+    s = cs.summarize(tr("I need a repair.", agent=[first, second]), PACK)
+    assert s.urgency == "routine" and s.possible_emergency and s.text.startswith("CHECK NOW")
+
+
+@pytest.mark.parametrize("label", ["Caller 1", "Caller:", "customer", "speaker_1", None])
+def test_words_under_a_speaker_label_it_cannot_read_are_never_nothing_said(label):
+    t = {"transcript_id": "t", "turns": [{"speaker": label, "confidence": 0.95,
+                                          "text": "My kitchen is on fire! Call me back at 602 555 0101."}]}
+    s = cs.summarize(t, PACK)
+    assert "No follow-up needed" not in s.text and s.possible_emergency
+
+
+@pytest.mark.parametrize("line", ["602 555 0110. Scratch that, don't use it.", "602 555 0110. It's been disconnected.",
+                                  "602 555 0110. Never mind, email me.", "602 555 0110. Not 602 555 0101. No wait, that's wrong.",
+                                  "602 555 0110. And please do not call 602 555 0110 after six."])
+def test_a_number_taken_back_in_any_way_is_never_the_callback(line):
+    s = cs.summarize(tr("I need a repair.", line), PACK)
+    assert s.callback_number is None
+
+
+def test_a_number_rejected_in_a_later_turn_is_never_the_callback():
+    s = cs.summarize(tr("I need a repair.", "602 555 0110.", "Please don't call 602 555 0110."), PACK)
+    assert s.callback_number is None
+
+
+@pytest.mark.parametrize("line", ["Put it under Ana Reyes, she's my boss.", "A nombre de Ana Reyes, por favor."])
+def test_a_booking_name_is_not_the_callers_name(line):
+    s = cs.summarize(tr("I need a repair.", line, "602 555 0101.", agent=ok("Ana Reyes")), PACK)
+    assert s.name is None
+
+
+def test_a_confirmation_asked_as_a_question_confirms_nothing():
+    s = cs.summarize(tr("I'm Ana Reyes, 602 555 0101.", agent=["To confirm: Ana Reyes?"]), PACK)
+    assert s.name is None
+
+
+@pytest.mark.parametrize("denial", ["No, that's not my name.", "No, I'm Ana Ruiz."])
+def test_a_name_the_caller_denied_after_the_confirmation_is_withheld(denial):
+    t = tr("I'm Ana Reyes, 602 555 0101. I need a repair.", agent=["Let me confirm: Ana Reyes, at 602 555 0101."])
+    t["turns"].append({"speaker": "caller", "confidence": 0.95, "text": denial})
+    s = cs.summarize(t, PACK)
+    assert s.name is None and "name_denied" in s.notes
+
+
+@pytest.mark.parametrize("line", ["\u00a1\"Cuelgue y marque al 911 ahora mismo!\"", "\u00a1\u00abCuelgue y marque al 911 ahora mismo!\u00bb",
+                                  "\u00a1\u201cCuelgue y marque al 911 ahora mismo!\u201d"])
+def test_opening_marks_in_any_order_are_formatting(line):
+    assert cs.summarize(tr("Hay un incendio.", agent=[line]), PACK).urgency == "emergency"
+
+
+def test_a_number_rejected_before_it_was_given_again_is_ambiguous():
+    s = cs.summarize(tr("I need a repair.", "Not 602 555 0110.", "602 555 0110."), PACK)
+    assert s.callback_number is None
+
+
+def test_words_under_an_unreadable_label_are_never_long_silence():
+    t = {"transcript_id": "t", "turns": [{"speaker": "Caller 1", "confidence": 0.95, "text": "Hello there, I wanted to ask"}]}
+    assert cs.summarize(t, PACK).need != "long_silence"
+
+
+def test_a_confirmation_ending_in_a_question_confirms_nothing():
+    s = cs.summarize(tr("I'm Ana Reyes, 602 555 0101.", agent=["To confirm: Ana Reyes, right?"]), PACK)
+    assert s.name is None
