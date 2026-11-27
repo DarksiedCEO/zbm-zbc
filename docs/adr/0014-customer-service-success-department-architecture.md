@@ -575,3 +575,91 @@ AEGIS Inquisitor round 12 on aaee4c9f (RR-F5): events are read as plain data onl
 a plain `dict`, or a key or value that is not plain text, a number, a boolean or null, refuses the replay; the replay
 works on private copies, so nothing can change between the check and the use (a `str` subclass client id answered
 `strip()` one way when checked and another way when applied).
+
+review queue (who sees `unrecognised_reply`, how fast) is wiring, not built. Regression tests: "AEGIS round 5".
+
+## Amendment — RR-F2 missed-call text-back (Nov 26 2026; MVP spec v0.1, front-desk team)
+
+`services/service-py/src/textback.py`, one job: for each missed call decide `send_now` (with the 30 s deadline),
+`defer_until_0800` (with the next 08:00 when a clock is known) or `do_not_send` and the reason, and word the one
+informational text (a way to continue, and how to opt out; never an offer, a link or a price). Not wired; nothing is
+sent from here.
+
+| Rule | Behaviour |
+|---|---|
+| Who can be texted | Mobile and VoIP only; a landline, a blocked or unreadable caller ID, or an unknown line type gets no text |
+| Consent | Asks the RR-F5 keeper with the normalised number (`opted_out(number)`), or uses the keeper's flag on the record; anything but a clear "not opted out" blocks (`consent_unknown`) |
+| One text per 5 minutes | Under 300 s since the last text: no text; exactly 300 s may text. `TextBackGate` remembers every text it approved, so repeated calls through one gate never double-text even when the record says "never texted"; a record without the last-text field fails closed. The gate is in memory: a store that outlives a restart is the wiring's job |
+| Quiet hours | The recipient's: 08:00 to before 21:00 local. The zone must always be readable. With a real clock the clock decides, to the second, and a send-now needs its 30 s deadline to land before 21:00 (20:59:30 already waits); without one the record's HH:MM is used. An unknown zone or a clock with no UTC offset is never guessed (`unknown_local_time`). A deferral must be decided again at 08:00 by the caller (consent and the 5-minute rule are read then) |
+| The text | One of four fixed wordings, never a business name or other record text (AEGIS round 4); always carries STOP (ALTO in Spanish). A callback number that is not a North American number is left out |
+
+Certification: `services/service-py/tests/test_textback.py` runs the shared MVP pool (F2, 300 missed calls per seed,
+boundaries at 07:59 / 08:00 / 20:59 / 21:00 and 299 / 300 s) for the three DEV seeds and three more: every action,
+deadline and message class matches the planted key. Two seeds are graded again on the clock path (each record's
+local time turned into a real clock in its zone) with the reason and the text checked too. A grader self-test proves
+one wrong text is noticed.
+
+AEGIS round 1 (Nov 26 2026, Inquisitor on 81e0dc7f): High: a record's HH:MM stood in for an unreadable zone and beat
+the real clock; High: the 5-minute rule rested only on the record (three calls, three texts). Also: 20:59:59 plus the
+30 s deadline landed after 21:00; a business name could carry an offer or a link and a send could carry no text; a
+tzinfo with no offset was read in the server's zone; the certification never graded the clock path, the reason or
+the text. All fixed as above with regression tests ("AEGIS round 1" section of the test file). The earlier "10 of 10
+mutants" line is withdrawn here: mutation results now come from `services/service-py/devtools/frontdesk_mutants.py`
+(it arrives with the RR-F3 commit at the top of this stack; until then the count is not claimed).
+
+AEGIS round 2 (Nov 26 2026, Inquisitor on 9fcd033b): the round-1 fixes held. New High: the gate subtracted two times
+on the wall clock, so across a daylight-saving jump 180 real seconds read as 63 minutes and one number was texted
+twice; the gate now keeps and compares UTC. Review: names that must be left out still got through (bare domains,
+look-alike letters, plurals of offer words, "USD", "Reply YES"); a name is now used only when it is Latin-script
+letters and simple punctuation with at most 3 digits and no link, domain, offer, price or instruction word.
+Placeholder zones ("Factory", "localtime", "UTC", "Etc/...") were read as real places; only a zone with an area and
+a place is used now. A clock that cannot be converted (overflow, a tzinfo that raises) now fails closed with
+`unknown_local_time` instead of raising. Regression tests: "AEGIS round 2" section; the DST test fails on the old
+wall-clock subtraction.
+
+AEGIS round 3 (Nov 26 2026, Inquisitor on 437d2871): no High; the kill criteria held. Review, all fixed: more offer
+and instruction words still passed in names ("Cheapest", "Discounted", "BOGO", "Clearance", "grátis", "Frēē",
+"Ƒree", "Rebajas", "Half Price", "9.99", "0FF", "Respond", "Opt In", "Llame Ya"). A name is now read with accents
+removed and digit look-alikes undone, rejected when any word STARTS like an offer or instruction (it errs toward
+leaving a real name out; the text still goes, without the name), and its letters are limited to basic Latin,
+Latin-1 and Latin Extended-A. The gate given an unreadable clock now returns `unknown_local_time` and records
+nothing instead of raising; a consent keeper that raises reads as `consent_unknown`; a deferral whose next 08:00
+is past the last date a clock can hold returns `unknown_local_time`. Regression tests: "AEGIS round 3".
+
+AEGIS round 4 (Nov 26 2026, Inquisitor on 7e38e849): 1 High: business names still carried offers past the word
+check (stroke look-alikes "PRØMØ", "SŦOP"; glued "MegaSale", "Buy1Get1Free"; unlisted "Claim Your Gift", "Buy
+Now"). A word list on free text cannot close this, so the text no longer carries a business name at all: every text
+is one of four fixed wordings (English or Spanish, with or without a format-checked +1 callback number), and the name check
+is removed. A branded name needs an approved-name registry signed off by a person (not built). Review: the gate
+raised TypeError when a caller passed its own `seconds_since_gate`; the gate now uses only its own memory. **Open
+for Andre:** with no clock, a record time of "20:59" sends (the pool's ruling), so the 30 s deadline can land up to
+29 s after 21:00 (record minute 20:59, real time up to 20:59:59, plus 30 s); the clock path already gives that up. Regression tests: "AEGIS round 4".
+
+AEGIS round 5 (Nov 26 2026, Inquisitor on e3f85f7d): no High; every kill criterion held (64,000 fuzzed calls). Review:
+the callback number was only format-checked, so a premium-rate 900 or 976 number or an N11 code could be offered; those
+are now left out (the wiring passes the client's own number; who owns it is not checked here). The 59 s in the round-4
+note was corrected to 29 s. Regression tests: "AEGIS round 5".
+
+AEGIS round 6 (Nov 27 2026, Inquisitor on eed8ea3c): 1 High, fixed: 976 was checked only as an area code, but the
+pay-per-call 976 is an exchange (213-976-xxxx); a callback is now left out for a 900 area, a 976 exchange, an N11 area
+or exchange, or an international-rate Caribbean or Atlantic +1 area (US territories and Canada stay). Regression
+tests: "AEGIS round 6".
+
+AEGIS Inquisitor round 7 on e8149296 (RR-F2): a clock is read only as a real `datetime` whose UTC offset is asked
+once (a tzinfo that answered an offset and then none was being converted in the host's zone), and the gate hands
+`decide` the UTC time it read; a last-text time counts only as a plain `int`; a dict subclass is read through
+`dict`'s own methods. Stated, not changed: a consent keeper that raises `KeyboardInterrupt` or `SystemExit` is not
+caught (nothing is sent). A near-valid fuzz (40,000 calls, one field changed at a time, 13,083 sends) held.
+
+AEGIS Inquisitor round 8 on c485c5b9 (RR-F2): any text or number value in a missed-call record that is a subclass
+(not a plain `str`, `int`, `float` or `bool`) makes the record unreadable (`unreadable_record`, no text): a `str`
+subclass holding "landline" could compare equal to "mobile". Disclosed for Andre: the callback check is a format
+check; non-geographic ranges such as 456, 500, 600, 700 and 880 are not refused (the wiring passes the client's own
+number).
+
+AEGIS Inquisitor round 9 on 105e828c (RR-F2): the round-8 subclass check became an allowlist: any record value that
+is not plain data (`str`, `int`, `float`, `bool`, `None`, `list`, `tuple`, `dict`) makes the record unreadable, so an
+arbitrary object that says "landline" but compares equal to "mobile" is never texted.
+
+AEGIS Inquisitor round 10 on e0a46247 (RR-F2): the plain-data rule covers keys too: a record key that is not plain
+text (an object that hashes like "line_type" and shadows it after the record is built) makes the record unreadable.
