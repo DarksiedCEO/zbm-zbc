@@ -1360,3 +1360,8 @@ in a word ("overcharged", "unpaid", "nonrefundable", "litigation"). Round 6 foun
 or filler characters outside any fold table, so any character outside printable ASCII now routes, and every stem is a
 plain substring ("countersued", "impagada", "latefees"). The docstring and this note describe the route flag as an
 advisory word list with known misses.
+
+AEGIS L7 rounds 7-9 (Nov 27 2026): a newline routes like any other character outside printable ASCII; the
+non-request exemption ignores letter case and outer spaces; a review whose reviewer and pile-up fields meet the fake
+rule is flagged for removal even when its id, stars or text cannot be read (a review or reviewer object with a
+non-string key is unreadable as a whole and is not flagged; it cannot come from JSON). Round 8 found no High.

@@ -26,8 +26,9 @@ Rules:
   business) gets no public reply: ``reply`` is None, it is flagged for a removal request and routed to the owner.
 - A review that cannot be read (not an object, no id, stars not a whole number 1-5, text not a string, reviewer or
   pile-up fields missing, not plain whole numbers or negative) gets no reply and goes to the owner; it never raises.
-  A review whose reviewer and pile-up fields meet the fake rule is flagged as a suspected fake even when its other
-  fields cannot be read. Only a non-list batch raises
+  A review whose reviewer and pile-up fields meet the fake rule is flagged as a suspected fake even when its id,
+  stars or text cannot be read; a review or reviewer object holding a key that is not a plain string is unreadable as
+  a whole and is not flagged (it cannot come from JSON; no reply, routed, approved). Only a non-list batch raises
   ValueError.
 """
 
