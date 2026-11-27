@@ -195,9 +195,11 @@ def normalise_number(raw: object) -> Optional[str]:
 def _restart_word(text: str) -> bool:
     """The whole reply is a restart word and nothing else (AEGIS round 6: "Yes 请停止发送" read as "yes" because the
     old reading dropped every non-Latin character)."""
-    key = _reply_key(text)
+    key = unicodedata.normalize("NFC", _reply_key(text))
+    if not re.fullmatch(r"[a-zà-ÿ]+(?: [a-zà-ÿ]+)*", key):
+        return False                   # any other mark (a strikethrough "U̶N̶STOP", AEGIS round 7) is not a restart word
     plain = "".join(c for c in unicodedata.normalize("NFKD", key) if not unicodedata.combining(c))
-    return bool(re.fullmatch(r"[a-z]+(?: [a-z]+)*", plain)) and (key in RESTART_WORDS or plain in RESTART_WORDS)
+    return key in RESTART_WORDS or plain in RESTART_WORDS
 
 
 def _refusal_near_contact(text: str) -> bool:
@@ -325,10 +327,12 @@ class ConsentKeeper:
             if e.get("consent") != "express_written" or e.get("source") not in CONSENT_SOURCES:
                 return   # only express written consent from a known source counts; anything else is not consent
             rec.written_consent_at = e["t"]
-            if (rec.suppressed_at is None or e["t"] > rec.suppressed_at) and rec.suppressed in ("opted_out", "possible_opt_out", "start_keyword_does_not_restore",
-                                  "number_reassigned"):
+            if (rec.suppressed_at is None or e["t"] > rec.suppressed_at) and rec.suppressed in (
+                    "opted_out", "possible_opt_out", "start_keyword_does_not_restore", "number_reassigned",
+                    "unrecognised_reply"):
                 rec.suppressed, rec.suppressed_at = None, None
-            rec.evidence = rec.evidence + [i] if rec.carrier_blocked else [i]
+            # the evidence keeps the event that set a block the opt-in did not clear (AEGIS round 7)
+            rec.evidence = rec.evidence + [i] if rec.carrier_blocked or rec.suppressed is not None else [i]
         elif kind == "inbound_sms":
             reading = opt_out_reading(e["text"])
             if reading is not None:

@@ -538,3 +538,10 @@ can clear ever stands in for an opt-out, and the same-instant order no longer ch
 followed by a revocation in another script ("Yes 请停止发送") read as a bare restart word: a restart word now counts
 only when it is the whole reply in Latin letters. Review: `replay` given a non-list raised TypeError; it is now a
 ValueError. Regression tests: "AEGIS round 6".
+
+AEGIS round 7 (Nov 27 2026, Inquisitor on ea4fe868): 1 High, fixed: the restart-word check removed combining marks,
+so a struck-through "U̶N̶STOP" (STOP with "UN" crossed out) read as UNSTOP; a restart word now has only plain or
+accented Latin letters, and any other mark makes the reply unrecognised. Review, fixed: an opt-in that did not clear a
+block replaced the evidence with itself (the cause of the block was lost, and the evidence changed with input order);
+the evidence now keeps it. New written consent after an unrecognised reply now restores texting, as after an opt-out.
+Regression tests: "AEGIS round 7".

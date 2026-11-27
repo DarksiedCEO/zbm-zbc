@@ -533,3 +533,26 @@ def test_a_bare_restart_word_is_still_recognised(text):
 def test_a_replay_that_is_not_a_list_refuses_with_valueerror(bad):
     with pytest.raises(ValueError):
         ck.ConsentKeeper().replay(bad)
+
+
+# ---------------------------------------------------------------- AEGIS round 7 (Inquisitor, ea4fe868)
+@pytest.mark.parametrize("text", ["U\u0336N\u0336STOP", "U\u0336N\u0336BLOCK", "S\u0336T\u0336A\u0336R\u0336T\u0336", "S\u0338TART",
+                                  "O\u0336K\u0336", "Y\u0336e\u0336s\u0336"])
+def test_a_struck_or_marked_word_is_never_a_restart_word_or_a_safe_reply(text):
+    events = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text=text),
+              send(6, sid="m", mclass="marketing"), send(6, sid="i")]
+    got = decide(events)
+    assert got[("m", 6)][0] == "block" and got[("i", 6)][0] == "block"
+
+
+def test_the_evidence_keeps_the_event_that_set_a_block():
+    events = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="Can I come at 4?"),
+              ev("opt_in", 5, consent="express_written"), send(6)]
+    d = ck.ConsentKeeper().replay(events)[0]
+    assert d.decision == "block" and 1 in d.evidence
+
+
+def test_new_written_consent_after_an_unrecognised_reply_restores_texting():
+    events = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="Can I come at 4?"),
+              ev("opt_in", 6, consent="express_written"), send(7)]
+    assert one(events) == ("allow", None)
