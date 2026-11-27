@@ -131,7 +131,7 @@ def _fractions(text: str) -> str:
     ("100⅜" is "100 3/8", never "1003⁄8"; AEGIS L5 rounds 6-7)."""
     out = []
     for c in text.translate(_FRACTIONS):
-        if unicodedata.category(c) == "No" and unicodedata.numeric(c, 1) % 1:
+        if unicodedata.category(c) == "No" and "⁄" in unicodedata.normalize("NFKC", c):   # "↉" too (round 8)
             out.append(" " + unicodedata.normalize("NFKC", c).replace("⁄", "/"))
         else:
             out.append(c)

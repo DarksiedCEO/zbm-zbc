@@ -420,3 +420,18 @@ def test_every_vulgar_fraction_keeps_the_house_number(x, y):
 def test_a_hyphenated_city_without_a_zip_is_one_city():
     v = dl.check(pair(listing(city="Winston-Salem", state="NC", zip=None), listing(city="Winston Salem", state="NC", zip=None)))
     assert v.action == "merge_or_remove_duplicate"
+
+
+# ---------------------------------------------------------------- AEGIS round 8 (Inquisitor, L5 c9324159 / L4 8b4b2b4b)
+@pytest.mark.parametrize("x, y", [("Riley Juniper DDS", "Riley Juniper DDS PLLC"), ("Riley Juniper DDS", "Riley Juniper D.D.S."),
+                                  ("Smile Dental DC", "Smile Dental DC, LLC")])
+def test_a_practitioner_or_department_pattern_never_splits_one_name(x, y):
+    assert dl.check(pair(listing(name=x), listing(name=y))).action == "merge_or_remove_duplicate"
+
+
+def test_a_practitioner_inside_a_practice_is_still_left_alone():
+    assert dl.check(pair(listing(name="Fixture Dental 964"), listing(name="Dr. Riley Juniper, DDS"))).action == "leave_both"
+
+
+def test_zero_thirds_keeps_the_house_number():
+    assert nap.street_key("100↉ Main St") == nap.street_key("100 0/3 Main St")

@@ -97,7 +97,9 @@ def _check(pair: dict) -> PairVerdict:
     def leave(reason: str) -> PairVerdict:
         return PairVerdict(pid, False, "leave_both", False, reason)
 
-    for x, y in ((a, b), (b, a)):
+    # a practitioner inside a practice, or a department, has another name; two names that already read as one
+    # ("Riley Juniper DDS" / "Riley Juniper DDS PLLC") are never set aside by those patterns (AEGIS L5 round 8)
+    for x, y in (((a, b), (b, a)) if na != nb else ()):
         if _PRACTITIONER.search(str(y.get("name") or "")) and not _PRACTITIONER.search(str(x.get("name") or "")):
             return leave("practitioner_listing")
         if _DEPARTMENT.search(str(y.get("name") or "")) and not _DEPARTMENT.search(str(x.get("name") or "")):

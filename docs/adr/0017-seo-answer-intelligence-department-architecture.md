@@ -1402,3 +1402,7 @@ value by a dash ("Suite-B", "Apt-C") keeps the unit; every vulgar fraction ("⅜
 a dash in a city is a space ("Winston-Salem" = "Winston Salem"), and two city names that differ only in spacing are
 one city. **The inverted default for names:** two names with the same letters and other spacing
 ("Mercedes-Benz" / "Mercedes Benz") are `owner_review` (L4: `name_needs_review`), never a merge or a fault on a guess.
+
+AEGIS round 8 (Nov 27 2026, Inquisitor on L5 c9324159 / L4 8b4b2b4b): the practitioner and department patterns are
+read only when the two names differ once formatting is set aside, so "Riley Juniper DDS" / "Riley Juniper DDS PLLC" is
+one name, not a practitioner inside a practice; "↉" is a fraction like the others.
