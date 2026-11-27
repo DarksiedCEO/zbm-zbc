@@ -14,6 +14,10 @@ messages stay queued (visibly) and alerts are recorded, not sent. Only the Legal
 (31), Cybersecurity (22), Compliance (38), the results-trend source and contract end dates are ports with
 fail-closed stand-ins.
 
+**RR-F5 consent / STOP keeper** (`src/consent_keeper.py`, MVP front-desk team): decides every front-desk text or
+call against the single consent record per (client, number); certified on the shared MVP fixture pool. Not wired to
+any route or provider. Rules and certification: ADR 0014, amendment "RR-F5 consent / STOP keeper".
+
 ## Run
 
 ```bash
