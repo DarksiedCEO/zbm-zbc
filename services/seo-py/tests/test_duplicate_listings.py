@@ -339,3 +339,32 @@ def test_spaced_initials_are_formatting(x, y):
 def test_an_unknown_street_spelling_at_one_number_asks_the_owner():
     v = dl.check(pair(listing(street="4533 Testwell Drv"), listing(street="4533 Testwell Dryve")))
     assert (v.is_duplicate, v.action, v.requires_owner_approval) == (False, "owner_review", False)
+
+
+# ---------------------------------------------------------------- AEGIS round 5 (Inquisitor, L5 9453329b / L4 5c37e1d1)
+@pytest.mark.parametrize("x, y", [("100A S St", "100A South St"), ("100 1/2 S St", "100 1/2 South St"),
+                                  ("1200-B N St", "1200-B North St")])
+def test_a_lettered_street_after_any_house_number_is_never_directional(x, y):
+    assert nap.street_key(x) != nap.street_key(y)
+    assert dl.check(pair(listing(street=x), listing(street=y))).action != "merge_or_remove_duplicate"
+
+
+@pytest.mark.parametrize("x, y", [("1 Pier Ave", "1 Pier Avenue"), ("5 Post Office Rd", "5 Post Office Road"),
+                                  ("5 Lot Rd", "5 Lot Road")])
+def test_a_street_name_that_starts_like_a_unit_is_a_street(x, y):
+    assert nap.street_key(x) == nap.street_key(y) and nap.street_key(x)[1] is None
+    assert dl.check(pair(listing(street=x), listing(street=y))).action == "merge_or_remove_duplicate"
+
+
+@pytest.mark.parametrize("x, y", [("5 Main St Ste 1-10", "5 Main St Ste 110"), ("5 Main St Unit 2-14", "5 Main St Unit 214"),
+                                  ("5 Main St Spc 1-2", "5 Main St Spc 12")])
+def test_a_hyphen_between_digits_is_another_unit(x, y):
+    assert nap.street_key(x) != nap.street_key(y)
+    assert dl.check(pair(listing(street=x), listing(street=y))).is_duplicate is False or \
+        dl.check(pair(listing(street=x), listing(street=y))).action != "merge_or_remove_duplicate"
+
+
+@pytest.mark.parametrize("x, y", [("Mtn View", "Mountain View"), ("Grand Jct", "Grand Junction"), ("Idaho Fls", "Idaho Falls"),
+                                  ("Palm Bch Gdns", "Palm Beach Gardens")])
+def test_more_city_abbreviations_are_formatting(x, y):
+    assert nap.city_key(x, "CA", None)[0] == nap.city_key(y, "CA", None)[0]

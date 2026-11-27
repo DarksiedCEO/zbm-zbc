@@ -1383,3 +1383,10 @@ only suffixes or directions is Street ("St Ext"). A lettered street ("100 S St")
 ("100 South St"). City abbreviations (N, W, Bch, Hts, Spgs ...) and spaced initials in names ("J. R.") are formatting.
 **The inverted default:** one house number in one city whose street words still differ is `owner_review` (neither a
 merge nor a move): the data cannot tell an unknown spelling from another street, so a person decides.
+
+AEGIS round 5 (Nov 27 2026, Inquisitor on L5 9453329b / L4 5c37e1d1): a lettered street is kept after any house
+number ("100A S St", "100 1/2 S St", "1200-B N St"); a unit value must hold a digit or be one or two letters that are
+not a street suffix, so "1 Pier Ave", "Post Office Rd" and "Lot Rd" are streets, not units; a hyphen is dropped only
+between a digit and a letter ("4-B" = "4B", but "1-10" is never "110"); more USPS city abbreviations ("Mtn", "Jct",
+"Fls", "Gdns" ...). The same house number with other street words asks the owner also when the number carries a
+letter ("100A").

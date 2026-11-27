@@ -118,6 +118,13 @@ _UNIT = re.compile(r"(?:,\s*|\s)((?:" + "|".join(sorted((k for k in UNIT_KIND if
 _ORDINAL_FLOOR = re.compile(r"(?:,\s*|\s)(\d+)(?:st|nd|rd|th)?\s+(?:floor|fl)\.?$")
 
 
+def _unit_value(v: str) -> bool:
+    """A unit number: it holds a digit, or is one or two letters that are not a street suffix ("Suite A", "Ste B")."""
+    if any(c.isdigit() for c in v):
+        return True
+    return len(v) <= 2 and v not in STREET_WORDS and v not in SUFFIXES
+
+
 def street_key(street: object) -> tuple[str, Optional[str]]:
     """(street line, unit) with abbreviations spelled out; unit styles of one kind ("Ste 4", "Ste #4", "#4", "Unit 4")
     read as one, while a floor, building or room keeps its kind ("floor:2" is not "unit:2"). Trailing punctuation is
@@ -134,9 +141,10 @@ def street_key(street: object) -> tuple[str, Optional[str]]:
             text = text[:m.start()]
             continue
         m = _UNIT.search(text)
-        if not m:
-            break
-        units.append(f"{UNIT_KIND[m.group(1)]}:{m.group(2).replace('-', '')}")     # "4-B" is "4b"
+        if not m or not _unit_value(m.group(2)):
+            break                      # "1 Pier Ave", "Post Office Rd", "Lot Rd": a street name, not a unit (round 5)
+        # "4-B" is "4b"; "1-10" stays "1-10" (never "110": AEGIS L5 round 5)
+        units.append(f"{UNIT_KIND[m.group(1)]}:{re.sub(r'(?<=[0-9])-(?=[a-z])|(?<=[a-z])-(?=[0-9])', '', m.group(2))}")
         text = text[:m.start()]
     unit = "|".join(sorted(units)) or None
     raw = re.findall(r"[^\W_]+", _join_initials(text))
@@ -146,7 +154,9 @@ def street_key(street: object) -> tuple[str, Optional[str]]:
         tail_only = bool(rest) and all(x in _DIRECTIONS or STREET_WORDS.get(x, x) in SUFFIXES for x in rest)
         if w == "st" and rest and not tail_only:
             words.append("saint")      # "St. Charles Ave": St before a name is Saint (AEGIS L5 round 2); not "St Ext"
-        elif w in ("n", "s", "e", "w") and i == 1 and raw[0].isdigit() and tail_only:
+        elif w in ("n", "s", "e", "w") and tail_only and i >= 1 and any(c.isdigit() for c in raw[0]) and \
+                all(re.fullmatch(r"\d+[a-z]?|[a-z]", x) for x in raw[:i]):
+            # "100 S St", "100A S St", "100 1/2 S St", "1200-B N St": a lettered street (AEGIS L5 rounds 4-5)
             words.append(w)            # "100 S St" is a lettered street, never "South Street" (AEGIS L5 round 4)
         else:
             words.append(STREET_WORDS.get(w, w))
@@ -157,7 +167,7 @@ def same_number_other_words(a: tuple[str, Optional[str]], b: tuple[str, Optional
     """Two street keys with the same house number and unit whose street words differ: formatting this module does not
     know, or another street. The data cannot tell, so a person decides (AEGIS L5 round 4: the inverted default)."""
     wa, wb = a[0].split(), b[0].split()
-    return bool(wa and wb) and a != b and a[1] == b[1] and wa[0] == wb[0] and wa[0].isdigit()
+    return bool(wa and wb) and a != b and a[1] == b[1] and wa[0] == wb[0] and any(c.isdigit() for c in wa[0])
 
 
 def phone_key(phone: object) -> Optional[str]:
@@ -210,7 +220,12 @@ AP_STATES = {"ala": "al", "ariz": "az", "ark": "ar", "calif": "ca", "cal": "ca",
 CITY_WORDS = {"st": "saint", "ste": "sainte", "ft": "fort", "mt": "mount", "pt": "point", "n": "north", "s": "south",
               "e": "east", "w": "west", "bch": "beach", "hts": "heights", "spgs": "springs", "spg": "spring",
               "vly": "valley", "cyn": "canyon", "lk": "lake", "pk": "park", "hls": "hills", "crk": "creek",
-              "ctr": "center", "vlg": "village", "is": "island", "pnes": "pines"}
+              "ctr": "center", "vlg": "village", "is": "island", "pnes": "pines", "mtn": "mountain",
+              "mtns": "mountains", "jct": "junction", "fls": "falls", "gdns": "gardens", "gdn": "garden",
+              "hbr": "harbor", "hl": "hill", "lks": "lakes", "mdw": "meadow", "mdws": "meadows", "prt": "port",
+              "sta": "station", "vly": "valley", "vw": "view", "xing": "crossing", "frk": "fork", "frst": "forest",
+              "grv": "grove", "hvn": "haven", "is.": "island", "isl": "island", "brk": "brook", "cv": "cove",
+              "rdg": "ridge", "riv": "river", "shr": "shore", "spr": "springs"}
 
 
 def state_key(state: object) -> str:
