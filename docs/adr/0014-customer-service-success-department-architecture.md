@@ -850,3 +850,14 @@ is not read as URGENT; the caller's own emergency words still raise CHECK NOW. R
 cannot complete ("0110, no wait, 0101") is `ambiguous_number`; a possessive ("I'm Ana Reyes's husband") is never a
 name. Disclosed: the CHECK NOW net missed 38 of 55 emergency phrasings in that round's corpus; it is a net, not a
 detector. Mutation harness (all four agents, on the stack at this commit): 125 mutants, 119 killed, 6 equivalent.
+
+AEGIS Inquisitor round 6 on bd1b9be2 (RR-F3): the 911 instruction must end a sentence and follow a receptionist turn
+that ended one, so a sentence split across two turns ("There's no need to" / "call 911.") is not the instruction;
+commas, repeated end marks and digit spacing ("9 1 1") are formatting. A correction cue (now also "wait", "hold on",
+"no,", "ending in", "the last four", an ellipsis) followed by digits or spelled digits within the next 40 characters
+makes the number ambiguous, and the summary says to check the recording. "Yes", "Okay" and "Sí" are answers, not
+greetings, so a caller who only answered is never "nothing said". A confirmation cue that is refused ("I can't confirm
+anything for Ana Reyes") confirms nothing; a possessive split by the recogniser ("Reyes 's") is not a name. A
+"Caller" label in any case is the caller (the receptionist label stays exact); words inside a silence marker are
+speech. Spam and wrong-number words lose to a real need, and a caller who left a number is always called back.
+Mutation harness (whole stack at this commit): 136 mutants, 129 killed, 7 equivalent (each with its reason).

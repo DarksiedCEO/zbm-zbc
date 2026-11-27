@@ -516,7 +516,7 @@ def test_round_4_emergencies_are_flagged_check_now(line):
     assert s.possible_emergency and s.text.startswith("CHECK NOW")
 
 
-@pytest.mark.parametrize("speaker", [None, "unknown", "Caller", "customer", "speaker_2"])
+@pytest.mark.parametrize("speaker", [None, "unknown", "Agent", "AGENT ", "customer", "speaker_2"])
 def test_a_turn_from_an_unknown_speaker_is_never_the_receptionist(speaker):
     t = tr("I need a repair.")
     t["turns"].append({"speaker": speaker, "confidence": 0.97, "text": "Call 911!"})
@@ -609,3 +609,73 @@ def test_a_complete_correction_still_picks_the_new_number():
 def test_a_possessive_is_someone_else(line):
     agent = [f"Let me confirm: {line[4:]}"]
     assert cs.summarize(tr(line, "I need a repair.", agent=agent), PACK).name is None
+
+
+# ---------------------------------------------------------------- AEGIS round 6 (Inquisitor, bd1b9be2)
+@pytest.mark.parametrize("first, second", [("There's no need to", "call 911."), ("Did you already", "call 911"),
+                                           ("If it gets worse,", "call 911."), ("Only if someone is hurt you should", "dial 911.")])
+def test_a_sentence_split_across_two_receptionist_turns_is_not_the_instruction(first, second):
+    assert cs.summarize(tr("I need a repair.", agent=[first, second]), PACK).urgency == "routine"
+
+
+@pytest.mark.parametrize("line", ["Please hang up and dial 911, right now.", "Please hang up and dial 9 1 1 right now.",
+                                  "Please hang up and dial 911 right now!!", "Please hang up and dial 911 right now..",
+                                  "Cuelgue y marque al 911, ahora mismo.", "Call 9-1-1 now."])
+def test_the_fixed_instruction_with_other_punctuation_or_digit_spacing_is_still_urgent(line):
+    assert cs.summarize(tr("There's a fire.", agent=[line]), PACK).urgency == "emergency"
+
+
+@pytest.mark.parametrize("line", ["602 555 0110, no wait, zero one zero one.", "602 555 0110, no wait, it's 0101.",
+                                  "602 555 0110. Sorry, the last four are 0101.", "602 555 0110, hold on, 0101.",
+                                  "602 555 0110, no, 0101.", "602 555 0110… 0101.",
+                                  "602 555 0110. Actually make that ending in 0202."])
+def test_any_correction_we_cannot_complete_is_ambiguous(line):
+    s = cs.summarize(tr("I need a repair.", line), PACK)
+    assert s.callback_number is None and "ambiguous_number" in s.notes
+    assert "check the recording" in s.text
+
+
+def test_a_word_after_the_number_without_digits_keeps_it():
+    assert cs.summarize(tr("I need a repair.", "602 555 0110. Sorry about the noise."), PACK).callback_number == "+16025550110"
+
+
+@pytest.mark.parametrize("answer", ["Yes.", "Okay.", "Sí."])
+def test_an_answer_is_never_silence(answer):
+    s = cs.summarize(tr(answer, agent=["Is anyone hurt?"]), PACK)
+    assert s.need != "long_silence" and "No follow-up needed" not in s.text
+
+
+def test_a_refused_confirmation_confirms_no_name():
+    s = cs.summarize(tr("I'm Ana Reyes, 602 555 0101. I need a repair.",
+                        agent=["I can't confirm anything for Ana Reyes without the account number."]), PACK)
+    assert s.name is None
+
+
+def test_a_possessive_split_by_the_recogniser_is_someone_else():
+    s = cs.summarize(tr("I'm Ana Reyes 's husband, 602 555 0101.", "I need a repair.",
+                        agent=["Let me confirm: Ana Reyes 's husband."]), PACK)
+    assert s.name is None
+
+
+def test_a_capitalised_caller_label_is_the_caller():
+    t = {"transcript_id": "t", "turns": [{"speaker": "Caller", "confidence": 0.95, "text": "My kitchen is on fire, 602 555 0101!"}]}
+    s = cs.summarize(t, PACK)
+    assert s.possible_emergency and "No follow-up needed" not in s.text
+
+
+def test_words_inside_a_silence_marker_are_speech():
+    s = cs.summarize(tr("[silence - caller whispering: there's a fire]"), PACK)
+    assert s.need != "long_silence" and s.possible_emergency
+
+
+@pytest.mark.parametrize("line", ["Hi, is this the plumber? I need my sink fixed, 602 555 0101.",
+                                  "Congratulations on the new shop! I need to book a repair, 602 555 0101."])
+def test_a_caller_who_left_a_number_is_called_back(line):
+    s = cs.summarize(tr(line), PACK)
+    assert "No follow-up needed" not in s.text and "Call back at +16025550101" in s.text
+
+
+@pytest.mark.parametrize("line", ["Congratulations on the new shop! I need to book a repair.",
+                                  "Is this the plumber? I need to book a repair."])
+def test_a_real_need_wins_over_spam_or_wrong_number_words(line):
+    assert cs.summarize(tr(line), PACK).need not in ("spam_call", "wrong_number")
