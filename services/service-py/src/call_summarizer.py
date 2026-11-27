@@ -279,6 +279,12 @@ def _need(trusted: list[str], pack: dict, emergency: bool, any_words: bool) -> s
     return "unclear"
 
 
+def _unmarked(text: str) -> str:
+    """The turn with every quote mark, "¡", invisible format character and wrapping bracket or emphasis mark set aside
+    (AEGIS rounds 8-11: „…“, ‹…›, U+200B, "(Please hang up ...)", "*...*")."""
+    return "".join(c for c in text if c not in "\"'¡„‚()[]{}*_" and unicodedata.category(c) not in ("Pi", "Pf", "Cf")).strip()
+
+
 def _said_911(agent_text: str, previous: Optional[str] = None) -> Optional[str]:
     """"urgent" when the receptionist told the caller to call 911: the whole trusted turn is exactly one of the
     instruction's fixed forms and the receptionist's turn before it ended a sentence. Anything said with it ("In an
@@ -287,16 +293,14 @@ def _said_911(agent_text: str, previous: Optional[str] = None) -> Optional[str]:
     sentence ("There's no need to" / "Call 911."), the two turns may be one sentence: "ambiguous", which raises
     CHECK NOW instead of URGENT (AEGIS round 8: neither reading is safe on its own). Otherwise None."""
     # every quote mark and the opening "¡" are formatting wherever they sit (AEGIS rounds 8-9: „…“, ‹…›, ¡"…!")
-    text = "".join(c for c in agent_text if c not in "\"'¡" and unicodedata.category(c) not in ("Pi", "Pf")
-                   and c not in "„‚").strip()
+    text = _unmarked(agent_text)
     text = re.sub(r"(?<!\d)9[\s.\-‐-―]?1[\s.\-‐-―]?1(?!\d)", "911", text)   # "9 1 1", "9-1-1", "9–1–1"
     if not re.search(r"[.!]$", text):
         return None
     text = re.sub(r"[.!]+$", ".", re.sub(r"\s+", " ", text.replace(",", " "))).replace(" .", ".")
     if _SAID_911.fullmatch(text) is None:
         return None
-    prev = None if previous is None else "".join(
-        c for c in previous if c not in "\"'" and unicodedata.category(c) not in ("Pi", "Pf") and c not in "„‚")
+    prev = None if previous is None else _unmarked(previous)
     if prev is not None and not re.search(r"(?<![.…])[.!?]\s*$", prev):
         return "ambiguous"
     return "urgent"
@@ -358,8 +362,13 @@ def _callback(trusted: list[str], notes: list[str], rejected_out: Optional[set] 
 # the receptionist confirms a caller's name only in the fixed form, the name straight after the cue at the start of
 # the turn ("Let me confirm: Ana Reyes, at ...", "Confirmo: Ana Reyes, al ..."). Anything else ("I can't confirm
 # anything for Ana Reyes", "Let me confirm: your landlord Ana Reyes") confirms nothing (AEGIS round 7)
-_CONFIRM_LINE = re.compile(rf"(?:let me confirm|just to confirm|to confirm|so to confirm|confirmo|para confirmar)"
-                           rf"\s*[:,]?\s*({_WORD} {_WORD})(?=\s*(?:[,.;:!]|$|\s(?:at|al|en|on)\b))(?![^?]*\?\s*$)", re.IGNORECASE)
+_CUE = r"(?:let me confirm|just to confirm|to confirm|so to confirm|confirmo|para confirmar)"
+_NUM_TEXT = r"\(?[2-9]\d{2}\)?[ .\-]?[2-9]\d{2}[ .\-]?\d{4}"
+# the fixed confirmation, the whole turn and nothing else (AEGIS round 11: "Let me confirm: you can't take calls at
+# ..." passed a start-only check): "Let me confirm: Ana Reyes.", "Let me confirm: Ana Reyes, at 602 555 0101.",
+# "Let me confirm: at 602 555 0101.", "Confirmo: Ana Reyes, al 602 555 0101."
+_CONFIRM_LINE = re.compile(rf"{_CUE}\s*[:,]?\s*({_WORD} {_WORD})(?:,?\s+(?:at|al)\s+{_NUM_TEXT})?\s*[.!]?", re.IGNORECASE)
+_READ_BACK = re.compile(rf"{_CUE}\s*[:,]?\s*(?:{_WORD} {_WORD},?\s+)?(?:at|al)\s+({_NUM_TEXT})\s*[.!]?", re.IGNORECASE)
 
 
 
@@ -368,8 +377,6 @@ _AFFIRM = re.compile(r"(?:(?:yes|yeah|yep|yup|correct|right|that'?s right|that'?
                      re.IGNORECASE)
 
 
-_CONFIRM_START = re.compile(r"(?:let me confirm|just to confirm|to confirm|so to confirm|confirmo|para confirmar)\b",
-                            re.IGNORECASE)
 _RETRACT = re.compile(r"\b(?:no|not|actually|sorry|misheard|wrong|wait|perd[oó]n|disculpe)\b", re.IGNORECASE)
 
 
@@ -380,14 +387,27 @@ def _clean_confirmation(text: str) -> bool:
 
 def _affirmed(ordered: list, i: int) -> bool:
     """After turn ``i`` the caller said something, and everything the caller said was an affirmation."""
-    later = [x for sp, _, x in ordered[i + 1:] if sp == "caller" and x.strip()]
-    return bool(later) and all(_AFFIRM.fullmatch(_fold(x).strip()) for x in later)
+    later = [(c, x) for sp, c, x in ordered[i + 1:] if sp == "caller" and x.strip()]
+    # a low-confidence "Yes." is never a fact, so it affirms nothing (AEGIS round 11)
+    return bool(later) and all(c >= LOW_CONFIDENCE and _AFFIRM.fullmatch(_fold(x).strip()) for c, x in later)
+
+
+# what may come before a strong lead-in in its sentence: greetings and fillers only (AEGIS round 11: "A lady goes I'm
+# Ana Reyes", "He was like I'm Mark Diaz" passed a list of reporting verbs; the inverted default allows only these)
+_OPENS_SENTENCE = re.compile(r"\s*(?:(?:hi|hello|hey|yes|yeah|okay|ok|and|so|well|oh|um|uh|hola|s[ií]|bueno|muy bien|"
+                             r"buenos d[ií]as|buenas tardes|good morning|good afternoon|thanks|gracias)[\s,]*)*",
+                             re.IGNORECASE)
+
+
+def _lead_prefix(m: re.Match) -> str:
+    """The text of the lead-in's own sentence before the lead-in word ("Okay, and " in "Okay, and I'm Ana Reyes")."""
+    return re.split(r"[.!?\n]", m.string[:m.start()])[-1]
 
 
 def _names(trusted: list[str], confirmations: Optional[list[str]] = None) -> list[str]:
     """Names the caller gave; with ``confirmations`` (the trusted receptionist turns), only those it repeated."""
     said = {m.group(1).casefold() for x in confirmations if "?" not in x and "¿" not in x
-            for m in [_CONFIRM_LINE.match(_fold(x).strip())] if m} \
+            for m in [_CONFIRM_LINE.fullmatch(_fold(x).strip())] if m} \
         if confirmations is not None else None
     names: list[str] = []
     for x in trusted:
@@ -406,8 +426,10 @@ def _names(trusted: list[str], confirmations: Optional[list[str]] = None) -> lis
             if m.re is not _LEAD_NAME and (re.search(r"[?¿]", before[-60:]) or
                                            re.search(r"\b(?:my|his|her|their|our|mi|su|sus)\b", before[-60:], re.IGNORECASE)):
                 continue                   # "... my boss? Ana Reyes, 602 ...": someone the caller spoke of (round 9)
-            if m.re is _LEAD_NAME and re.search(r"\b(?:said|says|told|asked|dijo|dice)\b[^.!?]*$", before, re.IGNORECASE):
-                continue                   # "A lady said I'm Ana Reyes": reported speech (AEGIS round 10)
+            if m.re is _LEAD_NAME and not _OPENS_SENTENCE.fullmatch(_lead_prefix(m)):
+                continue                   # "A lady goes I'm Ana Reyes": reported speech (AEGIS rounds 10-11)
+            if m.re is _LEAD_NAME and not re.match(rf"\s*(?:[,.;:!?]|$|and\b|y\b|{_NUM_TEXT})", x[m.end(1):], re.IGNORECASE):
+                continue                   # "I'm Ana Reyes daughter": the name must end there (AEGIS round 11)
             if re.search(r"\b(?:she|he|they|her|his|their|ella|[eé]l)\b", after, re.IGNORECASE):
                 continue                   # "The name is Ana Reyes, she's my tenant" (AEGIS round 9)
             if said is not None and cand.casefold() not in said:
@@ -462,7 +484,7 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
     name = names[0] if len(names) == 1 else None
     if name:                           # the caller said no after the confirmation ("No, I'm Ana Ruiz"): no name (round 8)
         at = [i for i, (sp, c, x) in enumerate(ordered) if sp == "agent" and c >= LOW_CONFIDENCE
-              and (m := _CONFIRM_LINE.match(_fold(x).strip())) and m.group(1).casefold() == name.casefold()
+              and (m := _CONFIRM_LINE.fullmatch(_fold(x).strip())) and m.group(1).casefold() == name.casefold()
               and _clean_confirmation(_fold(x))]
         # after the confirmation the caller may only affirm ("Yes.", "That's right", "Sí"); anything else ("Nah",
         # "Incorrecto", "Actually, I'm Ana Ruiz") withholds the name (AEGIS round 9: the inverted default)
@@ -493,12 +515,13 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
     for i, (sp, c, x) in enumerate(ordered):
         fx = _fold(x).strip()
         nums = {"+1" + "".join(m.groups()) for m in _NUM.finditer(fx)}
-        if sp == "agent" and c >= LOW_CONFIDENCE and _CONFIRM_START.match(fx) and _clean_confirmation(fx) and \
+        if sp == "agent" and c >= LOW_CONFIDENCE and _READ_BACK.fullmatch(fx) and _clean_confirmation(fx) and \
                 len(nums) == 1:
             read_back = (nums.pop(), i)
     if read_back and read_back[0] in said_numbers and read_back[0] not in rejected_numbers and \
             _affirmed(ordered, read_back[1]) and \
-            (callback == read_back[0] or "ambiguous_number" in notes or callback is None):
+            (callback == read_back[0] or (callback is None and "ambiguous_number" not in notes)):
+        # a caller-side doubt (an uncompletable correction, doubt after the number) is never overridden (round 11)
         if callback != read_back[0]:
             notes.append("callback_from_affirmed_read_back")
         callback = read_back[0]

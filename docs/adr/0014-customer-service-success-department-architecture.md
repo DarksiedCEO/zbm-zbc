@@ -899,3 +899,13 @@ nothing. Quote marks are set aside on the receptionist's previous turn too, so a
 A strong lead-in inside reported speech ("A lady said I'm ...") is not the caller's name. Mutation harness (whole stack):
 153 mutants, 132 killed, 21 equivalent with reasons. The Names and Callback rows
 above now say what the code does.
+
+AEGIS Inquisitor round 11 on 00e101c3 (RR-F3): the read-back and the name confirmation must each be the WHOLE turn
+in the fixed form ("Let me confirm: Ana Reyes, at 602 555 0101." / "Let me confirm: at 602 555 0101."); anything else
+in the turn ("you can't take calls at ...", "... for your landlord") is not a read-back. A low-confidence "Yes." affirms
+nothing. An affirmed read-back never overrides a caller-side doubt (an uncompletable correction or doubt after the
+number): no callback, check the recording. A strong lead-in counts only when its sentence opens with it (greetings
+and fillers aside), so reported speech in any wording ("A lady goes I'm ...") is not a name, and the name must end
+there ("I'm Ana Reyes daughter" is not a name). Quote marks, brackets, emphasis marks and invisible format characters
+are formatting around the 911 instruction and the turn before it. Mutation harness (whole stack): 156 mutants,
+134 killed, 22 equivalent with reasons.

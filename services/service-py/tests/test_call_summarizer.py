@@ -918,3 +918,54 @@ def test_a_lead_in_inside_reported_speech_is_not_the_callers_name():
 @pytest.mark.parametrize("line", ["Don't call my work number, 602 555 0101.", "602 555 0101 is my old number."])
 def test_a_rejected_number_read_back_and_affirmed_is_never_the_callback(line):
     assert cs.summarize(tr("I need a repair.", line, agent=rb("602 555 0101"), yes=True), PACK).callback_number is None
+
+
+# ---------------------------------------------------------------- AEGIS round 11 (Inquisitor, 00e101c3)
+@pytest.mark.parametrize("line", ["​Please hang up and dial 911 right now.", "Please hang up and dial 911 right now.⁠",
+                                  "(Please hang up and dial 911 right now.)", "*Please hang up and dial 911 right now.*"])
+def test_invisible_and_bracket_formatting_keeps_the_instruction(line):
+    assert cs.summarize(tr("There's a fire.", agent=[line]), PACK).urgency == "emergency"
+
+
+def test_a_finished_bracketed_turn_before_is_finished():
+    s = cs.summarize(tr("There's a fire.", agent=["(One moment.)", "Please hang up and dial 911 right now."]), PACK)
+    assert s.urgency == "emergency"
+
+
+@pytest.mark.parametrize("conf", [0.2, 0.0, float("nan")])
+def test_a_low_confidence_yes_affirms_nothing(conf):
+    t = tr("I'm Ana Reyes, 602 555 0101.", agent=ok("Ana Reyes", "602 555 0101"))
+    t["turns"].append({"speaker": "caller", "confidence": conf, "text": "Yes."})
+    s = cs.summarize(t, PACK)
+    assert s.name is None and s.callback_number is None
+
+
+@pytest.mark.parametrize("readback", ["Let me confirm: you can't take calls at 602 555 0101.",
+                                      "Let me confirm: you don't use 602 555 0101 anymore.",
+                                      "Let me confirm: we should never call 602 555 0101.",
+                                      "Let me confirm: 602 555 0101 is disconnected."])
+def test_only_the_fixed_read_back_form_counts(readback):
+    s = cs.summarize(tr("I need a repair.", "My number is 602 555 0101.", agent=[readback], yes=True), PACK)
+    assert s.callback_number is None
+
+
+@pytest.mark.parametrize("verb", ["goes", "yelled", "wrote", "was like", "keeps saying", "gritó"])
+def test_a_lead_in_after_any_reporting_words_is_not_the_callers_name(verb):
+    s = cs.summarize(tr(f"The man {verb} I'm Mark Diaz, 602 555 0101.", agent=ok("Mark Diaz"), yes=True), PACK)
+    assert s.name is None
+
+
+def test_a_name_must_end_where_the_lead_in_name_ends():
+    s = cs.summarize(tr("I'm Ana Reyes daughter, 602 555 0101.", agent=ok("Ana Reyes"), yes=True), PACK)
+    assert s.name is None
+
+
+def test_an_affirmed_read_back_never_overrides_a_caller_correction():
+    s = cs.summarize(tr("I need a repair.", "602 555 0101, no wait, it ends in 0110.", agent=rb("602 555 0101"), yes=True), PACK)
+    assert s.callback_number is None
+
+
+def test_a_read_back_with_anything_after_the_number_is_not_the_fixed_form():
+    s = cs.summarize(tr("I need a repair.", "My number is 602 555 0101.",
+                        agent=["Let me confirm: at 602 555 0101 for your landlord."], yes=True), PACK)
+    assert s.callback_number is None
