@@ -12,7 +12,10 @@ Rules:
   open, since many directories carry none) while the record says the business is open is ``closed_listing``; a listing shown open while the record says it is closed is
   ``wrong_status``. Otherwise the first field that really differs names the fault, in this order: ``wrong_name``,
   ``wrong_address`` (street, unit, city, state or ZIP), ``wrong_phone``; ``differences`` lists every field that
-  differs, so a listing with two faults shows both.
+  differs, so a listing with two faults shows both. When the only differences are ones the data cannot tell from
+  formatting (a name with the same letters and other spacing; the same house number, unit and city with other street
+  words; the same street and ZIP with other city words), the verdict is ``name_needs_review`` or
+  ``address_needs_review``: a person checks. A real fault always wins over a review.
 - A website that differs is listed in ``differences`` (``website``) but is not a planted fault on its own; a missing
   website is not a fault (many directories carry none).
 - A listing that cannot be read (not an object, no name, no street or no phone) is ``unreadable``: never "correct".
@@ -151,25 +154,22 @@ def _judge(rec: dict, x: object) -> CitationVerdict:
         diffs.append("website")
         if rec["website"]:
             proposed["website"] = rec["website"]
-    if "status" in diffs:
-        verdict = "closed_listing" if rec["open"] else "wrong_status"
-    elif "name" in diffs:
-        # the same letters with other spacing ("Mercedes-Benz" / "Mercedes Benz"): a person checks (round 6)
-        verdict = "name_needs_review" if nap.loose(nap.name_key(x.get("name"))) == nap.loose(nap.name_key(rec["name"])) \
-            else "wrong_name"
-    elif "address" in diffs:
-        # the same house number, unit and city with street words that still differ: an unknown spelling or another
-        # street; the data cannot tell, so a person checks (AEGIS L4 round 3: the inverted default)
-        same_city = nap.city_key(x.get("city"), x.get("state"), x.get("zip")) == \
-            nap.city_key(rec["city"], rec["state"], rec["zip"])
-        lk, rk = nap.city_key(x.get("city"), x.get("state"), x.get("zip")), nap.city_key(rec["city"], rec["state"],
-                                                                                       rec["zip"])
-        same_street = nap.street_key(x.get("street")) == nap.street_key(rec["street"])
-        verdict = "address_needs_review" if (same_city and nap.same_number_other_words(
-            nap.street_key(x.get("street")), nap.street_key(rec["street"]))) or (
-            same_street and nap.same_zip_other_city_words(lk, rk)) else "wrong_address"
-    elif "phone" in diffs:
-        verdict = "wrong_phone"
-    else:
-        verdict = "correct"
+    # each differing field is a fault or, when the data cannot tell formatting from a real difference, a review;
+    # a real fault always wins over a review, in the fixed order (AEGIS L4 round 7: a review hid a real fault)
+    name_review = "name" in diffs and nap.loose(nap.name_key(x.get("name"))) == nap.loose(nap.name_key(rec["name"]))
+    address_review = False
+    if "address" in diffs:
+        lk = nap.city_key(x.get("city"), x.get("state"), x.get("zip"))
+        rk = nap.city_key(rec["city"], rec["state"], rec["zip"])
+        ls, rs = nap.street_key(x.get("street")), nap.street_key(rec["street"])
+        # the same house number, unit and city with other street words, or the same street and ZIP with other city
+        # words: an unknown spelling or a real difference; a person checks (AEGIS L4 rounds 3-5: the inverted default)
+        address_review = (lk == rk and nap.same_number_other_words(ls, rs)) or \
+            (ls == rs and nap.same_zip_other_city_words(lk, rk))
+    faults = [("status", "closed_listing" if rec["open"] else "wrong_status"),
+              ("name", None if name_review else "wrong_name"),
+              ("address", None if address_review else "wrong_address"),
+              ("phone", "wrong_phone")]
+    verdict = next((v for f, v in faults if f in diffs and v), None) or \
+        ("name_needs_review" if name_review else "address_needs_review" if address_review else "correct")
     return CitationVerdict(cid, verdict, tuple(diffs), proposed if verdict != "correct" or diffs else {})

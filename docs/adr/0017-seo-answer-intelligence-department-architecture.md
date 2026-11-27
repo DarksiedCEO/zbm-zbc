@@ -1485,3 +1485,7 @@ street, state and ZIP with city words that still differ is `address_needs_review
 AEGIS round 6 for SEO-L4 (Nov 27 2026, Inquisitor on 570b349a, shared with SEO-L5 round 7): the SEO-L5 round-7 key
 fixes apply here (dashed units, every vulgar fraction, dashed cities). A listing name with the record's letters and
 other spacing ("Mercedes-Benz" / "Mercedes Benz") is `name_needs_review`, never `wrong_name` on a guess.
+
+AEGIS round 7 for SEO-L4 (Nov 27 2026, Inquisitor on 8b4b2b4b): a review verdict never hides a real fault: a name
+review plus another street number is `wrong_address`; the review verdicts are only for listings whose only
+differences cannot be told from formatting. The module's Rules now describe both review verdicts.

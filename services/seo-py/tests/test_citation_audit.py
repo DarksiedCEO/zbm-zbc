@@ -321,3 +321,12 @@ def test_a_name_with_other_spacing_needs_review():
 @pytest.mark.parametrize("rec_street, listed", [("100 Main St Suite B", "100 Main St Suite-B"), ("100 3/8 Main St", "100⅜ Main St")])
 def test_round_7_formatting_is_correct(rec_street, listed):
     assert ca.audit(_biz(dict(_REC, street=rec_street), dict(_LIST, street=listed)))[0].verdict == "correct"
+
+
+# ---------------------------------------------------------------- AEGIS round 7 (Inquisitor, 8b4b2b4b)
+@pytest.mark.parametrize("kw, verdict", [({"street": "4633 Testwell Drive"}, "wrong_address"), ({"zip": "89002"}, "wrong_address"),
+                                         ({"phone": "(702) 555-0119"}, "wrong_phone"), ({"state": "AZ"}, "wrong_address")])
+def test_a_name_review_never_hides_a_real_fault(kw, verdict):
+    rec = dict(_REC, name="Desert Sky Plumbing LLC")
+    v = ca.audit(_biz(rec, dict(_LIST, name="Desert-Sky Plumbing LLC", **kw)))[0]
+    assert v.verdict == verdict and "name" in v.differences
