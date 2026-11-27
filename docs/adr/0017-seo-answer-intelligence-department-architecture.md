@@ -1322,3 +1322,24 @@ hashing or effects. Existing aggregates remain readable and can be finished
 without rehashing under a replacement key. The stored fingerprint is a continuity
 check, not authenticated journal signing or a substitute for key escrow. Tests
 cover wrong-key restart, original-key recovery and changes during processing.
+
+## Amendment — SEO-L7 review response drafter (Nov 27 2026; MVP spec v0.1, Local / Business Profile)
+
+`services/seo-py/src/review_responder.py` drafts the business's reply to one public review and says what must happen
+before it is posted. Deterministic, no LLM, nothing posted. **The inverted default from the start:** the reply is one
+of six vetted wordings chosen only by star band (1-2, 3, 4-5) and whether the vertical is regulated; no word of the
+review, the reviewer's name, the service or any record text ever reaches the reply, so it cannot repeat a health or
+case detail, argue with the reviewer, or carry an injected instruction. Regulated verticals (med spa, dental,
+personal-injury law) and every vertical the module does not know get wordings with no relationship word ("visit",
+"patient", "treatment", "appointment", "case", "see you again" ...); the wordings are checked against the
+relationship and never-say lists at import and in the tests. A suspected fake (one review, account at most 7 days old,
+5 or more same-day reviews from new accounts) gets no reply and goes to the owner for a removal request. Any money or
+claim word routes the review to the owner, except the fixed non-request forms in a 4- or 5-star review. The owner
+approves before posting any review of 3 stars or fewer, any regulated or unknown vertical, any routed review and any
+fake. An unreadable review gets no reply and goes to the owner; only a non-list batch raises ValueError.
+
+Certified on the shared MVP L7 pool (300 reviews per seed; DEV seeds and three cert seeds): every flag, route and
+approval matches the key, no reply holds a detail term, a relationship word or a never-say word. Disclosed: the
+"approve as-is" rate from a blind human grader (spec bar >= 90%) is not measured here; the wordings are short and the
+same for every review of a band, which a human grader may rate below a tailored reply. Business voice is not applied
+(no per-client wording yet; a vetted per-client set in config would be the extension).
