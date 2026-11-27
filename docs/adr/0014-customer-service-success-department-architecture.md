@@ -570,3 +570,8 @@ left one more spelling that made one client two records. The default is inverted
 (the pool's are `client-<hex>`), ASCII letters, digits, `.`, `_` and `-` only, read with case and outer spaces aside;
 anything else refuses the whole replay (ValueError, nothing sent). Wiring must pass the platform's client id, never a
 business name. Phone numbers keep their existing reading (any script's digits folded, a NANP shape required).
+
+AEGIS Inquisitor round 12 on aaee4c9f (RR-F5): events are read as plain data only, as in RR-F2: an event that is not
+a plain `dict`, or a key or value that is not plain text, a number, a boolean or null, refuses the replay; the replay
+works on private copies, so nothing can change between the check and the use (a `str` subclass client id answered
+`strip()` one way when checked and another way when applied).

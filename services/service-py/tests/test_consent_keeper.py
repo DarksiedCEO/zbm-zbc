@@ -591,3 +591,28 @@ def test_two_different_slugs_never_merge():
                                                                          client="acme1"), send(9, sid="a", client="acme-1")])
     assert got[("a", 9)] == ("block", "opted_out")
     assert ck.normalise_client("acme-1") != ck.normalise_client("acme1")
+
+
+# ---------------------------------------------------------------- AEGIS round 12 (Inquisitor, aaee4c9f)
+class _TwoFaced(str):
+    reads = 0
+
+    def strip(self, *a):
+        _TwoFaced.reads += 1
+        return "client-a" if _TwoFaced.reads == 1 else "client-b"
+
+
+@pytest.mark.parametrize("bad", [_TwoFaced("client-a"), b"client-a", ["client-a"]])
+def test_a_client_id_that_is_not_plain_text_refuses(bad):
+    with pytest.raises(ValueError):
+        ck.ConsentKeeper().replay([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 2, text="STOP", client=bad),
+                                   send(3)])
+
+
+def test_an_event_that_is_not_a_plain_dict_or_holds_an_object_refuses():
+    class D(dict):
+        pass
+    with pytest.raises(ValueError):
+        ck.ConsentKeeper().replay([D(ev("opt_in", 1, consent="express_written"))])
+    with pytest.raises(ValueError):
+        ck.ConsentKeeper().replay([ev("opt_in", 1, consent="express_written", extra=object())])

@@ -166,6 +166,7 @@ def _ascii_digits(text: str) -> str:
                    else c for c in text)
 
 
+_PLAIN_EVENT = (str, int, float, bool, type(None))
 _SLUG = re.compile(r"[a-z0-9][a-z0-9._\-]{0,127}")
 
 
@@ -174,8 +175,8 @@ def normalise_client(raw: str) -> str:
     case aside it is read exactly as written, and it must be ASCII letters, digits, ".", "_" and "-" (starting with a
     letter or digit, at most 128). Anything else raises ValueError (AEGIS round 11: ten rounds of folding Unicode
     look-alikes kept leaving one more spelling that made one client two records, so the default is inverted)."""
-    if not isinstance(raw, str):
-        raise ValueError("client_id must be text")
+    if type(raw) is not str:
+        raise ValueError("client_id must be plain text")
     text = raw.strip(" \t").lower() if raw.isascii() else None
     if text is None or not _SLUG.fullmatch(text):
         raise ValueError("client_id must be a plain id: ASCII letters, digits, '.', '_' and '-'")
@@ -290,8 +291,12 @@ class ConsentKeeper:
 
     @staticmethod
     def _validate(e: dict, i: int) -> None:
-        if not isinstance(e, dict):
+        if type(e) is not dict:
             raise ValueError(f"event {i}: not an object")
+        # only plain data is read: a key or value of any other type (a str subclass that answers strip() differently
+        # on a second read) refuses the replay (AEGIS round 12: the inverted default, as in RR-F2)
+        if any(type(k) is not str or type(v) not in _PLAIN_EVENT for k, v in dict.items(e)):
+            raise ValueError(f"event {i}: only plain text, numbers, booleans and null are read")
         kind = e.get("kind")
         if kind not in KINDS:
             raise ValueError(f"event {i}: unknown kind {kind!r}")
@@ -323,6 +328,7 @@ class ConsentKeeper:
         rows = list(events)
         for i, e in enumerate(rows):
             self._validate(e, i)
+        rows = [dict(e) for e in rows]   # a private copy: nothing can change between the check and the use
         seen: set[str] = set()
         for i, e in enumerate(rows):
             if e["kind"] == "send_attempt":
