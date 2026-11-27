@@ -694,7 +694,8 @@ def test_words_inside_a_silence_marker_are_speech():
                                   "Congratulations on the new shop! I need to book a repair, 602 555 0101."])
 def test_a_caller_who_left_a_number_is_called_back(line):
     s = cs.summarize(tr(line, agent=rb("602 555 0101"), yes=True), PACK)
-    assert "No follow-up needed" not in s.text and "Call back at +16025550101" in s.text
+    # round 12: a number given in a sentence with other words fails closed to "check the recording"
+    assert "No follow-up needed" not in s.text and ("Call back at +16025550101" in s.text or "check the recording" in s.text)
 
 
 @pytest.mark.parametrize("line", ["Congratulations on the new shop! I need to book a repair.",
@@ -969,3 +970,48 @@ def test_a_read_back_with_anything_after_the_number_is_not_the_fixed_form():
     s = cs.summarize(tr("I need a repair.", "My number is 602 555 0101.",
                         agent=["Let me confirm: at 602 555 0101 for your landlord."], yes=True), PACK)
     assert s.callback_number is None
+
+
+# ---------------------------------------------------------------- AEGIS round 12 (Inquisitor, 5e05de29)
+@pytest.mark.parametrize("line", ["602 555 0101 stopped working.", "Stop calling 602 555 0101.", "Avoid 602 555 0101.",
+                                  "602 555 0101 got shut off.", "El 602 555 0101 ya lo cancelé."])
+def test_a_number_given_with_any_other_words_is_never_taken_on_a_yes(line):
+    s = cs.summarize(tr("I need a repair.", line, agent=rb("602 555 0101"), yes=True), PACK)
+    assert s.callback_number is None
+
+
+@pytest.mark.parametrize("line", ["My number is 602 555 0101.", "You can reach me at 602.555.0101.",
+                                  "Mi número es 602 555 0101.", "Me pueden llamar al 602 555 0101."])
+def test_a_plainly_given_number_read_back_and_affirmed_is_the_callback(line):
+    s = cs.summarize(tr("I need a repair.", line, agent=rb("602 555 0101"), yes=True), PACK)
+    assert s.callback_number == "+16025550101"
+
+
+def test_a_name_after_my_landlord_far_back_in_the_turn_is_not_the_callers():
+    line = "It's about my landlord, the one who never fixes anything at the building on the corner of Main. Ana Reyes, 602 555 0101."
+    assert cs.summarize(tr("I need a repair.", line, agent=ok("Ana Reyes"), yes=True), PACK).name is None
+
+
+@pytest.mark.parametrize("question", ["What is her name and number?", "Who is the owner?"])
+def test_a_name_given_to_a_question_about_someone_else_is_not_the_callers(question):
+    t = tr("I need a repair.")
+    t["turns"] += [{"speaker": "agent", "confidence": 0.97, "text": question},
+                   {"speaker": "caller", "confidence": 0.95, "text": "It's Ana Reyes, 602 555 0101."},
+                   {"speaker": "agent", "confidence": 0.97, "text": "Let me confirm: Ana Reyes."},
+                   {"speaker": "caller", "confidence": 0.95, "text": "Yes."}]
+    assert cs.summarize(t, PACK).name is None
+
+
+@pytest.mark.parametrize("prev, line", [("Okay. \U0001f64f", "Please hang up and dial 911 right now."),
+                                        ("Okay。", "Please hang up and dial 911 right now."),
+                                        (None, "<b>Please hang up and dial 911 right now.</b>"),
+                                        (None, "Please hang up and dial 9−1−1 right now.")])
+def test_more_formatting_around_the_instruction(prev, line):
+    agent = ([prev] if prev else []) + [line]
+    assert cs.summarize(tr("There's a fire.", agent=agent), PACK).urgency == "emergency"
+
+
+def test_words_under_an_unreadable_label_after_the_read_back_are_never_a_yes():
+    t = tr("I need a repair.", "My number is 602 555 0101.", agent=rb("602 555 0101"), yes=True)
+    t["turns"].append({"speaker": "Caller 2", "confidence": 0.95, "text": "No wait, that's the wrong number."})
+    assert cs.summarize(t, PACK).callback_number is None

@@ -9,7 +9,8 @@ Rules (spec v0.1, the front-desk shared rules, the Nov 26 spec-freeze rulings):
   source. A turn below 0.6 that has words is flagged and never used as a fact. A silent turn carries nothing and is
   not flagged (Nov 26 ruling): silence means re-ask, never guess.
 - A callback number is reported only when the receptionist read it back in the fixed form ("Let me confirm: ...,
-  at 602 555 0101."), the caller gave that number and did not reject it ("not 602 555 0101"), and the caller then
+  at 602 555 0101."), the caller gave that number in a sentence of plain words only and did not reject it ("not 602
+  555 0101", "602 555 0101 stopped working"), and the caller then
   only affirmed (AEGIS round 10). Anything else is no callback, and the summary says to check the recording. The
   caller-side readings (rejections, correction cues, doubt after the number) still run as a second fence.
 - A name is reported only when the caller gave it AND the receptionist confirmed it: the caller says it after a
@@ -282,7 +283,9 @@ def _need(trusted: list[str], pack: dict, emergency: bool, any_words: bool) -> s
 def _unmarked(text: str) -> str:
     """The turn with every quote mark, "¡", invisible format character and wrapping bracket or emphasis mark set aside
     (AEGIS rounds 8-11: „…“, ‹…›, U+200B, "(Please hang up ...)", "*...*")."""
-    return "".join(c for c in text if c not in "\"'¡„‚()[]{}*_" and unicodedata.category(c) not in ("Pi", "Pf", "Cf")).strip()
+    text = re.sub(r"<[^<>]{0,20}>", "", text).replace("。", ".").replace("！", "!")   # "<b>...</b>", "Okay。" (round 12)
+    return "".join(c for c in text if c not in "\"'¡„‚()[]{}*_" and
+                   unicodedata.category(c) not in ("Pi", "Pf", "Cf", "So", "Sk")).strip()   # emoji too
 
 
 def _said_911(agent_text: str, previous: Optional[str] = None) -> Optional[str]:
@@ -294,7 +297,7 @@ def _said_911(agent_text: str, previous: Optional[str] = None) -> Optional[str]:
     CHECK NOW instead of URGENT (AEGIS round 8: neither reading is safe on its own). Otherwise None."""
     # every quote mark and the opening "¡" are formatting wherever they sit (AEGIS rounds 8-9: „…“, ‹…›, ¡"…!")
     text = _unmarked(agent_text)
-    text = re.sub(r"(?<!\d)9[\s.\-‐-―]?1[\s.\-‐-―]?1(?!\d)", "911", text)   # "9 1 1", "9-1-1", "9–1–1"
+    text = re.sub(r"(?<!\d)9[\s.\-‐-―−]?1[\s.\-‐-―−]?1(?!\d)", "911", text)   # "9 1 1", "9-1-1", "9–1–1"
     if not re.search(r"[.!]$", text):
         return None
     text = re.sub(r"[.!]+$", ".", re.sub(r"\s+", " ", text.replace(",", " "))).replace(" .", ".")
@@ -380,6 +383,35 @@ _AFFIRM = re.compile(r"(?:(?:yes|yeah|yep|yup|correct|right|that'?s right|that'?
 _RETRACT = re.compile(r"\b(?:no|not|actually|sorry|misheard|wrong|wait|perd[oó]n|disculpe)\b", re.IGNORECASE)
 
 
+# what may stand beside a callback number in the caller's sentence: the ways the shared pool and ordinary callers give
+# one, a name, greetings and the correction cues. Any other word there ("stopped working", "Stop calling", "Avoid",
+# "got shut off", "ya lo cancelé") means a person must check (AEGIS round 12: the inverted default for rejections)
+_PLAIN_WORDS = re.compile(
+    r"(?:my|the|best|cell|phone|mobile|number|is|it'?s|it|you|can|reach|me|call|back|at|on|text|and|okay|ok|yes|"
+    r"yeah|so|hi|hello|this|i'?m|i|am|my name|name|please|thanks|thank|no|wait|sorry|perd[oó]n|mi|n[uú]mero|es|"
+    r"ll[aá]m(?:e|en)me|al|el|me|puede|pueden|llamar|llamarme|soy|habla|muy|bien|bueno|hola|s[ií]|y|gracias|por|favor|"
+    r"actually|mean|mejor|quiero|decir)",
+    re.IGNORECASE)
+
+
+def _only_plainly_given(number: str, trusted: list[str], names: Optional[list[str]] = None) -> bool:
+    """Every trusted caller sentence that holds ``number`` holds nothing else but plain words, names and numbers."""
+    seen = False
+    for x in trusted:
+        for sentence in re.split(r"[!?\n]|\.(?!\d)", _fold(x)):     # "602.555.0101" stays one number
+            nums = ["+1" + "".join(m.groups()) for m in _NUM.finditer(sentence)]
+            if number not in nums:
+                continue
+            seen = True
+            rest = _NUM.sub(" ", sentence)
+            for n in names or ():           # the caller's own name, as read
+                rest = re.sub(rf"(?<!\w){re.escape(n)}(?!\w)", " ", rest, flags=re.IGNORECASE)
+            words = re.findall(r"[^\W\d_][\w']*", rest)
+            if any(not _PLAIN_WORDS.fullmatch(w) for w in words):
+                return False
+    return seen
+
+
 def _clean_confirmation(text: str) -> bool:
     """A read-back with no question and nothing taken back in it ("Actually no, I misheard"; AEGIS round 10)."""
     return "?" not in text and "¿" not in text and not _RETRACT.search(text)
@@ -387,8 +419,9 @@ def _clean_confirmation(text: str) -> bool:
 
 def _affirmed(ordered: list, i: int) -> bool:
     """After turn ``i`` the caller said something, and everything the caller said was an affirmation."""
-    later = [(c, x) for sp, c, x in ordered[i + 1:] if sp == "caller" and x.strip()]
-    # a low-confidence "Yes." is never a fact, so it affirms nothing (AEGIS round 11)
+    later = [(c, x) for sp, c, x in ordered[i + 1:] if sp in ("caller", "unknown") and x.strip()]
+    # a low-confidence "Yes." is never a fact, so it affirms nothing (AEGIS round 11); words under a speaker label it
+    # cannot read after the read-back are never a yes either (round 12)
     return bool(later) and all(c >= LOW_CONFIDENCE and _AFFIRM.fullmatch(_fold(x).strip()) for c, x in later)
 
 
@@ -402,6 +435,14 @@ _OPENS_SENTENCE = re.compile(r"\s*(?:(?:hi|hello|hey|yes|yeah|okay|ok|and|so|wel
 def _lead_prefix(m: re.Match) -> str:
     """The text of the lead-in's own sentence before the lead-in word ("Okay, and " in "Okay, and I'm Ana Reyes")."""
     return re.split(r"[.!?\n]", m.string[:m.start()])[-1]
+
+
+# the turn that gives the name speaks of someone else ("my landlord ... Ana Reyes"), or the receptionist asked about
+# someone else ("What is her name?", "Who is the owner?"): never the caller's own name (AEGIS round 12)
+_THIRD_PARTY = re.compile(r"\b(?:my|his|her|their|our|mi|su|sus)\b(?!\s+(?:name|number|n[uú]mero|nombre|phone|cell|"
+                          r"tel[eé]fono|celular|appointment|cita))|\b(?:landlord|tenant|owner|boss|wife|husband|"
+                          r"mother|father|son|daughter|friend|neighbou?r|due[nñ]o|jefe|esposa|esposo)\b", re.IGNORECASE)
+_ASKS_OTHER = re.compile(r"\b(?:her|his|their|owner|whose|who|landlord|tenant|su|due[nñ]o|qui[eé]n)\b", re.IGNORECASE)
 
 
 def _names(trusted: list[str], confirmations: Optional[list[str]] = None) -> list[str]:
@@ -457,12 +498,13 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
         if not isinstance(t, dict) or not isinstance(t.get("text", ""), str):
             raise ValueError("every turn needs a text")
         speaker = t.get("speaker")
-        if type(speaker) is str and speaker.strip().casefold() == "caller":
+        if type(speaker) is str and speaker.strip().rstrip(":").strip().casefold() == "caller":
             speaker = "caller"         # "Caller" is the caller; the receptionist label stays exact (AEGIS round 6)
         if speaker not in ("caller", "agent"):
             notes.append("unknown_speaker_ignored")   # never read as the receptionist (AEGIS F3 round 4)
             if (t.get("text") or "").strip():
                 unknown_text.append(t.get("text"))  # never a fact, but never "nothing said" either (round 8)
+                ordered.append(("unknown", Fraction(0), t.get("text")))   # ... and never a yes (round 12)
             continue
         (caller if speaker == "caller" else agent).append((_confidence(t.get("confidence")), t.get("text") or ""))
         ordered.append((speaker, _confidence(t.get("confidence")), t.get("text") or ""))
@@ -491,6 +533,17 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
         if not at or not _affirmed(ordered, at[-1]):     # and a "yes" must come (AEGIS round 10)
             name = None
             notes.append("name_denied")
+    if name:                           # someone the caller speaks of, not the caller (AEGIS round 12)
+        for i, (sp, c, x) in enumerate(ordered):
+            at_name = re.search(rf"(?<!\w){re.escape(name)}(?!\w)", _fold(x))
+            if sp != "caller" or not at_name:
+                continue
+            x = _fold(x)[:at_name.end()]   # what the caller said up to the name
+            prev_agent = next((y for sp2, _, y in reversed(ordered[:i]) if sp2 == "agent" and y.strip()), "")
+            if _THIRD_PARTY.search(_fold(x)) or _ASKS_OTHER.search(_fold(prev_agent)):
+                name = None
+                notes.append("name_of_someone_else")
+            break
     if len(names) > 1:
         notes.append("ambiguous_name:" + "|".join(names))
 
@@ -519,6 +572,7 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
                 len(nums) == 1:
             read_back = (nums.pop(), i)
     if read_back and read_back[0] in said_numbers and read_back[0] not in rejected_numbers and \
+            _only_plainly_given(read_back[0], trusted, _names(trusted)) and \
             _affirmed(ordered, read_back[1]) and \
             (callback == read_back[0] or (callback is None and "ambiguous_number" not in notes)):
         # a caller-side doubt (an uncompletable correction, doubt after the number) is never overridden (round 11)
