@@ -128,15 +128,16 @@ test-verification round 4 (same subject) confirmed the round-3 fixes and found t
 Counterfeit ran late against the round-1 commit. Its two HIGH findings (the held-out seed readable from ids, and ids
 that gave the answer away) were already fixed by round 2. Its oracle-blindness finding was fixed by the type-strict,
 fully re-derived oracles of rounds 2-4. The two remaining gaps are fixed here:
-- **Fixture safety** (reworked after AEGIS test-verification on b76b94f2 found two High bypasses: a JSON-escaped
-  newline or an unusual separator hid a real number, and a second address after the first, or a `www.`, bare,
-  `//` or `ftp://` address, hid a real host). The checks now read every rendered value decoded from JSON, never the
-  raw text. A number is any run of digit groups joined by up to three non-alphanumeric characters, in any Unicode
-  digit form, and every 7-, 10- or 11-digit span of whole groups must be in 555-0100..0199. A host is any
-  domain-shaped token anywhere in a value and must be reserved (`.test` or `example.com`); IP literals, email
-  addresses and SSN shapes fail outright. Generated id fields are the only exemption from the number scan, and
-  each must match the id shape exactly. Every bypass the review found is now a test case. Not detected, by
-  construction (disclosed): numbers spelled in words, and hosts written with spaces or `[.]`.
+- **Fixture safety** (reworked after two AEGIS test-verification passes, on b76b94f2 and 2cb71287). Every rendered
+  file must be JSON lines; each line is parsed, duplicate keys are refused, and every string, JSON number and dict
+  key is checked after NFKC normalisation. Numbers: any run of digit groups joined by up to five non-alphanumeric
+  characters; every 7/10/11-digit span that is a dialable North American number must be in 555-0100..0199, and any
+  13-19 digit span passing the Luhn check (a card shape) fails. Hosts: every domain-shaped token in any script, and
+  every host after `scheme://` (localhost, IPv6 and integer IPs included), must be `.test` or `example.com`. IPv4
+  literals, email addresses and SSN shapes fail outright. Generated id fields are exempt from the number scan only
+  and must match their field's exact generated shape. Every bypass either review found is a test case; 43 seeds
+  scan clean. Not detected, by construction (disclosed): numbers in words; hosts written with spaces or `[.]`; an
+  SSN or 12-digit number with no separators; and digits inside a correctly shaped generated id (hash output).
 - **`build verify`** now fails when no dev seed is pinned, or when a seed's pins do not name exactly the generated
   files. It still proves the output has not drifted from the pins, not that the pins are right; the oracles do that.
 

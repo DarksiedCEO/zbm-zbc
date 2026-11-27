@@ -11,14 +11,15 @@ import re
 import sys
 import unicodedata
 import unittest
+import urllib.parse
 from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from poolgen import build, call_bank, common, oracle, pool_b
-from poolgen.verticals import VERTICAL_IDS, VERTICALS
+from poolgen import build, call_bank, common, oracle, pool_b  # noqa: E402 (after the sys.path insert)
+from poolgen.verticals import VERTICAL_IDS, VERTICALS  # noqa: E402
 
 SEED = "dev-a"
 WORLD, BKEY = pool_b.generate(SEED)
@@ -89,68 +90,124 @@ class Determinism(unittest.TestCase):
 
 
 class FixtureSafety(unittest.TestCase):
-    """Every rendered value is fictional: phones in 555-0100..0199, hosts reserved, no email or SSN shapes.
+    """Every rendered value is fictional: phones in 555-0100..0199, hosts reserved, no IP, email, SSN or card shapes.
 
-    The checks read DECODED values (every file is JSON lines, parsed), never the raw text, so a JSON escape such as
-    "\n" in front of a number cannot hide it (AEGIS test-verification on b76b94f2, High 1). A number is any run of
-    digit groups joined by up to three non-alphanumeric characters (any space, dash, dot, slash, underscore,
-    bracket or plus), in any Unicode digit form; every 7-, 10- or 11-digit span of whole groups is checked, so a
-    number next to other numbers or an extension is still seen (a 7-digit local span must end in a 4-digit group,
-    so "1-602-555" inside a fictional "+1-602-555-0117" is not read as a local number). A host is any domain-shaped token anywhere in a
-    value, so a second address hidden after the first, "www." or bare forms, "//host" and other schemes are all
-    read (High 2). Generated id fields are the one exemption: they must match the id shape exactly, and only the
-    phone scan skips them (their hex can look like digits).
-    Residual, by construction: numbers spelled in words, and hosts written with spaces or "[.]", are not detected."""
+    What is read (AEGIS test-verification on b76b94f2 and 2cb71287): every file is JSON lines and every line is
+    parsed, refusing duplicate keys; every string, number and dict key is checked, after NFKC normalisation (so
+    fullwidth, circled and superscript digits and fullwidth dots read as plain ones). Never the raw text, so a JSON
+    escape such as "\n" in front of a number cannot hide it. A JSON number is checked for 10- and 11-digit phones and
+    card shapes; a 7-digit JSON number is a count or a time, not a local phone.
+    Numbers: any run of digit groups joined by up to five non-alphanumeric characters; every 7-, 10- or 11-digit span
+    of whole groups that is a dialable North American number (area code and exchange start 2-9) must be in
+    555-0100..0199 (a 7-digit local span must end in a 4-digit group, so "1-602-555"
+    inside a fictional "+1-602-555-0117" is not read as a local number). Any 13- to 19-digit span that passes the
+    Luhn check is a card shape and fails.
+    Hosts: every domain-shaped token (any script) and every host after a "scheme://" must be reserved (".test" or
+    "example.com"), so a second address, "www." and bare forms, "//host", "localhost", IPv6 and integer IPs are read.
+    IPv4 literals (a sentence-final dot included), any email address and SSN shapes fail outright.
+    Generated id fields are the one exemption, from the number scan only: each must match its field's exact
+    generated shape (prefix and hex length), so an arbitrary value such as "lead-2138675309" fails.
+    Residual, by construction: numbers spelled in words; hosts written with spaces or "[.]"; an SSN or a 12-digit
+    number written with no separators; and a value in an id field with exactly the generated shape whose hex happens
+    to contain digits (hash output, not something the generator could copy from a real record)."""
 
-    ID_FIELDS = frozenset({"business_id", "call_id", "case_id", "citation_id", "client_id", "hidden_effect_lead_ids",
-                           "lead_id", "lead_ids", "missed_call_id", "page_id", "pair_id", "request_id", "review_id",
-                           "send_id", "transcript_id"})
-    ID_SHAPE = re.compile(r"[a-z][a-z0-9]*(?:-[a-z]+)*-[0-9a-f]{8,16}(?:-L\d{3})?")
+    HEX16 = r"[0-9a-f]{16}"
+    ID_SHAPES = {
+        "business_id": rf"(?:svc|loc|sync)-{HEX16}", "call_id": rf"call-{HEX16}", "case_id": rf"xfer-{HEX16}",
+        "citation_id": rf"cit-{HEX16}", "client_id": rf"client-{HEX16}", "missed_call_id": rf"mc-{HEX16}",
+        "page_id": rf"page-{HEX16}", "pair_id": rf"pair-{HEX16}", "request_id": rf"revreq-{HEX16}",
+        "review_id": rf"rev-[0-9a-f]{{10}}|rev7-{HEX16}", "send_id": rf"send-client-{HEX16}",
+        "transcript_id": rf"tr-{HEX16}", "lead_id": rf"svc-{HEX16}-L\d{{3}}", "lead_ids": rf"svc-{HEX16}-L\d{{3}}",
+        "hidden_effect_lead_ids": rf"svc-{HEX16}-L\d{{3}}",
+    }
+    ID_FIELDS = frozenset(ID_SHAPES)
     DIRECTORY_PATH = re.compile(r"(/biz/)[0-9a-f]{8}$")      # the directory's listing id in a citation URL
-    CHAIN = re.compile(r"\d+(?:[\W_]{1,3}\d+)*")
+    CHAIN = re.compile(r"\d+(?:[\W_]{1,5}\d+)*")
     GROUP = re.compile(r"\d+")
-    DOMAIN = re.compile(r"(?<![\w-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}(?![\w-])",
-                        re.IGNORECASE)
-    IPV4 = re.compile(r"(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?![\d.])")
-    EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
-    SSN = re.compile(r"(?<!\d)\d{3}[\W_]{1,3}\d{2}[\W_]{1,3}\d{4}(?!\d)")
+    DOMAIN = re.compile(r"(?<![^\W_])(?<!-)(?:[^\W_](?:[\w-]{0,61}[^\W_])?\.)+[^\W\d_][\w-]{0,61}[^\W_](?![^\W_])(?!-)")
+    SCHEME_URL = re.compile(r"[a-z][a-z0-9+.-]*://[^\s\"'<>]*", re.IGNORECASE)
+    IPV4 = re.compile(r"(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?!\d)(?!\.\d)")
+    EMAIL = re.compile(r"[\w.+-]+@[\w.-]+")
+    SSN = re.compile(r"(?<!\d)\d{3}[\W_]{1,5}\d{2}[\W_]{1,5}\d{4}(?!\d)")
+
+    @classmethod
+    def id_ok(cls, key: str, value: str) -> bool:
+        return re.fullmatch(cls.ID_SHAPES[key], value) is not None
+
+    @staticmethod
+    def _no_duplicate_keys(pairs):
+        keys = [k for k, _ in pairs]
+        if len(keys) != len(set(keys)):
+            raise ValueError(f"duplicate key in {keys}")
+        return dict(pairs)
 
     @staticmethod
     def _strings(obj, key=""):
+        """Every string, number and dict key, as (field, text). A key is checked as text of its own field."""
         if isinstance(obj, dict):
             for k, v in obj.items():
+                yield "", k
                 yield from FixtureSafety._strings(v, k)
         elif isinstance(obj, list):
             for v in obj:
                 yield from FixtureSafety._strings(v, key)
         elif isinstance(obj, str):
             yield key, obj
+        elif isinstance(obj, (int, float)) and not isinstance(obj, bool):
+            yield "#" + key, str(obj)          # "#": a JSON number, where a 7-digit value is a count or a time
 
     def _values(self, files):
         for name, text in files.items():
             self.assertTrue(name.endswith(".jsonl"), f"{name}: only JSON lines are scanned, so nothing else may ship")
             for n, line in enumerate(text.splitlines(), 1):
                 if line.strip():
-                    for key, value in self._strings(json.loads(line)):
+                    row = json.loads(line, object_pairs_hook=self._no_duplicate_keys)
+                    for key, value in self._strings(row):
                         yield f"{name}:{n}:{key}", key, value
 
     @classmethod
     def numbers(cls, text: str):
         """Every 7-, 10- or 11-digit span of whole digit groups, as "+1" plus 10 digits or the bare 7 digits."""
         for chain in cls.CHAIN.finditer(text):
-            groups = ["".join(str(unicodedata.digit(c)) for c in g) for g in cls.GROUP.findall(chain.group())]
+            groups = cls.GROUP.findall(chain.group())
             for i in range(len(groups)):
                 span = ""
                 for g in groups[i:]:
                     span += g
                     if len(span) > 11:
                         break
-                    if len(span) == 11 and span[0] == "1":
+                    if len(span) == 11 and span[0] == "1" and cls._nanp(span[1:]):
                         yield "+" + span
-                    elif len(span) == 10:
+                    elif len(span) == 10 and cls._nanp(span):
                         yield "+1" + span
-                    elif len(span) == 7 and len(g) in (4, 7):    # a local number ends in its 4-digit line
+                    elif len(span) == 7 and len(g) in (4, 7) and span[0] in "23456789":
+                        yield span                                 # a local number ends in its 4-digit line
+
+    @staticmethod
+    def _nanp(ten: str) -> bool:
+        """Area code and exchange both start 2-9: anything else is not a dialable North American number."""
+        return ten[0] in "23456789" and ten[3] in "23456789"
+
+    @classmethod
+    def cards(cls, text: str):
+        for chain in cls.CHAIN.finditer(text):
+            groups = cls.GROUP.findall(chain.group())
+            for i in range(len(groups)):
+                span = ""
+                for g in groups[i:]:
+                    span += g
+                    if len(span) > 19:
+                        break
+                    if len(span) >= 13 and cls._luhn(span):
                         yield span
+
+    @staticmethod
+    def _luhn(digits: str) -> bool:
+        total = 0
+        for i, c in enumerate(reversed(digits)):
+            d = int(c) * (2 if i % 2 else 1)
+            total += d - 9 if d > 9 else d
+        return total % 10 == 0
 
     @staticmethod
     def fictional_number(number: str) -> bool:
@@ -167,13 +224,27 @@ class FixtureSafety(unittest.TestCase):
     @classmethod
     def hosts(cls, text: str):
         yield from (m.group().lower() for m in cls.DOMAIN.finditer(text))
+        for url in cls.SCHEME_URL.findall(text):
+            try:
+                host = urllib.parse.urlsplit(url.replace("\\", "/")).hostname
+            except ValueError:
+                host = None
+            if url.lower().startswith(("http:", "https:", "ftp:", "ws:", "wss:")) or host:
+                yield (host or "").lower()          # an unreadable or empty host is not reserved either
 
     @classmethod
     def offending(cls, key: str, value: str) -> list:
         """Everything in one decoded value that is not fictional, empty when the value is safe."""
-        bad = [n for n in cls.numbers(cls.phone_text(key, value)) if not cls.fictional_number(n)]
-        bad += [h for h in cls.hosts(value) if not common.is_fixture_domain(h)]
-        bad += cls.IPV4.findall(value) + cls.EMAIL.findall(value) + cls.SSN.findall(cls.phone_text(key, value))
+        value = unicodedata.normalize("NFKC", value).replace("。", ".").replace("｡", ".")
+        bad = []
+        if key in cls.ID_FIELDS and not cls.id_ok(key, value):
+            bad.append(f"not a generated {key}")
+        digits = cls.phone_text(key, value)
+        bad += [n for n in cls.numbers(digits) if not cls.fictional_number(n)
+                and not (key.startswith("#") and len(n) == 7)]
+        bad += list(cls.cards(digits))
+        bad += [h or "(no host)" for h in cls.hosts(value) if not (h and common.is_fixture_domain(h))]
+        bad += cls.IPV4.findall(value) + cls.EMAIL.findall(value) + cls.SSN.findall(digits)
         return bad
 
     def test_every_rendered_value_is_fictional(self):
@@ -187,7 +258,7 @@ class FixtureSafety(unittest.TestCase):
         for where, key, value in self._values(build.render(SEED)):
             if key in self.ID_FIELDS:
                 seen.add(key)
-                self.assertRegex(value, rf"^{self.ID_SHAPE.pattern}$", where)
+                self.assertTrue(self.id_ok(key, value), f"{where}: {value!r}")
         self.assertEqual(seen, self.ID_FIELDS)        # an exemption nothing uses is removed, not left open
 
     def test_the_scan_catches_what_review_slipped_past_it(self):
@@ -203,19 +274,56 @@ class FixtureSafety(unittest.TestCase):
                   "see https://good.test\nhttps://realbiz.com", "www.realbiz.com", "realbiz.com/menu",
                   "//realbiz.com", "ftp://realbiz.com", "https://x.test@realbiz.com/", "https://realbiz.com#.test/",
                   "https://realbiz.com?x=.test/", "https://realbiz.com\\.test/", "REALBIZ.COM",
-                  "http://8.8.8.8/", "a@realbiz.com", "mailto:a@shop.test", "123-45-6789", "123 45 6789"]
+                  "http://8.8.8.8/", "a@realbiz.com", "mailto:a@shop.test", "123-45-6789", "123 45 6789",
+                  # found by the 2cb71287 pass
+                  "my server is 8.8.8.8.", "213    867    5309", "213     867     5309", "r\u00e9albiz.com",
+                  "realbiz\u3002com", "realbiz\uff0ecom", "realbiz.com_", "_realbiz.com", "http://localhost/",
+                  "a@localhost", "http://[2001:db8::1]/", "http://134744072/", "4111 1111 1111 1111",
+                  "4111-1111-1111-1111", "\u2461\u2460\u2462 \u2467\u2465\u2466 \u2464\u2462\u2460\u2468",
+                  "\u00b2\u00b9\u00b3\u2078\u2076\u2077\u2075\u00b3\u2070\u2079", "12 213 867 5309",
+                  "8675309", "myexample.com", "realbiztest.com", "notexample.com", "123  45  6789"]
         for form in unsafe:
             with self.subTest(form=form):
                 line = common.canonical_json({**row, "note": form})
                 found = [b for _, key, value in self._values({name: line}) for b in self.offending(key, value)]
                 self.assertTrue(found, form)
         safe = ["213-555-0142", "+12135550100", "+1 (213) 555-0199", "555-0156", "https://shop-1.test/book",
-                "www.example.com", "$1,500 per month", "2026-12-25", "08:00-17:00", "Suite 210"]
+                "www.example.com", "$1,500 per month", "2026-12-25", "08:00-17:00", "Suite 210",
+                "shop.example.com", "a.b.test", "1795777200", "version 1.2.3", "Unit 2. 555-0101 is ours."]
         for form in safe:
             with self.subTest(form=form):
                 line = common.canonical_json({**row, "note": form})
                 self.assertEqual([b for _, key, value in self._values({name: line})
                                   for b in self.offending(key, value)], [], form)
+
+    def test_the_scan_reads_numbers_keys_duplicates_and_id_fields(self):
+        """Not only string values: JSON numbers, dict keys, a value shadowed by a duplicate key, and an id field whose
+        value is not the generated shape (AEGIS 2cb71287 High 1 and 2)."""
+        name, text = next(iter(build.render(SEED).items()))
+        row = json.loads(text.splitlines()[0])
+        good_lead = "svc-0123456789abcdef-L001"
+        self.assertEqual([b for _, key, value in self._values({name: common.canonical_json({**row, "lead_id": good_lead})})
+                          for b in self.offending(key, value)], [])
+        lines = [common.canonical_json({**row, "phone_number": 2138675309}),
+                 common.canonical_json({**row, "2138675309": "x"}),
+                 common.canonical_json({**row, "realbiz.com": "x"}),
+                 common.canonical_json({**row, "lead_id": "lead-2138675309"}),
+                 common.canonical_json({**row, "lead_id": "svc-2138675309"}),
+                 common.canonical_json({**row, "lead_id": good_lead + " 213 867 5309"}),
+                 common.canonical_json({**row, "lead_id": good_lead + "\n"}),
+                 common.canonical_json({**row, "client_id": "client-0123456789abcde"}),
+                 common.canonical_json({**row, "lead_ids": [good_lead, "svc-2138675309"]}),
+                 common.canonical_json({**row, "card": 4111111111111111}),
+                 common.canonical_json(row)[:-1] + ',"note":"213 867 5309","note":"x"}']
+        for line in lines:
+            with self.subTest(line=line[-60:]):
+                try:
+                    found = [b for _, key, value in self._values({name: line}) for b in self.offending(key, value)]
+                except ValueError:
+                    found = ["refused"]
+                self.assertTrue(found, line)
+        with self.assertRaises(AssertionError):                 # a file that is not JSON lines is refused
+            list(self._values({"notes.txt": "213 867 5309"}))
 
     def test_the_fictional_range_is_exactly_0100_to_0199(self):
         for number, ok in (("+12135550100", True), ("+12135550199", True), ("+12135550099", False),
