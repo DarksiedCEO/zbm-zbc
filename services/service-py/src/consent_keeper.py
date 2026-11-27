@@ -64,6 +64,7 @@ import channels
 KINDS = ("opt_in", "inbound_sms", "carrier_opt_out", "number_reassigned", "staff_review", "send_attempt")
 MESSAGE_CLASSES = ("informational", "marketing")
 # Within one instant: consent first, then what a person said, then hard suppression, then sends.
+T_LIMIT = 10 ** 18                            # event times are within ±T_LIMIT
 _ORDER = {"opt_in": 0, "staff_review": 0, "inbound_sms": 1, "carrier_opt_out": 2, "number_reassigned": 2,
           "send_attempt": 3}
 # Replies known to be harmless; anything else an inbound text says blocks until a person reviews it. Read after NFKC,
@@ -265,11 +266,15 @@ def opt_out_reading(text: str) -> Optional[str]:
     return "unrecognised_reply"       # free text a person must read: blocks until a staff_review clears it
 
 
-# a whole reply one edit (a letter missing, added, swapped or changed) away from "stop", read with every invisible
-# and every character that is not a letter or digit removed and leet digits as letters; the classifier skips words
+# a whole reply one edit (a letter missing, added, swapped or changed) away from "stop", read after NFKD with every
+# invisible, every accent (combining mark) and every character that is not a letter or digit removed, leet digits
+# as letters, and the Cyrillic and Greek look-alikes of s, t, o and p as those letters; the classifier skips words
 # under four letters, so these are read here (a reviewer could otherwise clear a STOP typo as "not an opt-out").
-# Over-blocks "top", "shop", "step" ... as the whole reply: disclosed, a person reads them anyway
-_LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "$": "s", "@": "a"})
+# Over-blocks "top", "shop", "step" ... as the whole reply: disclosed, a person reads them anyway. Look-alikes of
+# other letters, from other scripts, are not mapped (disclosed).
+_LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "$": "s", "@": "a",
+                       "\u0455": "s", "\u0442": "t", "\u043e": "o", "\u0440": "p",      # Cyrillic ѕ т о р
+                       "\u03c4": "t", "\u03bf": "o", "\u03c1": "p"})                   # Greek τ ο ρ
 
 
 def _within_one_edit(a: str, b: str) -> bool:
@@ -284,8 +289,8 @@ def _within_one_edit(a: str, b: str) -> bool:
 
 
 def _near_stop(text: str) -> bool:
-    key = "".join(c for c in unicodedata.normalize("NFKC", _strip_invisible(text)).casefold().translate(_LEET)
-                  if c.isalnum())
+    key = "".join(c for c in unicodedata.normalize("NFKD", _strip_invisible(text)).casefold().translate(_LEET)
+                  if c.isalnum() and not unicodedata.combining(c))
     return 2 < len(key) < 6 and _within_one_edit(key, "stop")
 
 
@@ -343,7 +348,7 @@ class ConsentKeeper:
             raise ValueError(f"event {i}: unknown kind {kind!r}")
         if not isinstance(e.get("t"), int) or isinstance(e.get("t"), bool):
             raise ValueError(f"event {i}: t must be an integer")
-        if not -10 ** 18 <= e["t"] <= 10 ** 18:
+        if not -T_LIMIT <= e["t"] <= T_LIMIT:
             raise ValueError(f"event {i}: t is out of range")   # checked before anything is applied (queue round 3)
         if not isinstance(e.get("client_id"), str) or not e["client_id"]:
             raise ValueError(f"event {i}: client_id is required")

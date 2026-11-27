@@ -200,3 +200,22 @@ def test_opt_out_ruling_is_lifted_only_by_new_written_consent():
     event, _ = rq.review_event(h, rq.pending(h)[0].item_id, "Dana Ortiz", "opt_out")
     assert decide(h + [event, sms(20, "hello")]).reason == "opted_out"
     assert decide(h + [event, opt_in(t=30)]).decision == "allow"
+
+
+@pytest.mark.parametrize("text", ["śtp", "st́p", "śtp", "ѕtp", "ѕtор", "sτop", "stοp", "S̈TOP"])
+def test_an_accented_or_look_alike_stop_typo_is_never_queued(text):
+    h = [opt_in(), sms(5, text)]
+    assert rq.pending(h) == [] and decide(h).reason in ("possible_opt_out", "opted_out")
+
+
+def test_a_history_at_the_last_time_is_still_listed_but_cannot_be_reviewed():
+    h = [opt_in(), sms(ck.T_LIMIT, "what time do you open?")]
+    items = rq.pending(h)
+    assert len(items) == 1 and items[0].replies == ((ck.T_LIMIT, "what time do you open?"),)
+    with pytest.raises(ValueError):
+        rq.review_event(h, items[0].item_id, "Dana Ortiz", "not_an_opt_out")
+
+
+def test_the_probe_sees_a_reply_at_the_same_time_as_a_history_send():
+    h = [opt_in(), send(5, "s1"), sms(5, "what time do you open?")]
+    assert len(rq.pending(h)) == 1

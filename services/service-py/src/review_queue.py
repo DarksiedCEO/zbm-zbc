@@ -5,7 +5,8 @@ fixture-only; nothing is sent, and nothing here decides a send: the consent keep
 
 Rules:
 - The queue is read from the keeper itself, never from its own rules: for every (client, number) that ever sent an
-  inbound text, a probe send is replayed after the last event, and only a record the keeper blocks for
+  inbound text, a probe send is replayed at the last event's time (the keeper reads a send after every other event
+  at its time, and the probes come last), and only a record the keeper blocks for
   ``unrecognised_reply`` (a free-text reply nobody has read) is queued. A record blocked for anything stronger (an
   opt-out, a possible opt-out, a carrier block, a reassignment) is never queued: no review can clear it.
 - An item shows every inbound reply for that record since the last event that cleared it (an earlier review, new
@@ -17,7 +18,8 @@ Rules:
   when its own unread replies still have that digest: a reply recorded later, even with an earlier time, changes the
   digest and the ruling clears nothing, so a ruling can never clear a reply its reviewer did not read. (A reply timed
   before the record's latest written consent is not unread at all: the consent cleared it, as new consent after STOP
-  restores texting, and it is not in the digest.) The review is timed after the newest event in the history, the reviewer must have
+  restores texting, and it is not in the digest.) The review is timed after the newest event in the history (a history that already reaches the keeper's last
+  time, 10**18, cannot be reviewed: ValueError), the reviewer must have
   a readable name in plain text (the keeper's own rule), and the ruling is ``not_an_opt_out`` (clears the hold) or
   ``opt_out`` (records an opt-out; as after STOP, only new express written consent lifts it).
 - Every ruling is kept as a plain audit row (who, when, which replies, which ruling); the history plus the review
@@ -78,7 +80,7 @@ def pending(events: object) -> list[QueueItem]:
                 records.append(key)
     if not records:
         return []
-    probes = [{"kind": "send_attempt", "t": last_t + 1, "client_id": c, "number": n,
+    probes = [{"kind": "send_attempt", "t": last_t, "client_id": c, "number": n,
                "send_id": f"review-queue-probe-{j}", "message_class": "informational"}
               for j, (c, n) in enumerate(records)]
     taken = {e.get("send_id") for e in rows if e["kind"] == "send_attempt"}
@@ -111,6 +113,8 @@ def review_event(events: object, item_id: str, reviewer: object, ruling: str) ->
     if item is None:
         raise StaleItem("that item is not in the queue as listed: list the queue again and re-read it")
     t = max(e["t"] for e in rows) + 1        # after everything the reviewer could have seen
+    if t > ck.T_LIMIT:
+        raise ValueError("the history already reaches the keeper's last time: no review can be timed after it")
     event = {"kind": "staff_review", "t": t, "client_id": item.client_id, "number": item.number,
              "reviewer": reviewer, "ruling": ruling, "seen": item.item_id}
     ck.ConsentKeeper().replay(rows + [event])    # the keeper accepts it, or this raises

@@ -578,7 +578,7 @@ works on private copies, so nothing can change between the check and the use (a 
 
 **RR-F5 review queue (Nov 27 2026, Andre's approval).** `services/service-py/src/review_queue.py` lists the replies the
 keeper holds for `unrecognised_reply` and turns a named reviewer's ruling into the keeper's `staff_review` event. The
-queue reads the keeper itself (a probe send per record, replayed after the last event), never its own copy of the
+queue reads the keeper itself (a probe send per record, replayed at the last event's time, after every other event at that time), never its own copy of the
 rules, so a record held for anything stronger is never queued. An item shows every unread reply for its record, and
 a ruling is accepted only while the item is exactly what was listed: a reply that arrived after the reviewer opened
 it makes the ruling stale (`StaleItem`), and the keeper's `seen` digest (below) makes sure a ruling never clears a
@@ -605,3 +605,10 @@ AEGIS review-queue round 3 (Nov 27 2026): an event time outside ±10^18 refuses 
 from "stop" once invisibles and everything but letters and digits are removed and leet digits are read as letters
 ("s\u200btp", "5tp", "s.t.p"); it over-blocks "top", "shop", "step" as the whole reply (disclosed: a person reads
 them anyway, and new written consent restores texting).
+
+AEGIS review-queue round 4 (Nov 27 2026): an accent on a letter ("s\u0301tp") had survived NFKC as one letter, so a
+review could clear a STOP typo; the short-typo rule now reads after NFKD with every accent removed, and reads the
+Cyrillic and Greek look-alikes of s, t, o and p as those letters (other look-alikes are not mapped: disclosed). A
+history with an event at the keeper's last time (10^18) is still listed: the queue's probes are timed at the last
+event, which the keeper reads after every other event at that time; a ruling on such a history refuses with a
+ValueError, since no review can be timed after it.
