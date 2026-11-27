@@ -734,3 +734,8 @@ answerer (`answered_after_hang_up:<id>`). "Never raises" is narrowed to "never r
 AEGIS round 6 (Nov 27 2026, Inquisitor on ef583a20): no High. Review, fixed: `resolve` played a fixed "Urgent: " line
 for a case whose `urgent` was not exactly `True`; an "Urgent: " line now plays only for such a case, and a plain line
 only for one that is not. Regression tests: "AEGIS round 6".
+
+AEGIS Inquisitor round 7b on 6ad32849 (RR-F4): only plain types count inside a case too: the on-call order must be a
+`list` or `tuple` (no subclass), an id a plain `str` or `int`, the ring timeout a plain `int`; anything else is
+unreadable and fails closed (nobody rung, 30 s). A late answer is now logged (`answered_after_hang_up:<id>`) also
+when someone else answered live. The round-7 fuzz (40,000 cases) and urgency grid replay clean.

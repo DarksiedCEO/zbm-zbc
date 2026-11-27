@@ -414,3 +414,45 @@ def test_a_line_made_for_the_other_urgency_is_rejected_as_documented():
             "staff_behavior": {"staff-a": "answers"}, "urgent": False}
     o = tr.resolve(case, whisper=tr.whisper_line(None, "repair", urgent=True))
     assert (o.whisper_played, "whisper_rejected" in o.notes) == (False, True)
+
+
+# ---------------------------------------------------------------- AEGIS round 7 (Inquisitor, 6ad32849)
+class _ListLies(list):
+    def __iter__(self):
+        return iter(["intruder-8"])
+
+
+class _StrLies(str):
+    def strip(self, *a):
+        return "ghost-7"
+
+
+class _IntLies(int):
+    def __str__(self):
+        return "intruder-7"
+
+    def __gt__(self, other):
+        return False
+
+
+def _base(**kw):
+    c = {"case_id": "c", "in_business_hours": True, "on_call_order": ["staff-a"],
+         "staff_behavior": {"staff-a": "answers"}}
+    c.update(kw)
+    return c
+
+
+def test_nested_objects_cannot_ring_someone_not_on_call_or_stretch_the_30_s():
+    assert tr.plan(_base(on_call_order=_ListLies(["staff-a"]))).ring == ()
+    o = tr.resolve(_base(on_call_order=[_StrLies("staff-a")], staff_behavior={"ghost-7": "answers"}))
+    assert o.connect_to != "ghost-7"
+    assert "intruder-7" not in tr.plan(_base(on_call_order=[_IntLies(7)])).ring
+    p = tr.plan(_base(ring_timeout_seconds=_IntLies(3600)))
+    assert p.timeout_seconds == 30
+    assert tr.resolve(_base(ring_timeout_seconds=_IntLies(3600))).seconds_to_outcome <= 30
+
+
+def test_a_late_answer_is_logged_even_when_someone_else_answered_live():
+    o = tr.resolve(_base(on_call_order=["staff-a", "staff-b"],
+                         staff_behavior={"staff-a": "answers_after_caller_hung_up", "staff-b": "answers"}))
+    assert o.path == tr.CONNECTED and o.connect_to == "staff-b" and "answered_after_hang_up:staff-a" in o.notes

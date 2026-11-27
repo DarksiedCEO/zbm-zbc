@@ -14,14 +14,16 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings):
   exactly ``True``), it is played to them first (anything else is never played: ``whisper_rejected``); when it is missing the router still connects (the caller is
   never left waiting for paperwork) and records ``whisper_missing``. If one person answers live and another only
   after the caller hung up, the live answer wins (the caller was still there for it).
-- A staff member who answers after the caller hung up is logged, and the caller gets a text-back.
+- A staff member who answers after the caller hung up is logged (also when someone else answered live); when nobody
+  answered live, the caller gets a text-back.
 - Every path ends in a connected call or a fallback within 30 s of ringing starting (the 30 s bounds the ringing;
   the whisper, about 5 s, is played after someone answers, and the fallback message is RR-F2's job). Nothing ends in a dropped caller: any outcome the
   router cannot read is treated as "no answer", which leads to the fallback, and ``resolve`` never raises an
   ``Exception`` (a ``KeyboardInterrupt`` or ``SystemExit`` is not caught, on purpose): a case it
   cannot read at all (not an object, no usable id) also ends in the fallback, noted ``unreadable_case``.
 - The on-call order may be a list or a tuple; ids are strings (outer spaces trimmed) or whole numbers up to 10**18
-  (read as text). Anything else is nobody on call, noted ``unreadable_on_call_order``. Two behaviour records that
+  (read as text). Only plain types count (no subclass of list, tuple, str or int, and the ring timeout is a plain
+  int), so an object cannot change what it holds when it is read (AEGIS round 7). Anything else is nobody on call, noted ``unreadable_on_call_order``. Two behaviour records that
   name the same person and disagree are unreadable, so that person counts as not answering.
 """
 
@@ -60,7 +62,7 @@ class TransferOutcome:
 
 
 def _timeout(raw: object) -> tuple[int, Optional[str]]:
-    if not isinstance(raw, int) or isinstance(raw, bool) or raw < 1:
+    if type(raw) is not int or raw < 1:     # a plain whole number only (AEGIS round 7: no subclasses)
         return MAX_SECONDS, "ring_timeout_unreadable_used_30"
     if raw > MAX_SECONDS:
         return MAX_SECONDS, "ring_timeout_cut_to_30"
@@ -73,11 +75,9 @@ _MAX_INT_ID = 10 ** 18          # an id above this is not a staff or case id (an
 def _staff_id(p: object) -> Optional[str]:
     """A staff id as text: a string (outer spaces trimmed, so " staff-a" and "staff-a" are one person) or a whole
     number up to 10**18. Anything else is not an id."""
-    if isinstance(p, bool):
-        return None
-    if isinstance(p, int):
-        return str(p) if -_MAX_INT_ID <= p <= _MAX_INT_ID else None
-    if isinstance(p, str) and p.strip():
+    if type(p) is int:                 # plain types only: a subclass can override str(), strip() or comparison
+        return str(p) if -_MAX_INT_ID <= p <= _MAX_INT_ID else None   # (AEGIS round 7)
+    if type(p) is str and p.strip():
         return p.strip()
     return None
 
@@ -94,10 +94,7 @@ def _case_id(case: object) -> Optional[str]:
     case = _plain(case)
     if not isinstance(case, dict):
         return None
-    cid = case.get("case_id")
-    if isinstance(cid, int) and not isinstance(cid, bool):
-        return str(cid) if -_MAX_INT_ID <= cid <= _MAX_INT_ID else None
-    return cid.strip() if isinstance(cid, str) and cid.strip() else None
+    return _staff_id(case.get("case_id"))     # the same plain-text-or-whole-number rule as a staff id
 
 
 def plan(case: dict) -> RingPlan:
@@ -109,7 +106,7 @@ def plan(case: dict) -> RingPlan:
     if case.get("in_business_hours") is not True:
         return RingPlan(cid, (), timeout, "outside_hours")
     order = case.get("on_call_order")
-    if order is not None and not isinstance(order, (list, tuple)):
+    if order is not None and type(order) not in (list, tuple):     # no subclasses: iteration is theirs (AEGIS round 7)
         return RingPlan(cid, (), timeout, "unreadable_on_call_order")
     staff = tuple(dict.fromkeys(x for x in map(_staff_id, order or ()) if x))
     if not staff:
@@ -164,6 +161,8 @@ def _resolve(case: dict, behaviour: Optional[dict] = None, whisper: Optional[str
             if not played:
                 notes.append("whisper_rejected" if type(whisper) is str and whisper.strip() else
                              "whisper_missing")
+            # anyone else recorded as answering after the hang-up is logged too (AEGIS round 7)
+            notes += [f"answered_after_hang_up:{q}" for q in p.ring if seen.get(q) == ANSWERS_LATE]
             return TransferOutcome(p.case_id, CONNECTED, person, p.timeout_seconds, True, played, False,
                                    tuple(notes))
     late = [person for person in p.ring if seen.get(person) == ANSWERS_LATE]
