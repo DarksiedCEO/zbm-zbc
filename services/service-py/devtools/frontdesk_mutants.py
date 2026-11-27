@@ -10,7 +10,8 @@ Every mutant is applied to a fresh copy of ``src/`` and ``tests/`` in a temporar
 edited), then the agent's test file runs with ``-x``. A mutant that no longer applies (its text is gone) is reported
 ``NOT_APPLIED`` and fails the run, so the list cannot quietly rot. Mutants marked equivalent are expected to survive
 (they cannot change any observable behaviour) and are listed with the reason. Exit 0 only when every
-non-equivalent mutant is killed. Standard library only, plus pytest.
+non-equivalent mutant is killed. A kill counts only when pytest exits 1 (tests ran and failed); any other exit
+code is ``RUN_ERROR`` and fails the run. Standard library only, plus pytest.
 """
 
 from __future__ import annotations
@@ -48,8 +49,13 @@ MUTANTS: list[tuple[str, str, str, str, str | None]] = [
     ("consent_keeper", "state carries over", "        self._records = {}", "        pass", None),
     ("consent_keeper", "unreadable opt-out dropped",
      '        if kind != "send_attempt" and normalise_number(e.get("number")) is None:', "        if False:", None),
-    ("consent_keeper", "calls-only wording ignored",
-     "    if _no_contact(text):", "    if False:", None),
+    ("consent_keeper", "calls-only wording ignored", "    if _no_contact(text) or", "    if False or", None),
+    ("consent_keeper", "whole-message net removed", '    if _refusal_near_contact(text):\n        return "possible_opt_out"',
+     '    if False:\n        return "possible_opt_out"', None),
+    ("consent_keeper", "Spanish list removal ignored", "            _SPANISH_REMOVE.search(",
+     "            False and _SPANISH_REMOVE.search(", None),
+    ("consent_keeper", "glued refusal ignored", '    if any(re.match(r"^(?:dont|donot|no|never|stop)',
+     '    if False and any(re.match(r"^(?:dont|donot|no|never|stop)', None),
     ("consent_keeper", "no digit folding", "    text = _ascii_digits(raw).strip()", "    text = raw.strip()", None),
     ("consent_keeper", "no client folding",
      '    folded = _strip_invisible(unicodedata.normalize("NFC", raw)).translate(_DASHES).strip()',
@@ -99,9 +105,14 @@ MUTANTS: list[tuple[str, str, str, str, str | None]] = [
     ("textback", "look-alike letters kept",
      '    if any(c.isalpha() and not unicodedata.name(c, "").startswith("LATIN") for c in name):', "    if False:",
      "_SAFE_NAME already admits only ASCII and Latin-1/Latin Extended letters; the script check is a second fence"),
-    ("textback", "promo names kept",
-     "    if not name or not _SAFE_NAME.fullmatch(name) or _PROMO.search(name) or sum(c.isdigit() for c in name) > 3:",
-     "    if not name:", None),
+    ("textback", "promo names kept", "    if _PROMO.search(plain) or _PROMO.search(plain.translate(_LEET)):",
+     "    if False:", None),
+    ("textback", "digit look-alikes not undone", "    if _PROMO.search(plain) or _PROMO.search(plain.translate(_LEET)):",
+     "    if _PROMO.search(plain):", None),
+    ("textback", "accents kept",
+     '    plain = "".join(c for c in unicodedata.normalize("NFKD", name) if not unicodedata.combining(c))',
+     "    plain = name", None),
+    ("textback", "a raising keeper allows", "        blocked = None", "        blocked = False", None),
     ("textback", "missing field means never texted",
      '    if "seconds_since_last_text_to_number" not in call:\n        return no("unreadable_last_text_time")', "",
      None),
@@ -129,8 +140,16 @@ MUTANTS: list[tuple[str, str, str, str, str | None]] = [
      "        return str(p)", None),
     ("transfer_router", "last record wins", '        merged[sid] = v if merged.get(sid, v) == v else "conflicting_records"',
      "        merged[sid] = v", None),
-    ("transfer_router", "steering words kept", '    value = " ".join(_COMMAND_WORDS.sub(" ", value).split())[:limit].strip()',
-     '    value = " ".join(value.split())[:limit].strip()', None),
+    ("transfer_router", "steering words kept",
+     "        if any(part in _STEER or any(len(x) >= 4 and part.startswith(x) for x in _STEER)",
+     "        if False and any(part in _STEER or any(len(x) >= 4 and part.startswith(x) for x in _STEER)", None),
+    ("transfer_router", "no prefix match on steering words", "any(len(x) >= 4 and part.startswith(x) for x in _STEER)",
+     "False", None),
+    ("transfer_router", "the record's need is spoken",
+     "    why = NEED_PHRASES.get(need, DEFAULT_NEED) if isinstance(need, str) else DEFAULT_NEED",
+     "    why = need if isinstance(need, str) else DEFAULT_NEED", None),
+    ("transfer_router", "any whisper is played", "            played = _is_whisper_line(whisper)",
+     "            played = isinstance(whisper, str) and bool(whisper.strip())", None),
     ("transfer_router", "bool timeout read", "    if not isinstance(raw, int) or isinstance(raw, bool) or raw < 1:",
      "    if not isinstance(raw, int) or raw < 1:", None),
     # ---- RR-F3 call summarizer
@@ -138,18 +157,39 @@ MUTANTS: list[tuple[str, str, str, str, str | None]] = [
      "    trusted = [x for c, x in spoken]", None),
     ("call_summarizer", "silence flagged", "    flagged = any(c < LOW_CONFIDENCE for c, _ in spoken)",
      "    flagged = any(c < LOW_CONFIDENCE for c, _ in caller)", None),
-    ("call_summarizer", "first number wins", "    callback = numbers[-1] if numbers else None",
-     "    callback = numbers[0] if numbers else None", None),
-    ("call_summarizer", "ambiguous name picked", "    name = names[0] if len(names) == 1 else None",
-     "    name = names[0] if names else None", None),
-    ("call_summarizer", "911 ignored", "    emergency = said_911 or any(", "    emergency = False or any(", None),
-    ("call_summarizer", "health not routed", '    if any(term in low for term in _HEALTH):\n        return "treatment_question"',
+    ("call_summarizer", "first number wins", "    return distinct[-1][0], len({d[0] for d in distinct}) > 1",
+     "    return distinct[0][0], len({d[0] for d in distinct}) > 1", None),
+    ("call_summarizer", "health not routed", '    if _HEALTH.search(joined):\n        return "treatment_question"', "",
+     None),
+    ("call_summarizer", "agent confirmation used as source", "    callback, corrected = _callback(trusted, notes)",
+     "    callback, corrected = _callback([x for _, x in agent], notes)", None),
+    ("call_summarizer", "any capitalised pair is a name",
+     "        for m in list(_LEAD_NAME.finditer(x)) + list(_NAME_THEN_NUMBER.finditer(x)):",
+     '        for m in re.finditer(rf"({_WORD} {_WORD})", x):', None),
+    ("call_summarizer", "rejected number used",
+     "        if _REJECTED_NUMBER.search(joined[max(0, m.start() - 20):m.start()]):", "        if False:", None),
+    ("call_summarizer", "two numbers without a cue: later wins",
+     "        if distinct and number != distinct[-1][0] and not _CORRECTION.search(before):", "        if False:", None),
+    ("call_summarizer", "stop-word list ignored",
+     "            if any(w.casefold() in _NOT_NAME_WORD for w in words) or _HEALTH.search(cand):",
+     "            if _HEALTH.search(cand):", None),
+    ("call_summarizer", "health words kept in names",
+     "            if any(w.casefold() in _NOT_NAME_WORD for w in words) or _HEALTH.search(cand):",
+     "            if any(w.casefold() in _NOT_NAME_WORD for w in words):", None),
+    ("call_summarizer", "final health guard removed", "    if _HEALTH.search(text):", "    if False:",
+     "a second fence: the name reader already drops any name holding a health word, and nothing else in the text "
+     "comes from the caller"),
+    ("call_summarizer", "lower-case names read", "            if not all(w[0].isupper() for w in words):\n                continue",
      "", None),
-    ("call_summarizer", "agent confirmation used as source",
-     "    numbers = [\"+1\" + \"\".join(m) for x in trusted for m in _NUM.findall(x)]",
-     "    numbers = [\"+1\" + \"\".join(m) for _, x in agent for m in _NUM.findall(x)]", None),
-    ("call_summarizer", "no lead-in removal", "        for m in _NAME.finditer(_LEAD_IN.sub(\" \", _fold(x))):",
-     "        for m in _NAME.finditer(_fold(x)):", None),
+    ("call_summarizer", "chores read as emergencies", '_EMERGENCY.search(_NOT_EMERGENCY.sub(" ", _fold(x)))',
+     "_EMERGENCY.search(_fold(x))", None),
+    ("call_summarizer", "911 anywhere", "    said_911 = any(_SAID_911.search(_fold(x)) for _, x in agent)",
+     '    said_911 = any("911" in x for _, x in agent)', None),
+    ("call_summarizer", "binary float boundary", "    value = Fraction(str(raw))", "    value = Fraction(raw)", None),
+    ("call_summarizer", "flag threshold inclusive", "    flagged = any(c < LOW_CONFIDENCE for c, _ in spoken)",
+     "    flagged = any(c <= LOW_CONFIDENCE for c, _ in spoken)", None),
+    ("call_summarizer", "out-of-range confidence trusted", "    return value if 0 <= value <= 1 else Fraction(0)",
+     "    return value", None),
 ]
 TESTS = {"consent_keeper": "tests/test_consent_keeper.py", "textback": "tests/test_textback.py",
          "transfer_router": "tests/test_transfer_router.py", "call_summarizer": "tests/test_call_summarizer.py"}
@@ -178,9 +218,14 @@ def run(only: str | None = None) -> int:
             proc = subprocess.run([sys.executable, "-B", "-m", "pytest", "-q", "-x", "-p", "no:cacheprovider",
                                    TESTS[module]], cwd=work, capture_output=True, text=True,
                                   env={"PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1"})
-            killed = proc.returncode != 0
-            state = "killed" if killed else ("survived (equivalent)" if equivalent else "SURVIVED")
-            if not killed and not equivalent:
+            # pytest exits 1 only when tests ran and failed; 2-5 (interrupted, internal or usage error, no tests) mean
+            # the mutant broke the run itself, which proves nothing about the tests (AEGIS F3 round 1)
+            killed = proc.returncode == 1
+            if proc.returncode not in (0, 1):
+                state = f"RUN_ERROR (pytest exit {proc.returncode})"
+            else:
+                state = "killed" if killed else ("survived (equivalent)" if equivalent else "SURVIVED")
+            if not killed and not (equivalent and proc.returncode == 0):
                 bad += 1
             rows.append((module, label, state, equivalent))
     width = max(len(r[1]) for r in rows) if rows else 10

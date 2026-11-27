@@ -741,8 +741,6 @@ when someone else answered live. The round-7 fuzz (40,000 cases) and urgency gri
 
 out of the whisper. Regression tests: "AEGIS round 3".
 
-("AEGIS round 1" section); mutation results now come from `services/service-py/devtools/frontdesk_mutants.py`.
-
 ## Amendment — RR-F3 call summarizer (Nov 26 2026; MVP spec v0.1, front-desk team)
 
 `services/service-py/src/call_summarizer.py`, one job: turn one call transcript into a short summary for the owner:
@@ -751,11 +749,11 @@ name, callback number, one need label, urgency and the next action. Not wired; d
 | Rule | Behaviour |
 |---|---|
 | Nothing invented | Facts come only from the caller's turns that speech recognition trusts (confidence >= 0.6). The receptionist's confirmation line is checked against them (`confirmation_disagrees_with_caller`), never used as the source |
-| Low confidence | A spoken turn below 0.6 is flagged and never used; a silent turn is not flagged (Nov 26 ruling) |
-| Corrections | The last number the caller gave wins |
-| Names | Reported only when exactly one name was given ("I'm", "this is", "my name is", "soy", "me llamo" and the like are read past); two different names are reported as ambiguous, never picked |
-| No health detail | The summary is built only from the name, the number, a fixed label and the urgency, never the caller's words, and is checked against a health lexicon before it is returned |
-| Urgency | Emergency when the receptionist gave the 911 instruction or the caller described someone not breathing or collapsed, gas, smoke or fire, or a weapon |
+| Low confidence | A spoken turn below 0.6 is flagged and never used; a silent turn is not flagged (Nov 26 ruling); a confidence that is not a finite number from 0 to 1 (NaN, infinity, text) counts as low; 0.6 itself is trusted (read as written, not as the binary float) |
+| Corrections | A number the caller rejects ("not 602 ...") is never used. A later different number wins only after a correction cue ("no wait", "sorry", "actually", "perdón", "mejor" ...); two numbers with no cue are ambiguous: no callback number, `ambiguous_number` |
+| Names | Read only where the caller gives their own: after a lead-in ("I'm", "this is", "my name is", "put it under", "soy", "habla", "me llamo" ...) or as "First Last" opening a sentence and followed straight by a number. Never a city, landlord or business pair, a command ("Approve Refund"), or a pair with a health word. Reported only when exactly one was given; two are ambiguous, never picked |
+| No health detail | The summary is built only from the name, the number, a fixed label and the urgency, never the caller's words. The health lexicon matches whole words and stems ("archive" is not "hiv"); a name with a health word is dropped and the summary is still returned (never an exception) |
+| Urgency | Emergency when the receptionist gave the 911 instruction (a dial / call / marque verb with 911; never 911 inside a phone number or address) or the caller described someone not breathing, collapsed, passed out or having a heart attack, gas, smoke or fire, a weapon, or someone threatening people; equipment and chores ("fire alarm inspection", "smoke detector", "caulk gun", "bleeding the radiator") are not. The next action claims the 911 instruction only when it was given |
 | Need | One label: the pack's own category (its booking category for a booking; `treatment_question` for a health matter; `pricing_question` for a service the pack prices, `pricing` for one it does not) or a fixed front-desk label (emergency, complaint, existing_customer, reschedule, hours, vendor, wrong_number, spam_call, long_silence); `unclear` when nothing matches, never a guess |
 
 Certification: `services/service-py/tests/test_call_summarizer.py` runs the shared MVP pool (F3, 300 transcripts per
@@ -769,10 +767,23 @@ that wording.
 
 ### Mutation check for the front-desk agents (RR-F5, F2, F4, F3)
 
-`cd services/service-py && python3 devtools/frontdesk_mutants.py [agent]` plants 59 single defects, each in a fresh
+`cd services/service-py && python3 devtools/frontdesk_mutants.py [agent]` plants 77 single defects, each in a fresh
 copy of `src/` and `tests/` (the checkout is never edited), and runs that agent's test file. A mutant whose text no
-longer exists fails the run (`NOT_APPLIED`), so the list cannot rot. Result at this commit: 54 killed; 5 survive and
-are listed as equivalent with the reason (in the consent keeper: the carrier check in the decision, consent cleared
-on reassignment, the opt-in time guard, and the same-instant opt-in order; in the text-back: the Latin-script check,
-which the name pattern already enforces), each covered by another rule that cannot be told apart from outside.
+longer exists fails the run (`NOT_APPLIED`), so the list cannot rot. A kill counts only when pytest exits 1 (tests
+ran and failed); any other exit code is `RUN_ERROR` and fails the run (AEGIS F3 round 1: a mutant that breaks the
+import is not a test that caught it). Result at this commit: 71 killed; 6 survive and are listed as equivalent with
+the reason (in the consent keeper: the carrier check in the decision, consent cleared on reassignment, the opt-in
+time guard, and the same-instant opt-in order; in the text-back: the Latin-script check, which the name pattern
+already enforces; in the summarizer: the final health check on the text, which the name reader already enforces),
+each covered by another rule that cannot be told apart from outside.
 The summarizer's 0.6 confidence line is the exact fraction 3/5: this service allows no float literals. This replaces the hand-run mutant counts in the RR-F5, F2 and F4 commit messages.
+
+AEGIS round 1 on RR-F3 (Nov 26 2026, Inquisitor on 0aaf8411): 6 High, all fixed as above. Any capitalised pair was
+read as a name (cities, "Dear John", a business, a landlord, "Approve Refund", a planted "Owner Must Wire Funds"); a
+rejected number ("not 602 ...") or a second number with no correction became the callback; NaN confidence dropped a
+spoken turn without flagging it; "hiv" matched inside "archive" and a health word in a referral raised instead of
+returning a summary; Crohn's and multiple sclerosis were missing from the lexicon; six emergencies were missed and
+seven chores or 911-in-a-number cases were called emergencies. Review: odd pack shapes and a non-object transcript
+raised the wrong error; the 0.6 boundary and the name stop-words had no killing test (and 0.6 written as a float
+read as 0.5999... and was not trusted: fixed by reading the written value); a mutant that broke the run counted as
+killed. Regression tests: "AEGIS round 1" section. Every reviewer repro replays clean.
