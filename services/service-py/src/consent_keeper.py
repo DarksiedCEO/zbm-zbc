@@ -14,11 +14,18 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings, ADR 0014):
   "phone", "contact", "llamar" and its forms, "ligar", "appeler" ...), read after leet and doubled letters are undone,
   and "DNC" on its own. This fails toward suppression: "no calls on Sunday" blocks. The wording Customer Service
   hands to a human ("opt me out") blocks too (``possible_opt_out``).
-- A state-changing event (opt-in, inbound text, carrier opt-out, reassignment) for a number that cannot be read, a
+- Any other inbound text blocks too unless it is one of a short list of known-safe replies (``SAFE_REPLIES``:
+  "OK", "Thanks", "Yes", "Confirmed", "HELP", "Gracias", "Sí" ...; START and the restart words are read below):
+  ``unrecognised_reply``. Five review rounds showed that no word list catches every way to say "stop texting me"
+  (other apostrophes, leet, emoji letters, "Please discontinue these texts", "Cancelen los mensajes"), so the keeper
+  no longer decides that a free-text reply is harmless; a person does. A ``staff_review`` event (a named reviewer's
+  ruling ``not_an_opt_out``, recorded after the reply) clears ``unrecognised_reply`` and nothing else.
+- A state-changing event (opt-in, inbound text, carrier opt-out, reassignment, staff review) for a number that cannot be read, a
   non-object event, or a send_id used twice refuses the whole replay (``ValueError``): an opt-out is never dropped.
   Numbers are read after NFKC with any script's digits, dash look-alikes and invisibles folded, so one person never
   becomes two records. Client ids are read with NFC (not NFKC), every format character removed, dashes folded and
-  ASCII letters lower-cased: one client typed differently is one record, two different clients never merge.
+  every letter whose lower case is one letter lower-cased: one client typed differently is one record, two
+  different clients never merge.
 - Every ``replay`` is the whole history: no state carries over between calls.
 - Express written consent counts only from a known source (web form, paper form, keyword join, signed agreement,
   e-sign); a START reply is never one.
@@ -45,10 +52,19 @@ from typing import Iterable, Optional
 
 import channels
 
-KINDS = ("opt_in", "inbound_sms", "carrier_opt_out", "number_reassigned", "send_attempt")
+KINDS = ("opt_in", "inbound_sms", "carrier_opt_out", "number_reassigned", "staff_review", "send_attempt")
 MESSAGE_CLASSES = ("informational", "marketing")
 # Within one instant: consent first, then what a person said, then hard suppression, then sends.
-_ORDER = {"opt_in": 0, "inbound_sms": 1, "carrier_opt_out": 2, "number_reassigned": 2, "send_attempt": 3}
+_ORDER = {"opt_in": 0, "staff_review": 0, "inbound_sms": 1, "carrier_opt_out": 2, "number_reassigned": 2,
+          "send_attempt": 3}
+# Replies known to be harmless; anything else an inbound text says blocks until a person reviews it. Read after NFKC,
+# apostrophes unified, lower case, outer spaces and . ! , ? removed. A reply of only an emoji outside this list blocks.
+SAFE_REPLIES = frozenset({
+    "ok", "okay", "k", "kk", "thanks", "thank you", "thanks!", "thx", "ty", "yes", "y", "yeah", "yep", "sure",
+    "confirm", "confirmed", "c", "1", "2", "3", "sounds good", "great", "perfect", "got it", "see you then",
+    "see you", "will do", "on my way", "omw", "ok thanks", "ok thank you", "help", "info", "star", "stay", "spot",
+    "post", "gracias", "muchas gracias", "si", "sí", "ok gracias", "de acuerdo", "perfecto", "listo", "vale", "claro",
+    "confirmo", "ayuda", "\U0001F44D", "\U0001F44C"})
 # Keywords that ask to resume. None of them restores consent; they only change the reason on the block.
 RESTART_WORDS = frozenset({"start", "unstop", "yes", "subscribe", "resume", "resubscribe", "optin", "opt in",
                            "unblock", "si", "reanudar", "comenzar"})
@@ -131,7 +147,7 @@ def _strip_invisible(text: str) -> str:
     combining grapheme joiner and the variation selectors."""
     return "".join(c for c in text if unicodedata.category(c) != "Cf" and c != "\u034f"
                    and not ("\ufe00" <= c <= "\ufe0f" or "\U000e0100" <= c <= "\U000e01ef"))
-REASONS = ("opted_out", "possible_opt_out", "start_keyword_does_not_restore", "carrier_opt_out", "number_reassigned",
+REASONS = ("opted_out", "possible_opt_out", "unrecognised_reply", "start_keyword_does_not_restore", "carrier_opt_out", "number_reassigned",
            "no_written_consent", "invalid_number", "unknown_message_class")
 _E164 = re.compile(r"\+1[2-9][0-9]{2}[2-9][0-9]{6}")
 
@@ -202,7 +218,14 @@ def opt_out_reading(text: str) -> Optional[str]:
         return "opted_out"
     if _refusal_near_contact(text):
         return "possible_opt_out"     # fail toward suppression: a refusal anywhere near a contact word blocks
-    return None
+    if _reply_key(text) in SAFE_REPLIES or _restart_word(text):
+        return None
+    return "unrecognised_reply"       # free text a person must read: blocks until a staff_review clears it
+
+
+def _reply_key(text: str) -> str:
+    folded = _unify(unicodedata.normalize("NFKC", text)).lower()
+    return " ".join(folded.split()).strip(" .!,?¡¿")
 
 
 @dataclass
@@ -249,6 +272,9 @@ class ConsentKeeper:
             raise ValueError(f"event {i}: source must be text")
         if kind == "opt_in" and e.get("consent") is not None and not isinstance(e["consent"], str):
             raise ValueError(f"event {i}: consent must be text")
+        if kind == "staff_review" and (not isinstance(e.get("reviewer"), str) or not e["reviewer"].strip()
+                                       or e.get("ruling") != "not_an_opt_out"):
+            raise ValueError(f"event {i}: a staff review needs a reviewer and the ruling not_an_opt_out")
         if kind == "inbound_sms" and not isinstance(e.get("text"), str):
             raise ValueError(f"event {i}: text is required")
         if kind != "send_attempt" and normalise_number(e.get("number")) is None:
@@ -301,6 +327,11 @@ class ConsentKeeper:
                 rec.suppressed = "start_keyword_does_not_restore"
                 rec.evidence = rec.evidence + [i]
             # HELP, look-alike words and anything else change nothing
+        elif kind == "staff_review":
+            # clears only a reply nobody had read, and only when the review comes after it
+            if rec.suppressed == "unrecognised_reply" and rec.suppressed_at is not None and e["t"] > rec.suppressed_at:
+                rec.suppressed, rec.suppressed_at = None, None
+                rec.evidence = rec.evidence + [i]
         elif kind == "carrier_opt_out":
             rec.carrier_blocked = True
             self._suppress(rec, "carrier_opt_out", e["t"], i)

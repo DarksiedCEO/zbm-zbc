@@ -279,9 +279,12 @@ def test_wording_customer_service_hands_to_a_human_still_blocks():
 
 @pytest.mark.parametrize("text", ["Please call me back", "Call me at 5", "Can you call me tomorrow?",
                                   "Llámenme mañana", "Yes please"])
-def test_asking_to_be_called_is_not_an_opt_out(text):
-    assert one([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text=text),
-                send(6, mclass="marketing")]) == ("allow", None)
+def test_asking_to_be_called_is_not_an_opt_out_but_waits_for_a_person(text):
+    """Round 5: free text is never judged harmless by the keeper; it blocks as unrecognised until a staff review."""
+    history = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text=text)]
+    assert one(history + [send(6, mclass="marketing")]) == ("block", "unrecognised_reply")
+    reviewed = history + [ev("staff_review", 7, reviewer="andre", ruling="not_an_opt_out"), send(8, mclass="marketing")]
+    assert one(reviewed) == ("allow", None)
 
 
 @pytest.mark.parametrize("bad", [None, "STOP", 5, ["inbound_sms"]])
@@ -350,8 +353,7 @@ def test_more_calls_only_revocations_block(text):
 @pytest.mark.parametrize("text", ["I called earlier", "Thanks for calling", "Did you call me?", "Hola, llamo por mi cita",
                                   "Do call me tomorrow", "Please call me back"])
 def test_ordinary_calling_words_are_not_a_revocation(text):
-    assert one([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text=text),
-                send(6, mclass="marketing")]) == ("allow", None)
+    assert ck.opt_out_reading(text) == "unrecognised_reply"          # never opted_out: a person clears it
 
 
 @pytest.mark.parametrize("mark", ["⁦", "⁩", "‪", "‮", "͏", "᠎", "️",
@@ -432,3 +434,52 @@ def test_stop_and_start_at_one_instant_give_one_reason_in_any_order():
          ev("inbound_sms", 5, text="START"), send(6)]
     b = [a[0], a[2], a[1], a[3]]
     assert one(a) == one(b)
+
+
+# ---------------------------------------------------------------- AEGIS round 5 (Inquisitor, 70adc1b6)
+ROUND5_LEAKS = ["Don\uff40t text me", "Don\u0384t call me", "Please don\u02cat text me anymore", "Don\u2035t text me",
+                "R3voking consent", "I w1thdr4w my c0ns3nt", "Un5ubscribing", "0pting 0ut", "N0 m4s", "Y4 b4st4",
+                "Dej3nme en paz", "Please discontinue these texts", "Delete me from your list", "Erase my number",
+                "Forget my number", "Turn off texts", "Unenroll me from these texts", "Lay off the texts",
+                "Please don't reach me again", "Cancelen los mensajes", "Cancela mi suscripci\u00f3n",
+                "Detengan los mensajes", "Suspendan los mensajes", "Olv\u00eddense de mi n\u00famero", "Paren ya",
+                "\U0001F1F8\U0001F1F9\U0001F1F4\U0001F1F5", "\U0001F1F8 \U0001F1F9 \U0001F1F4 \U0001F1F5",
+                "\U0001F162\U0001F163\U0001F15E\U0001F15F", "\U0001F182\U0001F183\U0001F17E\U0001F17F", "\u274c\U0001F4F1",
+                "", " ", "\U0001F6D1", "Arrêtez svp", "Bitte nicht mehr schreiben"]
+
+
+@pytest.mark.parametrize("text", ROUND5_LEAKS)
+def test_round_5_revocations_block_every_send(text):
+    events = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text=text),
+              send(6, sid="m", mclass="marketing"), send(6, sid="i")]
+    got = decide(events)
+    assert got[("m", 6)][0] == "block" and got[("i", 6)][0] == "block"
+
+
+@pytest.mark.parametrize("text", ["OK", "ok!", "Okay.", "Thanks", "Thank you!", "Yes", "Y", "Confirmed", "C", "1",
+                                  "Sounds good", "See you then", "Gracias", "S\u00ed", "Perfecto", "\U0001F44D", "HELP",
+                                  "Spot", "Post"])
+def test_a_known_safe_reply_changes_nothing(text):
+    assert one([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text=text),
+                send(6, mclass="marketing")]) == ("allow", None)
+
+
+def test_a_staff_review_clears_only_an_unrecognised_reply_and_only_after_it():
+    base = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="Can I come at 4?")]
+    review = lambda t: ev("staff_review", t, reviewer="andre", ruling="not_an_opt_out")
+    assert one(base + [review(5), send(6)]) == ("block", "unrecognised_reply")         # same instant: not after
+    assert one([base[0], review(3), base[1], send(6)]) == ("block", "unrecognised_reply")  # before the reply
+    assert one(base + [review(6), send(7)]) == ("allow", None)
+    for text in ("STOP", "Please don't text me", "STPO"):
+        stopped = [base[0], ev("inbound_sms", 5, text=text), review(6), send(7)]
+        assert one(stopped)[0] == "block"                                               # an opt-out is never cleared
+
+
+@pytest.mark.parametrize("bad", [{"reviewer": ""}, {"reviewer": "  "}, {"reviewer": 5}, {"ruling": "ok"}, {}])
+def test_a_staff_review_without_a_reviewer_and_ruling_refuses_the_replay(bad):
+    e = ev("staff_review", 6, reviewer="andre", ruling="not_an_opt_out")
+    e.update(bad)
+    for k in [k for k in ("reviewer", "ruling") if k not in bad and not bad]:
+        e.pop(k)
+    with pytest.raises(ValueError):
+        ck.ConsentKeeper().replay([ev("opt_in", 1, consent="express_written"), e, send(7)])

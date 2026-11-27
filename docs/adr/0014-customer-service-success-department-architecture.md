@@ -458,6 +458,7 @@ front desk read "STOP" the same way.
 |---|---|
 | Every send is checked | A send with an unreadable number (`invalid_number`) or an unknown message class (`unknown_message_class`) is blocked; a malformed event (not an object, an unknown kind, a missing field, a send_id used twice, or an opt-in / inbound text / carrier / reassignment for a number that cannot be read) refuses the whole replay (`ValueError`), so an opt-out is never dropped |
 | One record per person | Numbers are read after NFKC with any script's digits, dash look-alikes and invisibles folded, and a `tel:` prefix removed; client ids are read with NFC (not NFKC), every invisible format character removed, dashes folded and ASCII letters lower-cased, so one client typed differently is one record and two different clients ("strasse" / "straße", "acme2" / "acme²") never merge. Every `replay` is the whole history: nothing carries over between calls |
+| Unrecognised replies | Any inbound text that is not an opt-out reading, a known-safe reply or a restart word blocks as `unrecognised_reply` until a `staff_review` (named reviewer, after the reply) clears it (AEGIS round 5) |
 | Calls too | The keeper decides calls as well as texts, so calls-only revocations block (`opted_out`): in one clause, a refusal word ("don't", "no", "never", "stop", "dejen", "nao", "ne" ...) within five words before a calling or messaging word ("call", "calls", "phone", "contact", "llamar" and its forms, "ligar", "appeler", "mensajes" ...), read after leet and doubled letters are undone, and "DNC" on its own. It fails toward suppression ("no calls on Sunday" blocks). Wording Customer Service hands to a human ("opt me out") blocks too (`possible_opt_out`) |
 | Consent sources | Express written consent counts only from a web form, paper form, keyword join, signed agreement or e-sign; a START reply is never consent |
 | Opt-out wins | `exact` -> `opted_out`, `suspected` (one typo of stop / unsubscribe) -> `possible_opt_out`; both block (Nov 26 ruling: STOP typos count) |
@@ -514,3 +515,16 @@ opt-out reading now applies after a restart word. **Open for Andre:** a reassign
 the pool is built; a number reassigned under one client does not end another client's consent. Number-level
 reassignment is stricter but contradicts the pool; it needs a ruling. The benign corpus still blocks 4 of 50.
 Regression tests: "AEGIS round 4".
+
+AEGIS round 5 (Nov 26 2026, Inquisitor on 70adc1b6): 5 High, the same class as rounds 1-4: more apostrophe look-alikes
+(some only after NFKC), leet inside revocation words ("R3voking consent", "N0 m4s"), more English and Spanish
+revocations ("Please discontinue these texts", "Erase my number", "Cancelen los mensajes", "Paren ya"), and STOP in
+emoji letters (🇸🇹🇴🇵, 🅢🅣🅞🅟). Five rounds show that no word list catches every way to revoke consent, so the
+design is inverted: after the opt-out readings above, an inbound text is harmless only when it is one of a short list
+of known-safe replies (`SAFE_REPLIES`: "OK", "Thanks", "Yes", "Confirmed", "HELP", "Gracias", "Sí", 👍 ...) or a
+restart word; any other text blocks every send as `unrecognised_reply` until a person reads it. A new event,
+`staff_review` (a named reviewer, the ruling `not_an_opt_out`, recorded after the reply), clears `unrecognised_reply`
+and nothing else: never an opt-out, a possible opt-out, a carrier opt-out or a reassignment. Every round 1-5 repro
+replays clean. **Trade-off for Andre:** 47 of the reviewer's 50 benign replies now block until reviewed (round 4: 4
+of 50). Texting a customer who replied in free text waits for a person; a missed opt-out is a TCPA violation. The
+review queue (who sees `unrecognised_reply`, how fast) is wiring, not built. Regression tests: "AEGIS round 5".
