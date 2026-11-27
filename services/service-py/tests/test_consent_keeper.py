@@ -671,3 +671,18 @@ def test_a_refused_replay_leaves_no_earlier_state():
     with pytest.raises(ValueError):
         k.replay([{"kind": "nope"}])
     assert k.unread_replies("client-a", "+16025550101") == ()
+
+
+@pytest.mark.parametrize("text", ["s​tp", "​sto", "t⁠op", "5tp", "s.t.p", "sop!", "shop"])
+def test_a_stop_typo_with_invisibles_leet_or_punctuation_is_a_possible_opt_out(text):
+    h = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text=text)]
+    assert one(h + [ev("staff_review", 6, reviewer="Dana", ruling="not_an_opt_out"), send(7)])[0] == "block"
+
+
+@pytest.mark.parametrize("t", [10 ** 18 + 1, -(10 ** 18) - 1, 10 ** 60], ids=["over", "under", "huge"])
+def test_an_out_of_range_time_refuses_the_replay_before_anything_is_applied(t):
+    k = ck.ConsentKeeper()
+    with pytest.raises(ValueError):
+        k.replay([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="Can I come at 4?"),
+                  ev("staff_review", t, reviewer="Dana", ruling="not_an_opt_out", seen="x")])
+    assert k.unread_replies("client-a", "+16025550101") == ()

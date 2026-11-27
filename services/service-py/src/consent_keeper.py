@@ -8,7 +8,9 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings, ADR 0014):
 - An opt-out wins: the reading of an inbound text is ``channels.opt_out_level``, the same classifier Customer
   Service already uses, so the whole company reads "STOP" one way. ``exact`` -> ``opted_out``; ``suspected`` (one
   typo of stop / unsubscribe) -> ``possible_opt_out``; both block (STOP typos count as an opt-out: fail toward
-  suppression).
+  suppression). The classifier skips words under four letters, so a whole reply one edit away from "stop" (after
+  invisibles and punctuation are removed and leet digits read as letters: "stp", "s\u200btp", "5tp") is read here as
+  ``possible_opt_out`` too; "top", "shop", "step" alone are over-blocked on purpose.
 - Calls are decided here too, so calls-only revocations also block (``opted_out``): inside one clause, a refusal word
   ("don't", "no", "never", "stop", "dejen", "nao", "ne" ...) within five words before a calling word ("call", "calls",
   "phone", "contact", "llamar" and its forms, "ligar", "appeler" ...), read after leet and doubled letters are undone,
@@ -256,16 +258,35 @@ def opt_out_reading(text: str) -> Optional[str]:
         return "opted_out"
     if _refusal_near_contact(text):
         return "possible_opt_out"     # fail toward suppression: a refusal anywhere near a contact word blocks
-    if _reply_key(text) in _SHORT_STOP_TYPOS:
-        return "possible_opt_out"     # "stp", "sop", "sto", "top" as the whole reply (AEGIS review-queue round 2)
+    if _near_stop(text):
+        return "possible_opt_out"     # "stp", "sop", "st0p", "s\u200btp" as the whole reply (review-queue rounds 2-3)
     if _reply_key(text) in SAFE_REPLIES or _restart_word(text):
         return None
     return "unrecognised_reply"       # free text a person must read: blocks until a staff_review clears it
 
 
-# "stop" with one letter missing, as the whole reply: the classifier skips words under four letters, so these are read
-# here (a reviewer could otherwise clear a STOP typo as "not an opt-out")
-_SHORT_STOP_TYPOS = frozenset({"top", "sop", "stp", "sto"})
+# a whole reply one edit (a letter missing, added, swapped or changed) away from "stop", read with every invisible
+# and every character that is not a letter or digit removed and leet digits as letters; the classifier skips words
+# under four letters, so these are read here (a reviewer could otherwise clear a STOP typo as "not an opt-out").
+# Over-blocks "top", "shop", "step" ... as the whole reply: disclosed, a person reads them anyway
+_LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "$": "s", "@": "a"})
+
+
+def _within_one_edit(a: str, b: str) -> bool:
+    if abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        diff = [i for i in range(len(a)) if a[i] != b[i]]
+        return len(diff) <= 1 or (len(diff) == 2 and diff[1] == diff[0] + 1 and a[diff[0]] == b[diff[1]]
+                                  and a[diff[1]] == b[diff[0]])
+    short, long_ = (a, b) if len(a) < len(b) else (b, a)
+    return any(long_[:i] + long_[i + 1:] == short for i in range(len(long_)))
+
+
+def _near_stop(text: str) -> bool:
+    key = "".join(c for c in unicodedata.normalize("NFKC", _strip_invisible(text)).casefold().translate(_LEET)
+                  if c.isalnum())
+    return 2 < len(key) < 6 and _within_one_edit(key, "stop")
 
 
 def _reply_key(text: str) -> str:
@@ -322,6 +343,8 @@ class ConsentKeeper:
             raise ValueError(f"event {i}: unknown kind {kind!r}")
         if not isinstance(e.get("t"), int) or isinstance(e.get("t"), bool):
             raise ValueError(f"event {i}: t must be an integer")
+        if not -10 ** 18 <= e["t"] <= 10 ** 18:
+            raise ValueError(f"event {i}: t is out of range")   # checked before anything is applied (queue round 3)
         if not isinstance(e.get("client_id"), str) or not e["client_id"]:
             raise ValueError(f"event {i}: client_id is required")
         normalise_client(e["client_id"])     # a client id that is not a plain id refuses the replay (ValueError)

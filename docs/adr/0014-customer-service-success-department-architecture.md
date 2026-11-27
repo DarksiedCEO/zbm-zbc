@@ -599,3 +599,9 @@ AEGIS review-queue round 2 (Nov 27 2026): "stp", "sop", "sto" and "top" as the w
 `possible_opt_out` (the classifier skips words under four letters, so a reviewer could have cleared a STOP typo);
 an `opt_out` ruling also resets the unread replies; a replay clears the keeper's state before it validates, so a
 refused replay leaves nothing from an earlier one.
+
+AEGIS review-queue round 3 (Nov 27 2026): an event time outside ±10^18 refuses the replay before anything is applied
+(a huge time had failed inside the digest, after the reset). The short-typo rule is now any whole reply one edit away
+from "stop" once invisibles and everything but letters and digits are removed and leet digits are read as letters
+("s\u200btp", "5tp", "s.t.p"); it over-blocks "top", "shop", "step" as the whole reply (disclosed: a person reads
+them anyway, and new written consent restores texting).
