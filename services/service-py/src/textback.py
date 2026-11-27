@@ -18,7 +18,9 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings, TCPA practice):
   must ask again then (consent and the 5-minute rule are read at that moment, not now).
 - The text is informational only (a way to continue the call), never marketing, and always says how to opt out. It
   is one of four fixed wordings (English or Spanish, with or without a callback number) and never carries record
-  text: no business name (AEGIS round 4), only a callback number that reads as a North American number.
+  text: no business name (AEGIS round 4), only a callback number that reads as a North American number and is not a
+  premium-rate (900, 976) or N11 code. The number's format is checked, not who owns it: the wiring passes the
+  client's own number.
 - A send-now decision must reach the caller within 30 s (the bar); the deadline travels with the decision.
 - Anything this module cannot read (line type, consent state, zone, local time, last-text time) fails closed: no
   text, with the reason.
@@ -54,6 +56,9 @@ class TextBackDecision:
     not_before: Optional[datetime] = None   # the next 08:00 in the recipient's zone, when deferring with a clock
 
 
+_NOT_A_CALLBACK_AREA = frozenset({"900", "976"})
+
+
 def message(business_name: Optional[str] = None, callback_number: Optional[str] = None,
             spanish: bool = False) -> str:
     """The only text F2 ever sends: informational, a way to continue, and how to opt out. No offer, no link, no
@@ -62,6 +67,8 @@ def message(business_name: Optional[str] = None, callback_number: Optional[str] 
     caller knows whom they called; a branded name needs an approved-name registry signed off by a person (not
     built). A callback number that is not a readable +1 number is left out."""
     number = normalise_number(callback_number) if callback_number is not None else None
+    if number is not None and (number[2:5] in _NOT_A_CALLBACK_AREA or number[3:5] == "11"):
+        number = None                  # premium-rate (900, 976), N11 service codes: never offered as a callback
     if spanish:
         who = "Perdimos su llamada."
         back = f"Responda a este mensaje o llamenos al {number}." if number else "Responda a este mensaje."

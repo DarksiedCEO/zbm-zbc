@@ -386,3 +386,13 @@ def test_a_deferral_past_the_last_clock_date_never_raises():
     now = datetime(9999, 12, 31, 23, 0, tzinfo=ZoneInfo("America/Phoenix"))
     d = tb.decide(call(), now=now)
     assert (d.action, d.reason) == ("do_not_send", "unknown_local_time")
+
+
+# ---------------------------------------------------------------- AEGIS round 5 (Inquisitor, e3f85f7d)
+@pytest.mark.parametrize("number", ["+19005550101", "+19765550101", "+19115550101", "+14115550101", "+16115550101"])
+def test_a_premium_rate_or_n11_callback_is_never_offered(number):
+    assert number not in tb.message(None, number) and tb.message(None, number) == tb.message(None, None)
+
+
+def test_an_ordinary_callback_is_offered():
+    assert "+16025550111" in tb.message(None, "+16025550111")

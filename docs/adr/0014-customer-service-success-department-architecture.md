@@ -629,8 +629,13 @@ is past the last date a clock can hold returns `unknown_local_time`. Regression 
 AEGIS round 4 (Nov 26 2026, Inquisitor on 7e38e849): 1 High: business names still carried offers past the word
 check (stroke look-alikes "PRØMØ", "SŦOP"; glued "MegaSale", "Buy1Get1Free"; unlisted "Claim Your Gift", "Buy
 Now"). A word list on free text cannot close this, so the text no longer carries a business name at all: every text
-is one of four fixed wordings (English or Spanish, with or without a vetted +1 callback number), and the name check
+is one of four fixed wordings (English or Spanish, with or without a format-checked +1 callback number), and the name check
 is removed. A branded name needs an approved-name registry signed off by a person (not built). Review: the gate
 raised TypeError when a caller passed its own `seconds_since_gate`; the gate now uses only its own memory. **Open
 for Andre:** with no clock, a record time of "20:59" sends (the pool's ruling), so the 30 s deadline can land up to
-59 s after 21:00; the clock path already gives that minute up. Regression tests: "AEGIS round 4".
+29 s after 21:00 (record minute 20:59, real time up to 20:59:59, plus 30 s); the clock path already gives that up. Regression tests: "AEGIS round 4".
+
+AEGIS round 5 (Nov 26 2026, Inquisitor on e3f85f7d): no High; every kill criterion held (64,000 fuzzed calls). Review:
+the callback number was only format-checked, so a premium-rate 900 or 976 number or an N11 code could be offered; those
+are now left out (the wiring passes the client's own number; who owns it is not checked here). The 59 s in the round-4
+note was corrected to 29 s. Regression tests: "AEGIS round 5".
