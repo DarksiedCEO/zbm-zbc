@@ -556,3 +556,27 @@ def test_new_written_consent_after_an_unrecognised_reply_restores_texting():
     events = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="Can I come at 4?"),
               ev("opt_in", 6, consent="express_written"), send(7)]
     assert one(events) == ("allow", None)
+
+
+# ---------------------------------------------------------------- AEGIS round 8 (Inquisitor, ded558d9)
+@pytest.mark.parametrize("variant", ["Acme  Dental", "Acme Dental", "Acme　Dental", "Acme Dental",
+                                     "Acme Dental", "Acme\tDental"])
+def test_a_client_with_other_spaces_is_one_record(variant):
+    assert ck.normalise_client(variant) == ck.normalise_client("Acme Dental")
+    assert ck.normalise_client("AcmeDental") != ck.normalise_client("Acme Dental")
+
+
+@pytest.mark.parametrize("name", ["​", "ㅤ", "⠀", "ᅟ", "­", "-", " ", "​ㅤ"])
+def test_a_reviewer_must_have_a_visible_name(name):
+    events = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="Can I come at 4?"),
+              ev("staff_review", 6, reviewer=name, ruling="not_an_opt_out"), send(7)]
+    with pytest.raises(ValueError):
+        ck.ConsentKeeper().replay(events)
+
+
+def test_the_evidence_keeps_a_staff_opt_out_the_opt_in_could_not_clear():
+    events = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 3, text="Can I come at 4?"),
+              ev("staff_review", 5, reviewer="Dana", ruling="opt_out"), ev("opt_in", 5, consent="express_written"),
+              send(6)]
+    d = ck.ConsentKeeper().replay(events)[0]
+    assert (d.decision, d.reason) == ("block", "opted_out") and 2 in d.evidence

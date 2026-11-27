@@ -458,7 +458,7 @@ front desk read "STOP" the same way.
 |---|---|
 | Every send is checked | A send with an unreadable number (`invalid_number`) or an unknown message class (`unknown_message_class`) is blocked; a malformed event (not an object, an unknown kind, a missing field, a send_id used twice, or an opt-in / inbound text / carrier / reassignment for a number that cannot be read) refuses the whole replay (`ValueError`), so an opt-out is never dropped |
 | One record per person | Numbers are read after NFKC with any script's digits, dash look-alikes and invisibles folded, and a `tel:` prefix removed; client ids are read with NFC (not NFKC), every invisible format character removed, dashes folded and ASCII letters lower-cased, so one client typed differently is one record and two different clients ("strasse" / "straße", "acme2" / "acme²") never merge. Every `replay` is the whole history: nothing carries over between calls |
-| Unrecognised replies | Any inbound text that is not an opt-out reading, a known-safe reply or a restart word blocks as `unrecognised_reply` until a `staff_review` (named reviewer, after the reply) clears it (AEGIS round 5) |
+| Unrecognised replies | Any inbound text that is not an opt-out reading, a known-safe reply or a restart word blocks as `unrecognised_reply` until a `staff_review` (named reviewer: at least one visible letter or digit, after the reply) clears it (AEGIS round 5), or new express written consent is recorded after it, as after STOP (open ruling for Andre, AEGIS round 8) |
 | Calls too | The keeper decides calls as well as texts, so calls-only revocations block (`opted_out`): in one clause, a refusal word ("don't", "no", "never", "stop", "dejen", "nao", "ne" ...) within five words before a calling or messaging word ("call", "calls", "phone", "contact", "llamar" and its forms, "ligar", "appeler", "mensajes" ...), read after leet and doubled letters are undone, and "DNC" on its own. It fails toward suppression ("no calls on Sunday" blocks). Wording Customer Service hands to a human ("opt me out") blocks too (`possible_opt_out`) |
 | Consent sources | Express written consent counts only from a web form, paper form, keyword join, signed agreement or e-sign; a START reply is never consent |
 | Opt-out wins | `exact` -> `opted_out`, `suspected` (one typo of stop / unsubscribe) -> `possible_opt_out`; both block (Nov 26 ruling: STOP typos count) |
@@ -545,3 +545,10 @@ accented Latin letters, and any other mark makes the reply unrecognised. Review,
 block replaced the evidence with itself (the cause of the block was lost, and the evidence changed with input order);
 the evidence now keeps it. New written consent after an unrecognised reply now restores texting, as after an opt-out.
 Regression tests: "AEGIS round 7".
+
+AEGIS Inquisitor round 8 on ded558d9 (RR-F5): client ids now read any run of spaces (tab, NBSP, U+3000, thin spaces)
+as one space, so "Acme  Dental" and "Acme Dental" are one record; a reviewer name must hold a visible letter or digit
+(zero-width, Hangul filler, braille blank and "-" are refused). New consent after an unreviewed reply still restores
+texting, as after STOP; that is documented here and left for Andre to rule on. Disclosed, not changed: when a staff
+`opt_out` ruling and an opt-in share one instant, the evidence list depends on their input order (the decision does
+not); a carrier opt-out is kept per (client, number), the same open scope ruling as reassignment.

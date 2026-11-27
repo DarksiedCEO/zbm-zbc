@@ -20,13 +20,15 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings, ADR 0014):
   (other apostrophes, leet, emoji letters, "Please discontinue these texts", "Cancelen los mensajes"), so the keeper
   no longer decides that a free-text reply is harmless; a person does. A ``staff_review`` event (a named reviewer's
   ruling ``not_an_opt_out``, recorded after the reply) clears ``unrecognised_reply`` and nothing else; the ruling
-  ``opt_out`` records the reply as an opt-out (``opted_out``, which no review clears).
+  ``opt_out`` records the reply as an opt-out (``opted_out``, which no review clears). New express written consent
+  recorded after the reply also clears it, exactly as new consent after STOP restores texting (a ruling for Andre:
+  AEGIS round 8 asked whether an unreviewed reply should outlast new consent).
 - A state-changing event (opt-in, inbound text, carrier opt-out, reassignment, staff review) for a number that cannot be read, a
   non-object event, or a send_id used twice refuses the whole replay (``ValueError``): an opt-out is never dropped.
   Numbers are read after NFKC with any script's digits, dash look-alikes and invisibles folded, so one person never
   becomes two records. Client ids are read with NFC (not NFKC), every format character removed, dashes folded and
-  every letter whose lower case is one letter lower-cased: one client typed differently is one record, two
-  different clients never merge.
+  every letter whose lower case is one letter lower-cased, and any run of spaces read as one space: one client typed
+  differently is one record, two different clients never merge.
 - Every ``replay`` is the whole history: no state carries over between calls.
 - Express written consent counts only from a known source (web form, paper form, keyword join, signed agreement,
   e-sign); a START reply is never one.
@@ -169,8 +171,20 @@ def normalise_client(raw: str) -> str:
     every invisible removed, dashes folded, trimmed, lower-cased letter by letter (\u00c9cole and \u00e9cole are one client;
     not case-folded, so "strasse" and "stra\u00dfe" stay two clients; a letter whose lower case is longer than one
     letter keeps its case)."""
-    folded = _strip_invisible(unicodedata.normalize("NFC", raw)).translate(_DASHES).strip()
+    folded = _strip_invisible(unicodedata.normalize("NFC", raw)).translate(_DASHES)
+    folded = re.sub(r"\s+", " ", folded).strip()   # any run of spaces (tab, NBSP, U+3000 ...) is one space (AEGIS round 8)
     return "".join(c.lower() if len(c.lower()) == 1 else c for c in folded)
+
+
+_FILLERS = {"\u115f", "\u1160", "\u3164", "\uffa0"}     # Hangul fillers: letters by category, blank on screen
+
+
+def _is_named(reviewer: object) -> bool:
+    """A reviewer name a person can read: at least one visible letter or digit (AEGIS round 8: "\u200b", "\u3164",
+    "\u2800" and "-" are not names)."""
+    if not isinstance(reviewer, str):
+        return False
+    return any(unicodedata.category(c)[0] in "LN" and c not in _FILLERS for c in _strip_invisible(reviewer))
 
 
 def normalise_number(raw: object) -> Optional[str]:
@@ -282,7 +296,7 @@ class ConsentKeeper:
             raise ValueError(f"event {i}: source must be text")
         if kind == "opt_in" and e.get("consent") is not None and not isinstance(e["consent"], str):
             raise ValueError(f"event {i}: consent must be text")
-        if kind == "staff_review" and (not isinstance(e.get("reviewer"), str) or not e["reviewer"].strip()
+        if kind == "staff_review" and (not _is_named(e.get("reviewer"))
                                        or e.get("ruling") not in ("not_an_opt_out", "opt_out")):
             raise ValueError(f"event {i}: a staff review needs a reviewer and the ruling not_an_opt_out or opt_out")
         if kind == "inbound_sms" and not isinstance(e.get("text"), str):
