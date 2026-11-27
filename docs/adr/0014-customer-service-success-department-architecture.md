@@ -698,3 +698,79 @@ arbitrary object that says "landline" but compares equal to "mobile" is never te
 
 AEGIS Inquisitor round 10 on e0a46247 (RR-F2): the plain-data rule covers keys too: a record key that is not plain
 text (an object that hashes like "line_type" and shadows it after the record is built) makes the record unreadable.
+
+59 s after 21:00; the clock path already gives that minute up. Regression tests: "AEGIS round 4".
+
+(RR-F3 commit), which anyone can rerun.
+deadline and message class matches the planted key. A grader self-test proves one wrong text is noticed. 10 of 10
+planted mutants killed.
+
+## Amendment — RR-F4 warm-transfer router (Nov 26 2026; MVP spec v0.1, front-desk team)
+
+`services/service-py/src/transfer_router.py`, one job: when the pack says a live caller needs a human, decide who to
+ring (`plan`) and turn what happened into the outcome (`resolve`): `connected` (to whom; the whisper summary first when
+there is one), `fallback_message_and_text_back`, or `caller_hung_up_log_and_text_back`. Nothing is dialled from here.
+
+| Rule | Behaviour |
+|---|---|
+| Hours and on-call | Outside business hours (anything but an explicit `true`) or with nobody on call: straight to the fallback, nobody rung |
+| Ringing | Simultaneous for everyone on call (Nov 26 ruling), duplicates rung once; a sequential plan is rung at once too and noted. The on-call order may be a list or a tuple of text or whole-number ids; anything else is nobody on call (`unreadable_on_call_order`) |
+| 30 s | A ring timeout above 30 s, or one that cannot be read, is cut to 30 s; every outcome lands within it |
+| Who connects | The first in the on-call order who answers live; never someone not on call; two records for one person that disagree count as not answering. A live answer beats someone else's late answer (ruling for the spec freeze; the pool's own oracle reads that mix the other way and the pool never generates it) |
+| Whisper | Played first when there is one, `whisper_line` made it, and its "Urgent: " start matches the case (urgent exactly `True`); anything else, including a line made for the other urgency, is `whisper_rejected`. A dict subclass is read through `dict`'s own methods, so an overridden `get` cannot change the record (AEGIS round 7); a missing one still connects (the caller is never held for it) and is recorded (`whisper_missing`). The whisper line says "Urgent" only for an explicit `True`, never speaks a caller-supplied name or other record text, and speaks the need only as a fixed phrase for its label (AEGIS round 4) |
+| No dropped caller | `resolve` never raises an `Exception`: an unreadable case (not an object, no usable id) ends in the fallback (`unreadable_case`); any unreadable outcome is "no answer", so every path ends connected or in a fallback; fallbacks and late answers ask RR-F2 for a text-back (which still applies consent and quiet hours) |
+
+Certification: `services/service-py/tests/test_transfer_router.py` runs the shared MVP pool (F4, 200 cases per seed)
+for the three DEV seeds and three more: path, person, whisper requirement, text-back and the 30 s limit match the key
+on every case. Two seeds also get pool-shaped twins the pool never makes (an on-call person answering outside hours,
+someone off call answering): none is ever connected. A grader self-test proves one dropped caller is noticed.
+
+AEGIS round 1 (Nov 26 2026, Inquisitor on 8c41637b): High: a case with an unreadable id raised, so no outcome at all
+(the kill criterion). Also: a tuple or numeric-id on-call order rang nobody; the whisper announced "Urgent" for
+`"false"`; the docs said a whisper was required to connect while the code connected without one; the pool certified
+neither "outside hours" nor "off call"; the mutant count had no artifact. All fixed as above with regression tests
+("AEGIS round 1" section); mutation results come from `services/service-py/devtools/frontdesk_mutants.py`, which arrives with the RR-F3
+commit at the top of this stack.
+
+AEGIS round 2 (Nov 26 2026, Inquisitor on aeb8ec03): the round-1 fixes held (30,000-case fuzz: no raise, every path
+connected or a fallback, never outside hours or off call). New High: a whole-number id over 4,300 digits made `str()`
+raise, so `resolve` still raised; ids are now whole numbers up to 10**18 or text, anything else is not an id.
+Review: two behaviour records for one person that disagree (7 and "7", "staff-a" and "staff-a ") let the last one
+win; they now count as not answering. Caller text could add its own "Press 2" or "Urgent" to the whisper; name and
+reason now keep only letters, digits, spaces, apostrophes and hyphens and lose any steering word, so the only
+instruction spoken is "Press 1 to accept". Regression tests: "AEGIS round 2" section.
+
+AEGIS round 3 (Nov 26 2026, Inquisitor on ce138ec5): no High; the kill criteria held. Review, all fixed: the word
+filter on the whisper was beaten by look-alike letters, Spanish forms ("pulse nueve"), inflections, "hit/push 9",
+spelled digits and digit runs; `resolve` played any non-empty string; "within 30 s" did not say what it bounds. The
+whisper now speaks a name only when it is at most 3 words of Latin letters read after NFKC with no steering word or
+spelled digit (anything else: "a caller who did not give a name"), and speaks the need only as a fixed phrase for its
+label (`NEED_PHRASES`; an unlisted label is "a request"), never record text. `resolve` plays only a line
+`whisper_line` made; anything else connects without it, noted `whisper_rejected`. The 30 s bounds the ringing; the
+whisper plays after an answer. Accepted: real names that start with a steering word ("Pressley", "Diez") are left
+out of the whisper (superseded by round 4). Regression tests: "AEGIS round 3".
+
+AEGIS round 4 (Nov 26 2026, Inquisitor on 23d3395f): 1 High: names that are instructions in other languages or
+synonyms ("Tapez Neuf", "Drücken Sie Neun", "Premi Nove", "Approve Refund Now") were spoken, and urgency words
+("Urgencia", "Dringend") came through names. A word list cannot cover every language, so the whisper no longer speaks
+any caller-supplied text: it is one of a fixed set of lines ("Transferring a caller about <fixed need phrase>. Their
+name and number are on your screen. Press 1 to accept.", optionally "Urgent: " first), and `resolve` plays a whisper
+only when it is one of those lines (a set lookup, constant time: the quadratic regex the reviewer timed at 6 s on 144
+KB is gone). Review: `resolve` raised on hand-built objects whose comparison raises; any exception while reading a
+case now ends in the fallback, noted `unreadable_case`. Regression tests: "AEGIS rounds 3 and 4".
+
+AEGIS round 5 (Nov 26 2026, Inquisitor on 2c1d4272): no High; every kill criterion held (30,000 fuzzed cases). Review,
+all fixed: a `str` subclass could fake a fixed whisper line, and a behaviour value equal to everything connected: only a
+plain `str` is now a whisper or an outcome; a whisper whose hash raised turned an answered call into a fallback: it now
+simply connects without the whisper; "the late answerer is logged" had no field: the outcome notes now name each late
+answerer (`answered_after_hang_up:<id>`). "Never raises" is narrowed to "never raises an `Exception`": a
+`KeyboardInterrupt` or `SystemExit` is not swallowed, on purpose. Regression tests: "AEGIS round 5".
+
+AEGIS round 6 (Nov 27 2026, Inquisitor on ef583a20): no High. Review, fixed: `resolve` played a fixed "Urgent: " line
+for a case whose `urgent` was not exactly `True`; an "Urgent: " line now plays only for such a case, and a plain line
+only for one that is not. Regression tests: "AEGIS round 6".
+
+AEGIS Inquisitor round 7b on 6ad32849 (RR-F4): only plain types count inside a case too: the on-call order must be a
+`list` or `tuple` (no subclass), an id a plain `str` or `int`, the ring timeout a plain `int`; anything else is
+unreadable and fails closed (nobody rung, 30 s). A late answer is now logged (`answered_after_hang_up:<id>`) also
+when someone else answered live. The round-7 fuzz (40,000 cases) and urgency grid replay clean.
