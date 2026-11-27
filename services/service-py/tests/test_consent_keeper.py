@@ -492,3 +492,44 @@ def test_a_staff_ruling_of_opt_out_is_permanent():
               ev("staff_review", 6, reviewer="andre", ruling="opt_out"),
               ev("staff_review", 7, reviewer="andre", ruling="not_an_opt_out"), send(8)]
     assert one(events) == ("block", "opted_out")
+
+
+# ---------------------------------------------------------------- AEGIS round 6 (Inquisitor, d462354a)
+@pytest.mark.parametrize("block", [[ev("inbound_sms", 5, text="STOP")], [ev("inbound_sms", 5, text="STPO")],
+                                   [ev("inbound_sms", 5, text="Please discontinue these texts"),
+                                    ev("staff_review", 6, reviewer="andre", ruling="opt_out")],
+                                   [ev("inbound_sms", 5, text="STOP"), ev("inbound_sms", 6, text="START")],
+                                   [ev("number_reassigned", 5)]])
+def test_a_later_reply_and_a_review_never_clear_a_stronger_block(block):
+    events = [ev("opt_in", 1, consent="express_written")] + block + [
+        ev("inbound_sms", 8, text="hello?"), ev("staff_review", 9, reviewer="andre", ruling="not_an_opt_out"),
+        send(10, sid="m", mclass="marketing"), send(10, sid="i")]
+    got = decide(events)
+    assert got[("m", 10)][0] == "block" and got[("i", 10)][0] == "block"
+
+
+def test_a_stop_and_a_reply_at_one_instant_decide_the_same_in_any_order():
+    stop, hello = ev("inbound_sms", 5, text="STOP"), ev("inbound_sms", 5, text="hello?")
+    tail = [ev("staff_review", 6, reviewer="andre", ruling="not_an_opt_out"), send(7)]
+    head = [ev("opt_in", 1, consent="express_written")]
+    assert one(head + [stop, hello] + tail) == one(head + [hello, stop] + tail) == ("block", "opted_out")
+
+
+@pytest.mark.parametrize("text", ["Yes \u8bf7\u505c\u6b62\u53d1\u9001", "Yes \uadf8\ub9cc \ubcf4\ub0b4\uc138\uc694", "Yes, \u062a\u0648\u0642\u0641",
+                                  "yes \u092c\u0902\u0926 \u0915\u0930\u094b", "Yes \u6b62\u3081\u3066", "start \u043d\u0435\u0442",
+                                  "S\u00ed \u505c\u6b62"])
+def test_a_restart_word_with_anything_else_is_not_a_restart_word(text):
+    assert ck.opt_out_reading(text) == "unrecognised_reply"
+
+
+@pytest.mark.parametrize("text", ["START", "Yes", "yes!", "UNSTOP", "S\u00ed"])
+def test_a_bare_restart_word_is_still_recognised(text):
+    events = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="STOP"),
+              ev("inbound_sms", 6, text=text), send(7)]
+    assert one(events) == ("block", "start_keyword_does_not_restore")
+
+
+@pytest.mark.parametrize("bad", [None, 5, 2.5, True, "STOP", {"kind": "opt_in"}])
+def test_a_replay_that_is_not_a_list_refuses_with_valueerror(bad):
+    with pytest.raises(ValueError):
+        ck.ConsentKeeper().replay(bad)

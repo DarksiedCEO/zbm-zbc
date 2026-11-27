@@ -530,3 +530,11 @@ of 50). Texting a customer who replied in free text waits for a person; a missed
 review queue (who sees `unrecognised_reply`, how fast) is wiring, not built. A reviewer can also rule a reply an
 opt-out (`ruling: opt_out`), which records `opted_out` and is never cleared. The round 3 and 4 revocations are tested
 to read as opt-outs, not merely as unrecognised, so a review can never clear them. Regression tests: "AEGIS round 5".
+
+AEGIS round 6 (Nov 27 2026, Inquisitor on d462354a): 3 High, all fixed. A later free-text reply replaced a stronger
+block (STOP, a STOP typo, a staff `opt_out` ruling, STOP+START, a reassignment) with `unrecognised_reply`, which a
+staff review then cleared: a block is now replaced only by one at least as strong (`_STRENGTH`), so nothing a review
+can clear ever stands in for an opt-out, and the same-instant order no longer changes any decision. A restart word
+followed by a revocation in another script ("Yes 请停止发送") read as a bare restart word: a restart word now counts
+only when it is the whole reply in Latin letters. Review: `replay` given a non-list raised TypeError; it is now a
+ValueError. Regression tests: "AEGIS round 6".

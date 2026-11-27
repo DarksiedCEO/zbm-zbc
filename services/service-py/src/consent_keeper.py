@@ -148,6 +148,10 @@ def _strip_invisible(text: str) -> str:
     combining grapheme joiner and the variation selectors."""
     return "".join(c for c in text if unicodedata.category(c) != "Cf" and c != "\u034f"
                    and not ("\ufe00" <= c <= "\ufe0f" or "\U000e0100" <= c <= "\U000e01ef"))
+# Which block may replace which: a block is replaced only by one at least as strong; a staff review clears only the
+# weakest, so nothing a review can clear ever stands in for an opt-out.
+_STRENGTH = {"unrecognised_reply": 1, "possible_opt_out": 3, "start_keyword_does_not_restore": 3,
+             "number_reassigned": 4, "opted_out": 5, "carrier_opt_out": 6}
 REASONS = ("opted_out", "possible_opt_out", "unrecognised_reply", "start_keyword_does_not_restore", "carrier_opt_out", "number_reassigned",
            "no_written_consent", "invalid_number", "unknown_message_class")
 _E164 = re.compile(r"\+1[2-9][0-9]{2}[2-9][0-9]{6}")
@@ -189,8 +193,11 @@ def normalise_number(raw: object) -> Optional[str]:
 
 
 def _restart_word(text: str) -> bool:
-    norm = channels.normalise(text).strip()
-    return norm in RESTART_WORDS
+    """The whole reply is a restart word and nothing else (AEGIS round 6: "Yes 请停止发送" read as "yes" because the
+    old reading dropped every non-Latin character)."""
+    key = _reply_key(text)
+    plain = "".join(c for c in unicodedata.normalize("NFKD", key) if not unicodedata.combining(c))
+    return bool(re.fullmatch(r"[a-z]+(?: [a-z]+)*", plain)) and (key in RESTART_WORDS or plain in RESTART_WORDS)
 
 
 def _refusal_near_contact(text: str) -> bool:
@@ -285,6 +292,8 @@ class ConsentKeeper:
     def replay(self, events: Iterable[dict]) -> list[Decision]:
         """Decide every send_attempt in ``events`` (any order). Raises ValueError on a malformed event: the replay
         refuses as a whole rather than decide on part of the record."""
+        if not isinstance(events, (list, tuple)):
+            raise ValueError("events must be a list of event objects")
         rows = list(events)
         for i, e in enumerate(rows):
             self._validate(e, i)
@@ -347,6 +356,10 @@ class ConsentKeeper:
         if rec.carrier_blocked and reason != "carrier_opt_out":
             rec.evidence = rec.evidence + [i]
             return       # the carrier block stays the reason: our own records cannot lift it
+        if rec.suppressed is not None and _STRENGTH[reason] < _STRENGTH[rec.suppressed]:
+            rec.evidence = rec.evidence + [i]
+            return       # a weaker block never replaces a stronger one (AEGIS round 6: a later "hello?" turned STOP into
+                         # a reply a staff review could clear)
         rec.suppressed, rec.suppressed_at = reason, t
         rec.evidence = [i]
 
