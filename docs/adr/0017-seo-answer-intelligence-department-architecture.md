@@ -1333,9 +1333,9 @@ case detail, argue with the reviewer, or carry an injected instruction. Regulate
 personal-injury law) and every vertical the module does not know get wordings with no relationship word ("visit",
 "patient", "treatment", "appointment", "case", "see you again" ...); the wordings are checked against the
 relationship and never-say lists at import and in the tests. A suspected fake (one review, account at most 7 days old,
-5 or more same-day reviews from new accounts) gets no reply and goes to the owner for a removal request. A currency sign
-or number character of any script, or a listed money, price or legal word stem anywhere in a word (after invisibles
-and look-alike letters are folded), routes the review to the owner, except the two exact non-request sentences in a
+5 or more same-day reviews from new accounts) gets no reply and goes to the owner for a removal request. Any character
+outside printable ASCII, any ASCII digit or "$", or a listed money, price or legal stem appearing anywhere as a plain
+substring of the casefolded text routes the review to the owner, except the two exact non-request sentences in a
 4- or 5-star review; the list misses words it does not know (disclosed: the flag is advisory and every reply is
 owner-approved). An unreadable review gets no reply and goes to the owner; only a non-list batch
 raises ValueError.
@@ -1356,6 +1356,7 @@ same for every review of a band, which a human grader may rate below a tailored 
 
 AEGIS L7 rounds 2-5 (Nov 27 2026): the grader fails a reply to a flagged fake; every Unicode currency sign and
 number character routes (read before NFKC, which folds "₨" and "﷼" into letters); money and legal stems match anywhere
-in a word ("overcharged", "unpaid", "nonrefundable", "litigation") after soft hyphens, zero-width characters and
-Cyrillic / Greek look-alike letters are folded. The docstring and this note now describe the route flag as a word
-list with known misses.
+in a word ("overcharged", "unpaid", "nonrefundable", "litigation"). Round 6 found look-alike letters and invisible
+or filler characters outside any fold table, so any character outside printable ASCII now routes, and every stem is a
+plain substring ("countersued", "impagada", "latefees"). The docstring and this note describe the route flag as an
+advisory word list with known misses.

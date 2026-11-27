@@ -235,3 +235,10 @@ def test_every_number_character_of_any_script_routes():
                                   "re\u00adfund", "re\u200bfund", "r\u0435fund"])
 def test_money_and_legal_word_stems_route_anywhere_in_a_word(text):
     assert rr.draft(review(text=text, stars=1)).route_to_owner
+
+
+@pytest.mark.parametrize("text", ["I WANT A R\u0415FUND", "\u0421HARGE", "\u0410TTORNEY", "R\u0395FUND",
+                                  "re\u3164fund", "re\u115ffund", "re\u2800fund", "countersued", "countersue",
+                                  "impagada", "latefees"])
+def test_any_non_ascii_character_or_substring_stem_routes(text):
+    assert rr.draft(review(text=text, stars=5)).route_to_owner
