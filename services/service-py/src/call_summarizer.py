@@ -8,14 +8,16 @@ Rules (spec v0.1, the front-desk shared rules, the Nov 26 spec-freeze rulings):
   trusts (confidence >= 0.6); the receptionist's own confirmation line is checked against them, never used as the
   source. A turn below 0.6 that has words is flagged and never used as a fact. A silent turn carries nothing and is
   not flagged (Nov 26 ruling): silence means re-ask, never guess.
-- A number the caller rejects ("not 602 555 0101") is never used. When the caller gives two different numbers, the
+- A number the caller rejects ("not 602 555 0101") is never used, and any no / not / wrong / oops / digit after the
+  last number makes it ambiguous: a person checks the recording (AEGIS round 7, fails closed). When the caller gives two different numbers, the
   later one wins only when a correction cue sits between them ("no wait", "sorry", "actually", "I mean", "perdón",
   "mejor", "quiero decir"); two numbers with no cue ("my cell is ... and my office is ...") are ambiguous: no callback
   number is reported and the owner sees ``ambiguous_number``.
 - A name is reported only when the caller gave it AND the receptionist confirmed it: the caller says it after a
   lead-in ("I'm", "my name is", "put it under", "soy", "me llamo" ...; "this is", "it's", "habla" only before a number
-  or a calling phrase) or as "First Last" opening a sentence before a number, and a trusted receptionist turn repeats
-  it ("Let me confirm: Ana Reyes ..."). A pair nobody confirmed (a landlord, a business, a mother, a city) is never a
+  or a calling phrase) or as "First Last" opening a sentence before a number, and a trusted receptionist turn confirms
+  exactly that pair in the fixed form, right after the cue ("Let me confirm: Ana Reyes, at ...", "Confirmo: ...";
+  AEGIS round 7). A pair nobody confirmed (a landlord, a business, a mother, a city) is never a
   name (AEGIS F3 round 3: word lists alone kept missing them). Never a pair holding a command, place, business or
   health word. Exactly one confirmed name, or none; two are ambiguous, never picked between.
 - No health detail ever reaches the summary: the summary is built only from the name, the number, a category from
@@ -79,6 +81,12 @@ _CORRECTION_CUE = (r"\bno wait\b|\bsorry\b|\bactually\b|\bi mean\b|\bcorrection\
 _CORRECTION = re.compile(_CORRECTION_CUE, re.IGNORECASE)
 # a correction cue followed by digits that do not form a whole number
 _DIGIT_WORD = r"(?:\d+|zero|oh|one|two|three|four|five|six|seven|eight|nine|cero|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve)"
+# after the last number, any no / not / wrong / oops / a digit or a spelled digit means the caller may have taken it
+# back ("No, that's not it.", "Oops, it's 0101 at the end", "Last digit's a one"): the number is ambiguous and a person
+# checks the recording (AEGIS round 7: the inverted default; a list of correction phrases kept missing some)
+_DOUBT_AFTER = re.compile(r"\b(?:no|not|nope|nah|wrong|oops|incorrect|isn'?t|wasn'?t|actually|wait|sorry|digits?|last|"
+                          r"ending|ends|mistake|equivocad[oa]|incorrecto|perd[oó]n|espere|n[uú]mero)\b|"
+                          r"\b" + _DIGIT_WORD + r"\b", re.IGNORECASE)
 _PARTIAL_CORRECTION = re.compile(
     r"(?:" + _CORRECTION_CUE + r"|\bwait\b|\bhold on\b|\bno\b\s*[,.!]|\bending in\b|\bends in\b|\blast (?:four|4|digits)\b|"
     r"…|\.\.\.|\bespere\b|\btermina en\b)[^\n]{0,40}?\b" + _DIGIT_WORD + r"\b", re.IGNORECASE)
@@ -274,9 +282,12 @@ def _said_911(agent_text: str, previous: Optional[str] = None) -> bool:
     Punctuation and digit spacing are formatting ("dial 911, right now.", "9 1 1", "now!!"); the turn must end a
     sentence and the receptionist's turn before it must have ended one too, so a sentence split across two turns
     ("There's no need to" / "call 911.") is never the instruction (AEGIS round 6)."""
-    if previous is not None and not re.search(r"[.!?…]\s*$", previous):
+    text = agent_text.strip().strip("\"'“”‘’«»").lstrip("¡").strip()
+    # a sentence split across turns: the turn before must have ended a sentence (an ellipsis does not), unless this
+    # turn opens one with a capital ("Thanks for calling Desert Plumbing" / "Please hang up and dial 911.") (round 7)
+    if previous is not None and not re.search(r"(?<![.…])[.!?]\s*[\"'”’»]?\s*$", previous) and not text[:1].isupper():
         return False
-    text = re.sub(r"(?<!\d)9[\s.\-]?1[\s.\-]?1(?!\d)", "911", agent_text.strip())
+    text = re.sub(r"(?<!\d)9[\s.\-]?1[\s.\-]?1(?!\d)", "911", text)
     if not re.search(r"[.!]$", text):
         return False
     text = re.sub(r"[.!]+$", ".", re.sub(r"\s+", " ", text.replace(",", " "))).replace(" .", ".")
@@ -313,7 +324,8 @@ def _callback(trusted: list[str], notes: list[str]) -> tuple[Optional[str], bool
         return None, False
     end = found[-1][2]
     nxt = _NUM.search(joined, end)
-    if _PARTIAL_CORRECTION.search(joined[end:nxt.start() if nxt else end + 60]):
+    if _PARTIAL_CORRECTION.search(joined[end:nxt.start() if nxt else end + 60]) or \
+            (nxt is None and _DOUBT_AFTER.search(joined[end:])):
         notes.append("ambiguous_number")   # "0110, no wait, 0101": a correction we cannot complete (AEGIS round 5)
         return None, False
     distinct = []
@@ -327,24 +339,17 @@ def _callback(trusted: list[str], notes: list[str]) -> tuple[Optional[str], bool
     return distinct[-1][0], len({d[0] for d in distinct}) > 1
 
 
-# a receptionist turn confirms a name only when it is a confirmation ("Let me confirm: Ana Reyes"), not any mention
-# ("I'll note your landlord Ana Reyes")
-_CONFIRM_CUE = re.compile(r"\bconfirm|\bconfirmo|\bis that (?:right|correct)|\bdid i get that right|\bcorrect\?|"
-                          r"\b¿?es correcto|\bverify|\bjust to (?:check|be sure)|\bso that'?s", re.IGNORECASE)
+# the receptionist confirms a caller's name only in the fixed form, the name straight after the cue at the start of
+# the turn ("Let me confirm: Ana Reyes, at ...", "Confirmo: Ana Reyes, al ..."). Anything else ("I can't confirm
+# anything for Ana Reyes", "Let me confirm: your landlord Ana Reyes") confirms nothing (AEGIS round 7)
+_CONFIRM_LINE = re.compile(rf"(?:let me confirm|just to confirm|to confirm|so to confirm|confirmo|para confirmar)"
+                           rf"\s*[:,]?\s*({_WORD} {_WORD})(?=\s*(?:[,.;:!?]|$|\s(?:at|al|en|on)\b))", re.IGNORECASE)
 
-
-_NO_CONFIRM = re.compile(r"\b(?:can'?t|cannot|can not|won'?t|unable to|not able to|don'?t|do not|no (?:puedo|podemos)|"
-                         r"no se puede)\W+(?:\w+\W+){0,2}$", re.IGNORECASE)
-
-
-def _confirms(text: str) -> bool:
-    """A confirmation cue that is not refused ("I can't confirm anything for Ana Reyes" confirms nothing; round 6)."""
-    return any(not _NO_CONFIRM.search(text[:m.start()]) for m in _CONFIRM_CUE.finditer(text))
 
 
 def _names(trusted: list[str], confirmations: Optional[list[str]] = None) -> list[str]:
     """Names the caller gave; with ``confirmations`` (the trusted receptionist turns), only those it repeated."""
-    said = " \n ".join(_fold(x).casefold() for x in confirmations if _confirms(_fold(x))) \
+    said = {m.group(1).casefold() for x in confirmations for m in [_CONFIRM_LINE.match(_fold(x).strip())] if m} \
         if confirmations is not None else None
     names: list[str] = []
     for x in trusted:
@@ -359,7 +364,7 @@ def _names(trusted: list[str], confirmations: Optional[list[str]] = None) -> lis
                 continue
             if re.search(r"'s?$", words[-1]) or re.match(r"\s*'", x[m.end(1):]):
                 continue                   # "I'm Ana Reyes's husband": a possessive names someone else (AEGIS round 5)
-            if said is not None and not re.search(rf"(?<!\w){re.escape(cand.casefold())}(?!\w)", said):
+            if said is not None and cand.casefold() not in said:
                 continue                   # nobody confirmed it: a landlord, a business, a mother is never a name
             if cand not in names:
                 names.append(cand)
@@ -406,8 +411,9 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
     if len(names) > 1:
         notes.append("ambiguous_name:" + "|".join(names))
 
-    said_911 = any(c >= LOW_CONFIDENCE and _said_911(_fold(x), _fold(agent[i - 1][1]) if i else None)
-                   for i, (c, x) in enumerate(agent))
+    spoken_agent = [(c, x) for c, x in agent if x.strip()]      # an empty receptionist turn is not a turn (round 7)
+    said_911 = any(c >= LOW_CONFIDENCE and _said_911(_fold(x), _fold(spoken_agent[i - 1][1]) if i else None)
+                   for i, (c, x) in enumerate(spoken_agent))
     emergency = said_911
     # the CHECK NOW net also reads low-confidence words: they are never a fact, but they can still be a warning
     possible = not emergency and any(_EMERGENCY.search(_fold(x)) or _EMERGENCY_WORDS.search(_fold(x))
@@ -430,8 +436,10 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
     elif flagged and (need in ("spam_call", "wrong_number", "long_silence", "unclear") or not callback):
         action = ("Part of the call could not be heard clearly; review the recording"
                   f"{' and call back at ' + callback if callback else ''}.")
-    elif need in ("spam_call", "wrong_number", "long_silence") and not callback:
-        action = "No follow-up needed."    # a caller who left a number is always called back (AEGIS round 6)
+    elif need == "long_silence" and not spoken and not callback and "ambiguous_number" not in notes:
+        action = "No follow-up needed."    # only a call where nothing was said (AEGIS round 7: the inverted default)
+    elif need in ("spam_call", "wrong_number") and not callback and "ambiguous_number" not in notes:
+        action = "Looks like spam or a wrong number; a person should confirm before closing it."
     elif callback:
         action = f"Call back at {callback}."
     elif "ambiguous_number" in notes:

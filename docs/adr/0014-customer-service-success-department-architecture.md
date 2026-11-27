@@ -861,3 +861,14 @@ anything for Ana Reyes") confirms nothing; a possessive split by the recogniser 
 "Caller" label in any case is the caller (the receptionist label stays exact); words inside a silence marker are
 speech. Spam and wrong-number words lose to a real need, and a caller who left a number is always called back.
 Mutation harness (whole stack at this commit): 136 mutants, 129 killed, 7 equivalent (each with its reason).
+
+AEGIS Inquisitor round 7 on 26f1be81 (RR-F3): the inverted default reaches the summary too. "No follow-up needed"
+is said only for a call where nothing was spoken; a spoken call that reads as spam or a wrong number says a person
+should confirm before closing it. After the caller's last number, any no / not / wrong / oops / sorry / digit makes
+the number ambiguous and the summary says to check the recording (fails closed: "602 555 0110. Sorry about the
+noise." loses its number). A name counts only when the receptionist confirmed exactly that pair in the fixed form
+right after the cue ("Let me confirm: Ana Reyes, at ..."); a refusal in any wording, or a third party named in the
+confirmation, confirms nothing. The 911 instruction is read with opening marks and quotes set aside; an empty
+receptionist turn is skipped; a turn before it that ends in an ellipsis did not end a sentence, but a 911 turn that
+opens with a capital starts one. Mutation harness (whole stack): 137 mutants, 125 killed, 12 equivalent, each with
+its reason.
