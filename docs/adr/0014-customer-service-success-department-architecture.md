@@ -767,15 +767,16 @@ that wording.
 
 ### Mutation check for the front-desk agents (RR-F5, F2, F4, F3)
 
-`cd services/service-py && python3 devtools/frontdesk_mutants.py [agent]` plants 77 single defects, each in a fresh
+`cd services/service-py && python3 devtools/frontdesk_mutants.py [agent]` plants 85 single defects, each in a fresh
 copy of `src/` and `tests/` (the checkout is never edited), and runs that agent's test file. A mutant whose text no
 longer exists fails the run (`NOT_APPLIED`), so the list cannot rot. A kill counts only when pytest exits 1 (tests
 ran and failed); any other exit code is `RUN_ERROR` and fails the run (AEGIS F3 round 1: a mutant that breaks the
-import is not a test that caught it). Result at this commit: 71 killed; 6 survive and are listed as equivalent with
+import is not a test that caught it). Result at this commit: 79 killed; 6 survive and are listed as equivalent with
 the reason (in the consent keeper: the carrier check in the decision, consent cleared on reassignment, the opt-in
-time guard, and the same-instant opt-in order; in the text-back: the Latin-script check, which the name pattern
-already enforces; in the summarizer: the final health check on the text, which the name reader already enforces),
-each covered by another rule that cannot be told apart from outside.
+time guard, and the same-instant opt-in order; in the transfer router: an unreadable case raising inside `plan`,
+which `resolve`'s catch-all turns into the same fallback; in the summarizer: the final health check on the text,
+which the name reader and the label check already enforce), each covered by another rule that cannot be told apart
+from outside.
 The summarizer's 0.6 confidence line is the exact fraction 3/5: this service allows no float literals. This replaces the hand-run mutant counts in the RR-F5, F2 and F4 commit messages.
 
 AEGIS round 1 on RR-F3 (Nov 26 2026, Inquisitor on 0aaf8411): 6 High, all fixed as above. Any capitalised pair was
@@ -787,3 +788,21 @@ seven chores or 911-in-a-number cases were called emergencies. Review: odd pack 
 raised the wrong error; the 0.6 boundary and the name stop-words had no killing test (and 0.6 written as a float
 read as 0.5999... and was not trusted: fixed by reading the written value); a mutant that broke the run counted as
 killed. Regression tests: "AEGIS round 1" section. Every reviewer repro replays clean.
+
+AEGIS round 2 on RR-F3 (Nov 26 2026, Inquisitor on 585ea682): the round-1 repros held; 8 new High, all fixed. Names:
+"It's Christmas Eve", "This is Long Beach", "Desert Bakery, 602 ..." were read as names; weak lead-ins ("this is",
+"it's", "habla") now need the name followed straight by a number or a calling phrase, and the non-name word list
+covers places, businesses, days, holidays and phone words. Numbers: "don't call 602 ...", "never use", "... is not my
+number anymore", "... that's disconnected" are now rejections (before or after the number). 911: a disclaimer,
+negation or question ("If this is ever an emergency, call 911", "No need to call 911", "Did you call 911?") is no
+longer the instruction; only a sentence with the instruction and no condition is. Emergencies are now read only in
+context (a fire burning, smoke filling, someone holding a weapon, someone fainted or having a seizure or stroke right
+now, gas leaking or smelt): "in flames", "fainted", "smell natural gas" are urgent, and "furnace won't fire up",
+"sharpen my knife", "gun safe", "shooting a video", "smoke-free", "fire my plumber", "had a seizure last month" are
+routine. Health: palsy, syndrome, pregnancy ("expecting twins"), diagnoses, chronic and psychiatric terms were added;
+stems that hit plumbing words ("derrame" alone, "diagnosed a cracked pipe", "depressurizing") were narrowed; a pack
+category that names a condition is reworded in the text. A huge integer confidence (10**400) raised OverflowError;
+it now counts as low. Review: "sorry" anywhere between two numbers read as a correction; a cue now counts only in the
+30 characters before the next number. **Known limit (unchanged):** these readings are wording rules on free speech;
+they are certified on the pool and on every reviewer paraphrase, not on real callers. The summary is advisory to the
+owner; nothing is sent or decided from it. Regression tests: "AEGIS round 2" section.

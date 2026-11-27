@@ -320,7 +320,8 @@ def test_the_name_reader_itself_drops_a_name_holding_a_health_word():
 # ---------------------------------------------------------------- AEGIS round 2 (Inquisitor, 585ea682)
 @pytest.mark.parametrize("line", ["It's Christmas Eve and I need a repair.", "This is Long Beach calling about a repair",
                                   "Desert Bakery, 602 555 0101.", "Cell Phone, 602 555 0101.",
-                                  "Habla Usted Espa\u00f1ol? 602 555 0101"])
+                                  "Habla Usted Espa\u00f1ol? 602 555 0101", "This is Mike Brown's house, I need a repair.",
+                                  "It's Gloria Vance who told me to call."])
 def test_round_2_pairs_that_are_not_the_callers_name(line):
     assert cs.summarize(tr(line, "602 555 0101."), PACK).name is None
 
