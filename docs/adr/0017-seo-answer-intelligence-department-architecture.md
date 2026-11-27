@@ -1323,6 +1323,62 @@ without rehashing under a replacement key. The stored fingerprint is a continuit
 check, not authenticated journal signing or a substitute for key escrow. Tests
 cover wrong-key restart, original-key recovery and changes during processing.
 
+## Amendment — SEO-L6 review-request guard (Nov 26 2026; MVP spec v0.1, Local / Business Profile)
+
+`services/seo-py/src/review_request_guard.py`, one job: decide whether one review request may go to one customer and,
+if not, list every reason. Not wired to any route, sender or Business Profile; nothing is sent from here.
+
+| Rule (FTC 16 CFR Part 465; Google's ban on selective solicitation; TCPA) | Refusal reason |
+|---|---|
+| The wording is an approved template (`APPROVED_TEMPLATES`, ZBM-written honest asks in English and Spanish) whose one link is a review link approved for the business (`approved_links`), and an email subject, if any, is approved | `unapproved_wording` |
+| A real customer after a real transaction (purchase or service visit, at most 365 days ago, not cancelled, refunded, voided or disputed) | `no_transaction` |
+| A text only to a readable +1 phone number, with SMS consent; email needs no SMS consent | `no_phone`, `no_sms_consent` |
+| Not opted out by any known flag (`opted_out` must be exactly `false`; `sms_opted_out`, `do_not_contact`, `unsubscribed`, `email_opted_out` must be `false` or absent) | `opted_out` |
+| Everyone is asked: any audience filter, or wording asking only for positive or 5-star reviews | `gating` |
+| No field the guard does not know (a `segment`, an `nps_score`): it might select the audience | `unknown_field` |
+| Explaining a refusal: anything offered in exchange; suggested review text; steering unhappy customers away | `incentive`, `suggested_text`, `review_suppression` |
+| An unreadable request (not an object, unknown channel, no customer) or an empty message; every other reason that can be read is still listed | `unreadable` |
+
+Only an approved template sends. The wording readings (English and Spanish; read after NFKC, with Unicode format
+characters (category Cf, e.g. zero-width spaces and joiners) removed, every dash read as "-", and the Cyrillic/Greek
+letters in a fixed table of common look-alikes read as Latin; other invisible or look-alike characters are not
+normalised, which only matters for the explanation because the send decision is the exact template match) name what is wrong
+for the person fixing the wording; they never allow a send. Certification: `services/seo-py/tests/test_review_request_guard.py`
+runs the shared MVP pool (SEO-L6, 300 scenarios per seed, 20 with two violations) for the three DEV seeds and three
+more: every decision matches the key and every key reason is listed. Disclosed differences, always stricter: the
+pool's "Post a 5-star review and your next cleaning is free" is also `gating`, and every refused row whose wording
+is not a template also carries `unapproved_wording`. The pool's three honest wordings are three of the six starter
+templates. A grader self-test proves one gated send is noticed. The pool has few distinct wordings and cannot show
+the wording rules work; the paraphrase corpus in the test file (30 reworded offers, 15 positive-only asks, 3
+suggestions, 3 steer-aways, from AEGIS round 1) does: none is sent and each is named.
+
+AEGIS round 1 (Nov 26 2026, Inquisitor on bbb4e06c): 2 High: 29 of 30 reworded offers and 15 of 15 positive-only
+asks were sent, because the decision rested on word lists. Fixed by the template rule above: free wording is never
+sent. Review, all fixed: cancelled or refunded transactions, a text with no phone, other opt-out flags, an offer in
+an email subject and a filter under another key were sent; an unreadable request listed only `unreadable`; any two
+apostrophes 12 characters apart read as a quoted review; the old "tier-0 approval (spec D3)" safety net is not in
+this repo and is no longer relied on. **Accepted:** every honest wording that is not a template is refused
+(`unapproved_wording`; the reviewer's 20 honest messages all refuse). A refused honest request costs a review, not
+an FTC violation; a person adds wording by approving it as a template in code review.
+
+AEGIS round 2 (Nov 26 2026, Inquisitor on ae5e118b): the round-1 fixes held; 3 High, all fixed. The `{link}` slot took
+any https host and path, so an approved template carried "/cash-for-reviews", "/happy-customers-only" or "https://.":
+the slot now takes only three link forms (`https://g.page/r/<id>/review`, Google's `writereview?placeid=<id>`, and the
+fixture pool's `https://reviews.example.com/r`), and the id is read for offer, gating, suggestion and steer-away words.
+The phone check used `\d`, so Arabic-Indic or full-width digits read as a phone: ASCII digits only now. Review: the
+`pool` and `fixture` fields were known but unread; they must now carry exactly the pool's own labels. A zero, negative
+or unreadable `amount` is `no_transaction`. An email address the request carries must be readable (`no_email`); a
+missing one is not refused, because the pool's records carry none and the sender looks the address up (known limit).
+Regression tests: "AEGIS round 2".
+
+AEGIS round 3 (Nov 27 2026, Inquisitor on cd869c11): 2 High: the id inside an approved Google link form was free text
+screened by a word list, so "TenBucksNow", "satisfiedcustomers" or "ca-sh-x1" rode inside an approved template. Same
+lesson as round 1, so the same fix: the `{link}` slot now takes only a link a person approved for the business, matched
+exactly. `check(request, approved_links=...)` takes the client's approved review links from the signed-off client
+record; with none passed, only the fixture pool's link (`https://reviews.example.com/r`, a reserved domain) is
+approved, so a live request is refused until its business's link is approved. The link forms and the id word list are
+removed. Regression tests: "AEGIS round 3".
+
 ## Amendment — SEO-L7 review response drafter (Nov 27 2026; MVP spec v0.1, Local / Business Profile)
 
 `services/seo-py/src/review_responder.py` drafts the business's reply to one public review and says what must happen

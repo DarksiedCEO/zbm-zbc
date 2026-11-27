@@ -445,3 +445,221 @@ regression cases (`fixed`).
 | SHOULD (quoted tail) | Below an unmarked Outlook quote, "Dont call me or email me anymore" or "I want to be removed from your email list" raised nothing, though R2 says any other opt-out wording raises `OPT_OUT_IN_QUOTED_TEXT` | `quoted_tail_opt_out` also answers `alert` (never `revoke`) for the sentence-shaped opt-outs the own-words rules read: a direct no-contact command, `_REMOVE_ME`, `_NEG_WANT` and the possible-opt-out wording. Single words and loose pairs in our own quoted mail still raise nothing (M-1) |
 | SHOULD (quoted tail, seeds 1-3) | Below an unmarked quote, `Stop the texts and the emails please`, a bare `STOP` line after a sign-off (`Thanks,\nSTOP`, cut with the signature) and leet alert wording (`D0n7 text or email m3`) still raised nothing | `quoted_tail_opt_out` alerts (never revokes) on a clause that STARTS with an imperative stop / quit / cease naming a channel or a contacting verb right after it (`_TAIL_STOP_CHANNEL`: a mailer's `Stop by anytime!` or `You can stop these emails at any time` still raises nothing); on a line after the sign-off that is nothing but exact opt-out words; and reads the alert phrases on the leet view too, as the strong-wording check already did |
 | SHOULD (long middle), not changed | An opt-out in the middle of an email over the 20,000-character inbound cap is dropped: `models.cut_head_tail` keeps the head and the last 2,000 characters before the service sees the text | Not local: the cut is the gateway model's (AEGIS L2), and keeping a middle clause means running the opt-out rules inside request validation. The documented promise stays an opt-out at the start or the end of a long message; the war room keeps scoring it as SHOULD. For Andre: a fix is to scan the dropped middle with `opt_out_level` in `_lenient_inbound` and carry the matching lines into the kept text |
+
+## Amendment — RR-F5 consent / STOP keeper (Nov 26 2026; MVP spec v0.1, front-desk team)
+
+`services/service-py/src/consent_keeper.py`, one job: hold the single consent and opt-out record per (client business,
+phone number) and decide every text or call the front-desk team sends (`allow` / `block` and the reason, with the
+events the decision rests on). Not wired to any route or provider: like the rest of this service it decides, it never
+sends. It reads inbound texts with this ADR's own classifier (`channels.opt_out_level`), so Customer Service and the
+front desk read "STOP" the same way.
+
+| Rule | Behaviour |
+|---|---|
+| Every send is checked | A send with an unreadable number (`invalid_number`) or an unknown message class (`unknown_message_class`) is blocked; a malformed event (not an object, an unknown kind, a missing field, a send_id used twice, or an opt-in / inbound text / carrier / reassignment for a number that cannot be read) refuses the whole replay (`ValueError`), so an opt-out is never dropped |
+| One record per person | Numbers are read after NFKC with any script's digits, dash look-alikes and invisibles folded, and a `tel:` prefix removed; client ids are system ids (ASCII letters, digits, `.`, `_`, `-`; case and outer spaces aside), and any other id refuses the replay, so one client is never two records and two different ids never merge (AEGIS round 11). Every `replay` is the whole history: nothing carries over between calls |
+| Unrecognised replies | Any inbound text that is not an opt-out reading, a known-safe reply or a restart word blocks as `unrecognised_reply` until a `staff_review` (named reviewer: at least one visible letter or digit, after the reply) clears it (AEGIS round 5), or new express written consent is recorded after it, as after STOP (open ruling for Andre, AEGIS round 8) |
+| Calls too | The keeper decides calls as well as texts, so calls-only revocations block (`opted_out`): in one clause, a refusal word ("don't", "no", "never", "stop", "dejen", "nao", "ne" ...) within five words before a calling or messaging word ("call", "calls", "phone", "contact", "llamar" and its forms, "ligar", "appeler", "mensajes" ...), read after leet and doubled letters are undone, and "DNC" on its own. It fails toward suppression ("no calls on Sunday" blocks). Wording Customer Service hands to a human ("opt me out") blocks too (`possible_opt_out`) |
+| Consent sources | Express written consent counts only from a web form, paper form, keyword join, signed agreement or e-sign; a START reply is never consent |
+| Opt-out wins | `exact` -> `opted_out`, `suspected` (one typo of stop / unsubscribe) -> `possible_opt_out`; both block (Nov 26 ruling: STOP typos count) |
+| Same instant | All state changes at an instant apply before any send at it, opt-ins before opt-outs, whatever the input order |
+| HELP, look-alike words | Change nothing (`Spot`, `Post`, `Stay`, `STAR`, `OK`, `Thanks`) |
+| START does not restore | START / UNSTOP / YES and similar keep the block; the reason becomes `start_keyword_does_not_restore`. Only a new express written consent recorded after the opt-out restores |
+| Carrier opt-out | Blocks; never lifted by our own records |
+| Reassigned number | Kills consent; a new express written consent recorded after it restores |
+| Marketing | Needs express written consent (`no_written_consent`); an informational reply does not, but every block applies |
+
+Certification: `services/service-py/tests/test_consent_keeper.py` replays the shared MVP pool (`fixtures/mvp_pools`,
+F5, about 10,000 events per seed) for the three DEV seeds and two more, and requires every decision to match the
+planted key (0 wrong decisions on all five). Reasons match the key except one disclosed relabelling: `stopp`, `st0p`
+and `Stop pls` are read as exact opt-outs (`opted_out`) where the key says `possible_opt_out`; both block. A grader
+self-test proves one leaked send is noticed. The test never imports the pool's oracle.
+
+AEGIS round 1 (Nov 26 2026, subject c08c3f3f). Inquisitor: 3 High, each a send allowed after an opt-out: an opt-out
+with an unreadable number was dropped; a reused keeper let older consent undo a later opt-out; calls-only wording
+("do not call me", "DNC") was not an opt-out. Also: one number split into two records by full-width or other-script
+digits, non-object events raising `AttributeError`, duplicate send ids, unfolded client ids, consent from any source.
+test-verification: no High; 7 untested rules (new consent after START after STOP; a restart word from a consenting
+number; exchange digit; trailing junk; empty client id; duplicate send id; allow evidence). 200 fresh seeds (722,282
+sends) gave 0 wrong decisions. All fixed as above (commit "RR-F5 round-1 fixes"), each with a regression test
+(`tests/test_consent_keeper.py`, "AEGIS round 1" section). Mutation by hand, not committed as an artifact: 10 of 11
+targeted mutants on the fixes killed; the survivor (the opt-in time guard) cannot change a sorted single replay. The
+certification seeds are dev-style (all five are in the repo); the held-out draw stays with the reviewer lane.
+
+AEGIS round 2 (Nov 26 2026, Inquisitor on e5f545e0): the round-1 fixes held (0 sends after an opt-out for every
+earlier repro; the opt-in time-guard mutant confirmed equivalent over 20,000 histories). New High: 20 more calls-only
+phrasings ("I don't want any calls", "no me llame", "d0nt c4ll me", Portuguese and French) were read as nothing; the
+clause rule above replaces the narrow pattern. Review: client ids kept nine invisible characters and case-folding
+merged distinct ids; both fixed as above. Accepted, by design: ordinary wording that reads as an opt-out ("don't
+call after 9pm", "Stop by anytime") blocks; that is the fail-toward-suppression rule, and a human can restore consent
+only through new written consent. Regression tests: "AEGIS round 2" section.
+
+AEGIS round 3 (Nov 26 2026, Inquisitor on 2554e328): 2 High. Twenty more calls-only phrasings ("dontcall", "no
+phonecalls", "calls? no thanks", "enough with the calls", 📵, "Call me never", "no me hablen", "dejen de marcarme",
+"cero llamadas") and six Spanish list-removal phrasings ("sáquenme de su lista", "eliminen mi número", "no me
+molesten") sent. Fix: list-removal wording and the no-phone emoji read as `opted_out`; and a whole-message net reads
+any refusal word anywhere with any contact word (calling, texting, messaging, voicemail, "hablar", "marcar", "yamar"),
+or a refusal glued to one ("dontcall", "nevertext"), as `possible_opt_out` — every send blocks and Andre sees it.
+Accepted, by design: the net over-blocks ordinary replies ("No problem, call me back"); 4 of the reviewer's 50 benign
+replies block. A missed opt-out is a TCPA violation; a lost text is a missed booking. Regression tests: "AEGIS round 3".
+
+AEGIS round 4 (Nov 26 2026, Inquisitor on e42571ef): 4 High, all fixed. Look-alike apostrophes ("Don‘t", "Don`t",
+"don´t") split "don't" and read as nothing: every apostrophe look-alike is now read as "'" before any rule runs.
+Revocation wording in other grammatical forms ("I withdraw my consent", "I'm opting out", "I no longer wish to
+receive these", "Kindly refrain", "Retiro mi consentimiento", "Déjenme en paz", "Ya basta") sent: a revocation reading
+(word stems, accents removed; plus common French, German, Italian, Portuguese and Chinese opt-outs) now reads
+`opted_out`. An opt-in `source` that was a list raised TypeError: a non-text source or consent is now a ValueError.
+Review: client ids with non-ASCII capitals ("École" / "école") split into two records: every letter whose lower case
+is one letter is now lower-cased; at one instant a STOP and a START gave a reason that depended on input order: an
+opt-out reading now applies after a restart word. **Open for Andre:** a reassignment is kept per (client, number), as
+the pool is built; a number reassigned under one client does not end another client's consent. Number-level
+reassignment is stricter but contradicts the pool; it needs a ruling. The benign corpus still blocks 4 of 50.
+Regression tests: "AEGIS round 4".
+
+AEGIS round 5 (Nov 26 2026, Inquisitor on 70adc1b6): 5 High, the same class as rounds 1-4: more apostrophe look-alikes
+(some only after NFKC), leet inside revocation words ("R3voking consent", "N0 m4s"), more English and Spanish
+revocations ("Please discontinue these texts", "Erase my number", "Cancelen los mensajes", "Paren ya"), and STOP in
+emoji letters (🇸🇹🇴🇵, 🅢🅣🅞🅟). Five rounds show that no word list catches every way to revoke consent, so the
+design is inverted: after the opt-out readings above, an inbound text is harmless only when it is one of a short list
+of known-safe replies (`SAFE_REPLIES`: "OK", "Thanks", "Yes", "Confirmed", "HELP", "Gracias", "Sí", 👍 ...) or a
+restart word; any other text blocks every send as `unrecognised_reply` until a person reads it. A new event,
+`staff_review` (a named reviewer, the ruling `not_an_opt_out`, recorded after the reply), clears `unrecognised_reply`
+and nothing else: never an opt-out, a possible opt-out, a carrier opt-out or a reassignment. Every round 1-5 repro
+replays clean. **Trade-off for Andre:** 47 of the reviewer's 50 benign replies now block until reviewed (round 4: 4
+of 50). Texting a customer who replied in free text waits for a person; a missed opt-out is a TCPA violation. The
+review queue (who sees `unrecognised_reply`, how fast) is wiring, not built. A reviewer can also rule a reply an
+opt-out (`ruling: opt_out`), which records `opted_out` and is never cleared. The round 3 and 4 revocations are tested
+to read as opt-outs, not merely as unrecognised, so a review can never clear them. Regression tests: "AEGIS round 5".
+
+AEGIS round 6 (Nov 27 2026, Inquisitor on d462354a): 3 High, all fixed. A later free-text reply replaced a stronger
+block (STOP, a STOP typo, a staff `opt_out` ruling, STOP+START, a reassignment) with `unrecognised_reply`, which a
+staff review then cleared: a block is now replaced only by one at least as strong (`_STRENGTH`), so nothing a review
+can clear ever stands in for an opt-out, and the same-instant order no longer changes any decision. A restart word
+followed by a revocation in another script ("Yes 请停止发送") read as a bare restart word: a restart word now counts
+only when it is the whole reply in Latin letters. Review: `replay` given a non-list raised TypeError; it is now a
+ValueError. Regression tests: "AEGIS round 6".
+
+AEGIS round 7 (Nov 27 2026, Inquisitor on ea4fe868): 1 High, fixed: the restart-word check removed combining marks,
+so a struck-through "U̶N̶STOP" (STOP with "UN" crossed out) read as UNSTOP; a restart word now has only plain or
+accented Latin letters, and any other mark makes the reply unrecognised. Review, fixed: an opt-in that did not clear a
+block replaced the evidence with itself (the cause of the block was lost, and the evidence changed with input order);
+the evidence now keeps it. New written consent after an unrecognised reply now restores texting, as after an opt-out.
+Regression tests: "AEGIS round 7".
+
+AEGIS Inquisitor round 8 on ded558d9 (RR-F5): client ids now read any run of spaces (tab, NBSP, U+3000, thin spaces)
+as one space, so "Acme  Dental" and "Acme Dental" are one record; a reviewer name must hold a visible letter or digit
+(zero-width, Hangul filler, braille blank and "-" are refused). New consent after an unreviewed reply still restores
+texting, as after STOP; that is documented here and left for Andre to rule on. Disclosed, not changed: when a staff
+`opt_out` ruling and an opt-in share one instant, the evidence list depends on their input order (the decision does
+not); a carrier opt-out is kept per (client, number), the same open scope ruling as reassignment.
+
+AEGIS Inquisitor round 9 on 96301ba2 (RR-F5): client ids now fold apostrophe look-alikes ("Joe’s" = "Joe's") and read
+every Greek sigma as one (an upper-case name typed lower-case is one client); a reviewer name needs a letter that is
+not a modifier mark (tatweel, the Japanese long-vowel mark and similar no longer count) or a digit; the ADR row on
+client ids now says what the code does (every letter lower-cased, not only ASCII).
+
+AEGIS Inquisitor round 10 on cd44d89c (RR-F5): the client id now inverts the default too. A replay refuses (ValueError)
+a client id holding anything but visible letters (not modifier marks or blank fillers), digits, combining accents,
+spaces and a few punctuation marks: a blank letter that looks like a space, a symbol or a superscript is never read
+as a client. Invisibles are removed before accents are composed (an invisible between "e" and its accent no longer
+makes a second client); lunate sigmas fold with the others and a dotted capital I reads as "i".
+
+AEGIS Inquisitor round 11 on 491e597a (RR-F5): ten rounds of folding Unicode look-alikes in client ids (spaces,
+apostrophes, sigmas, invisibles, blank letters, then fullwidth, math letters, ligatures, other scripts' digits) each
+left one more spelling that made one client two records. The default is inverted: a client id is a system id
+(the pool's are `client-<hex>`), ASCII letters, digits, `.`, `_` and `-` only, read with case and outer spaces aside;
+anything else refuses the whole replay (ValueError, nothing sent). Wiring must pass the platform's client id, never a
+business name. Phone numbers keep their existing reading (any script's digits folded, a NANP shape required).
+
+AEGIS Inquisitor round 12 on aaee4c9f (RR-F5): events are read as plain data only, as in RR-F2: an event that is not
+a plain `dict`, or a key or value that is not plain text, a number, a boolean or null, refuses the replay; the replay
+works on private copies, so nothing can change between the check and the use (a `str` subclass client id answered
+`strip()` one way when checked and another way when applied).
+
+review queue (who sees `unrecognised_reply`, how fast) is wiring, not built. Regression tests: "AEGIS round 5".
+
+## Amendment — RR-F2 missed-call text-back (Nov 26 2026; MVP spec v0.1, front-desk team)
+
+`services/service-py/src/textback.py`, one job: for each missed call decide `send_now` (with the 30 s deadline),
+`defer_until_0800` (with the next 08:00 when a clock is known) or `do_not_send` and the reason, and word the one
+informational text (a way to continue, and how to opt out; never an offer, a link or a price). Not wired; nothing is
+sent from here.
+
+| Rule | Behaviour |
+|---|---|
+| Who can be texted | Mobile and VoIP only; a landline, a blocked or unreadable caller ID, or an unknown line type gets no text |
+| Consent | Asks the RR-F5 keeper with the normalised number (`opted_out(number)`), or uses the keeper's flag on the record; anything but a clear "not opted out" blocks (`consent_unknown`) |
+| One text per 5 minutes | Under 300 s since the last text: no text; exactly 300 s may text. `TextBackGate` remembers every text it approved, so repeated calls through one gate never double-text even when the record says "never texted"; a record without the last-text field fails closed. The gate is in memory: a store that outlives a restart is the wiring's job |
+| Quiet hours | The recipient's: 08:00 to before 21:00 local. The zone must always be readable. With a real clock the clock decides, to the second, and a send-now needs its 30 s deadline to land before 21:00 (20:59:30 already waits); without one the record's HH:MM is used. An unknown zone or a clock with no UTC offset is never guessed (`unknown_local_time`). A deferral must be decided again at 08:00 by the caller (consent and the 5-minute rule are read then) |
+| The text | One of four fixed wordings, never a business name or other record text (AEGIS round 4); always carries STOP (ALTO in Spanish). A callback number that is not a North American number is left out |
+
+Certification: `services/service-py/tests/test_textback.py` runs the shared MVP pool (F2, 300 missed calls per seed,
+boundaries at 07:59 / 08:00 / 20:59 / 21:00 and 299 / 300 s) for the three DEV seeds and three more: every action,
+deadline and message class matches the planted key. Two seeds are graded again on the clock path (each record's
+local time turned into a real clock in its zone) with the reason and the text checked too. A grader self-test proves
+one wrong text is noticed.
+
+AEGIS round 1 (Nov 26 2026, Inquisitor on 81e0dc7f): High: a record's HH:MM stood in for an unreadable zone and beat
+the real clock; High: the 5-minute rule rested only on the record (three calls, three texts). Also: 20:59:59 plus the
+30 s deadline landed after 21:00; a business name could carry an offer or a link and a send could carry no text; a
+tzinfo with no offset was read in the server's zone; the certification never graded the clock path, the reason or
+the text. All fixed as above with regression tests ("AEGIS round 1" section of the test file). The earlier "10 of 10
+mutants" line is withdrawn here: mutation results now come from `services/service-py/devtools/frontdesk_mutants.py`
+(it arrives with the RR-F3 commit at the top of this stack; until then the count is not claimed).
+
+AEGIS round 2 (Nov 26 2026, Inquisitor on 9fcd033b): the round-1 fixes held. New High: the gate subtracted two times
+on the wall clock, so across a daylight-saving jump 180 real seconds read as 63 minutes and one number was texted
+twice; the gate now keeps and compares UTC. Review: names that must be left out still got through (bare domains,
+look-alike letters, plurals of offer words, "USD", "Reply YES"); a name is now used only when it is Latin-script
+letters and simple punctuation with at most 3 digits and no link, domain, offer, price or instruction word.
+Placeholder zones ("Factory", "localtime", "UTC", "Etc/...") were read as real places; only a zone with an area and
+a place is used now. A clock that cannot be converted (overflow, a tzinfo that raises) now fails closed with
+`unknown_local_time` instead of raising. Regression tests: "AEGIS round 2" section; the DST test fails on the old
+wall-clock subtraction.
+
+AEGIS round 3 (Nov 26 2026, Inquisitor on 437d2871): no High; the kill criteria held. Review, all fixed: more offer
+and instruction words still passed in names ("Cheapest", "Discounted", "BOGO", "Clearance", "grátis", "Frēē",
+"Ƒree", "Rebajas", "Half Price", "9.99", "0FF", "Respond", "Opt In", "Llame Ya"). A name is now read with accents
+removed and digit look-alikes undone, rejected when any word STARTS like an offer or instruction (it errs toward
+leaving a real name out; the text still goes, without the name), and its letters are limited to basic Latin,
+Latin-1 and Latin Extended-A. The gate given an unreadable clock now returns `unknown_local_time` and records
+nothing instead of raising; a consent keeper that raises reads as `consent_unknown`; a deferral whose next 08:00
+is past the last date a clock can hold returns `unknown_local_time`. Regression tests: "AEGIS round 3".
+
+AEGIS round 4 (Nov 26 2026, Inquisitor on 7e38e849): 1 High: business names still carried offers past the word
+check (stroke look-alikes "PRØMØ", "SŦOP"; glued "MegaSale", "Buy1Get1Free"; unlisted "Claim Your Gift", "Buy
+Now"). A word list on free text cannot close this, so the text no longer carries a business name at all: every text
+is one of four fixed wordings (English or Spanish, with or without a format-checked +1 callback number), and the name check
+is removed. A branded name needs an approved-name registry signed off by a person (not built). Review: the gate
+raised TypeError when a caller passed its own `seconds_since_gate`; the gate now uses only its own memory. **Open
+for Andre:** with no clock, a record time of "20:59" sends (the pool's ruling), so the 30 s deadline can land up to
+29 s after 21:00 (record minute 20:59, real time up to 20:59:59, plus 30 s); the clock path already gives that up. Regression tests: "AEGIS round 4".
+
+AEGIS round 5 (Nov 26 2026, Inquisitor on e3f85f7d): no High; every kill criterion held (64,000 fuzzed calls). Review:
+the callback number was only format-checked, so a premium-rate 900 or 976 number or an N11 code could be offered; those
+are now left out (the wiring passes the client's own number; who owns it is not checked here). The 59 s in the round-4
+note was corrected to 29 s. Regression tests: "AEGIS round 5".
+
+AEGIS round 6 (Nov 27 2026, Inquisitor on eed8ea3c): 1 High, fixed: 976 was checked only as an area code, but the
+pay-per-call 976 is an exchange (213-976-xxxx); a callback is now left out for a 900 area, a 976 exchange, an N11 area
+or exchange, or an international-rate Caribbean or Atlantic +1 area (US territories and Canada stay). Regression
+tests: "AEGIS round 6".
+
+AEGIS Inquisitor round 7 on e8149296 (RR-F2): a clock is read only as a real `datetime` whose UTC offset is asked
+once (a tzinfo that answered an offset and then none was being converted in the host's zone), and the gate hands
+`decide` the UTC time it read; a last-text time counts only as a plain `int`; a dict subclass is read through
+`dict`'s own methods. Stated, not changed: a consent keeper that raises `KeyboardInterrupt` or `SystemExit` is not
+caught (nothing is sent). A near-valid fuzz (40,000 calls, one field changed at a time, 13,083 sends) held.
+
+AEGIS Inquisitor round 8 on c485c5b9 (RR-F2): any text or number value in a missed-call record that is a subclass
+(not a plain `str`, `int`, `float` or `bool`) makes the record unreadable (`unreadable_record`, no text): a `str`
+subclass holding "landline" could compare equal to "mobile". Disclosed for Andre: the callback check is a format
+check; non-geographic ranges such as 456, 500, 600, 700 and 880 are not refused (the wiring passes the client's own
+number).
+
+AEGIS Inquisitor round 9 on 105e828c (RR-F2): the round-8 subclass check became an allowlist: any record value that
+is not plain data (`str`, `int`, `float`, `bool`, `None`, `list`, `tuple`, `dict`) makes the record unreadable, so an
+arbitrary object that says "landline" but compares equal to "mobile" is never texted.
+
+AEGIS Inquisitor round 10 on e0a46247 (RR-F2): the plain-data rule covers keys too: a record key that is not plain
+text (an object that hashes like "line_type" and shadows it after the record is built) makes the record unreadable.
