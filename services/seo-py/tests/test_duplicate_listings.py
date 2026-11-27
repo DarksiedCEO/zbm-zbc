@@ -508,3 +508,20 @@ def test_a_spelled_house_number_is_formatting(x, y):
 def test_another_house_number_stays_another_address(x, y):
     assert dl.check(pair(listing(street=x), listing(street=y))).action not in ("merge_or_remove_duplicate",
                                                                                "owner_review")
+
+
+# ---------------------------------------------------------------- AEGIS L5 round 12
+@pytest.mark.parametrize("x, y", [("One Fifth Ave", "1 Fifth Ave"), ("One 5th Ave", "1 5th Ave"), ("Two 1st St", "2 1st St"),
+                                  ("One Twenty-First St", "1 21st St"), ("Three 2nd St", "3 2nd St"),
+                                  ("100 1/2 Main St", "100-1/2 Main St"), ("100-½ Main St", "100 1/2 Main St"),
+                                  ("1234-1/2 W 3rd St", "1234 1/2 W 3rd St")])
+def test_spelled_house_before_a_numbered_street_and_hyphenated_fractions_are_formatting(x, y):
+    assert nap.street_key(x) == nap.street_key(y)
+    assert dl.check(pair(listing(street=x), listing(street=y))).action == "merge_or_remove_duplicate"
+
+
+@pytest.mark.parametrize("x, y", [("100-1/2 Main St", "100-1/3 Main St"), ("100-1/2 Main St", "100-1 Main St"),
+                                  ("100-1/2 Main St", "100 Main St")])
+def test_a_hyphenated_fraction_is_still_its_own_house_number(x, y):
+    assert dl.check(pair(listing(street=x), listing(street=y))).action not in ("merge_or_remove_duplicate",
+                                                                               "owner_review")

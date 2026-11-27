@@ -1422,3 +1422,8 @@ with a written fraction ("100 1/2") or a range ("100-102") kept as part of it; a
 St") is street words, so another spelling of it ("2d", "IH-35", "Interstate Hwy 5") is `owner_review`, never a move
 (round 9 had read the street's number as part of the house number). A spelled leading house number ("One Microsoft
 Way") is its digit. Spelled unit values ("Suite Five", "Suite East") are still read as street words (disclosed).
+
+AEGIS round 12 (Nov 27 2026, Inquisitor on L5 0ca6f5ad / L4 ae8e2b2c): a hyphenated fraction is a fraction ("100-1/2"
+is "100 1/2", never the range "100-1"), and a spelled house number before a numbered street is its digit ("One Fifth
+Ave" is "1 5th Ave"). "100 A Main St" / "100A Main St", a unit written before the street, and "One, Main St" are still
+other addresses (disclosed).

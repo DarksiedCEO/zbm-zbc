@@ -204,9 +204,13 @@ def street_key(street: object) -> tuple[str, Optional[str]]:
     # the house number is the first number, with a fraction or a range written as one token ("100 1/2" is
     # "100 1frac2", "100-102" is "100to102") and a spelled leading number as a digit ("One Microsoft Way";
     # AEGIS L5 round 11), so a numbered street's own number ("100 2nd St") is never read as part of the house number
-    text = re.sub(r"^\s*(\d+)\s*-\s*(\d+)\b", r"\1to\2", text)
+    # the fraction first, so "100-1/2" is "100 1/2", never the range "100-1" (AEGIS L5 round 12)
+    text = re.sub(r"^\s*(\d+)\s*-\s*(?=\d+\s*/\s*\d)", r"\1 ", text)
     text = re.sub(r"\b(\d+)\s*/\s*(\d+)\b", r"\1frac\2", text)
-    text = re.sub(r"^\s*(" + "|".join(_CARDINALS) + r")\b(?=\s+[^\W\d_])", lambda m: _CARDINALS[m.group(1)], text)
+    text = re.sub(r"^\s*(\d+)\s*-\s*(\d+)\b", r"\1to\2", text)
+    # a spelled house number before a word or a numbered street ("One Fifth Ave" is "1 5th Ave"; round 12)
+    text = re.sub(r"^\s*(" + "|".join(_CARDINALS) + r")\b(?=\s+(?:[^\W\d_]|\d+(?:st|nd|rd|th|d)\b))",
+                  lambda m: _CARDINALS[m.group(1)], text)
     raw = re.findall(r"[^\W_]+", _join_initials(text))
     words = []
     for i, w in enumerate(raw):
