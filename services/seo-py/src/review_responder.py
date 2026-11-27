@@ -15,7 +15,8 @@ Rules:
 - **Every reply needs the owner's approval before it is posted** (AEGIS L7 round 1: the inverted default; a money ask
   or a claim can be phrased without any word a list knows, "I want my $200 back", "see you in court", so no list
   decides what is posted unseen). ``route_to_owner`` is an extra flag that the review may ask for money or threaten a
-  claim: any money, price or legal word, a currency sign or amount, "back", "court" ... raises it, except a 4- or
+  claim: any money, price or legal word, a currency sign, any digit, "back", "court" ... raises it (an amount
+  written in words, "two hundred", does not: disclosed; the owner approves every reply anyway), except a 4- or
   5-star review whose every sentence holding such a word is exactly one of the fixed non-request sentences ("No need
   for a refund, they fixed it the same day", "I almost asked for a refund but they made it right"). Routing a review
   that asks for nothing costs only an owner look.

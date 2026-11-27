@@ -148,6 +148,8 @@ def _grade(seed):
         if d.flag_suspected_fake != k["flag_suspected_fake"] or (k["route_to_owner"] and not d.route_to_owner) or \
                 (k["owner_approval_before_posting"] and not d.owner_approval_before_posting):
             wrong.append((r["review_id"], (d.flag_suspected_fake, d.route_to_owner, d.owner_approval_before_posting), k))
+        if d.reply is not None and k["flag_suspected_fake"]:
+            wrong.append((r["review_id"], "reply_to_a_suspected_fake"))     # AEGIS L7 round 2
         if d.reply is not None:
             low = d.reply.lower()
             if any(t in low for t in k["detail_terms_never_in_reply"]):
@@ -201,3 +203,15 @@ def test_the_pool_routes_are_kept_and_extra_routes_are_counted():
     by_id = {k["review_id"]: k for k in key}
     extra = sum(rr.draft(r).route_to_owner and not by_id[r["review_id"]]["route_to_owner"] for r in reviews)
     assert extra < len(reviews) // 2         # the broad money net must not route most of a normal review mix
+
+
+def test_the_grader_fails_a_drafter_that_replies_to_fakes(monkeypatch):
+    real = rr.draft
+
+    def replies_anyway(r):
+        d = real(r)
+        return rr.ReplyDraft(d.review_id, d.reply or rr.WORDINGS[(True, "low")], d.flag_suspected_fake,
+                             d.route_to_owner, d.owner_approval_before_posting, d.notes)
+    monkeypatch.setattr(rr, "draft", replies_anyway)
+    _, wrong = _grade("dev-a")
+    assert any(w[1] == "reply_to_a_suspected_fake" for w in wrong)
