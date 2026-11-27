@@ -650,3 +650,9 @@ once (a tzinfo that answered an offset and then none was being converted in the 
 `decide` the UTC time it read; a last-text time counts only as a plain `int`; a dict subclass is read through
 `dict`'s own methods. Stated, not changed: a consent keeper that raises `KeyboardInterrupt` or `SystemExit` is not
 caught (nothing is sent). A near-valid fuzz (40,000 calls, one field changed at a time, 13,083 sends) held.
+
+AEGIS Inquisitor round 8 on c485c5b9 (RR-F2): any text or number value in a missed-call record that is a subclass
+(not a plain `str`, `int`, `float` or `bool`) makes the record unreadable (`unreadable_record`, no text): a `str`
+subclass holding "landline" could compare equal to "mobile". Disclosed for Andre: the callback check is a format
+check; non-geographic ranges such as 456, 500, 600, 700 and 880 are not refused (the wiring passes the client's own
+number).

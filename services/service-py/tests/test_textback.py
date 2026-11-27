@@ -460,3 +460,22 @@ def test_a_last_text_ten_seconds_ago_always_stops_a_new_one():
             return None if k == "seconds_since_last_text_to_number" else dict.get(self, k, d)
     for c in (call(seconds_since_last_text_to_number=Never(10)), Hides(call(seconds_since_last_text_to_number=10))):
         assert tb.decide(c, opted_out=lambda n: False).action == "do_not_send"
+
+
+# ---------------------------------------------------------------- AEGIS round 8 (Inquisitor, c485c5b9)
+class _Liar(str):
+    def __eq__(self, other):
+        return other == "mobile"
+
+    __hash__ = str.__hash__
+
+
+@pytest.mark.parametrize("field, value", [("line_type", _Liar("landline")), ("caller_id", _Liar("+16025550101")),
+                                          ("recipient_time_zone", _Liar("America/Phoenix"))])
+def test_a_subclass_value_makes_the_record_unreadable(field, value):
+    d = tb.decide(call(**{field: value}), opted_out=lambda n: False)
+    assert (d.action, d.reason) == ("do_not_send", "unreadable_record")
+    from datetime import datetime, timezone
+    g = tb.TextBackGate().decide(call(**{field: value}), now=datetime(2026, 11, 27, 18, 0, tzinfo=timezone.utc),
+                                 opted_out=lambda n: False)
+    assert g.action == "do_not_send"
