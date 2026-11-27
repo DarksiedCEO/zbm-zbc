@@ -313,9 +313,33 @@ def test_round_2_names_that_must_be_left_out(name):
 
 
 @pytest.mark.parametrize("name", ["Desert Sky Plumbing", "Smith & Sons", "Studio 54", "Caf\u00e9 Rosa",
-                                  "O'Brien Dental (Fixture)"])
-def test_ordinary_business_names_are_kept(name):
-    assert tb.decide(call(), business_name=name).text.startswith(name + ":")
+                                  "O'Brien Dental (Fixture)", "PR\u00d8M\u00d8", "\u00d8FFER", "S\u0166OP", "\u0110EAL",
+                                  "C\u0141ICK", "MegaSale", "Buy1Get1Free", "4FREE", "Claim Your Gift", "Buy Now",
+                                  "Two For One", "99 Cents Only", "Example .com"])
+def test_no_business_name_ever_reaches_the_text(name):
+    """AEGIS round 4: no word check on free text holds, so the name is never used (the text is fixed)."""
+    for spanish in (False, True):
+        d = tb.decide(call(), business_name=name, callback_number="+16025550111", spanish=spanish)
+        assert d.text == tb.message(None, "+16025550111", spanish)
+    now = datetime(2026, 11, 27, 19, 0, tzinfo=timezone.utc)      # 12:00 in Phoenix
+    d = tb.TextBackGate().decide(call(recipient_local_time=None), now=now, business_name=name)
+    assert d.action == "send_now" and d.text == tb.message(None, None)
+
+
+def test_every_text_is_one_of_four_fixed_wordings_plus_a_vetted_number():
+    texts = {tb.message(n, c, sp) for n in (None, "Acme", "PR\u00d8M\u00d8") for c in (None, "+16025550111")
+             for sp in (False, True)}
+    assert len(texts) == 4
+
+
+def test_the_gate_ignores_a_callers_own_seconds_since_gate():
+    gate = tb.TextBackGate()
+    from datetime import timezone as tz
+    now = datetime(2026, 11, 27, 18, 0, tzinfo=tz.utc)
+    d = gate.decide(call(recipient_local_time=None), now=now, seconds_since_gate=10**6)
+    assert d.action == "send_now"
+    assert gate.decide(call(missed_call_id="mc-2", recipient_local_time=None), now=now,
+                       seconds_since_gate=10**6).reason == "texted_within_5_minutes"
 
 
 @pytest.mark.parametrize("tz", ["Factory", "localtime", "UTC", "Etc/GMT+7", "EST", "posixrules"])

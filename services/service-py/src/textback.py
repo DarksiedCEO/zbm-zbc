@@ -17,9 +17,8 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings, TCPA practice):
   Outside the window the decision is ``defer_until_0800`` with the next 08:00 when the clock is known; the caller
   must ask again then (consent and the 5-minute rule are read at that moment, not now).
 - The text is informational only (a way to continue the call), never marketing, and always says how to opt out. It
-  is always worded. A business name is used only when it is Latin-script letters, spaces and & ' . , - ( ) with at
-  most 3 digits, and carries no link, domain, offer, price or instruction word ("reply", "join", "yes" ...);
-  otherwise it is left out. A callback number that is not a North American number is left out.
+  is one of four fixed wordings (English or Spanish, with or without a callback number) and never carries record
+  text: no business name (AEGIS round 4), only a callback number that reads as a North American number.
 - A send-now decision must reach the caller within 30 s (the bar); the deadline travels with the decision.
 - Anything this module cannot read (line type, consent state, zone, local time, last-text time) fails closed: no
   text, with the reason.
@@ -28,7 +27,6 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings, TCPA practice):
 from __future__ import annotations
 
 import re
-import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional
@@ -40,18 +38,6 @@ REPEAT_WINDOW_SECONDS = 300
 SEND_DEADLINE_SECONDS = 30
 TEXTABLE_LINES = ("mobile", "voip")
 _HHMM = re.compile(r"([01]\d|2[0-3]):([0-5]\d)")
-# A business name must be letters (Latin script, basic and Latin-1/Extended-A only, so a look-alike Cyrillic, Greek or
-# rare Latin letter such as "Ƒ" cannot hide a word), spaces and & ' . , - ( ), with at most 3 digits, no price
-# ("9.99"), no domain-like "x.yz", and no word that STARTS like an offer or an instruction. The check reads the name
-# with accents removed ("Frēē", "grátis") and digit look-alikes undone ("0FF", "fr33"). A name that fails is left out
-# of the text, never the text itself, so this errs toward leaving a real name out ("Winston's" starts with "win").
-_PROMO = re.compile(r"https?|www|\w\.[a-z]{2,}\b|\d[.,]\d|\b(?:off|ya|yes|si|opt|bogo|usd)\b|"
-                    r"\b(?:free|gratis|gratuit|discount|descuent|cheap|barat|sale|deal|offer|oferta|promo|coupon|"
-                    r"cupon|prize|premio|win|clearance|rebaja|half|price|precio|save|saving|ahorr|dollar|buck|cash|"
-                    r"reply|respond|text|txt|join|stop|click|visit|subscrib|envi[ae]|llam|marque|call)",
-                    re.IGNORECASE)
-_LEET = str.maketrans("013457@$", "oieastas")
-_SAFE_NAME = re.compile(r"[A-Za-z\u00c0-\u00d6\u00d8-\u00f6\u00f8-\u017f&'.,\- ()0-9]{1,40}")
 # tzdata entries that are not a place: "zone not set" placeholders and the host's own zone
 _PLACEHOLDER_ZONES = re.compile(r"(?:Factory|localtime|posixrules|posix/.*|right/.*|SystemV/.*|Etc/.*|"
                                 r"[A-Z]{3,5}(?:\d[A-Z]{3,5})?)", re.IGNORECASE)
@@ -68,31 +54,19 @@ class TextBackDecision:
     not_before: Optional[datetime] = None   # the next 08:00 in the recipient's zone, when deferring with a clock
 
 
-def _clean_name(name: object) -> Optional[str]:
-    if not isinstance(name, str) or any(unicodedata.category(c)[0] == "C" for c in name):
-        return None              # control or format characters (a line break, a zero-width space): left out
-    name = " ".join(name.split())
-    if not name or not _SAFE_NAME.fullmatch(name) or sum(c.isdigit() for c in name) > 3:
-        return None
-    plain = "".join(c for c in unicodedata.normalize("NFKD", name) if not unicodedata.combining(c))
-    if _PROMO.search(plain) or _PROMO.search(plain.translate(_LEET)):
-        return None
-    if any(c.isalpha() and not unicodedata.name(c, "").startswith("LATIN") for c in name):
-        return None
-    return name
-
-
 def message(business_name: Optional[str] = None, callback_number: Optional[str] = None,
             spanish: bool = False) -> str:
     """The only text F2 ever sends: informational, a way to continue, and how to opt out. No offer, no link, no
-    price. A name or number that fails its check is left out rather than sent."""
-    name = _clean_name(business_name)
+    price, and no free text from any record: ``business_name`` is accepted and deliberately never used (AEGIS round
+    4: a word check on names was beaten by "PRØMØ", "MegaSale", "Claim Your Gift"; no list can close that). The
+    caller knows whom they called; a branded name needs an approved-name registry signed off by a person (not
+    built). A callback number that is not a readable +1 number is left out."""
     number = normalise_number(callback_number) if callback_number is not None else None
     if spanish:
-        who = f"{name}: perdimos su llamada." if name else "Perdimos su llamada."
+        who = "Perdimos su llamada."
         back = f"Responda a este mensaje o llamenos al {number}." if number else "Responda a este mensaje."
         return f"{who} {back} Responda ALTO para no recibir mas mensajes."
-    who = f"{name}: sorry we missed your call." if name else "Sorry we missed your call."
+    who = "Sorry we missed your call."
     back = f"Reply here or call us back at {number}." if number else "Reply here and we will call you back."
     return f"{who} {back} Reply STOP to opt out."
 
@@ -171,6 +145,7 @@ def decide(call: dict, now: Optional[datetime] = None,
     text = message(business_name, callback_number, spanish)
     start = channels.QUIET_START_HOUR * 3600
     # with a clock, the whole 30 s deadline must land before 21:00; the minute-only record time is decided as given
+    # ("20:59" sends: the pool's spec ruling; AEGIS round 4 notes the real time may be up to 59 s later; open for Andre)
     end = channels.QUIET_END_HOUR * 3600 - (SEND_DEADLINE_SECONDS if local is not None else 0)
     if start <= seconds < end:
         return TextBackDecision(mcid, "send_now", "ok", SEND_DEADLINE_SECONDS, text=text)
@@ -202,6 +177,7 @@ class TextBackGate:
         number = normalise_number(call.get("caller_id")) if isinstance(call, dict) else None
         last = self._last.get(number) if number else None
         since = int((utc - last).total_seconds()) if last else None
+        kw.pop("seconds_since_gate", None)    # the gate's own memory is the only one it passes on
         d = decide(call, now=now, seconds_since_gate=since, **kw)
         if d.action == "send_now" and number:
             self._last[number] = utc

@@ -591,7 +591,7 @@ sent from here.
 | Consent | Asks the RR-F5 keeper with the normalised number (`opted_out(number)`), or uses the keeper's flag on the record; anything but a clear "not opted out" blocks (`consent_unknown`) |
 | One text per 5 minutes | Under 300 s since the last text: no text; exactly 300 s may text. `TextBackGate` remembers every text it approved, so repeated calls through one gate never double-text even when the record says "never texted"; a record without the last-text field fails closed. The gate is in memory: a store that outlives a restart is the wiring's job |
 | Quiet hours | The recipient's: 08:00 to before 21:00 local. The zone must always be readable. With a real clock the clock decides, to the second, and a send-now needs its 30 s deadline to land before 21:00 (20:59:30 already waits); without one the record's HH:MM is used. An unknown zone or a clock with no UTC offset is never guessed (`unknown_local_time`). A deferral must be decided again at 08:00 by the caller (consent and the 5-minute rule are read then) |
-| The text | Always worded and always carries STOP (ALTO in Spanish). A business name is used only when it is Latin-script letters, spaces and simple punctuation with at most 3 digits, with no link, domain, offer, price, control character or instruction word; a callback number that is not a North American number is left out |
+| The text | One of four fixed wordings, never a business name or other record text (AEGIS round 4); always carries STOP (ALTO in Spanish). A callback number that is not a North American number is left out |
 
 Certification: `services/service-py/tests/test_textback.py` runs the shared MVP pool (F2, 300 missed calls per seed,
 boundaries at 07:59 / 08:00 / 20:59 / 21:00 and 299 / 300 s) for the three DEV seeds and three more: every action,
@@ -625,3 +625,12 @@ leaving a real name out; the text still goes, without the name), and its letters
 Latin-1 and Latin Extended-A. The gate given an unreadable clock now returns `unknown_local_time` and records
 nothing instead of raising; a consent keeper that raises reads as `consent_unknown`; a deferral whose next 08:00
 is past the last date a clock can hold returns `unknown_local_time`. Regression tests: "AEGIS round 3".
+
+AEGIS round 4 (Nov 26 2026, Inquisitor on 7e38e849): 1 High: business names still carried offers past the word
+check (stroke look-alikes "PRØMØ", "SŦOP"; glued "MegaSale", "Buy1Get1Free"; unlisted "Claim Your Gift", "Buy
+Now"). A word list on free text cannot close this, so the text no longer carries a business name at all: every text
+is one of four fixed wordings (English or Spanish, with or without a vetted +1 callback number), and the name check
+is removed. A branded name needs an approved-name registry signed off by a person (not built). Review: the gate
+raised TypeError when a caller passed its own `seconds_since_gate`; the gate now uses only its own memory. **Open
+for Andre:** with no clock, a record time of "20:59" sends (the pool's ruling), so the 30 s deadline can land up to
+59 s after 21:00; the clock path already gives that minute up. Regression tests: "AEGIS round 4".
