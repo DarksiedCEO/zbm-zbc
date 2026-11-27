@@ -482,8 +482,7 @@ digits, non-object events raising `AttributeError`, duplicate send ids, unfolded
 test-verification: no High; 7 untested rules (new consent after START after STOP; a restart word from a consenting
 number; exchange digit; trailing junk; empty client id; duplicate send id; allow evidence). 200 fresh seeds (722,282
 sends) gave 0 wrong decisions. All fixed as above (commit "RR-F5 round-1 fixes"), each with a regression test
-(`tests/test_consent_keeper.py`, "AEGIS round 1" section). Mutation by hand, not committed as an artifact: 10 of 11
-targeted mutants on the fixes killed; the survivor (the opt-in time guard) cannot change a sorted single replay. The
+(`tests/test_consent_keeper.py`, "AEGIS round 1" section). Mutation: see the RR-F3 amendment (`devtools/frontdesk_mutants.py`). The
 certification seeds are dev-style (all five are in the repo); the held-out draw stays with the reviewer lane.
 
 AEGIS round 2 (Nov 26 2026, Inquisitor on e5f545e0): the round-1 fixes held (0 sends after an opt-out for every
@@ -739,3 +738,41 @@ AEGIS Inquisitor round 7b on 6ad32849 (RR-F4): only plain types count inside a c
 `list` or `tuple` (no subclass), an id a plain `str` or `int`, the ring timeout a plain `int`; anything else is
 unreadable and fails closed (nobody rung, 30 s). A late answer is now logged (`answered_after_hang_up:<id>`) also
 when someone else answered live. The round-7 fuzz (40,000 cases) and urgency grid replay clean.
+
+out of the whisper. Regression tests: "AEGIS round 3".
+
+("AEGIS round 1" section); mutation results now come from `services/service-py/devtools/frontdesk_mutants.py`.
+
+## Amendment — RR-F3 call summarizer (Nov 26 2026; MVP spec v0.1, front-desk team)
+
+`services/service-py/src/call_summarizer.py`, one job: turn one call transcript into a short summary for the owner:
+name, callback number, one need label, urgency and the next action. Not wired; deterministic; no LLM.
+
+| Rule | Behaviour |
+|---|---|
+| Nothing invented | Facts come only from the caller's turns that speech recognition trusts (confidence >= 0.6). The receptionist's confirmation line is checked against them (`confirmation_disagrees_with_caller`), never used as the source |
+| Low confidence | A spoken turn below 0.6 is flagged and never used; a silent turn is not flagged (Nov 26 ruling) |
+| Corrections | The last number the caller gave wins |
+| Names | Reported only when exactly one name was given ("I'm", "this is", "my name is", "soy", "me llamo" and the like are read past); two different names are reported as ambiguous, never picked |
+| No health detail | The summary is built only from the name, the number, a fixed label and the urgency, never the caller's words, and is checked against a health lexicon before it is returned |
+| Urgency | Emergency when the receptionist gave the 911 instruction or the caller described someone not breathing or collapsed, gas, smoke or fire, or a weapon |
+| Need | One label: the pack's own category (its booking category for a booking; `treatment_question` for a health matter; `pricing_question` for a service the pack prices, `pricing` for one it does not) or a fixed front-desk label (emergency, complaint, existing_customer, reschedule, hours, vendor, wrong_number, spam_call, long_silence); `unclear` when nothing matches, never a guess |
+
+Certification: `services/service-py/tests/test_call_summarizer.py` runs the shared MVP pool (F3, 300 transcripts per
+seed, 1,200 key facts) for the three DEV seeds and three more: every name, number, need and urgency matches the key,
+the low-confidence and correction flags match, and no forbidden health term reaches any summary. One disclosed
+equivalence: the pool labels a booking reached through an AI question or a prompt injection `booking`, a plain one
+with the pack's booking category; the summarizer always uses the pack's category. **Known limit:** the need rules
+are keyword rules written against the call bank's own wording (English and Spanish); their accuracy on real callers'
+wording is not measured yet. Name, number, urgency, the low-confidence rule and the health guard do not depend on
+that wording.
+
+### Mutation check for the front-desk agents (RR-F5, F2, F4, F3)
+
+`cd services/service-py && python3 devtools/frontdesk_mutants.py [agent]` plants 59 single defects, each in a fresh
+copy of `src/` and `tests/` (the checkout is never edited), and runs that agent's test file. A mutant whose text no
+longer exists fails the run (`NOT_APPLIED`), so the list cannot rot. Result at this commit: 54 killed; 5 survive and
+are listed as equivalent with the reason (in the consent keeper: the carrier check in the decision, consent cleared
+on reassignment, the opt-in time guard, and the same-instant opt-in order; in the text-back: the Latin-script check,
+which the name pattern already enforces), each covered by another rule that cannot be told apart from outside.
+The summarizer's 0.6 confidence line is the exact fraction 3/5: this service allows no float literals. This replaces the hand-run mutant counts in the RR-F5, F2 and F4 commit messages.
