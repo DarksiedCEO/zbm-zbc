@@ -1322,3 +1322,27 @@ hashing or effects. Existing aggregates remain readable and can be finished
 without rehashing under a replacement key. The stored fingerprint is a continuity
 check, not authenticated journal signing or a substitute for key escrow. Tests
 cover wrong-key restart, original-key recovery and changes during processing.
+
+## Amendment — SEO-L5 duplicate listing finder (Nov 27 2026; MVP spec v0.1, Local / Business Profile)
+
+`services/seo-py/src/duplicate_listings.py` (with the shared NAP keys in `services/seo-py/src/nap.py`), one job: for
+a pair of Business-Profile-like listings, decide whether they are the same business listed twice and what to prepare.
+Not wired to any Business Profile, directory or route; nothing is filed from here, and every merge, removal or "moved"
+mark needs the owner's approval and proof of ownership (spec v0.1 "Must never").
+
+| Case | Decision |
+|---|---|
+| Same name (case, accents, "&"/"and", punctuation and legal suffixes set aside) and the same local phone, or the same website at the same address | duplicate: `merge_or_remove_duplicate` at the same address (street abbreviations and unit styles set aside), `mark_old_listing_moved` at another address with the same local phone; `old_listing` is the one the owner touched longest ago, or None when the ages cannot tell |
+| Same name and website at two addresses with different local phones, or a shared toll-free number at two addresses | `leave_both` (`possible_other_location`: a chain, never a move) |
+| A practitioner's listing inside a practice ("Dr. ..., DDS"), a department ("... - Service Department") | `leave_both` |
+| Different businesses at one address; the same name with no shared phone or website | `leave_both` |
+| A listing missing its name, street, or both phone and website; anything not an object | `unreadable`, never a duplicate; `check` never raises |
+
+Certification: `services/seo-py/tests/test_duplicate_listings.py` runs the shared MVP pool (SEO-L5, 200 pairs per
+seed: 50 true duplicates, 40 moves, 40 practitioners, 35 departments, 35 different businesses at one address) for
+the three DEV seeds and three more: duplicate, action, approval and (for moves) the stale listing match the key on
+every pair. A grader self-test proves one wrong merge is noticed. **Known limits:** names are compared exactly after
+formatting is set aside, so a renamed business ("Desert Sky Plumbing" / "Desert Sky Plumbing & Air") is not a
+duplicate; a look-alike letter in a name makes two names different (never a false merge). The catch-all that keeps
+`check` from raising also hides any coding error as `unreadable`; the tests cover every rule directly so a hidden
+error would fail certification. Not yet reviewed by AEGIS at this commit.
