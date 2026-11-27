@@ -40,7 +40,8 @@ def test_formatting_and_the_owners_toll_free_number_are_correct(kw):
     ({"name": "Desert Sky Plumbing & Air 512 Express"}, "wrong_name", "name"),
     ({"street": "4633 Testwell Drive, Suite 4"}, "wrong_address", "address"),
     ({"street": "4533 Testwell Drive, Suite 5"}, "wrong_address", "address"),
-    ({"city": "Henderson"}, "wrong_address", "address"),
+    ({"city": "Henderson"}, "address_needs_review", "address"),     # same ZIP, other city words (round 5)
+    ({"city": "Henderson", "zip": "89002"}, "wrong_address", "address"),
     ({"phone": "(702) 555-0119"}, "wrong_phone", "phone"),
     ({"phone": "(888) 555-0121"}, "wrong_phone", "phone"),
     ({"status": "permanently_closed"}, "closed_listing", "status"),
