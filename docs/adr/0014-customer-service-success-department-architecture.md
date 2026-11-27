@@ -683,7 +683,7 @@ there is one), `fallback_message_and_text_back`, or `caller_hung_up_log_and_text
 | 30 s | A ring timeout above 30 s, or one that cannot be read, is cut to 30 s; every outcome lands within it |
 | Who connects | The first in the on-call order who answers live; never someone not on call; two records for one person that disagree count as not answering. A live answer beats someone else's late answer (ruling for the spec freeze; the pool's own oracle reads that mix the other way and the pool never generates it) |
 | Whisper | Played first when there is one and `whisper_line` made it (anything else: `whisper_rejected`); a missing one still connects (the caller is never held for it) and is recorded (`whisper_missing`). The whisper line says "Urgent" only for an explicit `True`, never speaks a caller-supplied name or other record text, and speaks the need only as a fixed phrase for its label (AEGIS round 4) |
-| No dropped caller | `resolve` never raises: an unreadable case (not an object, no usable id) ends in the fallback (`unreadable_case`); any unreadable outcome is "no answer", so every path ends connected or in a fallback; fallbacks and late answers ask RR-F2 for a text-back (which still applies consent and quiet hours) |
+| No dropped caller | `resolve` never raises an `Exception`: an unreadable case (not an object, no usable id) ends in the fallback (`unreadable_case`); any unreadable outcome is "no answer", so every path ends connected or in a fallback; fallbacks and late answers ask RR-F2 for a text-back (which still applies consent and quiet hours) |
 
 Certification: `services/service-py/tests/test_transfer_router.py` runs the shared MVP pool (F4, 200 cases per seed)
 for the three DEV seeds and three more: path, person, whisper requirement, text-back and the 30 s limit match the key
@@ -723,3 +723,10 @@ name and number are on your screen. Press 1 to accept.", optionally "Urgent: " f
 only when it is one of those lines (a set lookup, constant time: the quadratic regex the reviewer timed at 6 s on 144
 KB is gone). Review: `resolve` raised on hand-built objects whose comparison raises; any exception while reading a
 case now ends in the fallback, noted `unreadable_case`. Regression tests: "AEGIS rounds 3 and 4".
+
+AEGIS round 5 (Nov 26 2026, Inquisitor on 2c1d4272): no High; every kill criterion held (30,000 fuzzed cases). Review,
+all fixed: a `str` subclass could fake a fixed whisper line, and a behaviour value equal to everything connected: only a
+plain `str` is now a whisper or an outcome; a whisper whose hash raised turned an answered call into a fallback: it now
+simply connects without the whisper; "the late answerer is logged" had no field: the outcome notes now name each late
+answerer (`answered_after_hang_up:<id>`). "Never raises" is narrowed to "never raises an `Exception`": a
+`KeyboardInterrupt` or `SystemExit` is not swallowed, on purpose. Regression tests: "AEGIS round 5".

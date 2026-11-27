@@ -17,7 +17,8 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings):
 - A staff member who answers after the caller hung up is logged, and the caller gets a text-back.
 - Every path ends in a connected call or a fallback within 30 s of ringing starting (the 30 s bounds the ringing;
   the whisper, about 5 s, is played after someone answers, and the fallback message is RR-F2's job). Nothing ends in a dropped caller: any outcome the
-  router cannot read is treated as "no answer", which leads to the fallback, and ``resolve`` never raises: a case it
+  router cannot read is treated as "no answer", which leads to the fallback, and ``resolve`` never raises an
+  ``Exception`` (a ``KeyboardInterrupt`` or ``SystemExit`` is not caught, on purpose): a case it
   cannot read at all (not an object, no usable id) also ends in the fallback, noted ``unreadable_case``.
 - The on-call order may be a list or a tuple; ids are strings (outer spaces trimmed) or whole numbers up to 10**18
   (read as text). Anything else is nobody on call, noted ``unreadable_on_call_order``. Two behaviour records that
@@ -107,8 +108,8 @@ def plan(case: dict) -> RingPlan:
 
 
 def resolve(case: dict, behaviour: Optional[dict] = None, whisper: Optional[str] = None) -> TransferOutcome:
-    """Turn what each rung person did into the outcome; never raises (anything that fails while reading the case,
-    even an object whose comparison raises, ends in the fallback noted ``unreadable_case``)."""
+    """Turn what each rung person did into the outcome; never raises an ``Exception`` (anything that fails while
+    reading the case, even an object whose comparison raises, ends in the fallback noted ``unreadable_case``)."""
     try:
         return _resolve(case, behaviour, whisper)
     except Exception:
@@ -137,6 +138,8 @@ def _resolve(case: dict, behaviour: Optional[dict] = None, whisper: Optional[str
     seen = behaviour if behaviour is not None else case.get("staff_behavior")
     merged: dict[str, object] = {}
     for k, v in (seen.items() if isinstance(seen, dict) else ()):
+        if type(v) is not str:         # only plain text is an outcome; anything else (an object equal to everything)
+            v = "unreadable"           # is "no answer" (AEGIS round 5)
         sid = _staff_id(k)
         if sid is None:
             continue
@@ -147,12 +150,14 @@ def _resolve(case: dict, behaviour: Optional[dict] = None, whisper: Optional[str
         if seen.get(person) == ANSWERS:
             played = _is_whisper_line(whisper)
             if not played:
-                notes.append("whisper_rejected" if isinstance(whisper, str) and whisper.strip() else
+                notes.append("whisper_rejected" if type(whisper) is str and whisper.strip() else
                              "whisper_missing")
             return TransferOutcome(p.case_id, CONNECTED, person, p.timeout_seconds, True, played, False,
                                    tuple(notes))
-    if any(seen.get(person) == ANSWERS_LATE for person in p.ring):
-        return TransferOutcome(p.case_id, HUNG_UP, None, p.timeout_seconds, False, False, True, tuple(notes))
+    late = [person for person in p.ring if seen.get(person) == ANSWERS_LATE]
+    if late:                           # the late answerers are logged in the notes, in on-call order
+        return TransferOutcome(p.case_id, HUNG_UP, None, p.timeout_seconds, False, False, True,
+                               tuple(notes + [f"answered_after_hang_up:{person}" for person in late]))
     return TransferOutcome(p.case_id, FALLBACK, None, p.timeout_seconds, False, False, True,
                            tuple(notes + ["nobody_answered"]))
 
@@ -191,4 +196,4 @@ WHISPER_LINES = frozenset(f"{u}Transferring a caller about {w}. {_SCREEN} Press 
 
 
 def _is_whisper_line(text: object) -> bool:
-    return isinstance(text, str) and text in WHISPER_LINES      # a set lookup: constant time for any input
+    return type(text) is str and text in WHISPER_LINES    # a plain str only (a subclass can fake hash and equality)

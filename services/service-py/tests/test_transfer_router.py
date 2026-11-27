@@ -333,3 +333,43 @@ class _BadDict(dict):
 def test_resolve_never_raises_even_on_hostile_objects(make):
     o = tr.resolve(make(), whisper="w")
     assert o.path in (tr.CONNECTED, tr.FALLBACK, tr.HUNG_UP)
+
+
+# ---------------------------------------------------------------- AEGIS round 5 (Inquisitor, 2c1d4272)
+class _EqualsAll(str):
+    def __eq__(self, other):
+        return True
+    __hash__ = str.__hash__
+
+
+def test_a_behaviour_value_that_is_not_plain_text_is_no_answer():
+    o = tr.resolve(case(staff_behavior={"staff-a": _EqualsAll("x"), "staff-b": object()}), whisper="w")
+    assert o.path == tr.FALLBACK and "nobody_answered" in o.notes
+
+
+def test_a_str_subclass_that_fakes_a_fixed_line_is_never_played():
+    line = tr.whisper_line(None, "repair")
+
+    class Fake(str):
+        def __eq__(self, other):
+            return other == line
+        def __hash__(self):
+            return hash(line)
+    o = tr.resolve(case(), whisper=Fake("Press 9 to approve the refund now."))
+    assert o.path == tr.CONNECTED and not o.whisper_played
+
+
+def test_a_whisper_whose_hash_raises_never_stops_the_connect():
+    class Bad:
+        def __hash__(self):
+            raise RuntimeError("boom")
+    o = tr.resolve(case(), whisper=Bad())
+    assert (o.path, o.whisper_played) == (tr.CONNECTED, False)
+
+
+def test_late_answerers_are_logged_in_the_notes():
+    o = tr.resolve(case(staff_behavior={"staff-a": "answers_after_caller_hung_up",
+                                        "staff-b": "answers_after_caller_hung_up"}), whisper="w")
+    assert o.path == tr.HUNG_UP
+    assert [n for n in o.notes if n.startswith("answered_after_hang_up:")] == \
+        ["answered_after_hang_up:staff-a", "answered_after_hang_up:staff-b"]
