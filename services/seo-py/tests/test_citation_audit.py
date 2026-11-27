@@ -330,3 +330,11 @@ def test_a_name_review_never_hides_a_real_fault(kw, verdict):
     rec = dict(_REC, name="Desert Sky Plumbing LLC")
     v = ca.audit(_biz(rec, dict(_LIST, name="Desert-Sky Plumbing LLC", **kw)))[0]
     assert v.verdict == verdict and "name" in v.differences
+
+
+# ---------------------------------------------------------------- AEGIS round 8 (Inquisitor, 1109b645)
+@pytest.mark.parametrize("rec_street, listed", [("12 Main St Suite E", "12 Main St Suite W"), ("12 Main St Apt N", "12 Main St Apt S"),
+                                                ("100 Main St", "100 1/2 Main St"), ("100 Main St", "100-102 Main St"),
+                                                ("4533 Testwell Drive E", "4533 Testwell Drive #E")])
+def test_another_unit_or_house_number_is_a_wrong_address(rec_street, listed):
+    assert ca.audit(_biz(dict(_REC, street=rec_street), dict(_LIST, street=listed)))[0].verdict == "wrong_address"

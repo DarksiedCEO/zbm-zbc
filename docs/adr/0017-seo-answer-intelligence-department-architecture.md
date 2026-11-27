@@ -1489,3 +1489,7 @@ other spacing ("Mercedes-Benz" / "Mercedes Benz") is `name_needs_review`, never 
 AEGIS round 7 for SEO-L4 (Nov 27 2026, Inquisitor on 8b4b2b4b): a review verdict never hides a real fault: a name
 review plus another street number is `wrong_address`; the review verdicts are only for listings whose only
 differences cannot be told from formatting. The module's Rules now describe both review verdicts.
+
+AEGIS round 8 for SEO-L4 (Nov 27 2026, Inquisitor on 1109b645, shared with SEO-L5 round 9): with the SEO-L5 round-9
+keys, "Suite E" against "Suite W", "Apt N" against "Apt S", "100 1/2" or "100-102" against "100", and "#E" against a
+street direction "E" are each `wrong_address` (or `correct` where only formatting differs), never hidden behind a review.
