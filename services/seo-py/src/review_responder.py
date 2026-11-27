@@ -19,16 +19,18 @@ Rules:
   any script), any ASCII digit or "$", or a listed money, price or legal stem appearing anywhere as a plain substring
   of the casefolded text ("overcharged", "countersued", "court", "abogado" ...) raises it. The stems are a word list
   and miss words they do not know, and amounts written in plain ASCII words ("two hundred"): disclosed; the owner
-  approves every reply anyway. A 4- or 5-star review is not routed when every sentence holding such a word is exactly one of the
-  fixed non-request sentences (letter case and outer spaces aside) ("No need for a refund, they fixed it the same day", "I almost asked for a refund but
+  approves every reply anyway. A 4- or 5-star review with no character outside printable ASCII, no digit and no "$" is not
+  routed when every sentence holding a stem is exactly one of the fixed non-request sentences (letter case and outer
+  spaces aside) ("No need for a refund, they fixed it the same day", "I almost asked for a refund but
   they made it right"). Routing a review that asks for nothing costs only an owner look.
 - A suspected fake (a one-review account at most 7 days old, posted on a day at least 5 other new accounts reviewed the
   business) gets no public reply: ``reply`` is None, it is flagged for a removal request and routed to the owner.
 - A review that cannot be read (not an object, no id, stars not a whole number 1-5, text not a string, reviewer or
   pile-up fields missing, not plain whole numbers or negative) gets no reply and goes to the owner; it never raises.
   A review whose reviewer and pile-up fields meet the fake rule is flagged as a suspected fake even when its id,
-  stars or text cannot be read; a review or reviewer object holding a key that is not a plain string is unreadable as
-  a whole and is not flagged (it cannot come from JSON; no reply, routed, approved). Only a non-list batch raises
+  stars or text cannot be read. A review or reviewer object that is not exactly a ``dict`` (a subclass such as
+  ``OrderedDict`` included) or that holds a key that is not exactly a ``str`` is unreadable as a whole and is not
+  flagged (no reply, routed, approved): plain ``json.loads`` never produces one. Only a non-list batch raises
   ValueError.
 """
 

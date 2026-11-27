@@ -1363,5 +1363,6 @@ advisory word list with known misses.
 
 AEGIS L7 rounds 7-9 (Nov 27 2026): a newline routes like any other character outside printable ASCII; the
 non-request exemption ignores letter case and outer spaces; a review whose reviewer and pile-up fields meet the fake
-rule is flagged for removal even when its id, stars or text cannot be read (a review or reviewer object with a
-non-string key is unreadable as a whole and is not flagged; it cannot come from JSON). Round 8 found no High.
+rule is flagged for removal even when its id, stars or text cannot be read (a review or reviewer object that is not
+exactly a dict, or holds a key that is not exactly a str, is unreadable as a whole and is not flagged; plain
+json.loads never produces one). Round 8 found no High.
