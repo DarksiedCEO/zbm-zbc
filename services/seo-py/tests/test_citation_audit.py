@@ -310,3 +310,14 @@ def test_an_unknown_city_spelling_with_the_same_zip_needs_review():
 
 def test_another_city_with_another_zip_is_still_a_wrong_address():
     assert ca.audit(_biz(_REC, dict(_LIST, city="Henderson", zip="89002")))[0].verdict == "wrong_address"
+
+
+# ---------------------------------------------------------------- AEGIS round 6 (Inquisitor, 570b349a)
+def test_a_name_with_other_spacing_needs_review():
+    rec = dict(_REC, name="Mercedes Benz of Las Vegas")
+    assert ca.audit(_biz(rec, dict(_LIST, name="Mercedes-Benz of Las Vegas")))[0].verdict == "name_needs_review"
+
+
+@pytest.mark.parametrize("rec_street, listed", [("100 Main St Suite B", "100 Main St Suite-B"), ("100 3/8 Main St", "100⅜ Main St")])
+def test_round_7_formatting_is_correct(rec_street, listed):
+    assert ca.audit(_biz(dict(_REC, street=rec_street), dict(_LIST, street=listed)))[0].verdict == "correct"

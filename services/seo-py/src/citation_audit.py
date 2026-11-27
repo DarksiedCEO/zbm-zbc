@@ -27,7 +27,8 @@ from typing import Optional
 
 import nap
 
-VERDICTS = ("correct", "closed_listing", "wrong_status", "wrong_name", "wrong_address", "address_needs_review",
+VERDICTS = ("correct", "closed_listing", "wrong_status", "wrong_name", "name_needs_review", "wrong_address",
+            "address_needs_review",
             "wrong_phone", "unreadable")
 
 
@@ -153,7 +154,9 @@ def _judge(rec: dict, x: object) -> CitationVerdict:
     if "status" in diffs:
         verdict = "closed_listing" if rec["open"] else "wrong_status"
     elif "name" in diffs:
-        verdict = "wrong_name"
+        # the same letters with other spacing ("Mercedes-Benz" / "Mercedes Benz"): a person checks (round 6)
+        verdict = "name_needs_review" if nap.loose(nap.name_key(x.get("name"))) == nap.loose(nap.name_key(rec["name"])) \
+            else "wrong_name"
     elif "address" in diffs:
         # the same house number, unit and city with street words that still differ: an unknown spelling or another
         # street; the data cannot tell, so a person checks (AEGIS L4 round 3: the inverted default)

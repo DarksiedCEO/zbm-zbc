@@ -1481,3 +1481,7 @@ street, "Ste 1-10" is never "Ste 110" (`wrong_address`), and "Mtn View" is "Moun
 AEGIS round 5 for SEO-L4 (Nov 27 2026, Inquisitor on e4dc6fa9, shared with SEO-L5 round 6): the SEO-L5 round-6 key
 fixes apply here ("1200-B" = "1200B", "100½" = "100 1/2", "A-1" = "A1", "Clinton Twp" = "Clinton Township"). The same
 street, state and ZIP with city words that still differ is `address_needs_review`, never `wrong_address` on a guess.
+
+AEGIS round 6 for SEO-L4 (Nov 27 2026, Inquisitor on 570b349a, shared with SEO-L5 round 7): the SEO-L5 round-7 key
+fixes apply here (dashed units, every vulgar fraction, dashed cities). A listing name with the record's letters and
+other spacing ("Mercedes-Benz" / "Mercedes Benz") is `name_needs_review`, never `wrong_name` on a guess.
