@@ -19,7 +19,8 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings, ADR 0014):
   ``unrecognised_reply``. Five review rounds showed that no word list catches every way to say "stop texting me"
   (other apostrophes, leet, emoji letters, "Please discontinue these texts", "Cancelen los mensajes"), so the keeper
   no longer decides that a free-text reply is harmless; a person does. A ``staff_review`` event (a named reviewer's
-  ruling ``not_an_opt_out``, recorded after the reply) clears ``unrecognised_reply`` and nothing else.
+  ruling ``not_an_opt_out``, recorded after the reply) clears ``unrecognised_reply`` and nothing else; the ruling
+  ``opt_out`` records the reply as an opt-out (``opted_out``, which no review clears).
 - A state-changing event (opt-in, inbound text, carrier opt-out, reassignment, staff review) for a number that cannot be read, a
   non-object event, or a send_id used twice refuses the whole replay (``ValueError``): an opt-out is never dropped.
   Numbers are read after NFKC with any script's digits, dash look-alikes and invisibles folded, so one person never
@@ -273,8 +274,8 @@ class ConsentKeeper:
         if kind == "opt_in" and e.get("consent") is not None and not isinstance(e["consent"], str):
             raise ValueError(f"event {i}: consent must be text")
         if kind == "staff_review" and (not isinstance(e.get("reviewer"), str) or not e["reviewer"].strip()
-                                       or e.get("ruling") != "not_an_opt_out"):
-            raise ValueError(f"event {i}: a staff review needs a reviewer and the ruling not_an_opt_out")
+                                       or e.get("ruling") not in ("not_an_opt_out", "opt_out")):
+            raise ValueError(f"event {i}: a staff review needs a reviewer and the ruling not_an_opt_out or opt_out")
         if kind == "inbound_sms" and not isinstance(e.get("text"), str):
             raise ValueError(f"event {i}: text is required")
         if kind != "send_attempt" and normalise_number(e.get("number")) is None:
@@ -327,6 +328,8 @@ class ConsentKeeper:
                 rec.suppressed = "start_keyword_does_not_restore"
                 rec.evidence = rec.evidence + [i]
             # HELP, look-alike words and anything else change nothing
+        elif kind == "staff_review" and e["ruling"] == "opt_out":
+            self._suppress(rec, "opted_out", e["t"], i)       # a person read the reply as an opt-out: permanent
         elif kind == "staff_review":
             # clears only a reply nobody had read, and only when the review comes after it
             if rec.suppressed == "unrecognised_reply" and rec.suppressed_at is not None and e["t"] > rec.suppressed_at:

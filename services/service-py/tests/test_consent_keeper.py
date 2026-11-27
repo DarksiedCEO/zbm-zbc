@@ -387,6 +387,7 @@ def test_round_3_revocations_block_every_send(text):
               send(6, sid="m", mclass="marketing"), send(6, sid="i")]
     got = decide(events)
     assert got[("m", 6)][0] == "block" and got[("i", 6)][0] == "block"
+    assert ck.opt_out_reading(text) in ("opted_out", "possible_opt_out")   # an opt-out: no staff review clears it
 
 
 @pytest.mark.parametrize("text", ["No problem, call me back", "No, llame mañana por favor", "Not now call me later"])
@@ -413,6 +414,7 @@ def test_round_4_revocations_block_every_send(text):
               send(6, sid="m", mclass="marketing"), send(6, sid="i")]
     got = decide(events)
     assert got[("m", 6)][0] == "block" and got[("i", 6)][0] == "block"
+    assert ck.opt_out_reading(text) in ("opted_out", "possible_opt_out")
 
 
 @pytest.mark.parametrize("source", [["web_form"], {"x": 1}, 5])
@@ -483,3 +485,10 @@ def test_a_staff_review_without_a_reviewer_and_ruling_refuses_the_replay(bad):
         e.pop(k)
     with pytest.raises(ValueError):
         ck.ConsentKeeper().replay([ev("opt_in", 1, consent="express_written"), e, send(7)])
+
+
+def test_a_staff_ruling_of_opt_out_is_permanent():
+    events = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="Please discontinue these texts"),
+              ev("staff_review", 6, reviewer="andre", ruling="opt_out"),
+              ev("staff_review", 7, reviewer="andre", ruling="not_an_opt_out"), send(8)]
+    assert one(events) == ("block", "opted_out")

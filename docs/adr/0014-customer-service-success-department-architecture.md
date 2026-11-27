@@ -527,4 +527,6 @@ restart word; any other text blocks every send as `unrecognised_reply` until a p
 and nothing else: never an opt-out, a possible opt-out, a carrier opt-out or a reassignment. Every round 1-5 repro
 replays clean. **Trade-off for Andre:** 47 of the reviewer's 50 benign replies now block until reviewed (round 4: 4
 of 50). Texting a customer who replied in free text waits for a person; a missed opt-out is a TCPA violation. The
-review queue (who sees `unrecognised_reply`, how fast) is wiring, not built. Regression tests: "AEGIS round 5".
+review queue (who sees `unrecognised_reply`, how fast) is wiring, not built. A reviewer can also rule a reply an
+opt-out (`ruling: opt_out`), which records `opted_out` and is never cleared. The round 3 and 4 revocations are tested
+to read as opt-outs, not merely as unrecognised, so a review can never clear them. Regression tests: "AEGIS round 5".
