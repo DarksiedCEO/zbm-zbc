@@ -1493,3 +1493,8 @@ differences cannot be told from formatting. The module's Rules now describe both
 AEGIS round 8 for SEO-L4 (Nov 27 2026, Inquisitor on 1109b645, shared with SEO-L5 round 9): with the SEO-L5 round-9
 keys, "Suite E" against "Suite W", "Apt N" against "Apt S", "100 1/2" or "100-102" against "100", and "#E" against a
 street direction "E" are each `wrong_address` (or `correct` where only formatting differs), never hidden behind a review.
+
+AEGIS round 9 for SEO-L4 (Nov 27 2026, Inquisitor on 9c6c8349, shared with SEO-L5 round 10): with the SEO-L5
+round-10 keys, "Fifth Ave" / "5th Ave", "Twenty-First St" / "21st St" and "Interstate 5" / "I-5" are `correct`
+(formatting), "Suite NE" against "Suite NW" is `wrong_address`, and a listing with no city at all (missing, empty,
+spaces or a dash) is `wrong_address` with the record's city proposed: a review is only for other city words.

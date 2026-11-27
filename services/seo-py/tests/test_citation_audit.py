@@ -338,3 +338,23 @@ def test_a_name_review_never_hides_a_real_fault(kw, verdict):
                                                 ("4533 Testwell Drive E", "4533 Testwell Drive #E")])
 def test_another_unit_or_house_number_is_a_wrong_address(rec_street, listed):
     assert ca.audit(_biz(dict(_REC, street=rec_street), dict(_LIST, street=listed)))[0].verdict == "wrong_address"
+
+
+# ---------------------------------------------------------------- AEGIS L4 round 9
+@pytest.mark.parametrize("street, name, kind", [("4533 Fifth Ave, Suite 4", "5th", "Ave"),
+                                               ("4533 Twenty-First St, Suite 4", "21st", "St"),
+                                               ("4533 Interstate 5, Suite 4", "I-5", "")])
+def test_an_ordinal_word_street_is_formatting_of_the_numeral_street(street, name, kind):
+    rec = dict(RECORD, street_name=name, street_type=kind)
+    assert ca.audit({"canonical": rec, "listings": [listing(street=street)]})[0].verdict == "correct"
+
+
+@pytest.mark.parametrize("street", ["4533 Testwell Drive, Suite NE", "4533 Testwell Drive, Ste SW"])
+def test_a_two_letter_direction_unit_that_differs_is_a_wrong_address(street):
+    rec = dict(RECORD, suite="NW")
+    assert ca.audit({"canonical": rec, "listings": [listing(street=street)]})[0].verdict == "wrong_address"
+
+
+@pytest.mark.parametrize("city", [None, "", "   ", "-"])
+def test_a_listing_with_no_city_is_a_wrong_address(city):
+    assert one(city=city).verdict == "wrong_address"

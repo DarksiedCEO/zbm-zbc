@@ -14,7 +14,7 @@ Rules:
   ``wrong_address`` (street, unit, city, state or ZIP), ``wrong_phone``; ``differences`` lists every field that
   differs, so a listing with two faults shows both. When the only differences are ones the data cannot tell from
   formatting (a name with the same letters and other spacing; the same house number, unit and city with other street
-  words; the same street and ZIP with other city words), the verdict is ``name_needs_review`` or
+  words; the same street and ZIP with other city words; a listing with no city is ``wrong_address``), the verdict is ``name_needs_review`` or
   ``address_needs_review``: a person checks. A real fault always wins over a review.
 - A website that differs is listed in ``differences`` (``website``) but is not a planted fault on its own; a missing
   website is not a fault (many directories carry none).
@@ -165,7 +165,7 @@ def _judge(rec: dict, x: object) -> CitationVerdict:
         # the same house number, unit and city with other street words, or the same street and ZIP with other city
         # words: an unknown spelling or a real difference; a person checks (AEGIS L4 rounds 3-5: the inverted default)
         address_review = (lk == rk and nap.same_number_other_words(ls, rs)) or \
-            (ls == rs and nap.same_zip_other_city_words(lk, rk))
+            (ls == rs and bool(lk[0]) and nap.same_zip_other_city_words(lk, rk))   # no city at all is a fault (round 9)
     faults = [("status", "closed_listing" if rec["open"] else "wrong_status"),
               ("name", None if name_review else "wrong_name"),
               ("address", None if address_review else "wrong_address"),
