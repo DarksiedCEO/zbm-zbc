@@ -292,3 +292,20 @@ def test_a_hyphenated_unit_is_another_unit():
 def test_a_city_abbreviation_is_formatting():
     rec = dict(_REC, city="Mountain View", state="CA", zip="94041")
     assert ca.audit(_biz(rec, dict(_LIST, city="Mtn View", state="CA", zip="94041")))[0].verdict == "correct"
+
+
+# ---------------------------------------------------------------- AEGIS round 5 (Inquisitor, e4dc6fa9)
+@pytest.mark.parametrize("rec_kw, list_kw", [({"street": "1200B N St"}, {"street": "1200-B N St"}),
+                                             ({"street": "100 1/2 Main St"}, {"street": "100½ Main St"}),
+                                             ({"name": "A1 Plumbing"}, {"name": "A-1 Plumbing"}),
+                                             ({"city": "Clinton Township"}, {"city": "Clinton Twp"})])
+def test_round_6_formatting_is_correct(rec_kw, list_kw):
+    assert ca.audit(_biz(dict(_REC, **rec_kw), dict(_LIST, **list_kw)))[0].verdict == "correct"
+
+
+def test_an_unknown_city_spelling_with_the_same_zip_needs_review():
+    assert ca.audit(_biz(_REC, dict(_LIST, city="Lss Vegas")))[0].verdict == "address_needs_review"
+
+
+def test_another_city_with_another_zip_is_still_a_wrong_address():
+    assert ca.audit(_biz(_REC, dict(_LIST, city="Henderson", zip="89002")))[0].verdict == "wrong_address"

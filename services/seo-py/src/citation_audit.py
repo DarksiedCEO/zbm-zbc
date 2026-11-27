@@ -159,8 +159,12 @@ def _judge(rec: dict, x: object) -> CitationVerdict:
         # street; the data cannot tell, so a person checks (AEGIS L4 round 3: the inverted default)
         same_city = nap.city_key(x.get("city"), x.get("state"), x.get("zip")) == \
             nap.city_key(rec["city"], rec["state"], rec["zip"])
-        verdict = "address_needs_review" if same_city and nap.same_number_other_words(
-            nap.street_key(x.get("street")), nap.street_key(rec["street"])) else "wrong_address"
+        lk, rk = nap.city_key(x.get("city"), x.get("state"), x.get("zip")), nap.city_key(rec["city"], rec["state"],
+                                                                                       rec["zip"])
+        same_street = nap.street_key(x.get("street")) == nap.street_key(rec["street"])
+        verdict = "address_needs_review" if (same_city and nap.same_number_other_words(
+            nap.street_key(x.get("street")), nap.street_key(rec["street"]))) or (
+            same_street and nap.same_zip_other_city_words(lk, rk)) else "wrong_address"
     elif "phone" in diffs:
         verdict = "wrong_phone"
     else:
