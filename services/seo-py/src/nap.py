@@ -44,7 +44,25 @@ SUFFIXES = set(STREET_WORDS.values()) - {"north", "south", "east", "west", "nort
                                          "southwest", "mount", "fort"} | {"street", "loop", "mall", "oval", "pass",
                                                                          "path", "pike", "row", "run", "walk", "wall"}
 _ORDINALS = {"first": "1", "second": "2", "third": "3", "fourth": "4", "fifth": "5", "sixth": "6", "seventh": "7",
-             "eighth": "8", "ninth": "9", "tenth": "10", "eleventh": "11", "twelfth": "12"}
+             "eighth": "8", "ninth": "9", "tenth": "10", "eleventh": "11", "twelfth": "12", "thirteenth": "13",
+             "fourteenth": "14", "fifteenth": "15", "sixteenth": "16", "seventeenth": "17", "eighteenth": "18",
+             "nineteenth": "19", "twentieth": "20", "thirtieth": "30", "fortieth": "40", "fiftieth": "50",
+             "sixtieth": "60", "seventieth": "70", "eightieth": "80", "ninetieth": "90"}
+_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
+_UNIT_ORDINALS = ("first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth")
+
+
+def _nth(n: int) -> str:
+    """The numeral ordinal: 1 -> "1st", 12 -> "12th", 21 -> "21st"."""
+    return f"{n}{'th' if n % 100 in (11, 12, 13) else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+
+
+def _ordinal_words(text: str) -> str:
+    """Ordinal words as numeral ordinals: "Fifth" is "5th", "Twenty-First" / "twenty first" / "twentyfirst" is "21st",
+    so "100 Fifth Ave" and "100 5th Ave" are one street (AEGIS L5 round 10)."""
+    text = re.sub(r"\b(" + "|".join(_TENS) + r")[\s\-]?(" + "|".join(_UNIT_ORDINALS) + r")\b",
+                  lambda m: _nth(_TENS[m.group(1)] + int(_ORDINALS[m.group(2)])), text)
+    return re.sub(r"\b(" + "|".join(_ORDINALS) + r")\b", lambda m: _nth(int(_ORDINALS[m.group(1)])), text)
 _DIRECTIONS = {"n", "s", "e", "w", "ne", "nw", "se", "sw", "north", "south", "east", "west", "northeast", "northwest",
                "southeast", "southwest"}
 # unit words by kind: suite, unit, apartment and "#" are styles of one kind (the pool's formatting variants); a floor,
@@ -141,12 +159,13 @@ def _fractions(text: str) -> str:
 
 
 def _unit_value(v: str) -> bool:
-    """A unit number: it holds a digit, or is one or two letters that are not a street suffix ("Suite A", "Ste B")."""
+    """A unit number: it holds a digit, is one letter, is a two-letter direction ("Suite NE"; AEGIS L5 round 10), or
+    is two letters that are not a street suffix ("Ste AB")."""
     if any(c.isdigit() for c in v):
         return True
     if len(v) == 1:
         return True                    # "Suite E", "Apt N": one letter after a unit word is a unit (AEGIS L5 round 9)
-    return len(v) == 2 and v not in STREET_WORDS and v not in SUFFIXES
+    return len(v) == 2 and (v in ("ne", "nw", "se", "sw") or (v not in STREET_WORDS and v not in SUFFIXES))
 
 
 def street_key(street: object) -> tuple[str, Optional[str]]:
@@ -161,7 +180,8 @@ def street_key(street: object) -> tuple[str, Optional[str]]:
     # a unit word joined to its value by a dash ("Suite-B", "Apt-C") keeps the unit (AEGIS L5 round 7)
     text = re.sub(r"(?<![^\W\d_])(" + "|".join(k for k in UNIT_KIND if k != "#") + r")-(?=\w)", r"\1 ", text)
     text = _inner_punct(text)
-    text = re.sub(r"\b(" + "|".join(_ORDINALS) + r")\b", lambda m: _ORDINALS[m.group(1)], text)   # "Fourth Floor"
+    text = _ordinal_words(text)                                    # "Fourth Floor", "Fifth Ave" (round 10)
+    text = re.sub(r"\b(?:interstate|i)\s*(\d+)\b", r"i\1", text)     # "Interstate 5", "I-5", "I 5" (round 10)
     units = []
     while True:
         text = re.sub(r"[\s.,;:]+$", "", text)

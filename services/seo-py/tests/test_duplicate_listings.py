@@ -458,3 +458,32 @@ def test_spacing_variants_are_asked_of_the_owner_not_set_aside_by_patterns(x, y)
 
 def test_superscript_fractions_keep_the_house_number():
     assert nap.street_key("100¹⁄₂ Main St") == nap.street_key("100 1/2 Main St")
+
+
+# ---------------------------------------------------------------- AEGIS L5 round 10
+@pytest.mark.parametrize("x, y", [("100 5th Ave", "100 Fifth Ave"), ("100 1st St", "100 First St"),
+                                  ("100 12th St", "100 Twelfth St"), ("100 21st St", "100 Twenty-First St"),
+                                  ("100 21st St", "100 twenty first St"), ("100 I-5", "100 Interstate 5"),
+                                  ("200 Fourth Floor Plaza", "200 4th Floor Plaza")])
+def test_ordinal_words_and_numerals_are_one_street(x, y):
+    assert nap.street_key(x) == nap.street_key(y)
+    assert dl.check(pair(listing(street=x), listing(street=y))).action == "merge_or_remove_duplicate"
+
+
+@pytest.mark.parametrize("x, y", [("100 5th Ave", "100 6th Ave"), ("100 Fifth Ave", "100 Sixth Ave"),
+                                  ("100 21st St", "100 Twenty-Second St"), ("100 I-5", "100 I-15")])
+def test_other_ordinal_streets_stay_other_streets(x, y):
+    assert nap.street_key(x) != nap.street_key(y)
+
+
+def test_the_floor_reading_of_an_ordinal_word_is_kept():
+    assert nap.street_key("4533 Testwell Drive Fourth Floor") == nap.street_key("4533 Testwell Drive, 4th Fl")
+
+
+@pytest.mark.parametrize("x, y", [("4533 Testwell Drive Suite NE", "4533 Testwell Drive Suite NW"),
+                                  ("4533 Testwell Drive Ste SE", "4533 Testwell Drive Ste SW"),
+                                  ("4533 Testwell Drive Unit NE", "4533 Testwell Drive")])
+def test_a_two_letter_direction_after_a_unit_word_is_a_unit(x, y):
+    a, b = nap.street_key(x), nap.street_key(y)
+    assert a[0] == b[0] and a[1] != b[1]
+    assert nap.street_key("4533 Testwell Drive Suite NE")[1] == "unit:ne"

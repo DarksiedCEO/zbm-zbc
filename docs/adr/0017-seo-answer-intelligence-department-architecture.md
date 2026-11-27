@@ -1411,3 +1411,8 @@ AEGIS round 9 (Nov 27 2026, Inquisitor on L5 5802246c / L4 1109b645): one letter
 when it is also a direction ("Suite E" is not "Suite W"; "#E" is not "Drive E"); "same house number" compares the whole
 leading number ("100 1/2" and "100-102" are not "100"); the practitioner and department patterns are skipped also when
 the names differ only in spacing (then `owner_review`); superscript and subscript digits keep the house number apart.
+
+AEGIS round 10 (Nov 27 2026, Inquisitor on L5 b716e264 / L4 9c6c8349): ordinal words are numeral ordinals ("Fifth"
+is "5th", "Twenty-First" is "21st"), so "100 Fifth Ave" and "100 5th Ave" are one street again (round 9's whole house
+number had made them a move); "Interstate 5", "I-5" and "I 5" are one road; a two-letter direction after a unit word
+("Suite NE") is a unit, as the docstring says. Ordinal words above "ninety-ninth" are not converted (disclosed).
