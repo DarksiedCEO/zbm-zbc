@@ -1427,3 +1427,29 @@ AEGIS round 12 (Nov 27 2026, Inquisitor on L5 0ca6f5ad / L4 ae8e2b2c): a hyphena
 is "100 1/2", never the range "100-1"), and a spelled house number before a numbered street is its digit ("One Fifth
 Ave" is "1 5th Ave"). "100 A Main St" / "100A Main St", a unit written before the street, and "One, Main St" are still
 other addresses (disclosed).
+
+error would fail certification. Not yet reviewed by AEGIS at this commit.
+
+## Amendment — SEO-L4 citation audit (Nov 27 2026; MVP spec v0.1, Local / Business Profile)
+
+`services/seo-py/src/citation_audit.py`, one job: compare every directory listing of one business with the NAP record
+the owner confirmed and say, per listing, whether it is correct or which fault it carries, with the record's values
+proposed as the fix. Not wired to any directory; nothing is filed or edited from here, and every correction is a
+proposal the owner approves first.
+
+| Case | Verdict |
+|---|---|
+| Formatting only (name case, "&"/"and", punctuation, legal suffixes; street abbreviations and unit styles; phone punctuation, a leading 1, other scripts' digits; http/https/www; a full state name; ZIP+4), or the owner's own toll-free number | `correct` |
+| Listed closed (any status but "open", case aside) while the business is open / listed open while it is closed | `closed_listing` / `wrong_status` |
+| Otherwise the first real difference, in this order | `wrong_name`, `wrong_address` (street, unit, city, state, ZIP), `wrong_phone` |
+| A different website | listed in `differences`, not a fault on its own; a missing website is not a fault |
+| A listing with no name, street or readable phone, or one that cannot be read at all | `unreadable` (never `correct`); the rest of the audit goes on |
+| A record that cannot be read | the whole audit refuses (ValueError): nothing is judged against an unknown truth |
+
+`differences` lists every field that differs, so a listing with two faults shows both. Certification:
+`services/seo-py/tests/test_citation_audit.py` runs the shared MVP pool (SEO-L4, 200 businesses per seed, 15-45
+listings each, about 5,400 listings per seed) for the three DEV seeds and three more: every listing's verdict matches
+the key. A grader self-test proves one missed fault is noticed. It uses the shared NAP keys (`nap.py`, hardened in SEO-L5
+AEGIS round 1: every script kept in names, trailing legal suffixes only, full state names, unit kinds).
+**Known limits:** a business that legitimately lists a second local number (a fax, a second line) shows `wrong_phone`
+unless the record carries it; names are compared exactly after formatting. Not yet reviewed by AEGIS at this commit.
