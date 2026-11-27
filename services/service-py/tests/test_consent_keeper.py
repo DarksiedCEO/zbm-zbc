@@ -21,6 +21,8 @@ OPT_OUT_PAIR = {"opted_out", "possible_opt_out"}
 
 def ev(kind, t, client="client-a", number="+16025550101", **kw):
     e = {"kind": kind, "t": t, "client_id": client, "number": number}
+    if kind == "opt_in":
+        e["source"] = "web_form"
     e.update(kw)
     return e
 
@@ -219,3 +221,116 @@ def test_the_certification_grader_catches_a_keeper_that_lets_one_send_through(mo
     monkeypatch.setattr(ck.ConsentKeeper, "_decide", leaky)
     _, wrong, _ = _grade("dev-a")
     assert wrong, "the grader must notice a single opted-out send allowed"
+
+
+# ---------------------------------------------------------------- AEGIS round 1 (Inquisitor + test-verification, c08c3f3f)
+@pytest.mark.parametrize("kind, extra", [("inbound_sms", {"text": "STOP"}), ("carrier_opt_out", {}),
+                                         ("number_reassigned", {}), ("opt_in", {"consent": "express_written"})])
+@pytest.mark.parametrize("raw", ["602/555/0101x", "call me", None, 6025550101, "", "+44 20 7946 0958"])
+def test_a_state_change_for_an_unreadable_number_refuses_the_replay(kind, extra, raw):
+    with pytest.raises(ValueError):
+        ck.ConsentKeeper().replay([ev(kind, 5, number=raw, **extra), send(6)])
+
+
+def test_a_state_change_without_a_number_refuses_the_replay():
+    e = ev("inbound_sms", 5, text="STOP")
+    del e["number"]
+    with pytest.raises(ValueError):
+        ck.ConsentKeeper().replay([e, send(6)])
+
+
+@pytest.mark.parametrize("raw", ["602‑555‑0101", "602–555–0101", "tel:+16025550101",
+                                 "602/555/0101", "602​555​0101", "+1602555０１０１",
+                                 "+١٦٠٢٥٥٥٠١٠١"])
+def test_every_written_form_of_one_number_is_one_record(raw):
+    assert one([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="STOP", number=raw),
+                send(6)]) == ("block", "opted_out")
+    assert one([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="STOP"),
+                send(6, number=raw)]) == ("block", "opted_out")
+
+
+@pytest.mark.parametrize("raw", ["+16021550101", "+16025550101x", "+160255501019", "+1602555010", "+10025550101"])
+def test_a_number_that_is_not_a_north_american_number_blocks(raw):
+    assert one([send(6, number=raw)]) == ("block", "invalid_number")
+
+
+def test_a_reused_keeper_starts_every_replay_from_nothing():
+    keeper = ck.ConsentKeeper()
+    keeper.replay([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 10, text="STOP"), send(11)])
+    second = keeper.replay([ev("opt_in", 2, consent="express_written"), send(20, mclass="marketing")])
+    assert [(d.decision, d.reason) for d in second] == [("allow", None)]   # its own history only
+    third = keeper.replay([ev("inbound_sms", 10, text="STOP"), ev("opt_in", 2, consent="express_written"),
+                           send(20, mclass="marketing")])
+    assert [(d.decision, d.reason) for d in third] == [("block", "opted_out")]
+
+
+@pytest.mark.parametrize("text", ["Do not call me", "Don't call me", "Never call me again", "DNC", "dont call",
+                                  "stop calling me", "please don't contact me", "No me llamen",
+                                  "No me manden mensajes", "ya no me escriban", "no quiero llamadas"])
+def test_calls_only_revocations_block_texts_and_calls(text):
+    assert one([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text=text),
+                send(6, mclass="marketing")]) == ("block", "opted_out")
+
+
+def test_wording_customer_service_hands_to_a_human_still_blocks():
+    assert one([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="Opt me out"),
+                send(6)]) == ("block", "possible_opt_out")
+
+
+@pytest.mark.parametrize("text", ["Please call me back", "Call me at 5", "Can you call me tomorrow?",
+                                  "Llámenme mañana", "Yes please"])
+def test_asking_to_be_called_is_not_an_opt_out(text):
+    assert one([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text=text),
+                send(6, mclass="marketing")]) == ("allow", None)
+
+
+@pytest.mark.parametrize("bad", [None, "STOP", 5, ["inbound_sms"]])
+def test_a_non_object_event_refuses_with_value_error(bad):
+    with pytest.raises(ValueError):
+        ck.ConsentKeeper().replay([send(9), bad])
+
+
+def test_a_send_id_used_twice_refuses_the_replay():
+    with pytest.raises(ValueError):
+        ck.ConsentKeeper().replay([send(1, sid="dup"), ev("inbound_sms", 5, text="STOP"), send(6, sid="dup")])
+
+
+def test_an_empty_client_id_refuses():
+    with pytest.raises(ValueError):
+        ck.ConsentKeeper().replay([send(6, client="")])
+
+
+@pytest.mark.parametrize("client", ["client-a ", "CLIENT-A", "client‑a", "​client-a"])
+def test_one_client_typed_differently_is_one_record(client):
+    assert one([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="STOP", client=client),
+                send(6)]) == ("block", "opted_out")
+
+
+@pytest.mark.parametrize("source", ["inbound_sms_START", None, "unknown", "phone_call"])
+def test_consent_from_an_unknown_source_does_not_count(source):
+    assert one([ev("inbound_sms", 1, text="STOP"), ev("opt_in", 5, consent="express_written", source=source),
+                send(9)]) == ("block", "opted_out")
+    assert one([ev("opt_in", 5, consent="express_written", source=source), send(9, mclass="marketing")]) == \
+        ("block", "no_written_consent")
+
+
+def test_new_written_consent_after_start_after_stop_restores():
+    assert one([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="STOP"),
+                ev("inbound_sms", 7, text="START"), ev("opt_in", 9, consent="express_written"),
+                send(20, mclass="marketing")]) == ("allow", None)
+
+
+@pytest.mark.parametrize("word", ["YES", "START", "Sí", "si"])
+def test_a_restart_word_from_a_consenting_number_changes_nothing(word):
+    assert one([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text=word),
+                send(6, mclass="marketing")]) == ("allow", None)
+
+
+def test_si_after_stop_keeps_the_block_with_the_start_reason():
+    assert one([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="ALTO"),
+                ev("inbound_sms", 7, text="si"), send(9)]) == ("block", "start_keyword_does_not_restore")
+
+
+def test_an_allow_carries_the_consent_it_rests_on():
+    d = ck.ConsentKeeper().replay([ev("opt_in", 1, consent="express_written"), send(6, mclass="marketing")])[0]
+    assert (d.decision, d.evidence) == ("allow", (0, 1))

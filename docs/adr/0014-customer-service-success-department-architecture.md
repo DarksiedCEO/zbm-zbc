@@ -446,7 +446,7 @@ regression cases (`fixed`).
 | SHOULD (quoted tail, seeds 1-3) | Below an unmarked quote, `Stop the texts and the emails please`, a bare `STOP` line after a sign-off (`Thanks,\nSTOP`, cut with the signature) and leet alert wording (`D0n7 text or email m3`) still raised nothing | `quoted_tail_opt_out` alerts (never revokes) on a clause that STARTS with an imperative stop / quit / cease naming a channel or a contacting verb right after it (`_TAIL_STOP_CHANNEL`: a mailer's `Stop by anytime!` or `You can stop these emails at any time` still raises nothing); on a line after the sign-off that is nothing but exact opt-out words; and reads the alert phrases on the leet view too, as the strong-wording check already did |
 | SHOULD (long middle), not changed | An opt-out in the middle of an email over the 20,000-character inbound cap is dropped: `models.cut_head_tail` keeps the head and the last 2,000 characters before the service sees the text | Not local: the cut is the gateway model's (AEGIS L2), and keeping a middle clause means running the opt-out rules inside request validation. The documented promise stays an opt-out at the start or the end of a long message; the war room keeps scoring it as SHOULD. For Andre: a fix is to scan the dropped middle with `opt_out_level` in `_lenient_inbound` and carry the matching lines into the kept text |
 
-## Amendment — RR-F5 consent / STOP keeper (Nov 27 2026; MVP spec v0.1, front-desk team)
+## Amendment — RR-F5 consent / STOP keeper (Nov 26 2026; MVP spec v0.1, front-desk team)
 
 `services/service-py/src/consent_keeper.py`, one job: hold the single consent and opt-out record per (client business,
 phone number) and decide every text or call the front-desk team sends (`allow` / `block` and the reason, with the
@@ -456,7 +456,10 @@ front desk read "STOP" the same way.
 
 | Rule | Behaviour |
 |---|---|
-| Every send is checked | A send with an unreadable number (`invalid_number`) or an unknown message class (`unknown_message_class`) is blocked; a malformed event refuses the whole replay (`ValueError`) |
+| Every send is checked | A send with an unreadable number (`invalid_number`) or an unknown message class (`unknown_message_class`) is blocked; a malformed event (not an object, an unknown kind, a missing field, a send_id used twice, or an opt-in / inbound text / carrier / reassignment for a number that cannot be read) refuses the whole replay (`ValueError`), so an opt-out is never dropped |
+| One record per person | Numbers are read after NFKC with any script's digits, dash look-alikes and invisibles folded, and a `tel:` prefix removed; client ids are folded and case-folded the same way. Every `replay` is the whole history: nothing carries over between calls |
+| Calls too | The keeper decides calls as well as texts, so calls-only revocations ("do not call me", "DNC", "no me llamen", "no me manden mensajes") block (`opted_out`), and wording Customer Service hands to a human ("opt me out") blocks (`possible_opt_out`) |
+| Consent sources | Express written consent counts only from a web form, paper form, keyword join, signed agreement or e-sign; a START reply is never consent |
 | Opt-out wins | `exact` -> `opted_out`, `suspected` (one typo of stop / unsubscribe) -> `possible_opt_out`; both block (Nov 26 ruling: STOP typos count) |
 | Same instant | All state changes at an instant apply before any send at it, opt-ins before opt-outs, whatever the input order |
 | HELP, look-alike words | Change nothing (`Spot`, `Post`, `Stay`, `STAR`, `OK`, `Thanks`) |
@@ -470,3 +473,14 @@ F5, about 10,000 events per seed) for the three DEV seeds and two more, and requ
 planted key (0 wrong decisions on all five). Reasons match the key except one disclosed relabelling: `stopp`, `st0p`
 and `Stop pls` are read as exact opt-outs (`opted_out`) where the key says `possible_opt_out`; both block. A grader
 self-test proves one leaked send is noticed. The test never imports the pool's oracle.
+
+AEGIS round 1 (Nov 26 2026, subject c08c3f3f). Inquisitor: 3 High, each a send allowed after an opt-out: an opt-out
+with an unreadable number was dropped; a reused keeper let older consent undo a later opt-out; calls-only wording
+("do not call me", "DNC") was not an opt-out. Also: one number split into two records by full-width or other-script
+digits, non-object events raising `AttributeError`, duplicate send ids, unfolded client ids, consent from any source.
+test-verification: no High; 7 untested rules (new consent after START after STOP; a restart word from a consenting
+number; exchange digit; trailing junk; empty client id; duplicate send id; allow evidence). 200 fresh seeds (722,282
+sends) gave 0 wrong decisions. All fixed as above (commit "RR-F5 round-1 fixes"), each with a regression test
+(`tests/test_consent_keeper.py`, "AEGIS round 1" section). Mutation by hand, not committed as an artifact: 10 of 11
+targeted mutants on the fixes killed; the survivor (the opt-in time guard) cannot change a sorted single replay. The
+certification seeds are dev-style (all five are in the repo); the held-out draw stays with the reviewer lane.

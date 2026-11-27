@@ -9,6 +9,15 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings, ADR 0014):
   Service already uses, so the whole company reads "STOP" one way. ``exact`` -> ``opted_out``; ``suspected`` (one
   typo of stop / unsubscribe) -> ``possible_opt_out``; both block (STOP typos count as an opt-out: fail toward
   suppression).
+- Calls are decided here too, so calls-only revocations ("do not call me", "DNC", "no me llamen") and the wording
+  Customer Service hands to a human ("opt me out") also block (``opted_out`` / ``possible_opt_out``).
+- A state-changing event (opt-in, inbound text, carrier opt-out, reassignment) for a number that cannot be read, a
+  non-object event, or a send_id used twice refuses the whole replay (``ValueError``): an opt-out is never dropped.
+  Numbers are read after NFKC with any script's digits, dash look-alikes and invisibles folded, so one person never
+  becomes two records; client ids are folded the same way and case-folded.
+- Every ``replay`` is the whole history: no state carries over between calls.
+- Express written consent counts only from a known source (web form, paper form, keyword join, signed agreement,
+  e-sign); a START reply is never one.
 - Within one instant every state change is applied before any send at that instant, and opt-outs after opt-ins, so
   a STOP and a send in the same second never lets the send through, whatever order the events arrive in.
 - HELP changes nothing. START / UNSTOP / YES and the like never restore consent (ZBM rule); the block's reason
@@ -26,6 +35,7 @@ texts, and one client's consent never covers another's.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
@@ -38,16 +48,41 @@ _ORDER = {"opt_in": 0, "inbound_sms": 1, "carrier_opt_out": 2, "number_reassigne
 # Keywords that ask to resume. None of them restores consent; they only change the reason on the block.
 RESTART_WORDS = frozenset({"start", "unstop", "yes", "subscribe", "resume", "resubscribe", "optin", "opt in",
                            "unblock", "si", "reanudar", "comenzar"})
+# Consent is express written only when it comes from one of these (a START reply is never one of them).
+CONSENT_SOURCES = frozenset({"web_form", "paper_form", "keyword_join", "signed_agreement", "esign"})
+# Revocations the text classifier deliberately leaves to the phone side: this keeper decides texts AND calls, so any
+# of these blocks both (fail toward suppression). Matched on the normalised text, as whole words.
+_NO_CONTACT = re.compile(
+    r"\b(?:do ?n[o']?t|dont|never|no more|stop|quit)\s+(?:call|calling|ring|phone|contact)(?:ing)?\b|\bdnc\b|"
+    r"\bdo not call\b|\bno me (?:llamen|llames|marquen|manden|env[ií]en|escriban)\b|\bno (?:llamen|marquen)\b|"
+    r"\bya no me (?:llamen|escriban|manden)\b|\bno quiero (?:llamadas|mensajes)\b")
+_DASHES = dict.fromkeys(map(ord, "\u2010\u2011\u2012\u2013\u2014\u2015\u2212\ufe63\uff0d"), "-")
+_INVISIBLE = re.compile("[\u00ad\u200b-\u200f\u2060-\u2064\ufeff]")
 REASONS = ("opted_out", "possible_opt_out", "start_keyword_does_not_restore", "carrier_opt_out", "number_reassigned",
            "no_written_consent", "invalid_number", "unknown_message_class")
-_E164 = re.compile(r"\+1[2-9]\d{2}[2-9]\d{6}")
+_E164 = re.compile(r"\+1[2-9][0-9]{2}[2-9][0-9]{6}")
+
+
+def _ascii_digits(text: str) -> str:
+    """NFKC, then every Unicode decimal digit as its ASCII digit, dash look-alikes as "-", invisibles removed."""
+    text = _INVISIBLE.sub("", unicodedata.normalize("NFKC", text)).translate(_DASHES)
+    return "".join(str(unicodedata.decimal(c)) if not c.isascii() and unicodedata.decimal(c, None) is not None
+                   else c for c in text)
+
+
+def normalise_client(raw: str) -> str:
+    """One client id, however it was typed upstream: NFKC, dashes folded, invisibles removed, trimmed, case-folded."""
+    return _INVISIBLE.sub("", unicodedata.normalize("NFKC", raw)).translate(_DASHES).strip().casefold()
 
 
 def normalise_number(raw: object) -> Optional[str]:
     """A North American number as +1NXXNXXXXXX, or None when it is not one (never guessed)."""
     if not isinstance(raw, str):
         return None
-    digits = re.sub(r"[\s().\-]", "", raw.strip())
+    text = _ascii_digits(raw).strip()
+    if text.lower().startswith("tel:"):
+        text = text[4:]
+    digits = re.sub(r"[\s().\-/]", "", text)
     if digits.startswith("+"):
         cand = digits
     elif len(digits) == 11 and digits.startswith("1"):
@@ -62,6 +97,21 @@ def normalise_number(raw: object) -> Optional[str]:
 def _restart_word(text: str) -> bool:
     norm = channels.normalise(text).strip()
     return norm in RESTART_WORDS
+
+
+def opt_out_reading(text: str) -> Optional[str]:
+    """``opted_out``, ``possible_opt_out`` or None. Customer Service's SMS classifier first (exact / suspected), then
+    the wording it hands to a human (``possible_opt_out``: on SMS that still blocks), then calls-only revocations
+    ("do not call me", "DNC", "no me llamen"), which this keeper must honour because it also decides calls."""
+    level = channels.opt_out_level(text)
+    if level == "exact":
+        return "opted_out"
+    if level == "suspected" or channels.possible_opt_out(text):
+        return "possible_opt_out"
+    folded = channels.normalise(_ascii_digits(text))
+    if _NO_CONTACT.search(folded) or _NO_CONTACT.search(" ".join(folded.split())):
+        return "opted_out"
+    return None
 
 
 @dataclass
@@ -93,6 +143,8 @@ class ConsentKeeper:
 
     @staticmethod
     def _validate(e: dict, i: int) -> None:
+        if not isinstance(e, dict):
+            raise ValueError(f"event {i}: not an object")
         kind = e.get("kind")
         if kind not in KINDS:
             raise ValueError(f"event {i}: unknown kind {kind!r}")
@@ -104,6 +156,9 @@ class ConsentKeeper:
             raise ValueError(f"event {i}: send_id is required")
         if kind == "inbound_sms" and not isinstance(e.get("text"), str):
             raise ValueError(f"event {i}: text is required")
+        if kind != "send_attempt" and normalise_number(e.get("number")) is None:
+            # AEGIS Inquisitor c08c3f3f H1: an opt-out for a number we cannot read must not vanish; the replay refuses
+            raise ValueError(f"event {i}: unreadable number on a {kind} event")
 
     def replay(self, events: Iterable[dict]) -> list[Decision]:
         """Decide every send_attempt in ``events`` (any order). Raises ValueError on a malformed event: the replay
@@ -111,6 +166,14 @@ class ConsentKeeper:
         rows = list(events)
         for i, e in enumerate(rows):
             self._validate(e, i)
+        seen: set[str] = set()
+        for i, e in enumerate(rows):
+            if e["kind"] == "send_attempt":
+                if e["send_id"] in seen:
+                    raise ValueError(f"event {i}: send_id {e['send_id']!r} appears twice")
+                seen.add(e["send_id"])
+        # AEGIS Inquisitor c08c3f3f H2: every replay is the whole history; nothing carries over from an earlier call
+        self._records = {}
         order = sorted(range(len(rows)), key=lambda i: (rows[i]["t"], _ORDER[rows[i]["kind"]], i))
         out: list[Decision] = []
         for i in order:
@@ -123,22 +186,20 @@ class ConsentKeeper:
 
     def _apply(self, e: dict, i: int) -> None:
         number = normalise_number(e.get("number"))
-        if number is None:
-            return       # a state change for an unreadable number can never unblock anything; sends to it block
-        rec = self._record(e["client_id"], number)
+        rec = self._record(normalise_client(e["client_id"]), number)     # _validate refused unreadable numbers
         kind = e["kind"]
         if kind == "opt_in":
-            if e.get("consent") != "express_written":
-                return   # only express written consent counts; anything weaker is not recorded as consent
+            if e.get("consent") != "express_written" or e.get("source") not in CONSENT_SOURCES:
+                return   # only express written consent from a known source counts; anything else is not consent
             rec.written_consent_at = e["t"]
-            if rec.suppressed in ("opted_out", "possible_opt_out", "start_keyword_does_not_restore",
+            if (rec.suppressed_at is None or e["t"] > rec.suppressed_at) and rec.suppressed in ("opted_out", "possible_opt_out", "start_keyword_does_not_restore",
                                   "number_reassigned"):
                 rec.suppressed, rec.suppressed_at = None, None
             rec.evidence = rec.evidence + [i] if rec.carrier_blocked else [i]
         elif kind == "inbound_sms":
-            level = channels.opt_out_level(e["text"])
-            if level is not None:
-                self._suppress(rec, "opted_out" if level == "exact" else "possible_opt_out", e["t"], i)
+            reading = opt_out_reading(e["text"])
+            if reading is not None:
+                self._suppress(rec, reading, e["t"], i)
             elif _restart_word(e["text"]) and rec.suppressed in ("opted_out", "possible_opt_out"):
                 rec.suppressed = "start_keyword_does_not_restore"
                 rec.evidence = rec.evidence + [i]
@@ -166,7 +227,7 @@ class ConsentKeeper:
         mclass = e.get("message_class")
         if mclass not in MESSAGE_CLASSES:
             return Decision(sid, "block", "unknown_message_class", e["t"], (i,))
-        rec = self._records.get((e["client_id"], number), Record())
+        rec = self._records.get((normalise_client(e["client_id"]), number), Record())
         if rec.carrier_blocked:
             return Decision(sid, "block", "carrier_opt_out", e["t"], tuple(rec.evidence) + (i,))
         if rec.suppressed is not None:
