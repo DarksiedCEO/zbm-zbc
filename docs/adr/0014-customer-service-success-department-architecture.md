@@ -730,3 +730,7 @@ plain `str` is now a whisper or an outcome; a whisper whose hash raised turned a
 simply connects without the whisper; "the late answerer is logged" had no field: the outcome notes now name each late
 answerer (`answered_after_hang_up:<id>`). "Never raises" is narrowed to "never raises an `Exception`": a
 `KeyboardInterrupt` or `SystemExit` is not swallowed, on purpose. Regression tests: "AEGIS round 5".
+
+AEGIS round 6 (Nov 27 2026, Inquisitor on ef583a20): no High. Review, fixed: `resolve` played a fixed "Urgent: " line
+for a case whose `urgent` was not exactly `True`; an "Urgent: " line now plays only for such a case, and a plain line
+only for one that is not. Regression tests: "AEGIS round 6".

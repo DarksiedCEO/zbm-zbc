@@ -308,7 +308,7 @@ def test_resolve_never_plays_a_whisper_whisper_line_did_not_make(whisper):
 def test_resolve_plays_every_line_whisper_line_makes():
     for label in list(tr.NEED_PHRASES) + [None]:
         for urgent in (True, False):
-            assert tr.resolve(case(), whisper=tr.whisper_line("Ana Reyes", label, urgent)).whisper_played
+            assert tr.resolve(case(urgent=urgent), whisper=tr.whisper_line("Ana Reyes", label, urgent)).whisper_played
 
 
 def test_a_huge_whisper_is_rejected_by_set_lookup_not_parsing():
@@ -373,3 +373,15 @@ def test_late_answerers_are_logged_in_the_notes():
     assert o.path == tr.HUNG_UP
     assert [n for n in o.notes if n.startswith("answered_after_hang_up:")] == \
         ["answered_after_hang_up:staff-a", "answered_after_hang_up:staff-b"]
+
+
+# ---------------------------------------------------------------- AEGIS round 6 (Inquisitor, ef583a20)
+@pytest.mark.parametrize("urgent", ["false", False, None, 0, "true", 1])
+def test_an_urgent_line_is_never_played_for_a_case_that_is_not_exactly_urgent(urgent):
+    o = tr.resolve(case(urgent=urgent), whisper=tr.whisper_line(None, "repair", urgent=True))
+    assert o.path == tr.CONNECTED and not o.whisper_played
+
+
+def test_an_urgent_case_plays_only_the_urgent_line():
+    assert tr.resolve(case(urgent=True), whisper=tr.whisper_line(None, "repair", urgent=True)).whisper_played
+    assert not tr.resolve(case(urgent=True), whisper=tr.whisper_line(None, "repair")).whisper_played

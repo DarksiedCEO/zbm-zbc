@@ -148,7 +148,8 @@ def _resolve(case: dict, behaviour: Optional[dict] = None, whisper: Optional[str
     seen = merged
     for person in p.ring:
         if seen.get(person) == ANSWERS:
-            played = _is_whisper_line(whisper)
+            # a fixed line, and "Urgent: " only when this case says urgent is exactly True (AEGIS round 6)
+            played = _is_whisper_line(whisper) and whisper.startswith("Urgent: ") == (case.get("urgent") is True)
             if not played:
                 notes.append("whisper_rejected" if type(whisper) is str and whisper.strip() else
                              "whisper_missing")
