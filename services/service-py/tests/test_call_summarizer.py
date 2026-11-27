@@ -1442,3 +1442,13 @@ def test_a_receptionist_turn_that_is_not_a_confirmation_line_is_not_checked():
     t["turns"].insert(2, {"speaker": "agent", "confidence": 0.97, "text": "Our office line is 602 555 0202."})
     s = cs.summarize(t, {"reason_categories": ["repair"]})
     assert s.callback_number == "+16025550101" and "confirmation_disagrees_with_caller" not in s.notes
+
+
+@pytest.mark.parametrize("filler", ["\x1c", " ", " "])
+@pytest.mark.parametrize("line", ["Please hang up and dial 911 right now.", "Thanks."])
+def test_a_caller_turn_of_controls_or_spaces_after_the_question_is_not_the_yes(filler, line):
+    t = tr("I need a repair.", "602 555 0101.", agent=rb("602 555 0101"))
+    t["turns"] += [{"speaker": "caller", "confidence": 0.95, "text": filler},
+                   {"speaker": "agent", "confidence": 0.97, "text": line},
+                   {"speaker": "caller", "confidence": 0.95, "text": "Yes."}]
+    assert cs.summarize(t, PACK).callback_number is None

@@ -5,18 +5,19 @@ list, never their own words), how urgent it is, and the next action. Determinist
 
 Rules (spec v0.1, the front-desk shared rules, the Nov 26 spec-freeze rulings):
 - Nothing is added that the caller did not say. Facts come only from the CALLER's turns that speech recognition
-  trusts (confidence >= 0.6); the receptionist's own confirmation line is checked against the callback when one is reported, never used as the
-  source. A turn below 0.6 that has words is flagged and never used as a fact. A silent turn carries nothing and is
+  trusts (confidence >= 0.6); the receptionist's own trusted fixed confirmation line ("Let me confirm: Ana Reyes, at 602 555 0101.", "Let me
+  confirm: at 602 555 0101.") is checked against the callback when one is reported (a low-confidence turn or another
+  wording is not checked), never used as the source. A turn below 0.6 that has words is flagged and never used as a fact. A silent turn carries nothing and is
   not flagged (Nov 26 ruling): silence means re-ask, never guess.
-- A callback number is reported only when a trusted receptionist turn is exactly the fixed consent question for one
-  number ("Is 602 555 0101 the best number to call you back?", "¿Es el 602 555 0101 el mejor número para
+- A callback number is reported only when a trusted receptionist turn is the fixed consent question for one
+  number (matched as a whole turn after NFKC, any case, any spacing and number format) ("Is 602 555 0101 the best number to call you back?", "¿Es el 602 555 0101 el mejor número para
   devolverle la llamada?"), the caller gave that number in a trusted turn, and everything the caller says after the
   question is a trusted yes (Andre's ruling, Nov 27 2026, option (a)): the very next spoken turn after the question is
   the caller's yes, and after it the receptionist says nothing but the 911 instruction in one of its two fixed forms
   ("Please hang up and dial 911 right now.", "Cuelgue y marque al 911 ahora mismo.", exactly, read after NFKC) or a
-  fixed closing line as said, with nothing set aside ("Thank you, we'll call you back soon.", "Gracias,
-  le llamaremos pronto."); anything else, a question or not, means no callback (a yes to a later question is never
-  consent; AEGIS rounds 16-19). The explicit yes settles anything the caller said about the number before it. When this module's own
+  closing line from the fixed list ("Thanks.", "Thank you, we'll call you back soon.", "Gracias, le llamaremos
+  pronto." and the few variants _CLOSING lists, any case), as said, with nothing set aside; anything else, a
+  question or not, means no callback (a yes to a later question is never consent; AEGIS rounds 16-22). The explicit yes settles anything the caller said about the number before it. When this module's own
   rejection and correction rules (a word list, so not every phrasing) had marked that number as rejected or
   replaced, the note ``caller_doubted_this_number_earlier`` is added and the yes still stands. Anything else (no question, another
   wording, "No", "Yes, but text my other number", a low-confidence yes) is no callback, and the summary says to
@@ -459,7 +460,9 @@ def _answers_consent(ordered: list, i: int) -> bool:
 
 def _affirmed(ordered: list, i: int) -> bool:
     """After turn ``i`` the caller said something, and everything the caller said was an affirmation."""
-    later = [(c, x) for sp, c, x in ordered[i + 1:] if sp in ("caller", "unknown") and x.strip()]
+    # the same filter as _answers_consent: a caller turn of controls or other spaces is a turn, and it is no yes
+    # (AEGIS F3 round 22: dropped here but kept there, it let a "Yes." to the 911 line count as the answer)
+    later = [(c, x) for sp, c, x in ordered[i + 1:] if sp in ("caller", "unknown") and x.strip(_EDGES)]
     # a low-confidence "Yes." is never a fact, so it affirms nothing (AEGIS round 11); words under a speaker label it
     # cannot read after the question are never a yes either (round 12)
     return bool(later) and all(c >= LOW_CONFIDENCE and _AFFIRM.fullmatch(_fold(x).strip()) for c, x in later)
