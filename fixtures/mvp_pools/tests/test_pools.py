@@ -9,8 +9,8 @@ import copy
 import json
 import re
 import sys
+import unicodedata
 import unittest
-import urllib.parse
 from collections import Counter
 from pathlib import Path
 
@@ -89,51 +89,142 @@ class Determinism(unittest.TestCase):
 
 
 class FixtureSafety(unittest.TestCase):
-    # any North American number in any written form: +1 or 1 prefix optional; space, dot, dash or brackets between the
-    # groups (the call turns speak numbers as "213 555 0142"); digits glued to letters or a hyphen are ids, not numbers. Counterfeit round 1 found the E.164-only pattern let a
-    # spoken real-shape number through.
-    PHONE = re.compile(r"(?<![\w+-])(?:\+?1[ .-]?)?\(?([2-9]\d{2})\)?[ .-]?(\d{3})[ .-]?(\d{4})(?!\w)")
-    # the host is what a browser would contact, so it is parsed, not cut at the first "/" (Counterfeit round 1:
-    # "https://realbiz.com#.test/" passed although its host is realbiz.com)
-    URL = re.compile(r"https?://[^\s\"<>]+", re.IGNORECASE)
+    """Every rendered value is fictional: phones in 555-0100..0199, hosts reserved, no email or SSN shapes.
+
+    The checks read DECODED values (every file is JSON lines, parsed), never the raw text, so a JSON escape such as
+    "\n" in front of a number cannot hide it (AEGIS test-verification on b76b94f2, High 1). A number is any run of
+    digit groups joined by up to three non-alphanumeric characters (any space, dash, dot, slash, underscore,
+    bracket or plus), in any Unicode digit form; every 7-, 10- or 11-digit span of whole groups is checked, so a
+    number next to other numbers or an extension is still seen (a 7-digit local span must end in a 4-digit group,
+    so "1-602-555" inside a fictional "+1-602-555-0117" is not read as a local number). A host is any domain-shaped token anywhere in a
+    value, so a second address hidden after the first, "www." or bare forms, "//host" and other schemes are all
+    read (High 2). Generated id fields are the one exemption: they must match the id shape exactly, and only the
+    phone scan skips them (their hex can look like digits).
+    Residual, by construction: numbers spelled in words, and hosts written with spaces or "[.]", are not detected."""
+
+    ID_FIELDS = frozenset({"business_id", "call_id", "case_id", "citation_id", "client_id", "hidden_effect_lead_ids",
+                           "lead_id", "lead_ids", "missed_call_id", "page_id", "pair_id", "request_id", "review_id",
+                           "send_id", "transcript_id"})
+    ID_SHAPE = re.compile(r"[a-z][a-z0-9]*(?:-[a-z]+)*-[0-9a-f]{8,16}(?:-L\d{3})?")
+    DIRECTORY_PATH = re.compile(r"(/biz/)[0-9a-f]{8}$")      # the directory's listing id in a citation URL
+    CHAIN = re.compile(r"\d+(?:[\W_]{1,3}\d+)*")
+    GROUP = re.compile(r"\d+")
+    DOMAIN = re.compile(r"(?<![\w-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}(?![\w-])",
+                        re.IGNORECASE)
+    IPV4 = re.compile(r"(?<![\d.])\d{1,3}(?:\.\d{1,3}){3}(?![\d.])")
+    EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+    SSN = re.compile(r"(?<!\d)\d{3}[\W_]{1,3}\d{2}[\W_]{1,3}\d{4}(?!\d)")
 
     @staticmethod
-    def _host(url: str):
-        try:
-            return urllib.parse.urlsplit(url.replace("\\", "/")).hostname   # browsers read "\\" as "/" here
-        except ValueError:
-            return None
+    def _strings(obj, key=""):
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                yield from FixtureSafety._strings(v, k)
+        elif isinstance(obj, list):
+            for v in obj:
+                yield from FixtureSafety._strings(v, key)
+        elif isinstance(obj, str):
+            yield key, obj
 
-    def test_the_host_check_reads_the_real_host(self):
-        for url in ("https://realbiz.com#.test/", "https://realbiz.com?x=.test/", "https://x.test@realbiz.com/",
-                    "https://realbiz.com\\.test/"):
-            with self.subTest(url=url):
-                host = self._host(url)
-                self.assertFalse(host and common.is_fixture_domain(host), url)
+    def _values(self, files):
+        for name, text in files.items():
+            self.assertTrue(name.endswith(".jsonl"), f"{name}: only JSON lines are scanned, so nothing else may ship")
+            for n, line in enumerate(text.splitlines(), 1):
+                if line.strip():
+                    for key, value in self._strings(json.loads(line)):
+                        yield f"{name}:{n}:{key}", key, value
 
-    def _all_text(self):
-        yield from build.render(SEED).items()
+    @classmethod
+    def numbers(cls, text: str):
+        """Every 7-, 10- or 11-digit span of whole digit groups, as "+1" plus 10 digits or the bare 7 digits."""
+        for chain in cls.CHAIN.finditer(text):
+            groups = ["".join(str(unicodedata.digit(c)) for c in g) for g in cls.GROUP.findall(chain.group())]
+            for i in range(len(groups)):
+                span = ""
+                for g in groups[i:]:
+                    span += g
+                    if len(span) > 11:
+                        break
+                    if len(span) == 11 and span[0] == "1":
+                        yield "+" + span
+                    elif len(span) == 10:
+                        yield "+1" + span
+                    elif len(span) == 7 and len(g) in (4, 7):    # a local number ends in its 4-digit line
+                        yield span
 
-    def test_every_phone_is_in_the_fictional_range(self):
-        for name, text in self._all_text():
-            for area, exchange, line in self.PHONE.findall(text):
-                number = f"+1{area}{exchange}{line}"
-                with self.subTest(file=name, number=number):
-                    self.assertTrue(common.is_fixture_phone(number))
+    @staticmethod
+    def fictional_number(number: str) -> bool:
+        if len(number) == 7:
+            return number[:3] == "555" and 100 <= int(number[3:]) <= 199
+        return common.is_fixture_phone(number)
 
-    def test_the_phone_check_catches_every_written_form(self):
-        real = ("+12138675309", "213 867 5309", "(213) 867-5309", "213.867.5309", "1-213-867-5309", "2138675309")
-        for form in real:
+    @classmethod
+    def phone_text(cls, key: str, value: str) -> str:
+        if key in cls.ID_FIELDS:
+            return ""
+        return cls.DIRECTORY_PATH.sub(r"\1", value) if key == "url" else value
+
+    @classmethod
+    def hosts(cls, text: str):
+        yield from (m.group().lower() for m in cls.DOMAIN.finditer(text))
+
+    @classmethod
+    def offending(cls, key: str, value: str) -> list:
+        """Everything in one decoded value that is not fictional, empty when the value is safe."""
+        bad = [n for n in cls.numbers(cls.phone_text(key, value)) if not cls.fictional_number(n)]
+        bad += [h for h in cls.hosts(value) if not common.is_fixture_domain(h)]
+        bad += cls.IPV4.findall(value) + cls.EMAIL.findall(value) + cls.SSN.findall(cls.phone_text(key, value))
+        return bad
+
+    def test_every_rendered_value_is_fictional(self):
+        for where, key, value in self._values(build.render(SEED)):
+            bad = self.offending(key, value)
+            if bad:
+                self.fail(f"{where}: {bad} in {value[:120]!r}")
+
+    def test_id_fields_hold_only_ids(self):
+        seen = set()
+        for where, key, value in self._values(build.render(SEED)):
+            if key in self.ID_FIELDS:
+                seen.add(key)
+                self.assertRegex(value, rf"^{self.ID_SHAPE.pattern}$", where)
+        self.assertEqual(seen, self.ID_FIELDS)        # an exemption nothing uses is removed, not left open
+
+    def test_the_scan_catches_what_review_slipped_past_it(self):
+        """The forms AEGIS got past the b76b94f2 checks, each put into a real rendered line and read back the same
+        way the scan reads every file."""
+        name, text = next(iter(build.render(SEED).items()))
+        row = json.loads(text.splitlines()[0])
+        unsafe = ["call\n2138675309", "call\n213 867 5309", "213  867  5309", "213/867/5309", "867-5309",
+                  "2138675309x12", "213 867 5309", "213–867–5309", "213_867_5309", "213\t867\t5309",
+                  "+1 - 213 - 867 - 5309", "２１３８６７５３０９",
+                  "+12138675309", "(213) 867-5309", "213.867.5309", "1-213-867-5309", "213-555-0200",
+                  "213-555-0099", "555-0200", "on 2026-01-05 call 213 867 5309 ext 4",
+                  "see https://good.test\nhttps://realbiz.com", "www.realbiz.com", "realbiz.com/menu",
+                  "//realbiz.com", "ftp://realbiz.com", "https://x.test@realbiz.com/", "https://realbiz.com#.test/",
+                  "https://realbiz.com?x=.test/", "https://realbiz.com\\.test/", "REALBIZ.COM",
+                  "http://8.8.8.8/", "a@realbiz.com", "mailto:a@shop.test", "123-45-6789", "123 45 6789"]
+        for form in unsafe:
             with self.subTest(form=form):
-                found = self.PHONE.findall(f"call me at {form} today")
-                self.assertTrue(found and not common.is_fixture_phone("+1" + "".join(found[0])), form)
+                line = common.canonical_json({**row, "note": form})
+                found = [b for _, key, value in self._values({name: line}) for b in self.offending(key, value)]
+                self.assertTrue(found, form)
+        safe = ["213-555-0142", "+12135550100", "+1 (213) 555-0199", "555-0156", "https://shop-1.test/book",
+                "www.example.com", "$1,500 per month", "2026-12-25", "08:00-17:00", "Suite 210"]
+        for form in safe:
+            with self.subTest(form=form):
+                line = common.canonical_json({**row, "note": form})
+                self.assertEqual([b for _, key, value in self._values({name: line})
+                                  for b in self.offending(key, value)], [], form)
 
-    def test_every_web_address_is_reserved(self):
-        for name, text in self._all_text():
-            for url in self.URL.findall(text):
-                host = self._host(url)
-                with self.subTest(file=name, url=url):
-                    self.assertTrue(host and common.is_fixture_domain(host), url)
+    def test_the_fictional_range_is_exactly_0100_to_0199(self):
+        for number, ok in (("+12135550100", True), ("+12135550199", True), ("+12135550099", False),
+                           ("+12135550200", False), ("+12135551234", False), ("+12135560150", False),
+                           ("5550100", True), ("5550199", True), ("5550099", False), ("5550200", False)):
+            with self.subTest(number=number):
+                self.assertIs(self.fictional_number(number), ok)
+
+    def test_every_website_domain_is_reserved(self):
         for biz in WORLD:
             self.assertTrue(common.is_fixture_domain(biz["website"]["domain"]))
 
@@ -142,11 +233,6 @@ class FixtureSafety(unittest.TestCase):
             self.assertEqual(row["fixture"], common.FIXTURE_LABEL)
         for biz in WORLD:
             self.assertIn("(Fixture)", biz["name"])
-
-    def test_no_email_addresses_or_ssn_shapes(self):
-        for name, text in self._all_text():
-            self.assertIsNone(re.search(r"[\w.+-]+@[\w-]+\.\w+", text), name)
-            self.assertIsNone(re.search(r"\b\d{3}-\d{2}-\d{4}\b", text), name)
 
 
 class AnswerKeySeparation(unittest.TestCase):

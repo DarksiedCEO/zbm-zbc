@@ -128,10 +128,15 @@ test-verification round 4 (same subject) confirmed the round-3 fixes and found t
 Counterfeit ran late against the round-1 commit. Its two HIGH findings (the held-out seed readable from ids, and ids
 that gave the answer away) were already fixed by round 2. Its oracle-blindness finding was fixed by the type-strict,
 fully re-derived oracles of rounds 2-4. The two remaining gaps are fixed here:
-- **Fixture safety:** the phone check now finds any North American number in any written form (E.164, spaced as the
-  call turns speak it, dotted, dashed, bracketed, with or without the leading 1), and the address check parses the
-  real host (a fragment, query, user-info or backslash trick no longer passes). Digits glued to letters or a hyphen
-  are read as ids, not numbers; a real number written that way would not be caught (disclosed).
+- **Fixture safety** (reworked after AEGIS test-verification on b76b94f2 found two High bypasses: a JSON-escaped
+  newline or an unusual separator hid a real number, and a second address after the first, or a `www.`, bare,
+  `//` or `ftp://` address, hid a real host). The checks now read every rendered value decoded from JSON, never the
+  raw text. A number is any run of digit groups joined by up to three non-alphanumeric characters, in any Unicode
+  digit form, and every 7-, 10- or 11-digit span of whole groups must be in 555-0100..0199. A host is any
+  domain-shaped token anywhere in a value and must be reserved (`.test` or `example.com`); IP literals, email
+  addresses and SSN shapes fail outright. Generated id fields are the only exemption from the number scan, and
+  each must match the id shape exactly. Every bypass the review found is now a test case. Not detected, by
+  construction (disclosed): numbers spelled in words, and hosts written with spaces or `[.]`.
 - **`build verify`** now fails when no dev seed is pinned, or when a seed's pins do not name exactly the generated
   files. It still proves the output has not drifted from the pins, not that the pins are right; the oracles do that.
 
