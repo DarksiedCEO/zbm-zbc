@@ -227,3 +227,11 @@ def test_every_number_character_of_any_script_routes():
     chars = [chr(i) for i in range(0x110000) if unicodedata.category(chr(i)) in ("Nd", "Nl", "No") or chr(i).isdigit()]
     missed = [c for c in chars if not rr.draft(review(text=f"Send me {c} now.", stars=1)).route_to_owner]
     assert not missed, [hex(ord(c)) for c in missed[:5]]
+
+
+@pytest.mark.parametrize("text", ["You overcharged me, repay it this week.", "Way overpriced.", "Still unpaid.",
+                                  "Nonrefundable my foot.", "She sues everyone.", "Litigation is next.", "Malpractice.",
+                                  "Expect a subpoena.", "I want a settlement.", "Forty euros wasted.",
+                                  "re\u00adfund", "re\u200bfund", "r\u0435fund"])
+def test_money_and_legal_word_stems_route_anywhere_in_a_word(text):
+    assert rr.draft(review(text=text, stars=1)).route_to_owner

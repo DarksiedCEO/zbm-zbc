@@ -15,11 +15,12 @@ Rules:
 - **Every reply needs the owner's approval before it is posted** (AEGIS L7 round 1: the inverted default; a money ask
   or a claim can be phrased without any word a list knows, "I want my $200 back", "see you in court", so no list
   decides what is posted unseen). ``route_to_owner`` is an extra flag that the review may ask for money or threaten a
-  claim: any money, price or legal word, a currency sign or number character of any script (Unicode Sc, Nd, Nl, No), "back", "court" ... raises it (an amount
-  written in words, "two hundred", does not: disclosed; the owner approves every reply anyway), except a 4- or
-  5-star review whose every sentence holding such a word is exactly one of the fixed non-request sentences ("No need
-  for a refund, they fixed it the same day", "I almost asked for a refund but they made it right"). Routing a review
-  that asks for nothing costs only an owner look.
+  claim: a currency sign or number character of any script (Unicode Sc, Nd, Nl, No), or a listed money, price or
+  legal word stem anywhere in a word ("overcharged", "unpaid", "court", "abogado" ...) raises it. It is a word list
+  and misses words it does not know, and amounts written in words ("two hundred"): disclosed; the owner approves every
+  reply anyway. A 4- or 5-star review is not routed when every sentence holding such a word is exactly one of the
+  fixed non-request sentences ("No need for a refund, they fixed it the same day", "I almost asked for a refund but
+  they made it right"). Routing a review that asks for nothing costs only an owner look.
 - A suspected fake (a one-review account at most 7 days old, posted on a day at least 5 other new accounts reviewed the
   business) gets no public reply: ``reply`` is None, it is flagged for a removal request and routed to the owner.
 - A review that cannot be read (not an object, no id, stars not a whole number 1-5, reviewer fields
@@ -60,12 +61,20 @@ NEVER_WORDS = re.compile(r"\b(?:refund\w*|money|credit\w*|discount\w*|free|compe
                          r"fix (?:it|this)|promise\w*|guarantee\w*|sorry|apolog\w*|fault|mistake|actually|however|but|"
                          r"unfortunately|false|untrue|lie|lying|fake|wrong|policy|policies|terms)\b", re.IGNORECASE)
 
-_MONEY = re.compile(r"[$€£¥¢]|\d|\b(?:refund\w*|money|reimburs\w*|compensat\w*|credit\w*|chargeback\w*|charge ?back|"
-                    r"dispute\w*|lawyer\w*|attorney\w*|sue|sued|suing|lawsuit\w*|court\w*|judge|claims?|small claims|"
-                    r"bbb|paid|pay\w*|cost\w*|charg\w*|price\w*|fee|fees|bill\w*|invoice\w*|dollars?|bucks|cents?|"
-                    r"cash|financial\w*|back|return\w*|revers\w*|cancel\w*|owe\w*|deposit\w*|warrant\w*|legal\w*|"
-                    r"reembols\w*|dinero|devol\w*|devuelv\w*|abogad\w*|corte|demanda\w*|pag\w*|cobr\w*|"
-                    r"demand\w*)\b", re.IGNORECASE)
+# money, price and legal word stems, matched anywhere in a word ("overcharged", "unpaid", "nonrefundable"; AEGIS L7
+# round 5), after invisibles are removed and look-alike letters folded; a word list still misses words it does not
+# know, which is why every reply is owner-approved and this flag is only advisory
+_MONEY = re.compile(r"refund|money|reimburs|compensat|credit|charg|disput|lawyer|attorney|\bsu(?:e|ed|es|ing)\b|"
+                    r"lawsuit|litigat|court|judge|claim|subpoena|settle|malpractice|negligen|bbb|paid|pay|cost|pric|"
+                    r"\bfees?\b|bill|invoice|dollar|euro|peso|bucks|cents?\b|cash|financ|\bback\b|return|revers|"
+                    r"cancel|\bowe|deposit|warrant|legal|liab|expens|afford|ripoff|rip-off|rip off|scam|fraud|steal|stole|"
+                    r"theft|robbed|insur|estimat|quot|reembols|dinero|devol|devuelv|abogad|corte|demand|\bpag|cobr|"
+                    r"caro|estaf|fraude|robo",
+                    re.IGNORECASE)
+_LOOKALIKE = str.maketrans({"а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x", "і": "i", "ј": "j",
+                            "ѕ": "s", "ԁ": "d", "ɡ": "g", "ո": "n", "ս": "u", "ν": "v", "ο": "o", "ρ": "p", "α": "a"})
+
+
 # the only sentences holding a money word that are not a request, in a 4- or 5-star review (the pool's traps)
 _NOT_A_REQUEST = re.compile(r"no need for a refund, they fixed it the same day|"
                             r"i almost asked for a refund but they made it right", re.IGNORECASE)
@@ -96,6 +105,7 @@ def _whole(x: object) -> Optional[int]:
 
 def _sentences(text: str) -> list[str]:
     folded = unicodedata.normalize("NFKC", text).replace("’", "'").replace("‘", "'")
+    folded = "".join(c for c in folded if unicodedata.category(c) not in ("Cf", "Mn")).translate(_LOOKALIKE)
     return [s.strip() for s in re.split(r"[.!?\n;]+", folded) if s.strip()]
 
 
