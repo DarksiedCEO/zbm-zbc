@@ -14,7 +14,7 @@ Rules (spec v0.1, the front-desk shared rules, the Nov 26 spec-freeze rulings):
   "mejor", "quiero decir"); two numbers with no cue ("my cell is ... and my office is ...") are ambiguous: no callback
   number is reported and the owner sees ``ambiguous_number``.
 - A name is reported only when the caller gave it AND the receptionist confirmed it: the caller says it after a
-  lead-in ("I'm", "my name is", "put it under", "soy", "me llamo" ...; "this is", "it's", "habla" only before a number
+  lead-in ("I'm", "my name is", "soy", "me llamo", "mi nombre es"; "this is", "it's", "habla" only before a number
   or a calling phrase) or as "First Last" opening a sentence before a number, and a trusted receptionist turn confirms
   exactly that pair in the fixed form, right after the cue ("Let me confirm: Ana Reyes, at ...", "Confirmo: ...";
   AEGIS round 7). A pair nobody confirmed (a landlord, a business, a mother, a city) is never a
@@ -67,6 +67,9 @@ _REJECTED_NUMBER = re.compile(
     r"\bno (?:me )?(?:llame|llames|llamen|use|uses|marque|marques)(?:n)?\b[^.!?\d]{0,20}|\bnunca (?:al|llame)|"
     r"\bya no uso(?: el)?|\bold number(?: was| is)?|\bmi (?:viejo|antiguo) n[uú]mero(?: es| era)?)"
     r"\s*(?:me\s+)?(?:at|on|the|al|el)?\s*$", re.IGNORECASE)
+# any negation earlier in the number's own sentence ("Don't call my work number, 602 ...", "Never call this number:")
+# rejects it (AEGIS round 9: the inverted default; the phrase list above kept missing wordings)
+_NEG_BEFORE = re.compile(r"\b(?:don'?t|do not|never|not|no|nunca|ya no)\b", re.IGNORECASE)
 # a rejection right after the number ("602 555 0101 is not my number anymore", "... that's disconnected")
 _REJECTED_AFTER = re.compile(r"^\W{0,3}(?:(?:which|that|it|this one|that one)(?:'s| is| was)?\s+|is\s+|was\s+)?"
                              r"(?:not (?:my|mine|the|a good|working|in service)|isn'?t (?:mine|my|working)|no longer|"
@@ -96,7 +99,7 @@ _WORD = r"[A-ZÁÉÍÓÚÑÜ][a-záéíóúñü'\-]+"
 # "habla") only when the name is followed straight by a number or a calling phrase (AEGIS F3 round 2: "It's Christmas
 # Eve", "This is Long Beach")
 # "put it under" / "a nombre de" name whoever the booking is for, not the caller, so they are not lead-ins (round 8)
-_LEAD_NAME = re.compile(rf"(?:\bI'?m|\bI am|\bmy name is|\bthe name is|"
+_LEAD_NAME = re.compile(rf"(?:\bI'?m|\bI am|\bmy name is|"
                         rf"\bme llamo|\bsoy|\bmi nombre es)\s+({_WORD} {_WORD})"
                         rf"(?![\w'])", re.IGNORECASE)
 _WEAK_LEAD_NAME = re.compile(rf"(?:\bit'?s|\bit is|\bthis is|\bhabla)\s+({_WORD} {_WORD}),?\s+(?=\(?[2-9]\d{{2}}|"
@@ -284,13 +287,10 @@ def _said_911(agent_text: str, previous: Optional[str] = None) -> Optional[str]:
     Punctuation, quotes, an opening "¡" and digit spacing ("9 1 1") are formatting. When the turn before did not end a
     sentence ("There's no need to" / "Call 911."), the two turns may be one sentence: "ambiguous", which raises
     CHECK NOW instead of URGENT (AEGIS round 8: neither reading is safe on its own). Otherwise None."""
-    text = agent_text.strip()
-    while True:                        # opening and closing marks in any order: ¡"...!", "¡...!", «...» (round 8)
-        stripped = text.strip("\"'“”‘’«»").lstrip("¡").strip()
-        if stripped == text:
-            break
-        text = stripped
-    text = re.sub(r"(?<!\d)9[\s.\-]?1[\s.\-]?1(?!\d)", "911", text)
+    # every quote mark and the opening "¡" are formatting wherever they sit (AEGIS rounds 8-9: „…“, ‹…›, ¡"…!")
+    text = "".join(c for c in agent_text if c not in "\"'¡" and unicodedata.category(c) not in ("Pi", "Pf")
+                   and c not in "„‚").strip()
+    text = re.sub(r"(?<!\d)9[\s.\-‐-―]?1[\s.\-‐-―]?1(?!\d)", "911", text)   # "9 1 1", "9-1-1", "9–1–1"
     if not re.search(r"[.!]$", text):
         return None
     text = re.sub(r"[.!]+$", ".", re.sub(r"\s+", " ", text.replace(",", " "))).replace(" .", ".")
@@ -321,7 +321,11 @@ def _callback(trusted: list[str], notes: list[str]) -> tuple[Optional[str], bool
     last_end = 0
     for m in _NUM.finditer(joined):
         before = joined[last_end:m.start()]
-        if _REJECTED_NUMBER.search(joined[max(0, m.start() - 60):m.start()]) or \
+        # the number's own sentence since the previous number, a correction cue set aside ("..., no wait, sorry, 602 ...")
+        sentence = re.split(r"[.!?\n]", joined[max(last_end, m.start() - 80):m.start()])[-1]
+        sentence = _CORRECTION.sub(" ", re.sub(r"\bno\b(?=[\s,]*(?:wait|sorry|perd[oó]n|actually|i mean|espera|mejor))", " ",
+                                              sentence, flags=re.IGNORECASE))
+        if _REJECTED_NUMBER.search(joined[max(0, m.start() - 60):m.start()]) or _NEG_BEFORE.search(sentence) or \
                 _REJECTED_AFTER.search(joined[m.end():m.end() + 60]):
             last_end = m.end()
             notes.append("rejected_number_not_used")
@@ -358,9 +362,15 @@ _CONFIRM_LINE = re.compile(rf"(?:let me confirm|just to confirm|to confirm|so to
 
 
 
+_AFFIRM = re.compile(r"(?:(?:yes|yeah|yep|yup|correct|right|that'?s right|that'?s correct|exactly|ok|okay|uh-?huh|"
+                     r"s[ií]|correcto|exacto|as[ií] es|eso es|claro)[\s,.!]*)+(?:thanks?|thank you|gracias)?[\s.!]*",
+                     re.IGNORECASE)
+
+
 def _names(trusted: list[str], confirmations: Optional[list[str]] = None) -> list[str]:
     """Names the caller gave; with ``confirmations`` (the trusted receptionist turns), only those it repeated."""
-    said = {m.group(1).casefold() for x in confirmations for m in [_CONFIRM_LINE.match(_fold(x).strip())] if m} \
+    said = {m.group(1).casefold() for x in confirmations if "?" not in x and "¿" not in x
+            for m in [_CONFIRM_LINE.match(_fold(x).strip())] if m} \
         if confirmations is not None else None
     names: list[str] = []
     for x in trusted:
@@ -375,6 +385,12 @@ def _names(trusted: list[str], confirmations: Optional[list[str]] = None) -> lis
                 continue
             if re.search(r"'s?$", words[-1]) or re.match(r"\s*'", x[m.end(1):]):
                 continue                   # "I'm Ana Reyes's husband": a possessive names someone else (AEGIS round 5)
+            before, after = x[:m.start(1)], re.split(r"[.!?\n]", x[m.end(1):])[0]
+            if m.re is not _LEAD_NAME and (re.search(r"[?¿]", before[-60:]) or
+                                           re.search(r"\b(?:my|his|her|their|our|mi|su|sus)\b", before[-60:], re.IGNORECASE)):
+                continue                   # "... my boss? Ana Reyes, 602 ...": someone the caller spoke of (round 9)
+            if re.search(r"\b(?:she|he|they|her|his|their|ella|[eé]l)\b", after, re.IGNORECASE):
+                continue                   # "The name is Ana Reyes, she's my tenant" (AEGIS round 9)
             if said is not None and cand.casefold() not in said:
                 continue                   # nobody confirmed it: a landlord, a business, a mother is never a name
             if cand not in names:
@@ -427,8 +443,10 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
     if name:                           # the caller said no after the confirmation ("No, I'm Ana Ruiz"): no name (round 8)
         at = [i for i, (sp, c, x) in enumerate(ordered) if sp == "agent" and c >= LOW_CONFIDENCE
               and (m := _CONFIRM_LINE.match(_fold(x).strip())) and m.group(1).casefold() == name.casefold()]
-        if at and any(sp == "caller" and re.search(r"\b(?:no|not|nope|wrong|incorrect|isn'?t)\b", _fold(x), re.IGNORECASE)
-                      for sp, _, x in ordered[at[-1] + 1:]):
+        # after the confirmation the caller may only affirm ("Yes.", "That's right", "Sí"); anything else ("Nah",
+        # "Incorrecto", "Actually, I'm Ana Ruiz") withholds the name (AEGIS round 9: the inverted default)
+        if not at or any(sp == "caller" and x.strip() and not _AFFIRM.fullmatch(_fold(x).strip())
+                         for sp, _, x in ordered[at[-1] + 1:]):
             name = None
             notes.append("name_denied")
     if len(names) > 1:

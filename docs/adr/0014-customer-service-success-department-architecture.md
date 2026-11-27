@@ -880,3 +880,12 @@ after the last accepted number, even around a later rejected one, or that number
 ambiguous. "Put it under" / "a nombre de" name whoever the booking is for, so they are no longer the caller's own
 name; a confirmation asked as a question confirms nothing; a caller who says no after the confirmation has no name
 reported (`name_denied`). Mutation harness (whole stack): 142 mutants, 128 killed, 14 equivalent with reasons.
+
+AEGIS Inquisitor round 9 on 64e53e41 (RR-F3): every quote mark (any Unicode opening or closing quote) and "¡" are
+formatting wherever they sit, and any dash between the digits of 911; any negation in a number's own sentence
+("Don't call my work number, 602 ...") rejects it, a correction cue set aside; a confirmation turn holding a question
+mark confirms nothing; after the confirmation the caller may only affirm (yes, that's right, correct, sí ...):
+anything else withholds the name; a weak or bare name after "my ..." or a question in the same turn, or followed by
+"she / he / they ..." in its sentence, is someone the caller spoke of, never their own; "the name is" is no longer a
+lead-in. Trade-off disclosed: "602 555 0101 is not my number anymore, it's 602 555 0202" now fails closed (no number).
+Mutation harness, summarizer: 55 mutants, 46 killed, 9 equivalent with reasons.

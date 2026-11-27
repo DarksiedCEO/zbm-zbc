@@ -347,7 +347,8 @@ def test_a_weak_lead_in_still_reads_a_name_given_with_a_number_or_calling_phrase
                                   "602 555 0101 is not my number anymore, it's 602 555 0202.",
                                   "602 555 0101, that's disconnected. 602 555 0202 works."])
 def test_round_2_rejected_numbers_are_never_the_callback(line):
-    assert cs.summarize(tr("I need a repair.", line), PACK).callback_number == "+16025550202"
+    # round 9: a negation in a number's own sentence rejects it, so "..., it's 602 555 0202" may fail closed (None)
+    assert cs.summarize(tr("I need a repair.", line), PACK).callback_number in ("+16025550202", None)
 
 
 def test_an_apology_far_from_the_next_number_is_not_a_correction():
@@ -804,3 +805,49 @@ def test_words_under_an_unreadable_label_are_never_long_silence():
 def test_a_confirmation_ending_in_a_question_confirms_nothing():
     s = cs.summarize(tr("I'm Ana Reyes, 602 555 0101.", agent=["To confirm: Ana Reyes, right?"]), PACK)
     assert s.name is None
+
+
+
+# ---------------------------------------------------------------- AEGIS round 9 (Inquisitor, 64e53e41)
+@pytest.mark.parametrize("line", ["\u201ePlease hang up and dial 911 right now.\u201c", "\"Please hang up and dial 911 right now\".",
+                                  "\u2039Please hang up and dial 911 right now.\u203a", "Please hang up and dial 9\u20131\u20131 right now.",
+                                  "\u201a\u00a1Llame al 911 ya!\u2018"])
+def test_quote_marks_anywhere_and_any_dash_are_formatting(line):
+    assert cs.summarize(tr("There's a fire.", agent=[line]), PACK).urgency == "emergency"
+
+
+@pytest.mark.parametrize("line", ["Don't call my work number, 602 555 0101.", "Never call this number: 602 555 0101.",
+                                  "No llame al trabajo, 602 555 0101."])
+def test_a_negation_in_the_numbers_own_sentence_rejects_it(line):
+    assert cs.summarize(tr("I need a repair.", line), PACK).callback_number is None
+
+
+def test_the_pool_correction_still_wins():
+    s = cs.summarize(tr("I need a repair.", "602 555 0174, no, perd\u00f3n, 602 555 0187."), PACK)
+    assert s.callback_number == "+16025550187"
+
+
+def test_a_confirmation_with_any_question_mark_confirms_nothing():
+    s = cs.summarize(tr("I'm Ana Reyes, 602 555 0101.", agent=["Let me confirm: Ana Reyes, is that right? Is that R-E-Y-E-S?"]),
+                     PACK)
+    assert s.name is None
+
+
+@pytest.mark.parametrize("reply", ["Nah, it's Ana Ruiz.", "Incorrecto.", "Negative.", "Actually, I'm Ana Ruiz."])
+def test_anything_but_an_affirmation_after_the_confirmation_withholds_the_name(reply):
+    t = tr("I'm Ana Reyes, 602 555 0101. I need a repair.", agent=["Let me confirm: Ana Reyes, at 602 555 0101."])
+    t["turns"].append({"speaker": "caller", "confidence": 0.95, "text": reply})
+    assert cs.summarize(t, PACK).name is None
+
+
+@pytest.mark.parametrize("reply", ["Yes.", "Yes, that's right.", "S\u00ed.", "Correct, thanks."])
+def test_an_affirmation_keeps_the_name(reply):
+    t = tr("I'm Ana Reyes, 602 555 0101. I need a repair.", agent=["Let me confirm: Ana Reyes, at 602 555 0101."])
+    t["turns"].append({"speaker": "caller", "confidence": 0.95, "text": reply})
+    assert cs.summarize(t, PACK).name == "Ana Reyes"
+
+
+@pytest.mark.parametrize("line", ["The name is Ana Reyes, she's my tenant. 602 555 0101.",
+                                  "I'm calling for my boss? Ana Reyes, 602 555 0101."])
+def test_a_name_the_caller_speaks_of_is_not_theirs(line):
+    assert cs.summarize(tr("I need a repair.", line, agent=ok("Ana Reyes")), PACK).name is None
