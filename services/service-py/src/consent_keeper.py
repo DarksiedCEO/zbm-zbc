@@ -270,8 +270,9 @@ def opt_out_reading(text: str) -> Optional[str]:
 # invisible, every accent (combining mark) and every character that is not a letter or digit removed, leet digits
 # as letters, and the Cyrillic and Greek look-alikes of s, t, o and p as those letters; the classifier skips words
 # under four letters, so these are read here (a reviewer could otherwise clear a STOP typo as "not an opt-out").
-# Over-blocks "top", "shop", "step" ... as the whole reply: disclosed, a person reads them anyway. Look-alikes of
-# other letters, from other scripts, are not mapped (disclosed).
+# Over-blocks "top", "shop", "step" ... as the whole reply: disclosed, a person reads them anyway. Every other
+# look-alike is not mapped (disclosed): other scripts, and Latin letters with strokes or hooks ("ŧ", "ƭ", "ʂ", "ȿ"),
+# which NFKD does not take apart; such a reply is held for a person as unrecognised_reply.
 _LEET = str.maketrans({"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "$": "s", "@": "a",
                        "\u0455": "s", "\u0442": "t", "\u043e": "o", "\u0440": "p",      # Cyrillic ѕ т о р
                        "\u03c4": "t", "\u03bf": "o", "\u03c1": "p"})                   # Greek τ ο ρ
