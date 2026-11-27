@@ -8,11 +8,10 @@ Rules (spec v0.1, the front-desk shared rules, the Nov 26 spec-freeze rulings):
   trusts (confidence >= 0.6); the receptionist's own confirmation line is checked against them, never used as the
   source. A turn below 0.6 that has words is flagged and never used as a fact. A silent turn carries nothing and is
   not flagged (Nov 26 ruling): silence means re-ask, never guess.
-- A number the caller rejects ("not 602 555 0101") is never used, and any no / not / wrong / oops / digit after the
-  last number makes it ambiguous: a person checks the recording (AEGIS round 7, fails closed). When the caller gives two different numbers, the
-  later one wins only when a correction cue sits between them ("no wait", "sorry", "actually", "I mean", "perdón",
-  "mejor", "quiero decir"); two numbers with no cue ("my cell is ... and my office is ...") are ambiguous: no callback
-  number is reported and the owner sees ``ambiguous_number``.
+- A callback number is reported only when the receptionist read it back in the fixed form ("Let me confirm: ...,
+  at 602 555 0101."), the caller gave that number and did not reject it ("not 602 555 0101"), and the caller then
+  only affirmed (AEGIS round 10). Anything else is no callback, and the summary says to check the recording. The
+  caller-side readings (rejections, correction cues, doubt after the number) still run as a second fence.
 - A name is reported only when the caller gave it AND the receptionist confirmed it: the caller says it after a
   lead-in ("I'm", "my name is", "soy", "me llamo", "mi nombre es"; "this is", "it's", "habla" only before a number
   or a calling phrase) or as "First Last" opening a sentence before a number, and a trusted receptionist turn confirms
@@ -296,7 +295,9 @@ def _said_911(agent_text: str, previous: Optional[str] = None) -> Optional[str]:
     text = re.sub(r"[.!]+$", ".", re.sub(r"\s+", " ", text.replace(",", " "))).replace(" .", ".")
     if _SAID_911.fullmatch(text) is None:
         return None
-    if previous is not None and not re.search(r"(?<![.…])[.!?]\s*[\"'”’»]?\s*$", previous):
+    prev = None if previous is None else "".join(
+        c for c in previous if c not in "\"'" and unicodedata.category(c) not in ("Pi", "Pf") and c not in "„‚")
+    if prev is not None and not re.search(r"(?<![.…])[.!?]\s*$", prev):
         return "ambiguous"
     return "urgent"
 
@@ -313,10 +314,10 @@ def _confidence(raw: object) -> Fraction:
     return value if 0 <= value <= 1 else Fraction(0)
 
 
-def _callback(trusted: list[str], notes: list[str]) -> tuple[Optional[str], bool]:
-    """(the callback number, whether a correction picked it)."""
+def _callback(trusted: list[str], notes: list[str], rejected_out: Optional[set] = None) -> tuple[Optional[str], bool]:
+    """(the callback number, whether a correction picked it); ``rejected_out`` collects every number rejected."""
     found = []                         # (number, text before it since the previous accepted number)
-    rejected: set[str] = set()
+    rejected: set[str] = rejected_out if rejected_out is not None else set()
     joined = " \n ".join(_fold(x) for x in trusted)
     last_end = 0
     for m in _NUM.finditer(joined):
@@ -367,6 +368,22 @@ _AFFIRM = re.compile(r"(?:(?:yes|yeah|yep|yup|correct|right|that'?s right|that'?
                      re.IGNORECASE)
 
 
+_CONFIRM_START = re.compile(r"(?:let me confirm|just to confirm|to confirm|so to confirm|confirmo|para confirmar)\b",
+                            re.IGNORECASE)
+_RETRACT = re.compile(r"\b(?:no|not|actually|sorry|misheard|wrong|wait|perd[oó]n|disculpe)\b", re.IGNORECASE)
+
+
+def _clean_confirmation(text: str) -> bool:
+    """A read-back with no question and nothing taken back in it ("Actually no, I misheard"; AEGIS round 10)."""
+    return "?" not in text and "¿" not in text and not _RETRACT.search(text)
+
+
+def _affirmed(ordered: list, i: int) -> bool:
+    """After turn ``i`` the caller said something, and everything the caller said was an affirmation."""
+    later = [x for sp, _, x in ordered[i + 1:] if sp == "caller" and x.strip()]
+    return bool(later) and all(_AFFIRM.fullmatch(_fold(x).strip()) for x in later)
+
+
 def _names(trusted: list[str], confirmations: Optional[list[str]] = None) -> list[str]:
     """Names the caller gave; with ``confirmations`` (the trusted receptionist turns), only those it repeated."""
     said = {m.group(1).casefold() for x in confirmations if "?" not in x and "¿" not in x
@@ -389,6 +406,8 @@ def _names(trusted: list[str], confirmations: Optional[list[str]] = None) -> lis
             if m.re is not _LEAD_NAME and (re.search(r"[?¿]", before[-60:]) or
                                            re.search(r"\b(?:my|his|her|their|our|mi|su|sus)\b", before[-60:], re.IGNORECASE)):
                 continue                   # "... my boss? Ana Reyes, 602 ...": someone the caller spoke of (round 9)
+            if m.re is _LEAD_NAME and re.search(r"\b(?:said|says|told|asked|dijo|dice)\b[^.!?]*$", before, re.IGNORECASE):
+                continue                   # "A lady said I'm Ana Reyes": reported speech (AEGIS round 10)
             if re.search(r"\b(?:she|he|they|her|his|their|ella|[eé]l)\b", after, re.IGNORECASE):
                 continue                   # "The name is Ana Reyes, she's my tenant" (AEGIS round 9)
             if said is not None and cand.casefold() not in said:
@@ -434,7 +453,8 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
     if flagged:
         notes.append("low_confidence_turn_not_used")
 
-    callback, corrected = _callback(trusted, notes)
+    rejected_numbers: set[str] = set()
+    callback, corrected = _callback(trusted, notes, rejected_numbers)
     agent_trusted = [x for c, x in agent if c >= LOW_CONFIDENCE]       # a receptionist turn is checked too
     names = _names(trusted, agent_trusted)
     if not names and _names(trusted):
@@ -442,11 +462,11 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
     name = names[0] if len(names) == 1 else None
     if name:                           # the caller said no after the confirmation ("No, I'm Ana Ruiz"): no name (round 8)
         at = [i for i, (sp, c, x) in enumerate(ordered) if sp == "agent" and c >= LOW_CONFIDENCE
-              and (m := _CONFIRM_LINE.match(_fold(x).strip())) and m.group(1).casefold() == name.casefold()]
+              and (m := _CONFIRM_LINE.match(_fold(x).strip())) and m.group(1).casefold() == name.casefold()
+              and _clean_confirmation(_fold(x))]
         # after the confirmation the caller may only affirm ("Yes.", "That's right", "Sí"); anything else ("Nah",
         # "Incorrecto", "Actually, I'm Ana Ruiz") withholds the name (AEGIS round 9: the inverted default)
-        if not at or any(sp == "caller" and x.strip() and not _AFFIRM.fullmatch(_fold(x).strip())
-                         for sp, _, x in ordered[at[-1] + 1:]):
+        if not at or not _affirmed(ordered, at[-1]):     # and a "yes" must come (AEGIS round 10)
             name = None
             notes.append("name_denied")
     if len(names) > 1:
@@ -464,6 +484,27 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
         _EMERGENCY.search(_fold(x)) or _EMERGENCY_WORDS.search(_fold(x)) for x in [x for _, x in spoken] + unknown_text))
     if possible:
         notes.append("possible_emergency")
+    # the callback is the number the receptionist read back in the fixed confirmation, that the caller gave and
+    # then affirmed; anything else (no read-back, a read-back the caller did not affirm, a number the caller never
+    # gave) is no callback and a person checks the recording (AEGIS round 10: the inverted default, after nine rounds
+    # of phrase lists for rejected and corrected numbers)
+    said_numbers = {"+1" + "".join(m.groups()) for x in trusted for m in _NUM.finditer(_fold(x))}
+    read_back = None
+    for i, (sp, c, x) in enumerate(ordered):
+        fx = _fold(x).strip()
+        nums = {"+1" + "".join(m.groups()) for m in _NUM.finditer(fx)}
+        if sp == "agent" and c >= LOW_CONFIDENCE and _CONFIRM_START.match(fx) and _clean_confirmation(fx) and \
+                len(nums) == 1:
+            read_back = (nums.pop(), i)
+    if read_back and read_back[0] in said_numbers and read_back[0] not in rejected_numbers and \
+            _affirmed(ordered, read_back[1]) and \
+            (callback == read_back[0] or "ambiguous_number" in notes or callback is None):
+        if callback != read_back[0]:
+            notes.append("callback_from_affirmed_read_back")
+        callback = read_back[0]
+    elif callback is not None:
+        notes.append("callback_not_confirmed")
+        callback = None
     confirmed = ["+1" + "".join(m) for x in agent_trusted for m in _NUM.findall(x)]
     if callback and confirmed and confirmed[-1] != callback:
         notes.append("confirmation_disagrees_with_caller")
@@ -482,14 +523,16 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
                   f"{' and call back at ' + callback if callback else ''}.")
     elif unknown_text and not callback:
         action = "Part of the call had a speaker label that could not be read; review the recording."
-    elif need == "long_silence" and not spoken and not unknown_text and not callback and "ambiguous_number" not in notes:
+    elif need == "long_silence" and not spoken and not unknown_text and not callback and "ambiguous_number" not in notes \
+            and "callback_not_confirmed" not in notes:
         action = "No follow-up needed."    # only a call where nothing was said (AEGIS round 7: the inverted default)
-    elif need in ("spam_call", "wrong_number") and not callback and "ambiguous_number" not in notes:
+    elif need in ("spam_call", "wrong_number") and not callback and "ambiguous_number" not in notes \
+            and "callback_not_confirmed" not in notes:
         action = "Looks like spam or a wrong number; a person should confirm before closing it."
     elif callback:
         action = f"Call back at {callback}."
-    elif "ambiguous_number" in notes:
-        action = "The callback number was unclear; check the recording before calling back."
+    elif "ambiguous_number" in notes or "callback_not_confirmed" in notes:
+        action = "The callback number was not confirmed; check the recording before calling back."
     else:
         action = "No callback number given; no follow-up possible by phone."
 
