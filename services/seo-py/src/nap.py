@@ -48,6 +48,8 @@ _ORDINALS = {"first": "1", "second": "2", "third": "3", "fourth": "4", "fifth": 
              "fourteenth": "14", "fifteenth": "15", "sixteenth": "16", "seventeenth": "17", "eighteenth": "18",
              "nineteenth": "19", "twentieth": "20", "thirtieth": "30", "fortieth": "40", "fiftieth": "50",
              "sixtieth": "60", "seventieth": "70", "eightieth": "80", "ninetieth": "90"}
+_CARDINALS = {"one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8",
+              "nine": "9", "ten": "10", "eleven": "11", "twelve": "12"}
 _TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80, "ninety": 90}
 _UNIT_ORDINALS = ("first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth")
 
@@ -199,6 +201,12 @@ def street_key(street: object) -> tuple[str, Optional[str]]:
     # units sorted by kind only, so "Suite 400, Fl 4" is "Fl 4 Suite 400" while two units of one kind keep their order
     # ("Unit 5, Ste 4" is not "Unit 4, Ste 5"; AEGIS L5 round 6)
     unit = "|".join(sorted(units, key=lambda u: u.split(":")[0])) or None
+    # the house number is the first number, with a fraction or a range written as one token ("100 1/2" is
+    # "100 1frac2", "100-102" is "100to102") and a spelled leading number as a digit ("One Microsoft Way";
+    # AEGIS L5 round 11), so a numbered street's own number ("100 2nd St") is never read as part of the house number
+    text = re.sub(r"^\s*(\d+)\s*-\s*(\d+)\b", r"\1to\2", text)
+    text = re.sub(r"\b(\d+)\s*/\s*(\d+)\b", r"\1frac\2", text)
+    text = re.sub(r"^\s*(" + "|".join(_CARDINALS) + r")\b(?=\s+[^\W\d_])", lambda m: _CARDINALS[m.group(1)], text)
     raw = re.findall(r"[^\W_]+", _join_initials(text))
     words = []
     for i, w in enumerate(raw):
@@ -207,7 +215,7 @@ def street_key(street: object) -> tuple[str, Optional[str]]:
         if w == "st" and rest and not tail_only:
             words.append("saint")      # "St. Charles Ave": St before a name is Saint (AEGIS L5 round 2); not "St Ext"
         elif w in ("n", "s", "e", "w") and tail_only and i >= 1 and any(c.isdigit() for c in raw[0]) and \
-                all(re.fullmatch(r"\d+[a-z]?|[a-z]", x) for x in raw[:i]):
+                all(re.fullmatch(r"\d+[a-z]?|\d+(?:frac|to)\d+|[a-z]", x) for x in raw[:i]):
             # "100 S St", "100A S St", "100 1/2 S St", "1200-B N St": a lettered street (AEGIS L5 rounds 4-5)
             words.append(w)            # "100 S St" is a lettered street, never "South Street" (AEGIS L5 round 4)
         else:
@@ -216,13 +224,12 @@ def street_key(street: object) -> tuple[str, Optional[str]]:
 
 
 def _house(words: list[str]) -> list[str]:
-    """The leading words of a street line that hold a digit: the house number with any fraction or range."""
-    out = []
-    for w in words:
-        if not any(c.isdigit() for c in w):
-            break
-        out.append(w)
-    return out
+    """The house number: the first word when it holds a digit, with a written fraction after it ("100 1frac2");
+    a range is already one word ("100to102"). A numbered street after it ("100 2nd St") is street words, so another
+    spelling of it is a review, never another address (AEGIS L5 round 11)."""
+    if not words or not any(c.isdigit() for c in words[0]):
+        return []
+    return words[:2] if len(words) > 1 and re.fullmatch(r"\d+frac\d+", words[1]) else words[:1]
 
 
 def same_number_other_words(a: tuple[str, Optional[str]], b: tuple[str, Optional[str]]) -> bool:

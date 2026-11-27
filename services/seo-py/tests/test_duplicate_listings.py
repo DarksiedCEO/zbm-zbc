@@ -487,3 +487,24 @@ def test_a_two_letter_direction_after_a_unit_word_is_a_unit(x, y):
     a, b = nap.street_key(x), nap.street_key(y)
     assert a[0] == b[0] and a[1] != b[1]
     assert nap.street_key("4533 Testwell Drive Suite NE")[1] == "unit:ne"
+
+
+# ---------------------------------------------------------------- AEGIS L5 round 11
+@pytest.mark.parametrize("x, y", [("100 2nd St", "100 2d St"), ("100 3rd Ave", "100 3d Ave"),
+                                  ("100 I-35", "100 IH-35"), ("100 I-5", "100 Interstate Hwy 5")])
+def test_another_spelling_of_a_numbered_street_is_a_review_not_a_move(x, y):
+    assert dl.check(pair(listing(street=x), listing(street=y))).action == "owner_review"
+
+
+@pytest.mark.parametrize("x, y", [("One Microsoft Way", "1 Microsoft Way"), ("Two Penn Plaza", "2 Penn Plaza"),
+                                  ("One Testwell Drive", "1 Testwell Drive")])
+def test_a_spelled_house_number_is_formatting(x, y):
+    assert nap.street_key(x) == nap.street_key(y)
+    assert dl.check(pair(listing(street=x), listing(street=y))).action == "merge_or_remove_duplicate"
+
+
+@pytest.mark.parametrize("x, y", [("100 1/2 Main St", "100 Main St"), ("100-102 Main St", "100 Main St"),
+                                  ("100 Main St", "101 Main St")])
+def test_another_house_number_stays_another_address(x, y):
+    assert dl.check(pair(listing(street=x), listing(street=y))).action not in ("merge_or_remove_duplicate",
+                                                                               "owner_review")

@@ -1416,3 +1416,9 @@ AEGIS round 10 (Nov 27 2026, Inquisitor on L5 b716e264 / L4 9c6c8349): ordinal w
 is "5th", "Twenty-First" is "21st"), so "100 Fifth Ave" and "100 5th Ave" are one street again (round 9's whole house
 number had made them a move); "Interstate 5", "I-5" and "I 5" are one road; a two-letter direction after a unit word
 ("Suite NE") is a unit, as the docstring says. Ordinal words above "ninety-ninth" are not converted (disclosed).
+
+AEGIS round 11 (Nov 27 2026, Inquisitor on L5 9cc6a754 / L4 8b0c2224): the house number is the first number only,
+with a written fraction ("100 1/2") or a range ("100-102") kept as part of it; a numbered street after it ("100 2nd
+St") is street words, so another spelling of it ("2d", "IH-35", "Interstate Hwy 5") is `owner_review`, never a move
+(round 9 had read the street's number as part of the house number). A spelled leading house number ("One Microsoft
+Way") is its digit. Spelled unit values ("Suite Five", "Suite East") are still read as street words (disclosed).
