@@ -358,3 +358,23 @@ def test_a_two_letter_direction_unit_that_differs_is_a_wrong_address(street):
 @pytest.mark.parametrize("city", [None, "", "   ", "-"])
 def test_a_listing_with_no_city_is_a_wrong_address(city):
     assert one(city=city).verdict == "wrong_address"
+
+
+# ---------------------------------------------------------------- AEGIS L4 round 10
+@pytest.mark.parametrize("street, name, kind, verdict", [
+    ("4533 2d St, Suite 4", "2nd", "St", "address_needs_review"),
+    ("4533 IH-35, Suite 4", "I-35", "", "address_needs_review"),
+    ("Four Thousand Testwell Drive, Suite 4", "Testwell", "Drive", "wrong_address")])
+def test_numbered_street_spellings_are_reviews(street, name, kind, verdict):
+    rec = dict(RECORD, street_name=name, street_type=kind)
+    assert ca.audit({"canonical": rec, "listings": [listing(street=street)]})[0].verdict == verdict
+
+
+def test_a_spelled_house_number_is_correct():
+    rec = dict(RECORD, street_number="1", street_name="Microsoft", street_type="Way")
+    assert ca.audit({"canonical": rec, "listings": [listing(street="One Microsoft Way, Suite 4")]})[0].verdict == "correct"
+
+
+@pytest.mark.parametrize("street", ["4533 1/2 Testwell Drive, Suite 4", "4533-4535 Testwell Drive, Suite 4"])
+def test_another_house_number_is_a_wrong_address(street):
+    assert one(street=street).verdict == "wrong_address"

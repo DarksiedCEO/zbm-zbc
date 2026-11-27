@@ -1498,3 +1498,8 @@ AEGIS round 9 for SEO-L4 (Nov 27 2026, Inquisitor on 9c6c8349, shared with SEO-L
 round-10 keys, "Fifth Ave" / "5th Ave", "Twenty-First St" / "21st St" and "Interstate 5" / "I-5" are `correct`
 (formatting), "Suite NE" against "Suite NW" is `wrong_address`, and a listing with no city at all (missing, empty,
 spaces or a dash) is `wrong_address` with the record's city proposed: a review is only for other city words.
+
+AEGIS round 10 for SEO-L4 (Nov 27 2026, Inquisitor on 8b0c2224, shared with SEO-L5 round 11): with the SEO-L5
+round-11 keys, another spelling of a numbered street at the same house number ("100 2nd St" / "100 2d St", "I-35" /
+"IH-35") is `address_needs_review`, a spelled house number ("One Microsoft Way") is `correct`, and "100 1/2" or
+"100-102" against "100" stays `wrong_address`.
