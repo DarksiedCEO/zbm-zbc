@@ -644,3 +644,9 @@ AEGIS round 6 (Nov 27 2026, Inquisitor on eed8ea3c): 1 High, fixed: 976 was chec
 pay-per-call 976 is an exchange (213-976-xxxx); a callback is now left out for a 900 area, a 976 exchange, an N11 area
 or exchange, or an international-rate Caribbean or Atlantic +1 area (US territories and Canada stay). Regression
 tests: "AEGIS round 6".
+
+AEGIS Inquisitor round 7 on e8149296 (RR-F2): a clock is read only as a real `datetime` whose UTC offset is asked
+once (a tzinfo that answered an offset and then none was being converted in the host's zone), and the gate hands
+`decide` the UTC time it read; a last-text time counts only as a plain `int`; a dict subclass is read through
+`dict`'s own methods. Stated, not changed: a consent keeper that raises `KeyboardInterrupt` or `SystemExit` is not
+caught (nothing is sent). A near-valid fuzz (40,000 calls, one field changed at a time, 13,083 sends) held.

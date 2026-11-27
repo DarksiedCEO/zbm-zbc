@@ -409,3 +409,47 @@ def test_a_976_or_n11_exchange_or_an_international_rate_area_is_never_offered(nu
 @pytest.mark.parametrize("number", ["+17875550101", "+13405550101", "+16025550111", "+14165550101"])
 def test_us_territory_and_canadian_callbacks_are_offered(number):
     assert number in tb.message(None, number)
+
+
+# ---------------------------------------------------------------- AEGIS round 7 (Inquisitor, e8149296)
+def test_a_clock_whose_offset_changes_between_questions_is_read_once():
+    from datetime import datetime, timedelta, timezone, tzinfo
+
+    class FlipFlop(tzinfo):
+        def __init__(self):
+            self.n = 0
+
+        def utcoffset(self, dt):
+            self.n += 1
+            return timedelta(hours=-7) if self.n == 1 else None
+
+        def dst(self, dt):
+            return None
+
+    now = datetime(2026, 11, 27, 6, 30, tzinfo=FlipFlop())     # 06:30 in Phoenix: before 08:00
+    d = tb.decide(call(recipient_time_zone="America/Phoenix"), now=now, opted_out=lambda n: False)
+    assert d.action == "defer_until_0800"
+    g = tb.TextBackGate().decide(call(recipient_time_zone="America/Phoenix"),
+                                 now=datetime(2026, 11, 27, 6, 30, tzinfo=FlipFlop()), opted_out=lambda n: False)
+    assert g.action == "defer_until_0800"
+
+
+def test_a_clock_subclass_is_not_a_clock():
+    from datetime import datetime, timezone
+
+    class Fake(datetime):
+        pass
+    d = tb.decide(call(), now=Fake(2026, 11, 27, 18, 0, tzinfo=timezone.utc), opted_out=lambda n: False)
+    assert (d.action, d.reason) == ("do_not_send", "unknown_local_time")
+
+
+def test_a_last_text_ten_seconds_ago_always_stops_a_new_one():
+    class Never(int):
+        def __lt__(self, other):
+            return False
+
+    class Hides(dict):
+        def get(self, k, d=None):
+            return None if k == "seconds_since_last_text_to_number" else dict.get(self, k, d)
+    for c in (call(seconds_since_last_text_to_number=Never(10)), Hides(call(seconds_since_last_text_to_number=10))):
+        assert tb.decide(c, opted_out=lambda n: False).action == "do_not_send"

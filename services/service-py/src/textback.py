@@ -23,7 +23,10 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings, TCPA practice):
   client's own number.
 - A send-now decision must reach the caller within 30 s (the bar); the deadline travels with the decision.
 - Anything this module cannot read (line type, consent state, zone, local time, last-text time) fails closed: no
-  text, with the reason.
+  text, with the reason. Records are read as plain data: a dict subclass through ``dict``'s own methods, a last-text
+  time only as a plain ``int``, a clock only as a real ``datetime`` whose offset is read once (AEGIS round 7). A
+  consent keeper that raises an ``Exception`` reads as ``consent_unknown``; a ``KeyboardInterrupt`` or
+  ``SystemExit`` is not caught, on purpose, and nothing is sent.
 """
 
 from __future__ import annotations
@@ -89,6 +92,25 @@ def message(business_name: Optional[str] = None, callback_number: Optional[str] 
     return f"{who} {back} Reply STOP to opt out."
 
 
+def _plain(d: object) -> object:
+    """A dict subclass is read through ``dict``'s own methods, so an overridden ``get`` cannot change what the record
+    holds (AEGIS round 7); anything else is returned unchanged."""
+    if isinstance(d, dict) and type(d) is not dict:
+        return dict(dict.items(d))
+    return d
+
+
+def _utc(now: object) -> Optional[datetime]:
+    """The clock as a plain UTC time, its offset read exactly once (AEGIS round 7: a tzinfo that answers an offset to
+    one question and none to the next is never read again), or None. Only a real ``datetime`` is a clock."""
+    if type(now) is not datetime:
+        return None
+    off = now.utcoffset()
+    if type(off) is not timedelta:
+        return None
+    return (now.replace(tzinfo=None) - off).replace(tzinfo=timezone.utc)
+
+
 def _local(call: dict, now: Optional[datetime]) -> tuple[Optional[int], Optional[datetime]]:
     """(seconds after local midnight, the local datetime when a clock is known) or (None, None)."""
     name = call.get("recipient_time_zone")
@@ -99,9 +121,10 @@ def _local(call: dict, now: Optional[datetime]) -> tuple[Optional[int], Optional
         return None, None
     if now is not None:
         try:
-            if not isinstance(now, datetime) or now.utcoffset() is None:
+            utc = _utc(now)
+            if utc is None:
                 return None, None
-            local = now.astimezone(z)
+            local = utc.astimezone(z)
         except Exception:             # an unreadable clock (overflow, a tzinfo that raises) fails closed with a reason
             return None, None
         return local.hour * 3600 + local.minute * 60 + local.second, local
@@ -125,6 +148,7 @@ def decide(call: dict, now: Optional[datetime] = None,
     record's own ``number_opted_out`` flag (the keeper's answer, carried on the record) is used. ``seconds_since_gate``
     is the gate's own memory of the last text to this number (``TextBackGate`` passes it).
     """
+    call = _plain(call)
     mcid = call.get("missed_call_id") if isinstance(call, dict) else None
     if not isinstance(mcid, str) or not mcid:
         raise ValueError("missed_call_id is required")
@@ -153,7 +177,7 @@ def decide(call: dict, now: Optional[datetime] = None,
     for since in (call.get("seconds_since_last_text_to_number"), seconds_since_gate):
         if since is None:
             continue
-        if not isinstance(since, int) or isinstance(since, bool) or since < 0:
+        if type(since) is not int or since < 0:      # a plain whole number only (AEGIS round 7: no subclasses)
             return no("unreadable_last_text_time")
         if since < REPEAT_WINDOW_SECONDS:
             return no("texted_within_5_minutes")
@@ -183,11 +207,12 @@ class TextBackGate:
         self._last: dict[str, datetime] = {}
 
     def decide(self, call: dict, now: datetime, **kw) -> TextBackDecision:
+        call = _plain(call)
         try:
-            if not isinstance(now, datetime) or now.utcoffset() is None:
+            utc = _utc(now)                      # real elapsed time: two times in one zone subtract on the wall
+            if utc is None:                      # clock (AEGIS round 2: across a DST jump), so compare in UTC
                 raise ValueError
-            utc = now.astimezone(timezone.utc)   # real elapsed time: two times in one zone subtract on the wall
-        except Exception:                        # clock (AEGIS round 2: across a DST jump), so compare in UTC
+        except Exception:
             mcid = call.get("missed_call_id") if isinstance(call, dict) else None
             if not isinstance(mcid, str) or not mcid:
                 raise ValueError("missed_call_id is required") from None
@@ -196,7 +221,7 @@ class TextBackGate:
         last = self._last.get(number) if number else None
         since = int((utc - last).total_seconds()) if last else None
         kw.pop("seconds_since_gate", None)    # the gate's own memory is the only one it passes on
-        d = decide(call, now=now, seconds_since_gate=since, **kw)
+        d = decide(call, now=utc, seconds_since_gate=since, **kw)   # decide reads the clock the gate read
         if d.action == "send_now" and number:
             self._last[number] = utc
         return d
