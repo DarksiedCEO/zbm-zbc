@@ -575,3 +575,23 @@ AEGIS Inquisitor round 12 on aaee4c9f (RR-F5): events are read as plain data onl
 a plain `dict`, or a key or value that is not plain text, a number, a boolean or null, refuses the replay; the replay
 works on private copies, so nothing can change between the check and the use (a `str` subclass client id answered
 `strip()` one way when checked and another way when applied).
+
+review queue (who sees `unrecognised_reply`, how fast) is wiring, not built. Regression tests: "AEGIS round 5".
+
+## Amendment — RR-F2 missed-call text-back (Nov 26 2026; MVP spec v0.1, front-desk team)
+
+`services/service-py/src/textback.py`, one job: for each missed call decide `send_now` (with the 30 s deadline),
+`defer_until_0800` or `do_not_send` and the reason, and word the one informational text (a way to continue, and how
+to opt out; never an offer or a link). Not wired; nothing is sent from here.
+
+| Rule | Behaviour |
+|---|---|
+| Who can be texted | Mobile and VoIP only; a landline, a blocked or unreadable caller ID, or an unknown line type gets no text |
+| Consent | Asks the RR-F5 keeper with the normalised number (`opted_out(number)`), or uses the keeper's flag on the record; anything but a clear "not opted out" blocks (`consent_unknown`) |
+| One text per 5 minutes | Under 300 s since the last text: no text; exactly 300 s may text |
+| Quiet hours | The recipient's: 08:00 to before 21:00 local. Outside it the text waits for 08:00, when it is decided again. An unknown zone or a clock without a zone is never guessed (`unknown_local_time`) |
+
+Certification: `services/service-py/tests/test_textback.py` runs the shared MVP pool (F2, 300 missed calls per seed,
+boundaries at 07:59 / 08:00 / 20:59 / 21:00 and 299 / 300 s) for the three DEV seeds and three more: every action,
+deadline and message class matches the planted key. A grader self-test proves one wrong text is noticed. 10 of 10
+planted mutants killed.
