@@ -26,9 +26,9 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings, ADR 0014):
 - A state-changing event (opt-in, inbound text, carrier opt-out, reassignment, staff review) for a number that cannot be read, a
   non-object event, or a send_id used twice refuses the whole replay (``ValueError``): an opt-out is never dropped.
   Numbers are read after NFKC with any script's digits, dash look-alikes and invisibles folded, so one person never
-  becomes two records. Client ids are read with NFC (not NFKC), every format character removed, dashes folded and
-  every letter whose lower case is one letter lower-cased (every Greek sigma one sigma), apostrophe look-alikes read
-  as one apostrophe, and any run of spaces read as one space: one client typed differently is one record, two different clients never merge.
+  becomes two records. Client ids are system ids, not names: ASCII letters, digits, ".", "_" and "-", read with
+  outer spaces and case aside; any other id refuses the replay (AEGIS round 11), so one client is never two records
+  and two different ids never merge.
 - Every ``replay`` is the whole history: no state carries over between calls.
 - Express written consent counts only from a known source (web form, paper form, keyword join, signed agreement,
   e-sign); a START reply is never one.
@@ -166,43 +166,24 @@ def _ascii_digits(text: str) -> str:
                    else c for c in text)
 
 
+_SLUG = re.compile(r"[a-z0-9][a-z0-9._\-]{0,127}")
+
+
 def normalise_client(raw: str) -> str:
-    """One client id, however it was typed upstream: every invisible removed, then NFC (not NFKC: "acme\u00b2" is not
-    "acme2"; a replay refuses such an id, see ``client_id_readable``), dashes and apostrophes folded, spaces collapsed,
-    trimmed, lower-cased letter by letter (\u00c9cole and \u00e9cole are one client; not case-folded, so "strasse" and
-    "stra\u00dfe" stay two clients); every Greek sigma one sigma and a dotted capital I is "i"."""
-    # invisibles go BEFORE composing, so one between a letter and its accent cannot keep them apart (AEGIS round 10)
-    folded = unicodedata.normalize("NFC", _strip_invisible(raw)).translate(_DASHES).translate(_APOSTROPHES)
-    folded = re.sub(r"\s+", " ", folded).strip()   # any run of spaces (tab, NBSP, U+3000 ...) is one space (AEGIS round 8)
-    # apostrophe look-alikes ("Joe\u2019s" typed by a phone) are one apostrophe, and every Greek sigma one sigma
-    # ("\u039f\u0394\u039f\u03a3" and "\u03bf\u03b4\u03bf\u03c2" are one client) (AEGIS round 9)
-    folded = folded.translate(_SIGMAS)
-    return "".join(c.lower() if len(c.lower()) == 1 else c for c in folded).replace("\u03c2", "\u03c3")
-
-
-# every Greek sigma, lunate ones included, is one sigma; a dotted capital I is "i" (AEGIS round 10)
-_SIGMAS = str.maketrans({"\u03f2": "\u03c3", "\u03f9": "\u03c3", "\u03c2": "\u03c3", "\u0130": "i"})
-_CLIENT_PUNCT = set(" -'&.,_/+#@()")
-
-
-def client_id_readable(raw: str) -> bool:
-    """A client id is made of letters a person can see (not modifier marks or blank fillers), digits, combining
-    accents on them, spaces and a few punctuation marks. Anything else (a blank letter that looks like a space, a
-    symbol) refuses the replay instead of risking one client read as two (AEGIS round 10: the inverted default)."""
-    text = unicodedata.normalize("NFC", _strip_invisible(raw))
-    for c in text:
-        cat = unicodedata.category(c)
-        if c in _CLIENT_PUNCT or c.isspace() or c in _DASHES_SET or c in _APOSTROPHE_SET:
-            continue
-        if cat in ("Lu", "Ll", "Lt", "Lo", "Nd", "Mn", "Mc") and c not in _FILLERS:
-            continue
-        return False
-    return True
+    """One client id: a system id (the pool's are "client-<hex>"), never a name a person types. Outer spaces and ASCII
+    case aside it is read exactly as written, and it must be ASCII letters, digits, ".", "_" and "-" (starting with a
+    letter or digit, at most 128). Anything else raises ValueError (AEGIS round 11: ten rounds of folding Unicode
+    look-alikes kept leaving one more spelling that made one client two records, so the default is inverted)."""
+    if not isinstance(raw, str):
+        raise ValueError("client_id must be text")
+    text = raw.strip(" \t").lower() if raw.isascii() else None
+    if text is None or not _SLUG.fullmatch(text):
+        raise ValueError("client_id must be a plain id: ASCII letters, digits, '.', '_' and '-'")
+    return text
 
 
 _FILLERS = {"\u115f", "\u1160", "\u3164", "\uffa0"}
-_DASHES_SET = set(map(chr, _DASHES))
-_APOSTROPHE_SET = set(map(chr, _APOSTROPHES))     # Hangul fillers: letters by category, blank on screen
+    # Hangul fillers: letters by category, blank on screen
 
 
 def _is_named(reviewer: object) -> bool:
@@ -318,8 +299,7 @@ class ConsentKeeper:
             raise ValueError(f"event {i}: t must be an integer")
         if not isinstance(e.get("client_id"), str) or not e["client_id"]:
             raise ValueError(f"event {i}: client_id is required")
-        if not client_id_readable(e["client_id"]) or not normalise_client(e["client_id"]):
-            raise ValueError(f"event {i}: client_id holds characters that are not letters, digits or plain marks")
+        normalise_client(e["client_id"])     # a client id that is not a plain id refuses the replay (ValueError)
         if kind == "send_attempt" and (not isinstance(e.get("send_id"), str) or not e["send_id"]):
             raise ValueError(f"event {i}: send_id is required")
         if kind == "opt_in" and e.get("source") is not None and not isinstance(e["source"], str):

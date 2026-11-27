@@ -303,12 +303,6 @@ def test_an_empty_client_id_refuses():
         ck.ConsentKeeper().replay([send(6, client="")])
 
 
-@pytest.mark.parametrize("client", ["client-a ", "CLIENT-A", "client‑a", "​client-a"])
-def test_one_client_typed_differently_is_one_record(client):
-    assert one([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="STOP", client=client),
-                send(6)]) == ("block", "opted_out")
-
-
 @pytest.mark.parametrize("source", ["inbound_sms_START", None, "unknown", "phone_call"])
 def test_consent_from_an_unknown_source_does_not_count(source):
     assert one([ev("inbound_sms", 1, text="STOP"), ev("opt_in", 5, consent="express_written", source=source),
@@ -354,20 +348,6 @@ def test_more_calls_only_revocations_block(text):
                                   "Do call me tomorrow", "Please call me back"])
 def test_ordinary_calling_words_are_not_a_revocation(text):
     assert ck.opt_out_reading(text) == "unrecognised_reply"          # never opted_out: a person clears it
-
-
-@pytest.mark.parametrize("mark", ["⁦", "⁩", "‪", "‮", "͏", "᠎", "️",
-                                  "\U000e0041", "؜"])
-def test_every_invisible_in_a_client_id_is_removed(mark):
-    assert one([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="STOP", client="client-a" + mark),
-                send(6)]) == ("block", "opted_out")
-
-
-@pytest.mark.parametrize("a, b", [("strasse-dental", "straße-dental"), ("k-plumbing", "\uff4b-plumbing")])
-def test_two_different_clients_never_merge(a, b):
-    got = decide([ev("inbound_sms", 1, text="STOP", client=a), ev("opt_in", 5, consent="express_written", client=b),
-                  send(9, sid="a", client=a)])
-    assert got[("a", 9)] == ("block", "opted_out")      # b's consent never lifts a's STOP
 
 
 # ---------------------------------------------------------------- AEGIS round 3 (Inquisitor, 2554e328)
@@ -420,14 +400,6 @@ def test_round_4_revocations_block_every_send(text):
 def test_an_opt_in_source_that_is_not_text_refuses_with_valueerror(source):
     with pytest.raises(ValueError):
         ck.ConsentKeeper().replay([ev("opt_in", 1, consent="express_written", source=source), send(2)])
-
-
-@pytest.mark.parametrize("a, b", [("École-Dental", "école-dental"), ("ÑANDÚ-SPA", "ñandú-spa"),
-                                  ("Ørsted-Clinic", "ørsted-clinic")])
-def test_one_client_typed_with_other_capitals_is_one_record(a, b):
-    events = [ev("opt_in", 1, consent="express_written", client=a), ev("inbound_sms", 5, text="STOP", client=a),
-              send(6, client=b)]
-    assert one(events)[0] == "block"
 
 
 def test_stop_and_start_at_one_instant_give_one_reason_in_any_order():
@@ -558,13 +530,6 @@ def test_new_written_consent_after_an_unrecognised_reply_restores_texting():
 
 
 # ---------------------------------------------------------------- AEGIS round 8 (Inquisitor, ded558d9)
-@pytest.mark.parametrize("variant", ["Acme  Dental", "Acme Dental", "Acme　Dental", "Acme Dental",
-                                     "Acme Dental", "Acme\tDental"])
-def test_a_client_with_other_spaces_is_one_record(variant):
-    assert ck.normalise_client(variant) == ck.normalise_client("Acme Dental")
-    assert ck.normalise_client("AcmeDental") != ck.normalise_client("Acme Dental")
-
-
 @pytest.mark.parametrize("name", ["​", "ㅤ", "⠀", "ᅟ", "­", "-", " ", "​ㅤ"])
 def test_a_reviewer_must_have_a_visible_name(name):
     events = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="Can I come at 4?"),
@@ -582,20 +547,6 @@ def test_the_evidence_keeps_a_staff_opt_out_the_opt_in_could_not_clear():
 
 
 # ---------------------------------------------------------------- AEGIS round 9 (Inquisitor, 96301ba2)
-@pytest.mark.parametrize("variant", ["Joe’s Dental", "Joe‘s Dental", "Joeʼs Dental", "Joe`s Dental",
-                                     "Joe´s Dental", "Joe′s Dental"])
-def test_an_apostrophe_look_alike_is_one_client(variant):
-    assert ck.normalise_client(variant) == ck.normalise_client("Joe's Dental")
-    events = [ev("opt_in", 1, client="Joe's Dental", consent="express_written"),
-              ev("inbound_sms", 2, client="Joe's Dental", text="STOP"), send(3, client=variant)]
-    assert ck.ConsentKeeper().replay(events)[0].decision == "block"
-
-
-def test_every_greek_sigma_is_one_client():
-    assert ck.normalise_client("ΟΔΟΣ") == ck.normalise_client("οδος")
-    assert ck.normalise_client("ΟΔΟΣ") == ck.normalise_client("οδοσ")
-
-
 @pytest.mark.parametrize("name", ["ـ", "ー", "ߺ", "ــ", "ʻ"])
 def test_a_modifier_mark_is_not_a_reviewer_name(name):
     events = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="Can I come at 4?"),
@@ -611,28 +562,32 @@ def test_a_real_reviewer_name_in_any_script_counts(name):
     assert ck.ConsentKeeper().replay(events)[0].decision == "allow"
 
 
-def test_a_client_id_with_a_superscript_refuses_the_replay():
-    # round 10 inverted the default: a character that is not a letter, digit or plain mark refuses (never merges)
-    with pytest.raises(ValueError):
-        decide([ev("inbound_sms", 1, text="STOP", client="acme2"), ev("opt_in", 5, consent="express_written",
-                                                                       client="acme\u00b2"), send(9, sid="a", client="acme2")])
-
-
 # ---------------------------------------------------------------- AEGIS round 10 (Inquisitor, cd44d89c)
-@pytest.mark.parametrize("mark", ["\u200d", "\u200b", "\u2060", "\ufe0f", "\u034f"])
-def test_an_invisible_between_a_letter_and_its_accent_is_still_one_client(mark):
-    assert ck.normalise_client("Cafe" + mark + "\u0301 Rosa") == ck.normalise_client("Caf\u00e9 Rosa")
-    events = [ev("opt_in", 1, client="Caf\u00e9 Rosa", consent="express_written"),
-              ev("inbound_sms", 2, client="Caf\u00e9 Rosa", text="STOP"), send(3, client="Cafe" + mark + "\u0301 Rosa")]
-    assert ck.ConsentKeeper().replay(events)[0].decision == "block"
 
 
-@pytest.mark.parametrize("blank", ["\u3164", "\uffa0", "\u2800", "\u115f", "\u1160"])
-def test_a_blank_letter_in_a_client_id_refuses_the_replay(blank):
+# ---------------------------------------------------------------- AEGIS round 11 (Inquisitor, 491e597a): ids are slugs
+# Client ids are system ids (the pool's are "client-<hex>"), never names a person types. Ten rounds of folding Unicode
+# look-alikes kept leaving one more spelling that made two records, so the default is inverted: an id is ASCII
+# letters, digits, "-", "_" and "." only; case and outer spaces aside it is read as written; anything else refuses.
+@pytest.mark.parametrize("client", ["client-a ", "CLIENT-A", " Client-A"])
+def test_one_client_typed_with_case_or_outer_spaces_is_one_record(client):
+    assert one([ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="STOP", client=client),
+                send(6)]) == ("block", "opted_out")
+
+
+@pytest.mark.parametrize("client", ["client\u2011a", "\u200bclient-a", "client-a\u2066", "Joe's Dental", "Acme Dental",
+                                    "\uff21\uff23\uff2d\uff25", "\U0001d400cme", "\ufb01ne", "\u0664\u0662", "Acme\u3164Dental",
+                                    "Caf\u00e9", "\u0410\u0441me", "acme\u00b2", "acme\u17b4", "Acme\u06dd1",
+                                    "\u03a3afe", "\u0130stanbul", "stra\u00dfe", ""])
+def test_a_client_id_that_is_not_a_plain_slug_refuses_the_replay(client):
     with pytest.raises(ValueError):
-        ck.ConsentKeeper().replay([ev("opt_in", 1, client="Acme" + blank + "Dental", consent="express_written")])
+        ck.ConsentKeeper().replay([ev("opt_in", 1, consent="express_written", client=client), send(2, client=client)])
+    with pytest.raises(ValueError):
+        ck.normalise_client(client)
 
 
-@pytest.mark.parametrize("x, y", [("\u03f9AFE", "\u03c3afe"), ("\u03f2afe", "\u03c3afe"), ("\u0130stanbul Dental", "istanbul dental")])
-def test_lunate_sigma_and_dotted_capital_i_are_one_client(x, y):
-    assert ck.normalise_client(x) == ck.normalise_client(y)
+def test_two_different_slugs_never_merge():
+    got = decide([ev("inbound_sms", 1, text="STOP", client="acme-1"), ev("opt_in", 5, consent="express_written",
+                                                                         client="acme1"), send(9, sid="a", client="acme-1")])
+    assert got[("a", 9)] == ("block", "opted_out")
+    assert ck.normalise_client("acme-1") != ck.normalise_client("acme1")

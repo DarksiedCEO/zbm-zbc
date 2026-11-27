@@ -457,7 +457,7 @@ front desk read "STOP" the same way.
 | Rule | Behaviour |
 |---|---|
 | Every send is checked | A send with an unreadable number (`invalid_number`) or an unknown message class (`unknown_message_class`) is blocked; a malformed event (not an object, an unknown kind, a missing field, a send_id used twice, or an opt-in / inbound text / carrier / reassignment for a number that cannot be read) refuses the whole replay (`ValueError`), so an opt-out is never dropped |
-| One record per person | Numbers are read after NFKC with any script's digits, dash look-alikes and invisibles folded, and a `tel:` prefix removed; client ids are read with NFC (not NFKC), every invisible format character removed, dashes and apostrophe look-alikes folded, any run of spaces read as one, and every letter whose lower case is one letter lower-cased (Greek sigmas as one), so one client typed differently is one record and two different clients ("strasse" / "straße", "acme2" / "acme²") never merge. Every `replay` is the whole history: nothing carries over between calls |
+| One record per person | Numbers are read after NFKC with any script's digits, dash look-alikes and invisibles folded, and a `tel:` prefix removed; client ids are system ids (ASCII letters, digits, `.`, `_`, `-`; case and outer spaces aside), and any other id refuses the replay, so one client is never two records and two different ids never merge (AEGIS round 11). Every `replay` is the whole history: nothing carries over between calls |
 | Unrecognised replies | Any inbound text that is not an opt-out reading, a known-safe reply or a restart word blocks as `unrecognised_reply` until a `staff_review` (named reviewer: at least one visible letter or digit, after the reply) clears it (AEGIS round 5), or new express written consent is recorded after it, as after STOP (open ruling for Andre, AEGIS round 8) |
 | Calls too | The keeper decides calls as well as texts, so calls-only revocations block (`opted_out`): in one clause, a refusal word ("don't", "no", "never", "stop", "dejen", "nao", "ne" ...) within five words before a calling or messaging word ("call", "calls", "phone", "contact", "llamar" and its forms, "ligar", "appeler", "mensajes" ...), read after leet and doubled letters are undone, and "DNC" on its own. It fails toward suppression ("no calls on Sunday" blocks). Wording Customer Service hands to a human ("opt me out") blocks too (`possible_opt_out`) |
 | Consent sources | Express written consent counts only from a web form, paper form, keyword join, signed agreement or e-sign; a START reply is never consent |
@@ -563,3 +563,10 @@ a client id holding anything but visible letters (not modifier marks or blank fi
 spaces and a few punctuation marks: a blank letter that looks like a space, a symbol or a superscript is never read
 as a client. Invisibles are removed before accents are composed (an invisible between "e" and its accent no longer
 makes a second client); lunate sigmas fold with the others and a dotted capital I reads as "i".
+
+AEGIS Inquisitor round 11 on 491e597a (RR-F5): ten rounds of folding Unicode look-alikes in client ids (spaces,
+apostrophes, sigmas, invisibles, blank letters, then fullwidth, math letters, ligatures, other scripts' digits) each
+left one more spelling that made one client two records. The default is inverted: a client id is a system id
+(the pool's are `client-<hex>`), ASCII letters, digits, `.`, `_` and `-` only, read with case and outer spaces aside;
+anything else refuses the whole replay (ValueError, nothing sent). Wiring must pass the platform's client id, never a
+business name. Phone numbers keep their existing reading (any script's digits folded, a NANP shape required).
