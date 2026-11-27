@@ -12,8 +12,9 @@ Rules (spec v0.1, the front-desk shared rules, the Nov 26 spec-freeze rulings):
   number ("Is 602 555 0101 the best number to call you back?", "¿Es el 602 555 0101 el mejor número para
   devolverle la llamada?"), the caller gave that number in a trusted turn, and everything the caller says after the
   question is a trusted yes (Andre's ruling, Nov 27 2026, option (a)): the very next spoken turn after the question is
-  the caller's yes, and the receptionist asks nothing after it (a yes to a later question is never consent; AEGIS
-  round 16). The explicit yes settles anything the caller said about the number before it. When this module's own
+  the caller's yes, and after it the receptionist says nothing but the fixed 911 instruction or a fixed closing line
+  ("Thank you, we'll call you back soon.", "Gracias, le llamaremos pronto."); anything else, a question or not, means
+  no callback (a yes to a later question is never consent; AEGIS rounds 16-17). The explicit yes settles anything the caller said about the number before it. When this module's own
   rejection and correction rules (a word list, so not every phrasing) had marked that number as rejected or
   replaced, the note ``caller_doubted_this_number_earlier`` is added and the yes still stands. Anything else (no question, another
   wording, "No", "Yes, but text my other number", a low-confidence yes) is no callback, and the summary says to
@@ -397,6 +398,10 @@ _CONFIRM_LINE = re.compile(rf"{_CUE}\s*[:,]?\s*({_WORD} {_WORD})(?:,?\s+(?:at|al
 _CONSENT = re.compile(rf"(?:is\s+({_NUM_TEXT})\s+the\s+best\s+number\s+to\s+call\s+you\s+back|"
                       rf"¿\s*es\s+(?:el\s+)?({_NUM_TEXT})\s+el\s+mejor\s+n[uú]mero\s+para\s+devolverle\s+la\s+"
                       rf"llamada)\s*\?", re.IGNORECASE)
+# the fixed closing lines a receptionist may say after the consent question (nothing else)
+_CLOSING = re.compile(r"(?:thank you|thanks)[,!.]?\s*(?:we'?ll|we will|someone will) call you back(?: soon| today| shortly)?[.!]?|"
+                      r"(?:thank you|thanks)[.!]?|gracias[,!.]?\s*(?:le llamaremos|lo llamaremos|la llamaremos) "
+                      r"(?:pronto|hoy)[.!]?|gracias[.!]?", re.IGNORECASE)
 _AFFIRM = re.compile(r"(?:(?:yes|yeah|yep|yup|correct|right|that'?s right|that'?s correct|exactly|ok|okay|uh-?huh|"
                      r"s[ií]|correcto|exacto|as[ií] es|eso es|claro)[\s,.!]*)+(?:thanks?|thank you|gracias)?[\s.!]*",
                      re.IGNORECASE)
@@ -433,7 +438,11 @@ def _answers_consent(ordered: list, i: int) -> bool:
     after = [(sp, c, x) for sp, c, x in ordered[i + 1:] if x.strip()]
     if not after or after[0][0] != "caller":
         return False
-    if any(sp == "agent" and ("?" in x or "¿" in x) for sp, _, x in after):
+    # after it the receptionist may say only the fixed 911 instruction or a fixed closing line: anything else might
+    # be another question, with or without a question mark (AEGIS round 17: "？", "؟", "Let me know if that's not
+    # right."), so the inverted default withholds the callback
+    if any(sp == "agent" and _CLOSING.fullmatch(_unmarked(_fold(x)).strip()) is None and _said_911(_fold(x)) is None
+           for sp, _, x in after):
         return False
     return _affirmed(ordered, i)
 

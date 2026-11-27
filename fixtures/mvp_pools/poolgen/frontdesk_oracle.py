@@ -176,6 +176,10 @@ _CALLER_NAME = re.compile(r"(?:^|(?<=My name is )|(?<=Me llamo )|(?<=I'm )|(?<=[
                           r"|(?<=It's )|(?<=\. ))([A-Z][a-z]+ [A-Z][a-z]+)(?=[.,])", re.MULTILINE)
 
 
+# all the agent may say after the consent question in this pool: the fixed 911 instruction
+_AFTER_CONSENT = frozenset({"Please hang up and dial 911 right now.", "Cuelgue y marque al 911 ahora mismo."})
+
+
 def _consented(t: dict, digits: str) -> bool:
     """The agent asked the consent question for these digits and the caller's next turn was a yes."""
     turns = t["turns"]
@@ -183,9 +187,9 @@ def _consented(t: dict, digits: str) -> bool:
         m = _CONSENT.match(x["text"]) if x["speaker"] == "agent" else None
         if m and (m["num"] or m["num2"]).replace(" ", "") == digits:
             later = [y for y in turns[i + 1:] if y["text"]]
-            # the very next spoken turn is the caller's yes, and the agent asks nothing afterwards
+            # the very next spoken turn is the caller's yes, and the agent says nothing afterwards but the 911 line
             if later and later[0]["speaker"] == "caller" and later[0]["text"] in ("Yes.", "Sí.") and \
-                    not any(y["speaker"] == "agent" and ("?" in y["text"] or "¿" in y["text"]) for y in later):
+                    not any(y["speaker"] == "agent" and y["text"] not in _AFTER_CONSENT for y in later):
                 return True
     return False
 

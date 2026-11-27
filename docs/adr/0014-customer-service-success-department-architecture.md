@@ -959,14 +959,20 @@ need in free words before the number, so no fail-closed word rule could close it
 Andre ruled for option (a): the receptionist asks the fixed consent question ("Is 602 555 0101 the best number to
 call you back?" / "¿Es el 602 555 0101 el mejor número para devolverle la llamada?"), and only a trusted yes to it,
 with nothing else said by the caller afterwards, sets the callback. The explicit yes settles what came before or
-after; when the caller's own words had rejected or corrected that number, the note
+after; when this module's own rejection and correction rules (a word list) had marked that number, the note
 `caller_doubted_this_number_earlier` is added and the yes stands. The read-back line still confirms the name. The
 plain-words and phone-word fences around the callback are removed. The shared MVP F3 pool now has the consent
 question after every read-back (fixtures/mvp_pools: generator, oracle and the three dev-seed f3 transcript pins);
-the answer keys are unchanged. Mutation harness (call_summarizer): 79 mutants, 60 killed, 19 equivalent.
+the answer keys are unchanged. Mutation harness (call_summarizer): 80 mutants, 61 killed, 19 equivalent.
 
 AEGIS Inquisitor round 16 on 84d856e2 (RR-F3): a yes to a later receptionist question ("Is that a no?", "Or should
 we use your work number?") was read as consent. Now the very next spoken turn after the consent question must be the
 caller's yes, and the receptionist may ask nothing after it (a closing statement is fine). The doubt note is described
 exactly: it fires when this module's own rejection and correction rules (a word list) marked the number. The pool
 oracle applies the same next-turn rule.
+
+AEGIS Inquisitor round 17 on 99fe68e8 (RR-F3): a later question with a look-alike question mark ("？", "؟") or with
+none ("Let me know if that's not right.") slipped past the "no question" check. The inverted default: after the
+consent question the receptionist may say only the fixed 911 instruction or a fixed closing line ("Thank you, we'll
+call you back soon.", "Thanks.", "Gracias, le llamaremos pronto."); anything else means no callback. The pool oracle
+allows only its 911 line after the consent question.

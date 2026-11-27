@@ -1215,7 +1215,7 @@ def test_a_yes_then_any_later_question_withholds_the_callback():
 def test_a_yes_then_a_plain_closing_line_keeps_the_callback():
     t = tr("I need a repair.", "602 555 0101.", agent=rb("602 555 0101"))
     t["turns"] += [{"speaker": "caller", "confidence": 0.95, "text": "Yes."},
-                   {"speaker": "agent", "confidence": 0.97, "text": "Great, someone will call you back today."}]
+                   {"speaker": "agent", "confidence": 0.97, "text": "Thank you, we'll call you back soon."}]
     assert cs.summarize(t, PACK).callback_number == "+16025550101"
 
 
@@ -1228,5 +1228,40 @@ def test_a_yes_then_a_later_question_answered_yes_withholds_the_callback():
     t = tr("I need a repair.", "602 555 0101.", agent=rb("602 555 0101"))
     t["turns"] += [{"speaker": "caller", "confidence": 0.95, "text": "Yes."},
                    {"speaker": "agent", "confidence": 0.97, "text": "Or should I text you instead?"},
+                   {"speaker": "caller", "confidence": 0.95, "text": "Yes."}]
+    assert cs.summarize(t, PACK).callback_number is None
+
+
+@pytest.mark.parametrize("follow", ["Or should we use your work number instead\uff1f", "Or your work number\u061f",
+                                    "Or your work number\u2047", "Let me know if that's not right.",
+                                    "Tell me if you would rather we use your work number.",
+                                    "Should we use your work number instead.", "Dígame si prefiere su trabajo.",
+                                    "Great, someone will call you back today."])
+def test_anything_the_receptionist_says_after_the_consent_but_the_fixed_lines_withholds_the_callback(follow):
+    t = tr("I need a repair.", "602 555 0101.", agent=rb("602 555 0101"))
+    t["turns"] += [{"speaker": "caller", "confidence": 0.95, "text": "Yes."},
+                   {"speaker": "agent", "confidence": 0.97, "text": follow},
+                   {"speaker": "caller", "confidence": 0.95, "text": "Yes."}]
+    assert cs.summarize(t, PACK).callback_number is None
+
+
+@pytest.mark.parametrize("closing", ["Thank you, we'll call you back soon.", "Thanks.", "Gracias, le llamaremos pronto.",
+                                     "Please hang up and dial 911 right now."])
+def test_the_fixed_closing_lines_and_the_911_instruction_keep_the_callback(closing):
+    t = tr("I need a repair.", "602 555 0101.", agent=rb("602 555 0101"))
+    t["turns"] += [{"speaker": "caller", "confidence": 0.95, "text": "Yes."},
+                   {"speaker": "agent", "confidence": 0.97, "text": closing}]
+    assert cs.summarize(t, PACK).callback_number == "+16025550101"
+
+
+def test_a_yes_after_a_closing_line_is_not_the_answer_to_the_question():
+    t = tr("I need a repair.", "602 555 0101.", agent=rb("602 555 0101") + ["Thanks."], yes=True)
+    assert cs.summarize(t, PACK).callback_number is None
+
+
+def test_a_closing_word_inside_a_longer_turn_is_not_a_closing_line():
+    t = tr("I need a repair.", "602 555 0101.", agent=rb("602 555 0101"))
+    t["turns"] += [{"speaker": "caller", "confidence": 0.95, "text": "Yes."},
+                   {"speaker": "agent", "confidence": 0.97, "text": "Thanks, or should we use your work number"},
                    {"speaker": "caller", "confidence": 0.95, "text": "Yes."}]
     assert cs.summarize(t, PACK).callback_number is None
