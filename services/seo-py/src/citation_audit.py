@@ -21,6 +21,7 @@ Rules:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -34,7 +35,8 @@ class CitationVerdict:
     citation_id: str
     verdict: str
     differences: tuple          # every field that differs: name, address, phone, website, status
-    proposed: dict              # field -> the record's value, for the owner to approve; empty when correct
+    proposed: dict              # field -> the record's value, for the owner to approve; empty when nothing differs
+    #                             (a "correct" listing whose website differs still proposes the record's website)
 
 
 def _with_suite(street: str, suite: object) -> str:
@@ -42,8 +44,12 @@ def _with_suite(street: str, suite: object) -> str:
     used as written, a bare one ("4") is a suite; a street that already ends in a unit keeps it (AEGIS L4 round 1)."""
     if suite is None or (isinstance(suite, str) and not suite.strip()) or nap.street_key(street)[1] is not None:
         return street
-    text = str(suite).strip()
-    if nap.street_key("1 x " + text)[1] is None:   # no unit word of its own
+    text = str(suite).strip().rstrip(".,;: ")
+    # a suite that names its kind anywhere ("Ste 4", "#4", "4th Floor", "Floor 2") is used as written; a bare one is a
+    # suite (AEGIS L4 round 2: "4th Floor" became "Suite 4th Floor")
+    if nap.street_key("1 x, " + text)[1] is None and not re.search(
+            r"(?<![^\W\d_])(?:suite|ste|unit|apt|apartment|bldg|building|fl|floor|rm|room|no)(?![^\W\d_])|#", text,
+            re.IGNORECASE):
         text = f"Suite {text}"
     return f"{street}, {text}"
 
@@ -53,6 +59,15 @@ def _record_street(rec: dict) -> str:
 
 
 def _record(rec: object) -> dict:
+    try:
+        return _read_record(rec)
+    except ValueError:
+        raise
+    except Exception as exc:       # a field that cannot be read as text: the record is unreadable (AEGIS L4 round 2)
+        raise ValueError("the confirmed record cannot be read") from exc
+
+
+def _read_record(rec: object) -> dict:
     if not isinstance(rec, dict):
         raise ValueError("the confirmed record must be an object")
     street = rec.get("street") if isinstance(rec.get("street"), str) else _record_street(rec)

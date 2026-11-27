@@ -1459,3 +1459,9 @@ above apply here too ("Mt"/"Mount", "St." as Saint, numeric ZIPs, "D.C."/"Nev.",
 listing is not reported wrong. A record that carries a street line AND a suite field now uses both (a suite that names
 its kind, "Ste 4" or "Floor 2", is used as written; a bare one is a suite); a suite that is neither text nor a number
 refuses the audit. The docstring now says what the code does: a listing with no status reads as open.
+
+AEGIS round 2 for SEO-L4 (Nov 27 2026, Inquisitor on fa92b095, shared with SEO-L5 round 3): the SEO-L5 round-3 NAP
+fixes apply here (every script in street names, "Joe's" = "Joes", "Ste 4.", "4th Floor", "W.Va."). A suite field that
+names its kind anywhere ("4th Floor", "Ste 4.") is used as written; only a bare one becomes "Suite N". A record field
+that cannot be read as text now refuses the audit with ValueError, as documented. `proposed` is empty only when
+nothing differs: a correct listing whose website differs still proposes the record's website.

@@ -187,3 +187,36 @@ def test_no_status_reads_as_open():
     lst = {k: v for k, v in _LIST.items() if k != "status"}
     assert ca.audit(_biz(_REC, lst))[0].verdict == "correct"
     assert ca.audit(_biz(dict(_REC, open=False), lst))[0].verdict == "wrong_status"
+
+
+# ---------------------------------------------------------------- AEGIS round 2 (Inquisitor, fa92b095)
+@pytest.mark.parametrize("suite, listed", [("4th Floor", "12 Main St, 4th Floor"), ("Ste 4.", "12 Main St Ste 4"),
+                                           ("4th Floor", "12 Main St Fl 4")])
+def test_a_suite_that_names_its_kind_is_used_as_written(suite, listed):
+    assert ca.audit(_biz(dict(_REC, suite=suite), dict(_LIST, street=listed)))[0].verdict == "correct"
+
+
+def test_a_record_field_that_cannot_be_read_refuses_with_value_error():
+    class Boom:
+        def __str__(self):
+            raise RuntimeError("boom")
+    rec = {k: v for k, v in _REC.items() if k != "street"}
+    rec.update(street_number=Boom(), street_name="Main", street_type="St")
+    with pytest.raises(ValueError):
+        ca.audit(_biz(rec, _LIST))
+
+
+@pytest.mark.parametrize("kw", [{"name": "Joe's Plumbing"}, {"name": "A.A.A. Plumbing"}])
+def test_inner_punctuation_in_a_name_is_still_correct(kw):
+    plain = {"Joe's Plumbing": "Joes Plumbing", "A.A.A. Plumbing": "AAA Plumbing"}[kw["name"]]
+    assert ca.audit(_biz(dict(_REC, name=plain), dict(_LIST, **kw)))[0].verdict == "correct"
+
+
+def test_a_non_latin_street_is_another_street():
+    rec = dict(_REC, street="100 東京通り")
+    assert ca.audit(_biz(rec, dict(_LIST, street="100 大阪通り")))[0].verdict == "wrong_address"
+
+
+def test_west_virginia_ap_style_is_the_state():
+    rec = dict(_REC, state="WV", city="Charleston", zip="25301")
+    assert ca.audit(_biz(rec, dict(_LIST, state="W.Va.", city="Charleston", zip="25301")))[0].verdict == "correct"
