@@ -1265,3 +1265,53 @@ def test_a_closing_word_inside_a_longer_turn_is_not_a_closing_line():
                    {"speaker": "agent", "confidence": 0.97, "text": "Thanks, or should we use your work number"},
                    {"speaker": "caller", "confidence": 0.95, "text": "Yes."}]
     assert cs.summarize(t, PACK).callback_number is None
+
+
+@pytest.mark.parametrize("follow", ["Thanks <or is work better?>", "Thank you, we'll call you back soon. <Or use work?>",
+                                    "Gracias <¿o el del trabajo?>", "Please hang up and dial 911 right now. <Or is work better?>",
+                                    "Please hang up and dial 911 right now?", "Please hang up and dial 911 right now"])
+def test_after_the_yes_only_a_fixed_line_as_said_keeps_the_callback(follow):
+    t = tr("I need a repair.", "602 555 0101.", agent=rb("602 555 0101"))
+    t["turns"] += [{"speaker": "caller", "confidence": 0.95, "text": "Yes."},
+                   {"speaker": "agent", "confidence": 0.97, "text": follow},
+                   {"speaker": "caller", "confidence": 0.95, "text": "Yes."}]
+    assert cs.summarize(t, PACK).callback_number is None
+
+
+@pytest.mark.parametrize("follow", ["Thank you, we'll call you back soon.", "Thanks.", "Please hang up and dial 911 right now."])
+def test_after_the_yes_a_fixed_line_keeps_the_callback(follow):
+    t = tr("I need a repair.", "602 555 0101.", agent=rb("602 555 0101"))
+    t["turns"] += [{"speaker": "caller", "confidence": 0.95, "text": "Yes."},
+                   {"speaker": "agent", "confidence": 0.97, "text": follow}]
+    assert cs.summarize(t, PACK).callback_number == "+16025550101"
+
+
+def _consent_call(caller_text):
+    return {"transcript_id": "doubt", "turns": [
+        {"speaker": "agent", "confidence": 0.98, "text": "Thanks for calling. How can I help?"},
+        {"speaker": "caller", "confidence": 0.95, "text": caller_text},
+        {"speaker": "agent", "confidence": 0.97, "text": "Is 602 555 0101 the best number to call you back?"},
+        {"speaker": "caller", "confidence": 0.95, "text": "Yes."}]}
+
+
+@pytest.mark.parametrize("caller_text", ["My old number was 602 555 0101. I need a repair.",
+                                         "Don't use my cell, 602 555 0101. I need a repair.",
+                                         "I need a repair. 602 555 0101 is disconnected.",
+                                         "Do not call 602 555 0101. My cell is 602 555 0101."])
+def test_a_number_the_caller_doubted_keeps_the_yes_and_says_so(caller_text):
+    s = cs.summarize(_consent_call(caller_text), {"reason_categories": ["repair"]})
+    assert s.callback_number == "+16025550101"
+    assert "caller_doubted_this_number_earlier" in s.notes and "callback_from_consent_question" in s.notes
+    assert "rejected_number_not_used" in s.notes
+
+
+def test_a_number_said_twice_once_rejected_is_ambiguous_on_the_caller_side():
+    s = cs.summarize(_consent_call("Do not call 602 555 0101. My cell is 602 555 0101."), {"reason_categories": ["repair"]})
+    assert "ambiguous_number" in s.notes
+
+
+def test_a_low_confidence_name_confirmation_is_not_a_confirmation():
+    t = _consent_call("I'm Dana Ortiz. I need a repair. My cell is 602 555 0101.")
+    t["turns"].insert(2, {"speaker": "agent", "confidence": 0.3, "text": "Let me confirm: Dana Ortiz."})
+    s = cs.summarize(t, {"reason_categories": ["repair"]})
+    assert s.notes.count("name_not_confirmed") == 1 and "name_denied" not in s.notes

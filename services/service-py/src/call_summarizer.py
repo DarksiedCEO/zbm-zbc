@@ -12,9 +12,10 @@ Rules (spec v0.1, the front-desk shared rules, the Nov 26 spec-freeze rulings):
   number ("Is 602 555 0101 the best number to call you back?", "¿Es el 602 555 0101 el mejor número para
   devolverle la llamada?"), the caller gave that number in a trusted turn, and everything the caller says after the
   question is a trusted yes (Andre's ruling, Nov 27 2026, option (a)): the very next spoken turn after the question is
-  the caller's yes, and after it the receptionist says nothing but the fixed 911 instruction or a fixed closing line
-  ("Thank you, we'll call you back soon.", "Gracias, le llamaremos pronto."); anything else, a question or not, means
-  no callback (a yes to a later question is never consent; AEGIS rounds 16-17). The explicit yes settles anything the caller said about the number before it. When this module's own
+  the caller's yes, and after it the receptionist says nothing but the fixed 911 instruction (exactly, with its end
+  mark) or a fixed closing line as said, with nothing set aside ("Thank you, we'll call you back soon.", "Gracias,
+  le llamaremos pronto."); anything else, a question or not, means no callback (a yes to a later question is never
+  consent; AEGIS rounds 16-18). The explicit yes settles anything the caller said about the number before it. When this module's own
   rejection and correction rules (a word list, so not every phrasing) had marked that number as rejected or
   replaced, the note ``caller_doubted_this_number_earlier`` is added and the yes still stands. Anything else (no question, another
   wording, "No", "Yes, but text my other number", a low-confidence yes) is no callback, and the summary says to
@@ -427,7 +428,7 @@ _PLAIN_WORDS = re.compile(
 
 
 def _clean_confirmation(text: str) -> bool:
-    """A read-back with no question and nothing taken back in it ("Actually no, I misheard"; AEGIS round 10)."""
+    """A confirmation line with no question and nothing taken back in it ("Actually no, I misheard"; AEGIS round 10)."""
     return "?" not in text and "¿" not in text and not _RETRACT.search(text)
 
 
@@ -440,8 +441,10 @@ def _answers_consent(ordered: list, i: int) -> bool:
         return False
     # after it the receptionist may say only the fixed 911 instruction or a fixed closing line: anything else might
     # be another question, with or without a question mark (AEGIS round 17: "？", "؟", "Let me know if that's not
-    # right."), so the inverted default withholds the callback
-    if any(sp == "agent" and _CLOSING.fullmatch(_unmarked(_fold(x)).strip()) is None and _said_911(_fold(x)) is None
+    # right."), so the inverted default withholds the callback. The closing line is matched on the turn as said, with
+    # nothing set aside (AEGIS round 18: "Thanks <or is work better?>"), and a 911 turn counts only when it is the
+    # instruction as such ("urgent"), not one read as "ambiguous" (brackets, a "?" or no end mark)
+    if any(sp == "agent" and _CLOSING.fullmatch(_fold(x).strip()) is None and _said_911(_fold(x)) != "urgent"
            for sp, _, x in after):
         return False
     return _affirmed(ordered, i)
@@ -451,7 +454,7 @@ def _affirmed(ordered: list, i: int) -> bool:
     """After turn ``i`` the caller said something, and everything the caller said was an affirmation."""
     later = [(c, x) for sp, c, x in ordered[i + 1:] if sp in ("caller", "unknown") and x.strip()]
     # a low-confidence "Yes." is never a fact, so it affirms nothing (AEGIS round 11); words under a speaker label it
-    # cannot read after the read-back are never a yes either (round 12)
+    # cannot read after the question are never a yes either (round 12)
     return bool(later) and all(c >= LOW_CONFIDENCE and _AFFIRM.fullmatch(_fold(x).strip()) for c, x in later)
 
 

@@ -963,7 +963,15 @@ after; when this module's own rejection and correction rules (a word list) had m
 `caller_doubted_this_number_earlier` is added and the yes stands. The read-back line still confirms the name. The
 plain-words and phone-word fences around the callback are removed. The shared MVP F3 pool now has the consent
 question after every read-back (fixtures/mvp_pools: generator, oracle and the three dev-seed f3 transcript pins);
-the answer keys are unchanged. Mutation harness (call_summarizer): 80 mutants, 61 killed, 19 equivalent.
+the answer keys are unchanged.
+
+AEGIS F3 round 18 (Nov 27 2026): after the yes, "Thanks <or is work better?>" passed as a closing line (bracketed
+words were set aside before the match) and a 911 line read as "ambiguous" (brackets, a "?" or no end mark) passed as
+the instruction, so a yes to the question inside them set the callback. The closing line is now matched on the turn
+as said, and a 911 turn counts only when it reads as the instruction itself. Six mutants marked equivalent were
+killable: the doubt note, the ambiguous-number note and a low-confidence name confirmation now have tests, and the
+equivalence reasons that named the removed read-back are rewritten. Mutation harness (call_summarizer): 82 mutants,
+69 killed, 13 equivalent.
 
 AEGIS Inquisitor round 16 on 84d856e2 (RR-F3): a yes to a later receptionist question ("Is that a no?", "Or should
 we use your work number?") was read as consent. Now the very next spoken turn after the consent question must be the
