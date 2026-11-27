@@ -580,3 +580,33 @@ def test_the_evidence_keeps_a_staff_opt_out_the_opt_in_could_not_clear():
               send(6)]
     d = ck.ConsentKeeper().replay(events)[0]
     assert (d.decision, d.reason) == ("block", "opted_out") and 2 in d.evidence
+
+
+# ---------------------------------------------------------------- AEGIS round 9 (Inquisitor, 96301ba2)
+@pytest.mark.parametrize("variant", ["Joe’s Dental", "Joe‘s Dental", "Joeʼs Dental", "Joe`s Dental",
+                                     "Joe´s Dental", "Joe′s Dental"])
+def test_an_apostrophe_look_alike_is_one_client(variant):
+    assert ck.normalise_client(variant) == ck.normalise_client("Joe's Dental")
+    events = [ev("opt_in", 1, client="Joe's Dental", consent="express_written"),
+              ev("inbound_sms", 2, client="Joe's Dental", text="STOP"), send(3, client=variant)]
+    assert ck.ConsentKeeper().replay(events)[0].decision == "block"
+
+
+def test_every_greek_sigma_is_one_client():
+    assert ck.normalise_client("ΟΔΟΣ") == ck.normalise_client("οδος")
+    assert ck.normalise_client("ΟΔΟΣ") == ck.normalise_client("οδοσ")
+
+
+@pytest.mark.parametrize("name", ["ـ", "ー", "ߺ", "ــ", "ʻ"])
+def test_a_modifier_mark_is_not_a_reviewer_name(name):
+    events = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="Can I come at 4?"),
+              ev("staff_review", 6, reviewer=name, ruling="not_an_opt_out"), send(7)]
+    with pytest.raises(ValueError):
+        ck.ConsentKeeper().replay(events)
+
+
+@pytest.mark.parametrize("name", ["Dana", "田中", "محمد", "R2", "ダーナ"])
+def test_a_real_reviewer_name_in_any_script_counts(name):
+    events = [ev("opt_in", 1, consent="express_written"), ev("inbound_sms", 5, text="Can I come at 4?"),
+              ev("staff_review", 6, reviewer=name, ruling="not_an_opt_out"), send(7)]
+    assert ck.ConsentKeeper().replay(events)[0].decision == "allow"

@@ -27,8 +27,8 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings, ADR 0014):
   non-object event, or a send_id used twice refuses the whole replay (``ValueError``): an opt-out is never dropped.
   Numbers are read after NFKC with any script's digits, dash look-alikes and invisibles folded, so one person never
   becomes two records. Client ids are read with NFC (not NFKC), every format character removed, dashes folded and
-  every letter whose lower case is one letter lower-cased, and any run of spaces read as one space: one client typed
-  differently is one record, two different clients never merge.
+  every letter whose lower case is one letter lower-cased (every Greek sigma one sigma), apostrophe look-alikes read
+  as one apostrophe, and any run of spaces read as one space: one client typed differently is one record, two different clients never merge.
 - Every ``replay`` is the whole history: no state carries over between calls.
 - Express written consent counts only from a known source (web form, paper form, keyword join, signed agreement,
   e-sign); a START reply is never one.
@@ -171,9 +171,11 @@ def normalise_client(raw: str) -> str:
     every invisible removed, dashes folded, trimmed, lower-cased letter by letter (\u00c9cole and \u00e9cole are one client;
     not case-folded, so "strasse" and "stra\u00dfe" stay two clients; a letter whose lower case is longer than one
     letter keeps its case)."""
-    folded = _strip_invisible(unicodedata.normalize("NFC", raw)).translate(_DASHES)
+    folded = _strip_invisible(unicodedata.normalize("NFC", raw)).translate(_DASHES).translate(_APOSTROPHES)
     folded = re.sub(r"\s+", " ", folded).strip()   # any run of spaces (tab, NBSP, U+3000 ...) is one space (AEGIS round 8)
-    return "".join(c.lower() if len(c.lower()) == 1 else c for c in folded)
+    # apostrophe look-alikes ("Joe\u2019s" typed by a phone) are one apostrophe, and every Greek sigma one sigma
+    # ("\u039f\u0394\u039f\u03a3" and "\u03bf\u03b4\u03bf\u03c2" are one client) (AEGIS round 9)
+    return "".join(c.lower() if len(c.lower()) == 1 else c for c in folded).replace("\u03c2", "\u03c3")
 
 
 _FILLERS = {"\u115f", "\u1160", "\u3164", "\uffa0"}     # Hangul fillers: letters by category, blank on screen
@@ -184,7 +186,9 @@ def _is_named(reviewer: object) -> bool:
     "\u2800" and "-" are not names)."""
     if not isinstance(reviewer, str):
         return False
-    return any(unicodedata.category(c)[0] in "LN" and c not in _FILLERS for c in _strip_invisible(reviewer))
+    # a letter that is a mark on screen (category Lm: "\u0640", "\u30fc", "\u07fa") is not a name (AEGIS round 9)
+    return any(unicodedata.category(c) in ("Lu", "Ll", "Lt", "Lo", "Nd", "Nl", "No") and c not in _FILLERS
+               for c in _strip_invisible(reviewer))
 
 
 def normalise_number(raw: object) -> Optional[str]:
