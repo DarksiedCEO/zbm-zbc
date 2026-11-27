@@ -681,7 +681,7 @@ there is one), `fallback_message_and_text_back`, or `caller_hung_up_log_and_text
 | Hours and on-call | Outside business hours (anything but an explicit `true`) or with nobody on call: straight to the fallback, nobody rung |
 | Ringing | Simultaneous for everyone on call (Nov 26 ruling), duplicates rung once; a sequential plan is rung at once too and noted. The on-call order may be a list or a tuple of text or whole-number ids; anything else is nobody on call (`unreadable_on_call_order`) |
 | 30 s | A ring timeout above 30 s, or one that cannot be read, is cut to 30 s; every outcome lands within it |
-| Who connects | The first in the on-call order who answers live; never someone not on call. A live answer beats someone else's late answer (ruling for the spec freeze; the pool's own oracle reads that mix the other way and the pool never generates it) |
+| Who connects | The first in the on-call order who answers live; never someone not on call; two records for one person that disagree count as not answering. A live answer beats someone else's late answer (ruling for the spec freeze; the pool's own oracle reads that mix the other way and the pool never generates it) |
 | Whisper | Played first when there is one; a missing one still connects (the caller is never held for it) and is recorded (`whisper_missing`). The whisper line says "Urgent" only for an explicit `True`, and reads the name and reason as one printable line of at most 60 characters |
 | No dropped caller | `resolve` never raises: an unreadable case (not an object, no usable id) ends in the fallback (`unreadable_case`); any unreadable outcome is "no answer", so every path ends connected or in a fallback; fallbacks and late answers ask RR-F2 for a text-back (which still applies consent and quiet hours) |
 
@@ -694,4 +694,13 @@ AEGIS round 1 (Nov 26 2026, Inquisitor on 8c41637b): High: a case with an unread
 (the kill criterion). Also: a tuple or numeric-id on-call order rang nobody; the whisper announced "Urgent" for
 `"false"`; the docs said a whisper was required to connect while the code connected without one; the pool certified
 neither "outside hours" nor "off call"; the mutant count had no artifact. All fixed as above with regression tests
-("AEGIS round 1" section); mutation results now come from `services/service-py/devtools/frontdesk_mutants.py`.
+("AEGIS round 1" section); mutation results come from `services/service-py/devtools/frontdesk_mutants.py`, which arrives with the RR-F3
+commit at the top of this stack.
+
+AEGIS round 2 (Nov 26 2026, Inquisitor on aeb8ec03): the round-1 fixes held (30,000-case fuzz: no raise, every path
+connected or a fallback, never outside hours or off call). New High: a whole-number id over 4,300 digits made `str()`
+raise, so `resolve` still raised; ids are now whole numbers up to 10**18 or text, anything else is not an id.
+Review: two behaviour records for one person that disagree (7 and "7", "staff-a" and "staff-a ") let the last one
+win; they now count as not answering. Caller text could add its own "Press 2" or "Urgent" to the whisper; name and
+reason now keep only letters, digits, spaces, apostrophes and hyphens and lose any steering word, so the only
+instruction spoken is "Press 1 to accept". Regression tests: "AEGIS round 2" section.

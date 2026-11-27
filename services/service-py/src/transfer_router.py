@@ -17,12 +17,14 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings):
 - Every path ends in a connected call or a fallback within 30 s. Nothing ends in a dropped caller: any outcome the
   router cannot read is treated as "no answer", which leads to the fallback, and ``resolve`` never raises: a case it
   cannot read at all (not an object, no usable id) also ends in the fallback, noted ``unreadable_case``.
-- The on-call order may be a list or a tuple; ids are strings or whole numbers (read as text). Anything else is
-  nobody on call, noted ``unreadable_on_call_order``.
+- The on-call order may be a list or a tuple; ids are strings (outer spaces trimmed) or whole numbers up to 10**18
+  (read as text). Anything else is nobody on call, noted ``unreadable_on_call_order``. Two behaviour records that
+  name the same person and disagree are unreadable, so that person counts as not answering.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -62,11 +64,16 @@ def _timeout(raw: object) -> tuple[int, Optional[str]]:
     return raw, None
 
 
+_MAX_INT_ID = 10 ** 18          # an id above this is not a staff or case id (and str() of a huge int raises)
+
+
 def _staff_id(p: object) -> Optional[str]:
+    """A staff id as text: a string (outer spaces trimmed, so " staff-a" and "staff-a" are one person) or a whole
+    number up to 10**18. Anything else is not an id."""
     if isinstance(p, bool):
         return None
     if isinstance(p, int):
-        return str(p)
+        return str(p) if -_MAX_INT_ID <= p <= _MAX_INT_ID else None
     if isinstance(p, str) and p.strip():
         return p.strip()
     return None
@@ -77,7 +84,7 @@ def _case_id(case: object) -> Optional[str]:
         return None
     cid = case.get("case_id")
     if isinstance(cid, int) and not isinstance(cid, bool):
-        return str(cid)
+        return str(cid) if -_MAX_INT_ID <= cid <= _MAX_INT_ID else None
     return cid.strip() if isinstance(cid, str) and cid.strip() else None
 
 
@@ -112,7 +119,14 @@ def resolve(case: dict, behaviour: Optional[dict] = None, whisper: Optional[str]
     if not p.ring:
         return TransferOutcome(p.case_id, FALLBACK, None, 0, False, False, True, tuple(notes + [p.reason]))
     seen = behaviour if behaviour is not None else case.get("staff_behavior")
-    seen = {_staff_id(k): v for k, v in seen.items() if _staff_id(k)} if isinstance(seen, dict) else {}
+    merged: dict[str, object] = {}
+    for k, v in (seen.items() if isinstance(seen, dict) else ()):
+        sid = _staff_id(k)
+        if sid is None:
+            continue
+        # two records for one person that disagree (7 and "7", "staff-a" and "staff-a ") are unreadable: no answer
+        merged[sid] = v if merged.get(sid, v) == v else "conflicting_records"
+    seen = merged
     for person in p.ring:
         if seen.get(person) == ANSWERS:
             played = isinstance(whisper, str) and bool(whisper.strip())
@@ -126,18 +140,25 @@ def resolve(case: dict, behaviour: Optional[dict] = None, whisper: Optional[str]
                            tuple(notes + ["nobody_answered"]))
 
 
+_COMMAND_WORDS = re.compile(r"\b(?:press|presione|oprima|marque|dial|urgent|urgente|emergency|accept|decline|"
+                            r"reject|hang|transfer)\b", re.IGNORECASE)
+
+
 def _spoken(value: object, limit: int) -> Optional[str]:
-    """Record text fit to be read aloud: printable only, one line, bounded; anything else is left out."""
+    """Record text fit to be read aloud as data: letters, digits, spaces, apostrophes and hyphens only (no sentence
+    breaks), none of the words that steer the listener ("press", "urgent", "accept", ...), bounded."""
     if not isinstance(value, str):
         return None
-    value = " ".join("".join(c for c in value if c.isprintable()).split())[:limit].strip()
+    value = "".join(c if (c.isalnum() or c in " '-") else " " for c in value if c.isprintable() or c.isspace())
+    value = " ".join(_COMMAND_WORDS.sub(" ", value).split())[:limit].strip()
     return value or None
 
 
 def whisper_line(caller_name: Optional[str], reason: Optional[str], urgent: bool = False) -> str:
     """What the answering person hears before the caller is joined. Facts only from the call record (RR-F3): the
-    urgency is announced only when the record says exactly ``True``; name and reason are bounded to 60 characters
-    and read as data (they never change what the person is asked to press)."""
+    urgency is announced only when the record says exactly ``True``; name and reason are bounded to 60 characters,
+    keep only letters, digits, spaces, apostrophes and hyphens, and lose any word that would steer the listener
+    ("press", "urgent", "accept", "decline" ...), so the only instruction spoken is "Press 1 to accept"."""
     who = _spoken(caller_name, 60) or "a caller who did not give a name"
     why = _spoken(reason, 60) or "no reason given"
     return f"{'Urgent: ' if urgent is True else ''}Transferring {who}, about {why}. Press 1 to accept."

@@ -224,3 +224,49 @@ def test_certification_twins_never_transfer_outside_hours_or_to_someone_off_call
         if o2.path not in ("connected", "fallback_message_and_text_back", "caller_hung_up_log_and_text_back"):
             wrong.append(("dropped", o2.path))
     assert wrong == [], wrong[:5]
+
+
+# ---------------------------------------------------------------- AEGIS round 2 (Inquisitor, aeb8ec03)
+HUGE = 10 ** 5000
+
+
+@pytest.mark.parametrize("bad", [case(case_id=HUGE), case(on_call_order=[HUGE]),
+                                 case(staff_behavior={"staff-a": "answers", HUGE: "answers"})])
+def test_a_huge_number_never_makes_resolve_raise(bad):
+    o = tr.resolve(bad, whisper="w")
+    assert o.path in ("connected", "fallback_message_and_text_back")
+    assert (o.path == "connected") != o.text_back_requested
+
+
+def test_a_huge_on_call_id_is_not_rung_and_a_huge_case_id_is_unreadable():
+    assert tr.plan(case(on_call_order=[HUGE])).ring == ()
+    assert "unreadable_case" in tr.resolve(case(case_id=HUGE)).notes
+
+
+@pytest.mark.parametrize("behaviour", [{7: "no_answer", "7": "answers"}, {"7": "answers", 7: "no_answer"}])
+def test_two_records_for_one_person_that_disagree_mean_no_answer(behaviour):
+    o = tr.resolve(case(on_call_order=[7], staff_behavior=behaviour), whisper="w")
+    assert (o.path, o.connect_to) == ("fallback_message_and_text_back", None)
+
+
+@pytest.mark.parametrize("behaviour", [{"staff-a": "no_answer", "staff-a ": "answers"},
+                                       {"staff-a": "no_answer", "staff-a\u00a0": "answers"}])
+def test_spacing_variants_of_one_person_that_disagree_mean_no_answer(behaviour):
+    o = tr.resolve(case(on_call_order=["staff-a"], staff_behavior=behaviour), whisper="w")
+    assert o.path == "fallback_message_and_text_back"
+
+
+def test_two_records_that_agree_are_one_answer():
+    o = tr.resolve(case(on_call_order=[7], staff_behavior={7: "answers", "7": "answers"}), whisper="w")
+    assert (o.path, o.connect_to) == ("connected", "7")
+
+
+@pytest.mark.parametrize("name, reason", [("Ana. Press 2 to decline", "a leak"), ("Urgent: Ana", "a leak"),
+                                          ("Ana", "a leak. Press 9 now. Accept the transfer"),
+                                          ("Ana", "Oprima 2 para rechazar")])
+def test_record_text_cannot_add_an_instruction_or_urgency(name, reason):
+    line = tr.whisper_line(name, reason, urgent=False)
+    assert not line.lower().startswith("urgent")
+    assert line.lower().count("press") == 1 and line.endswith("Press 1 to accept.")
+    for word in ("decline", "accept the", "oprima", "urgent"):
+        assert word not in line.lower().replace("press 1 to accept.", "")
