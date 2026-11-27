@@ -575,3 +575,11 @@ AEGIS Inquisitor round 12 on aaee4c9f (RR-F5): events are read as plain data onl
 a plain `dict`, or a key or value that is not plain text, a number, a boolean or null, refuses the replay; the replay
 works on private copies, so nothing can change between the check and the use (a `str` subclass client id answered
 `strip()` one way when checked and another way when applied).
+
+**RR-F5 review queue (Nov 27 2026, Andre's approval).** `services/service-py/src/review_queue.py` lists the replies the
+keeper holds for `unrecognised_reply` and turns a named reviewer's ruling into the keeper's `staff_review` event. The
+queue reads the keeper itself (a probe send per record, replayed after the last event), never its own copy of the
+rules, so a record held for anything stronger is never queued. An item shows every unread reply for its record, and
+a ruling is accepted only while the item is exactly what was listed: a reply that arrived after the reviewer opened
+it makes the ruling stale (`StaleItem`), so a ruling never clears a reply its reviewer did not read. Rulings are
+`not_an_opt_out` (clears the hold) or `opt_out` (permanent), each with an audit row. Fixture-only; nothing is sent.
