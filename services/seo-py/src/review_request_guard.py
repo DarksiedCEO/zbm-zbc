@@ -117,7 +117,8 @@ class Verdict:
 
 
 def _text(raw: object) -> str:
-    """NFKC, invisible format characters removed, every dash and hyphen read as "-"."""
+    """NFKC, format characters (Cf) and soft hyphens removed, every dash read as "-", and the fixed look-alike table
+    (``_LOOKALIKE``) read as Latin. Only explains a refusal: a send needs the exact approved template."""
     if not isinstance(raw, str):
         return ""
     text = unicodedata.normalize("NFKC", raw)

@@ -1339,8 +1339,10 @@ if not, list every reason. Not wired to any route, sender or Business Profile; n
 | Explaining a refusal: anything offered in exchange; suggested review text; steering unhappy customers away | `incentive`, `suggested_text`, `review_suppression` |
 | An unreadable request (not an object, unknown channel, no customer) or an empty message; every other reason that can be read is still listed | `unreadable` |
 
-Only an approved template sends. The wording readings (English and Spanish; read after NFKC, with invisible
-characters removed, every dash read as "-" and Cyrillic/Greek look-alike letters read as Latin) name what is wrong
+Only an approved template sends. The wording readings (English and Spanish; read after NFKC, with Unicode format
+characters (category Cf, e.g. zero-width spaces and joiners) removed, every dash read as "-", and the Cyrillic/Greek
+letters in a fixed table of common look-alikes read as Latin; other invisible or look-alike characters are not
+normalised, which only matters for the explanation because the send decision is the exact template match) name what is wrong
 for the person fixing the wording; they never allow a send. Certification: `services/seo-py/tests/test_review_request_guard.py`
 runs the shared MVP pool (SEO-L6, 300 scenarios per seed, 20 with two violations) for the three DEV seeds and three
 more: every decision matches the key and every key reason is listed. Disclosed differences, always stricter: the
