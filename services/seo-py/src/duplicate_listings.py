@@ -114,6 +114,9 @@ def _check(pair: dict) -> PairVerdict:
     same_city = all(x == y for x, y in zip(ca, cb) if x and y) and (ca[0] == cb[0] or (ca[2] and ca[2] == cb[2]))
     if same_city and street_a == street_b:
         return PairVerdict(pid, True, "merge_or_remove_duplicate", True, "same_business_same_address")
+    if street_a == street_b and nap.same_zip_other_city_words(ca, cb):
+        # one street address and ZIP, other city words ("Clinton Twp" spelled some way this module does not know)
+        return PairVerdict(pid, False, "owner_review", False, "same_zip_city_words_differ")
     if same_city and nap.same_number_other_words(street_a, street_b):
         # one house number, other street words ("100 S St" / "100 South St", or a suffix this module does not know):
         # neither a merge nor a move is safe, so the owner is asked (AEGIS L5 round 4)

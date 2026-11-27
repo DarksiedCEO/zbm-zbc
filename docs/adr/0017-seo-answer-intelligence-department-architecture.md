@@ -1390,3 +1390,9 @@ not a street suffix, so "1 Pier Ave", "Post Office Rd" and "Lot Rd" are streets,
 between a digit and a letter ("4-B" = "4B", but "1-10" is never "110"); more USPS city abbreviations ("Mtn", "Jct",
 "Fls", "Gdns" ...). The same house number with other street words asks the owner also when the number carries a
 letter ("100A").
+
+AEGIS round 6 (Nov 27 2026, Inquisitor on L5 325bd497 / L4 e4dc6fa9): "1200-B" is house number "1200B"; a vulgar
+fraction keeps its house number apart ("100½" = "100 1/2", never NFKC's "1001⁄2"); two units of one kind keep their
+order; a hyphen with a letter on one side is formatting in names, streets and cities ("A-1" = "A1"; "1-10" stays);
+city apostrophes ("O'Fallon") and more abbreviations (Twp, Hgts ...). **The inverted default for cities:** the same
+street address, state and ZIP with city words that still differ is `owner_review` (L4: `address_needs_review`).

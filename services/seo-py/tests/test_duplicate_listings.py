@@ -368,3 +368,30 @@ def test_a_hyphen_between_digits_is_another_unit(x, y):
                                   ("Palm Bch Gdns", "Palm Beach Gardens")])
 def test_more_city_abbreviations_are_formatting(x, y):
     assert nap.city_key(x, "CA", None)[0] == nap.city_key(y, "CA", None)[0]
+
+
+# ---------------------------------------------------------------- AEGIS round 6 (Inquisitor, L5 325bd497 / L4 e4dc6fa9)
+@pytest.mark.parametrize("x, y", [("1200-B N St", "1200B N St"), ("100-A Main St", "100A Main St"),
+                                  ("100½ Main St", "100 1/2 Main St")])
+def test_house_number_formatting_is_formatting(x, y):
+    assert nap.street_key(x) == nap.street_key(y)
+    assert dl.check(pair(listing(street=x), listing(street=y))).action == "merge_or_remove_duplicate"
+
+
+def test_two_units_of_one_kind_keep_their_order():
+    assert nap.street_key("5 Main St Unit 5, Ste 4") != nap.street_key("5 Main St Unit 4, Ste 5")
+
+
+@pytest.mark.parametrize("x, y", [("A-1 Plumbing", "A1 Plumbing"), ("Desert-Sky Plumbing", "DesertSky Plumbing")])
+def test_a_hyphen_inside_a_name_is_formatting(x, y):
+    assert nap.name_key(x) == nap.name_key(y)
+
+
+@pytest.mark.parametrize("x, y", [("Clinton Twp", "Clinton Township"), ("Shaker Hgts", "Shaker Heights"), ("O'Fallon", "OFallon")])
+def test_more_city_formatting(x, y):
+    assert nap.city_key(x, "MI", "48038") == nap.city_key(y, "MI", "48038")
+
+
+def test_an_unknown_city_spelling_with_the_same_zip_asks_the_owner():
+    v = dl.check(pair(listing(city="Las Vegas"), listing(city="Lss Vegas")))
+    assert (v.is_duplicate, v.action) == (False, "owner_review")

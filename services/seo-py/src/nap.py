@@ -88,7 +88,9 @@ _APOSTROPHE_LIKE = "'\u2018\u2019\u201b\u0060\u00b4\u02b9\u02bb\u02bc\u02bd\u203
 
 def _inner_punct(text: str) -> str:
     """Punctuation inside a word is formatting: "Joe's" is "joes", "A.A.A." is "aaa" (AEGIS L5 round 3)."""
-    text = re.sub(rf"(?<=\w)[{_APOSTROPHE_LIKE}](?=\w)", "", text)
+    text = re.sub(rf"(?<=\w)[{_APOSTROPHE_LIKE}](?=\w)", "", text)               # "Joe's" (AEGIS L5 round 3)
+    # a hyphen with a letter on at least one side ("A-1", "Desert-Sky"); "1-10" between digits stays (round 6)
+    text = re.sub(r"(?<=[^\W\d_])[\-‐‑](?=\w)|(?<=\w)[\-‐‑](?=[^\W\d_])", "", text)
     return re.sub(r"(?<!\w)(?:[^\W\d_]\.){2,}", lambda m: m.group(0).replace(".", ""), text)
 
 
@@ -118,6 +120,11 @@ _UNIT = re.compile(r"(?:,\s*|\s)((?:" + "|".join(sorted((k for k in UNIT_KIND if
 _ORDINAL_FLOOR = re.compile(r"(?:,\s*|\s)(\d+)(?:st|nd|rd|th)?\s+(?:floor|fl)\.?$")
 
 
+# a vulgar fraction keeps its house number apart: "100½" is "100 1/2", never NFKC's "1001⁄2" (AEGIS L5 round 6)
+_FRACTIONS = str.maketrans({"½": " 1/2", "¼": " 1/4", "¾": " 3/4", "⅓": " 1/3", "⅔": " 2/3", "⅛": " 1/8",
+                            "⁄": "/"})
+
+
 def _unit_value(v: str) -> bool:
     """A unit number: it holds a digit, or is one or two letters that are not a street suffix ("Suite A", "Ste B")."""
     if any(c.isdigit() for c in v):
@@ -130,7 +137,10 @@ def street_key(street: object) -> tuple[str, Optional[str]]:
     read as one, while a floor, building or room keeps its kind ("floor:2" is not "unit:2"). Trailing punctuation is
     formatting ("Ste 4."), several unit parts are all kept ("Suite 400, Fl 4"), "4th Floor" is "floor:4", and street
     names of every script are kept ("100 東京通り" is not "100 大阪通り") (AEGIS L5 round 3)."""
-    text = _inner_punct(_fold(street)).replace("#", " # ")
+    raw_street = street.translate(_FRACTIONS) if isinstance(street, str) else street
+    text = _fold(raw_street).replace("#", " # ")
+    text = re.sub(r"^\s*(\d+)\s*-\s*([a-z])\b", r"\1\2", text)    # "1200-B" is house number "1200b" (round 6)
+    text = _inner_punct(text)
     text = re.sub(r"\b(" + "|".join(_ORDINALS) + r")\b", lambda m: _ORDINALS[m.group(1)], text)   # "Fourth Floor"
     units = []
     while True:
@@ -146,7 +156,9 @@ def street_key(street: object) -> tuple[str, Optional[str]]:
         # "4-B" is "4b"; "1-10" stays "1-10" (never "110": AEGIS L5 round 5)
         units.append(f"{UNIT_KIND[m.group(1)]}:{re.sub(r'(?<=[0-9])-(?=[a-z])|(?<=[a-z])-(?=[0-9])', '', m.group(2))}")
         text = text[:m.start()]
-    unit = "|".join(sorted(units)) or None
+    # units sorted by kind only, so "Suite 400, Fl 4" is "Fl 4 Suite 400" while two units of one kind keep their order
+    # ("Unit 5, Ste 4" is not "Unit 4, Ste 5"; AEGIS L5 round 6)
+    unit = "|".join(sorted(units, key=lambda u: u.split(":")[0])) or None
     raw = re.findall(r"[^\W_]+", _join_initials(text))
     words = []
     for i, w in enumerate(raw):
@@ -168,6 +180,12 @@ def same_number_other_words(a: tuple[str, Optional[str]], b: tuple[str, Optional
     know, or another street. The data cannot tell, so a person decides (AEGIS L5 round 4: the inverted default)."""
     wa, wb = a[0].split(), b[0].split()
     return bool(wa and wb) and a != b and a[1] == b[1] and wa[0] == wb[0] and any(c.isdigit() for c in wa[0])
+
+
+def same_zip_other_city_words(a: tuple[str, str, str], b: tuple[str, str, str]) -> bool:
+    """Two city keys with the same state and ZIP whose city words differ: an abbreviation this module does not know,
+    or another city sharing a ZIP. The data cannot tell, so a person decides (AEGIS L5 round 6)."""
+    return bool(a[2]) and a[2] == b[2] and a[1] == b[1] and bool(a[1]) and a[0] != b[0]
 
 
 def phone_key(phone: object) -> Optional[str]:
@@ -225,7 +243,8 @@ CITY_WORDS = {"st": "saint", "ste": "sainte", "ft": "fort", "mt": "mount", "pt":
               "hbr": "harbor", "hl": "hill", "lks": "lakes", "mdw": "meadow", "mdws": "meadows", "prt": "port",
               "sta": "station", "vly": "valley", "vw": "view", "xing": "crossing", "frk": "fork", "frst": "forest",
               "grv": "grove", "hvn": "haven", "is.": "island", "isl": "island", "brk": "brook", "cv": "cove",
-              "rdg": "ridge", "riv": "river", "shr": "shore", "spr": "springs"}
+              "rdg": "ridge", "riv": "river", "shr": "shore", "spr": "springs", "twp": "township",
+              "hgts": "heights", "hghts": "heights", "jctn": "junction", "vill": "village", "cty": "city"}
 
 
 def state_key(state: object) -> str:
@@ -239,5 +258,5 @@ def city_key(city: object, state: object, zip_code: object) -> tuple[str, str, s
     if type(zip_code) is int and 0 <= zip_code <= 99999:
         zip_code = f"{zip_code:05d}"   # a ZIP stored as a number lost its leading zero (AEGIS L5 round 2)
     z = re.sub(r"[^0-9]", "", _fold(zip_code))[:5]
-    words = [CITY_WORDS.get(w, w) for w in re.findall(r"\w+", _fold(city))]
+    words = [CITY_WORDS.get(w, w) for w in re.findall(r"[^\W_]+", _inner_punct(_fold(city)))]
     return " ".join(words), state_key(state), z
