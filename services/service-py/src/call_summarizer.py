@@ -9,13 +9,15 @@ Rules (spec v0.1, the front-desk shared rules, the Nov 26 spec-freeze rulings):
   source. A turn below 0.6 that has words is flagged and never used as a fact. A silent turn carries nothing and is
   not flagged (Nov 26 ruling): silence means re-ask, never guess.
 - A callback number is reported only when the receptionist read it back in the fixed form ("Let me confirm: ...,
-  at 602 555 0101."), the caller gave that number in a sentence of plain words only and did not reject it ("not 602
-  555 0101", "602 555 0101 stopped working"), and the caller then
-  only affirmed (AEGIS round 10). Anything else is no callback, and the summary says to check the recording. The
+  at 602 555 0101."), the caller gave that number in a sentence of plain words only, every caller sentence after it (in that
+  turn and later ones) is plain words too, so nothing can reject it ("602 555 0101. That phone doesn't work
+  anymore."; AEGIS round 13), and the caller then only affirmed (AEGIS round 10). Anything else is no callback, and the summary says to check the recording. The
   caller-side readings (rejections, correction cues, doubt after the number) still run as a second fence.
 - A name is reported only when the caller gave it AND the receptionist confirmed it: the caller says it after a
   lead-in ("I'm", "my name is", "soy", "me llamo", "mi nombre es"; "this is", "it's", "habla" only before a number
-  or a calling phrase) or as "First Last" opening a sentence before a number, and a trusted receptionist turn confirms
+  or a calling phrase) or as "First Last" opening a sentence before a number (a bare name only when the receptionist asked for
+  the caller's own name, or it is the answer to the opening greeting with nobody else spoken of before it; AEGIS
+  round 13), and a trusted receptionist turn confirms
   exactly that pair in the fixed form, right after the cue ("Let me confirm: Ana Reyes, at ...", "Confirmo: ...";
   AEGIS round 7). A pair nobody confirmed (a landlord, a business, a mother, a city) is never a
   name (AEGIS F3 round 3: word lists alone kept missing them). Never a pair holding a command, place, business or
@@ -292,17 +294,25 @@ def _said_911(agent_text: str, previous: Optional[str] = None) -> Optional[str]:
     """"urgent" when the receptionist told the caller to call 911: the whole trusted turn is exactly one of the
     instruction's fixed forms and the receptionist's turn before it ended a sentence. Anything said with it ("In an
     emergency. Call 911.", "We are not an emergency line. Call 911.") is not the instruction (AEGIS round 5).
-    Punctuation, quotes, an opening "¡" and digit spacing ("9 1 1") are formatting. When the turn before did not end a
+    Quotes, an opening "¡", inner punctuation and digit spacing ("9 1 1") are formatting; the final "." or "!" is not:
+    without it the turn may have been cut off, and with angle brackets in it words may have been set aside, so both
+    are "ambiguous" (CHECK NOW; AEGIS round 13). When the turn before did not end a
     sentence ("There's no need to" / "Call 911."), the two turns may be one sentence: "ambiguous", which raises
     CHECK NOW instead of URGENT (AEGIS round 8: neither reading is safe on its own). Otherwise None."""
     # every quote mark and the opening "¡" are formatting wherever they sit (AEGIS rounds 8-9: „…“, ‹…›, ¡"…!")
     text = _unmarked(agent_text)
     text = re.sub(r"(?<!\d)9[\s.\-‐-―−]?1[\s.\-‐-―−]?1(?!\d)", "911", text)   # "9 1 1", "9-1-1", "9–1–1"
-    if not re.search(r"[.!]$", text):
-        return None
+    ended = bool(re.search(r"[.!]$", text))
+    if not ended:
+        text += "."
     text = re.sub(r"[.!]+$", ".", re.sub(r"\s+", " ", text.replace(",", " "))).replace(" .", ".")
     if _SAID_911.fullmatch(text) is None:
         return None
+    # the fixed form with no end mark may have been cut off, and anything inside angle brackets was set aside:
+    # either way a person checks now (AEGIS round 13: "<no need to> call 911." read as URGENT; "Please hang up and
+    # dial 911 right now" with no end mark read as routine)
+    if not ended or "<" in agent_text or ">" in agent_text:
+        return "ambiguous"
     prev = None if previous is None else _unmarked(previous)
     if prev is not None and not re.search(r"(?<![.…])[.!?]\s*$", prev):
         return "ambiguous"
@@ -390,17 +400,21 @@ _PLAIN_WORDS = re.compile(
     r"(?:my|the|best|cell|phone|mobile|number|is|it'?s|it|you|can|reach|me|call|back|at|on|text|and|okay|ok|yes|"
     r"yeah|so|hi|hello|this|i'?m|i|am|my name|name|please|thanks|thank|no|wait|sorry|perd[oó]n|mi|n[uú]mero|es|"
     r"ll[aá]m(?:e|en)me|al|el|me|puede|pueden|llamar|llamarme|soy|habla|muy|bien|bueno|hola|s[ií]|y|gracias|por|favor|"
-    r"actually|mean|mejor|quiero|decir)",
+    r"actually|mean|mejor|quiero|decir|that'?s|right|correct|exactly|yep|yup|uh-?huh|correcto|exacto|as[ií]|eso|"
+    r"claro|much|very)",
     re.IGNORECASE)
 
 
 def _only_plainly_given(number: str, trusted: list[str], names: Optional[list[str]] = None) -> bool:
-    """Every trusted caller sentence that holds ``number`` holds nothing else but plain words, names and numbers."""
+    """Every trusted caller sentence from the first that holds ``number`` to the end of the call holds nothing else but
+    plain words, names and numbers. A sentence after the number ("That phone doesn't work anymore.", "That line got
+    shut off in May.") may reject it, in the same turn or a later one, so it must be plain too (AEGIS round 13: the
+    inverted default; a caller who describes the problem after giving the number gets "check the recording")."""
     seen = False
     for x in trusted:
         for sentence in re.split(r"[!?\n]|\.(?!\d)", _fold(x)):     # "602.555.0101" stays one number
             nums = ["+1" + "".join(m.groups()) for m in _NUM.finditer(sentence)]
-            if number not in nums:
+            if number not in nums and not seen:
                 continue
             seen = True
             rest = _NUM.sub(" ", sentence)
@@ -442,7 +456,22 @@ def _lead_prefix(m: re.Match) -> str:
 _THIRD_PARTY = re.compile(r"\b(?:my|his|her|their|our|mi|su|sus)\b(?!\s+(?:name|number|n[uú]mero|nombre|phone|cell|"
                           r"tel[eé]fono|celular|appointment|cita))|\b(?:landlord|tenant|owner|boss|wife|husband|"
                           r"mother|father|son|daughter|friend|neighbou?r|due[nñ]o|jefe|esposa|esposo)\b", re.IGNORECASE)
-_ASKS_OTHER = re.compile(r"\b(?:her|his|their|owner|whose|who|landlord|tenant|su|due[nñ]o|qui[eé]n)\b", re.IGNORECASE)
+_ASKS_OTHER = re.compile(r"\b(?:her|his|their|owner|whose|who|landlord|tenant|su|due[nñ]o|qui[eé]n|person|"
+                         r"someone|somebody|they|them|for whom|calling for|para qui[eé]n|persona|boss|wife|husband|mother|father|son|"
+                         r"daughter|friend|neighbou?r|mom|dad|jefe|esposa|esposo)\b|\byour\s+[^\W\d_]+'s\b",
+                         re.IGNORECASE)
+# someone other than the caller, spoken of before a bare name ("Calling for the guy upstairs. Mark Diaz, 602 ...")
+_OTHER_PERSON = re.compile(r"\b(?:he|she|they|him|them|his|hers|their|theirs|[eé]l|ella|ellos|ellas|guy|lady|man|woman|"
+                           r"gentleman|kid|kids|tenant|landlord|owner|boss|wife|husband|mother|father|mom|dad|son|"
+                           r"daughter|friend|neighbou?r|roommate|brother|sister|grandma|grandmother|grandpa|"
+                           r"grandfather|calling for|on behalf|de parte|due[nñ]o|jefe|esposa|esposo|mam[aá]|pap[aá]|"
+                           r"hijo|hija|amigo|amiga|vecino|vecina|inquilino|se[nñ]or|se[nñ]ora)\b", re.IGNORECASE)
+# a name the caller gave without "I'm" / "my name is" / "this is" counts only as the answer to a question for the
+# caller's own name (AEGIS round 13: "What's your son's name?", "the person you're calling for", a bare "Mark Diaz,
+# 602 ..." after "Calling for the guy upstairs." were all reported as the caller's)
+_ASKS_OWN = re.compile(r"\b(?:(?:what'?s|what is|may i (?:have|get)|can i (?:have|get)|could i (?:have|get)) your (?:full )?"
+                       r"name|who am i speaking (?:with|to)|(?:cu[aá]l es|me da|me puede dar) su nombre|"
+                       r"con qui[eé]n hablo)\b", re.IGNORECASE)
 
 
 def _names(trusted: list[str], confirmations: Optional[list[str]] = None) -> list[str]:
@@ -540,7 +569,14 @@ def summarize(transcript: dict, pack: Optional[dict] = None) -> Summary:
                 continue
             x = _fold(x)[:at_name.end()]   # what the caller said up to the name
             prev_agent = next((y for sp2, _, y in reversed(ordered[:i]) if sp2 == "agent" and y.strip()), "")
-            if _THIRD_PARTY.search(_fold(x)) or _ASKS_OTHER.search(_fold(prev_agent)):
+            full = _fold(ordered[i][2])
+            lead = any(m.group(1).casefold() == name.casefold() and m.start(1) == at_name.start()
+                       for m in list(_LEAD_NAME.finditer(full)) + list(_WEAK_LEAD_NAME.finditer(full)))
+            first_agent = next((y for sp2, _, y in ordered if sp2 == "agent" and y.strip()), "")
+            said_before = " ".join(_fold(y) for sp2, _, y in ordered[:i] if sp2 in ("caller", "unknown")) + " " + x
+            bare_ok = _ASKS_OWN.search(_fold(prev_agent)) or \
+                (prev_agent == first_agent and not _OTHER_PERSON.search(said_before))
+            if _THIRD_PARTY.search(_fold(x)) or _ASKS_OTHER.search(_ASKS_OWN.sub(" ", _fold(prev_agent))) or (not lead and not bare_ok):
                 name = None
                 notes.append("name_of_someone_else")
             break

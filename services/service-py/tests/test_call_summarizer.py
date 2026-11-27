@@ -1004,7 +1004,6 @@ def test_a_name_given_to_a_question_about_someone_else_is_not_the_callers(questi
 
 @pytest.mark.parametrize("prev, line", [("Okay. \U0001f64f", "Please hang up and dial 911 right now."),
                                         ("Okay。", "Please hang up and dial 911 right now."),
-                                        (None, "<b>Please hang up and dial 911 right now.</b>"),
                                         (None, "Please hang up and dial 9−1−1 right now.")])
 def test_more_formatting_around_the_instruction(prev, line):
     agent = ([prev] if prev else []) + [line]
@@ -1015,3 +1014,57 @@ def test_words_under_an_unreadable_label_after_the_read_back_are_never_a_yes():
     t = tr("I need a repair.", "My number is 602 555 0101.", agent=rb("602 555 0101"), yes=True)
     t["turns"].append({"speaker": "Caller 2", "confidence": 0.95, "text": "No wait, that's the wrong number."})
     assert cs.summarize(t, PACK).callback_number is None
+
+
+# ---- AEGIS round 13 -------------------------------------------------------------------------------------------------
+
+N13 = "602 555 0101"
+
+
+@pytest.mark.parametrize("line", ["<b>Please hang up and dial 911 right now.</b>", "<no need to> call 911.",
+                                  "Please hang up and dial 911 right now"])
+def test_angle_brackets_or_no_end_mark_on_the_instruction_raise_check_now_not_urgent(line):
+    s = cs.summarize(tr("There's a fire.", agent=["Thanks for calling.", line]), PACK)
+    assert s.urgency == "routine" and "possible_emergency" in s.notes and "911_instruction_after_unfinished_turn" in s.notes
+    s = cs.summarize(tr("I need a repair.", agent=["Thanks for calling.", line]), PACK)
+    assert s.urgency == "routine" and "possible_emergency" in s.notes and "No follow-up needed" not in s.text
+
+
+@pytest.mark.parametrize("caller", [(f"I need a repair. My cell is {N13}. That phone doesn't work anymore.",),
+                                    (f"I need a repair. My cell is {N13}. That line got shut off.",),
+                                    (f"I need a repair. My cell is {N13}.", "That line got shut off in May.")])
+def test_any_later_words_about_the_number_withhold_it_even_after_a_yes(caller):
+    s = cs.summarize(tr(*caller, agent=rb(N13), yes=True), PACK)
+    assert s.callback_number is None and "check the recording" in s.text
+
+
+def test_a_plain_number_read_back_and_affirmed_is_still_the_callback():
+    s = cs.summarize(tr("I need a repair.", f"My cell is {N13}. Thanks.", agent=rb(N13), yes=True), PACK)
+    assert s.callback_number == "+16025550101"
+
+
+@pytest.mark.parametrize("turns", [
+    [("caller", "I need to book a repair for my son's apartment."), ("agent", "What's your son's name and number?"),
+     ("caller", f"Mark Diaz, {N13}.")],
+    [("caller", "I'm calling for the guy upstairs, his sink is broken."),
+     ("agent", "What is the name and number of the person you're calling for?"), ("caller", f"Mark Diaz, {N13}.")],
+    [("caller", f"Calling for the guy upstairs. Mark Diaz, {N13}. He needs a repair.")],
+    [("caller", "My neighbor needs a repair."), ("agent", "Okay, name and number?"), ("caller", f"Mark Diaz, {N13}.")]])
+def test_a_bare_name_given_for_someone_else_is_not_the_callers(turns):
+    t = [{"speaker": "agent", "confidence": 0.98, "text": "Thanks for calling. How can I help?"}] + \
+        [{"speaker": sp, "confidence": 0.95, "text": x} for sp, x in turns] + \
+        [{"speaker": "agent", "confidence": 0.97, "text": f"Let me confirm: Mark Diaz, at {N13}."},
+         {"speaker": "caller", "confidence": 0.95, "text": "Yes."}]
+    assert cs.summarize({"transcript_id": "r13", "turns": t}, PACK).name is None
+
+
+@pytest.mark.parametrize("ask", ["What's your name and number?", "May I have your name, please?",
+                                 "Who am I speaking with?"])
+def test_a_bare_name_answering_a_question_for_the_callers_own_name_is_kept(ask):
+    t = [{"speaker": "agent", "confidence": 0.98, "text": "Thanks for calling. How can I help?"},
+         {"speaker": "caller", "confidence": 0.95, "text": "I need a repair."},
+         {"speaker": "agent", "confidence": 0.97, "text": ask},
+         {"speaker": "caller", "confidence": 0.95, "text": f"Mark Diaz, {N13}."},
+         {"speaker": "agent", "confidence": 0.97, "text": f"Let me confirm: Mark Diaz, at {N13}."},
+         {"speaker": "caller", "confidence": 0.95, "text": "Yes."}]
+    assert cs.summarize({"transcript_id": "r13", "turns": t}, PACK).name == "Mark Diaz"

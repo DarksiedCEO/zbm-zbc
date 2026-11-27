@@ -920,3 +920,14 @@ someone else ("my landlord ...") or the receptionist's turn before asked about s
 label is the caller. Emoji, symbols, HTML tags, the CJK full stop and the minus sign are formatting around the 911
 instruction and the turn before it. Mutation harness (whole stack): 160 mutants, 131 killed, 29 equivalent, each with
 its reason (most of the older caller-side rules are now second fences behind the read-back).
+
+AEGIS Inquisitor round 13 on 8ee0ba9d (RR-F3): **the plain-words rule covers the rest of the call.** Once the caller
+gives the number, every later caller sentence, in that turn and later ones, must be plain words too, so "My cell is
+602 555 0101. That phone doesn't work anymore." is never taken on a yes. Trade-off disclosed: a caller who describes
+the problem after giving the number ("602 555 0101. My sink is leaking.") also fails closed to "check the
+recording". A bare name ("Mark Diaz, 602 ...", no "I'm" / "my name is" / "this is") is the caller's only when the
+receptionist asked for the caller's own name ("What's your name?", "May I have your name?", "Who am I speaking
+with?") or it answers the opening greeting with nobody else spoken of before it; "your son's name", "the person
+you're calling for" and "Calling for the guy upstairs." withhold it. The 911 instruction with no final "." or "!"
+(possibly cut off) or with any angle bracket in the turn ("<no need to> call 911.", "<b>...</b>") is "ambiguous":
+CHECK NOW, never URGENT and never routine. Mutation harness (whole stack): 166 mutants, 137 killed, 29 equivalent, each with its reason.
