@@ -32,6 +32,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+from typing import Iterable, Optional
 
 CHANNELS = ("sms", "email")
 TRANSACTION_TYPES = ("purchase", "service_visit")
@@ -59,15 +60,12 @@ OPT_OUT_FLAGS = ("sms_opted_out", "do_not_contact", "unsubscribed", "email_opted
 TRANSACTION_FIELDS = {"type", "days_ago", "status", "id", "amount", "refunded"}
 TRANSACTION_OK_STATUSES = (None, "completed", "paid", "fulfilled", "closed")
 
-# The {link} slot takes only a review link in one of these exact forms (AEGIS round 2: any https host and path let
-# "/cash-for-reviews" or "https://." ride inside an approved template). The id is letters, digits, "_" or "-" only
-# and is also read for offer, gating, suggestion and steer-away words (separators read as spaces, and as nothing).
-_LINK_ID = r"[A-Za-z0-9_\-]{6,64}"
-_LINK_FORMS = (rf"https://g\.page/r/({_LINK_ID})/review", rf"https://search\.google\.com/local/writereview\?placeid=({_LINK_ID})",
-               r"https://reviews\.example\.com/(r)")          # the fixture pool's own link (example.com is reserved)
-_LINK = re.compile("(?:" + "|".join(f"(?:{f})" for f in _LINK_FORMS) + ")")
-_ID_WORDS = re.compile(r"cash|free|gift|discount|coupon|deal|prize|reward|win|paid|pay|happy|only|love|best|great|"
-                       r"star|unhappy|complain|call|text|first|instead|bonus|off|grat|regalo|premio", re.IGNORECASE)
+# The {link} slot takes only a link a person approved for the business (AEGIS round 3: any id inside an approved
+# Google form could spell "TenBucksNow" or "ca-sh"; a word list on the id cannot stop that). The caller passes the
+# client's approved review links (from the client record a person signed off); with none passed, only the fixture
+# pool's own link is approved (example.com is reserved and serves nothing).
+APPROVED_REVIEW_LINKS = frozenset({"https://reviews.example.com/r"})
+_LINK = re.compile(r"(https://[!-~]+)")         # any printable ASCII run; whether it is approved is checked exactly
 _PHONE = re.compile(r"\+1[2-9][0-9]{2}[2-9][0-9]{6}")         # ASCII digits only: [0-9], never \d
 _EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+")
 _TEMPLATES = tuple(re.compile(re.escape(t).replace(re.escape("{link}"), _LINK.pattern)) for t in APPROVED_TEMPLATES)
@@ -140,16 +138,13 @@ def _wording_reasons(text: str) -> set:
     return reasons
 
 
-def _approved(message: object, subject: object) -> bool:
+def _approved(message: object, subject: object, links: frozenset) -> bool:
     if not isinstance(message, str):
         return False
     for t in _TEMPLATES:
         m = t.fullmatch(message)
         if m:
-            link_id = next(g for g in m.groups() if g is not None)
-            if link_id != "r" and (_ID_WORDS.search(link_id) or _wording_reasons(re.sub(r"[_\-]", " ", link_id))):
-                return False
-            return subject is None or subject in APPROVED_SUBJECTS
+            return m.group(1) in links and (subject is None or subject in APPROVED_SUBJECTS)
     return False
 
 
@@ -165,7 +160,14 @@ def _transaction_ok(tx: object) -> bool:
     return isinstance(age, int) and not isinstance(age, bool) and 0 <= age <= MAX_TRANSACTION_AGE_DAYS
 
 
-def check(request: dict) -> Verdict:
+def check(request: dict, approved_links: Optional[Iterable[str]] = None) -> Verdict:
+    """Decide one request. ``approved_links`` are the business's approved review links (exact strings); without
+    them only the fixture link is approved, so a live request with a real link is refused until its link is passed."""
+    try:
+        links = APPROVED_REVIEW_LINKS if approved_links is None else frozenset(
+            x for x in approved_links if isinstance(x, str) and x.startswith("https://") and x.isascii())
+    except TypeError:
+        links = frozenset()
     if not isinstance(request, dict):
         return Verdict("unknown", "refuse", ("unreadable",))
     rid = request.get("request_id")
@@ -201,6 +203,6 @@ def check(request: dict) -> Verdict:
     reasons |= _wording_reasons(wording)
     if not _text(message).strip():
         reasons.add("unreadable")
-    elif not _approved(message, subject):
+    elif not _approved(message, subject, links):
         reasons.add("unapproved_wording")
     return Verdict(rid, "refuse" if reasons else "send", tuple(sorted(reasons)))

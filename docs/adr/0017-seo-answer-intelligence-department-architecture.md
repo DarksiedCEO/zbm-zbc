@@ -1330,7 +1330,7 @@ if not, list every reason. Not wired to any route, sender or Business Profile; n
 
 | Rule (FTC 16 CFR Part 465; Google's ban on selective solicitation; TCPA) | Refusal reason |
 |---|---|
-| The wording is an approved template (`APPROVED_TEMPLATES`, ZBM-written honest asks in English and Spanish) whose one link is an approved review-link form, and an email subject, if any, is approved | `unapproved_wording` |
+| The wording is an approved template (`APPROVED_TEMPLATES`, ZBM-written honest asks in English and Spanish) whose one link is a review link approved for the business (`approved_links`), and an email subject, if any, is approved | `unapproved_wording` |
 | A real customer after a real transaction (purchase or service visit, at most 365 days ago, not cancelled, refunded, voided or disputed) | `no_transaction` |
 | A text only to a readable +1 phone number, with SMS consent; email needs no SMS consent | `no_phone`, `no_sms_consent` |
 | Not opted out by any known flag (`opted_out` must be exactly `false`; `sms_opted_out`, `do_not_contact`, `unsubscribed`, `email_opted_out` must be `false` or absent) | `opted_out` |
@@ -1368,3 +1368,11 @@ The phone check used `\d`, so Arabic-Indic or full-width digits read as a phone:
 or unreadable `amount` is `no_transaction`. An email address the request carries must be readable (`no_email`); a
 missing one is not refused, because the pool's records carry none and the sender looks the address up (known limit).
 Regression tests: "AEGIS round 2".
+
+AEGIS round 3 (Nov 27 2026, Inquisitor on cd869c11): 2 High: the id inside an approved Google link form was free text
+screened by a word list, so "TenBucksNow", "satisfiedcustomers" or "ca-sh-x1" rode inside an approved template. Same
+lesson as round 1, so the same fix: the `{link}` slot now takes only a link a person approved for the business, matched
+exactly. `check(request, approved_links=...)` takes the client's approved review links from the signed-off client
+record; with none passed, only the fixture pool's link (`https://reviews.example.com/r`, a reserved domain) is
+approved, so a live request is refused until its business's link is approved. The link forms and the id word list are
+removed. Regression tests: "AEGIS round 3".

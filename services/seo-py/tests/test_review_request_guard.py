@@ -293,8 +293,10 @@ def test_the_link_slot_takes_only_an_approved_review_link_form(link):
 
 @pytest.mark.parametrize("link", ["https://g.page/r/CU9OsDPZVk0iEB0/review",
                                   "https://search.google.com/local/writereview?placeid=ChIJN1t_tDeuEmsRUsoyG83frY4"])
-def test_real_review_link_forms_send(link):
-    assert reasons(req(g.APPROVED_TEMPLATES[0].format(link=link))) == ()
+def test_a_real_review_link_sends_only_when_approved_for_the_business(link):
+    r = req(g.APPROVED_TEMPLATES[0].format(link=link))
+    assert "unapproved_wording" in g.check(r).reasons
+    assert g.check(r, approved_links=[link]).reasons == ()
 
 
 @pytest.mark.parametrize("phone", ["+1213555٠١٠١", "+1213555０１０１",
@@ -323,3 +325,24 @@ def test_a_positive_amount_is_a_transaction():
 @pytest.mark.parametrize("email", ["", "not-an-email", "ana@", "ana@example", "аna@example.com", 5])
 def test_an_email_address_that_is_carried_must_be_readable(email):
     assert "no_email" in reasons(req(channel="email", email=email))
+
+
+# ---------------------------------------------------------------- AEGIS round 3 (Inquisitor, cd869c11)
+@pytest.mark.parametrize("link_id", ["TenBucksNow", "FiftyDollarsBack", "getrefund", "myvoucher", "storecredit", "get10pct",
+                                     "5estrellas", "positivereview", "goodreviews", "satisfiedcustomers", "tellusprivately",
+                                     "dont-post-email-us", "ca-sh-x1", "fr-ee-x1", "ha-ppy-x1", "st-ar-x1"])
+def test_a_crafted_link_id_never_sends(link_id):
+    for form in ("https://g.page/r/{}/review", "https://search.google.com/local/writereview?placeid={}"):
+        assert "unapproved_wording" in reasons(req(g.APPROVED_TEMPLATES[1].format(link=form.format(link_id))))
+
+
+def test_an_approved_link_list_is_matched_exactly():
+    good = "https://g.page/r/CU9OsDPZVk0iEB0/review"
+    for link in (good + "/", good.upper(), good + "?x=1", "https://g.page/r/CU9OsDPZVk0iEB1/review"):
+        assert "unapproved_wording" in g.check(req(g.APPROVED_TEMPLATES[1].format(link=link)), approved_links=[good]).reasons
+
+
+@pytest.mark.parametrize("links", [5, [None, 7], ["http://g.page/r/x/review"], "https://reviews.example.com/r"])
+def test_an_unreadable_approved_link_list_approves_nothing_unsafe(links):
+    v = g.check(req(g.APPROVED_TEMPLATES[1].format(link="https://g.page/r/x/review")), approved_links=links)
+    assert v.decision == "refuse"
