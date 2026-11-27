@@ -1473,3 +1473,7 @@ a state and a ZIP, and a website that is text; an empty listing status reads as 
 that cannot be read refuses with ValueError. **The inverted default:** a listing with the record's house number, unit
 and city whose street words still differ is `address_needs_review` (a person checks), never `correct` and never
 `wrong_address` on a guess.
+
+AEGIS round 4 for SEO-L4 (Nov 27 2026, Inquisitor on 5c37e1d1, shared with SEO-L5 round 5): the SEO-L5 round-5 key
+fixes apply here: "100A S St" is never "100A South St" (`address_needs_review`, never `correct`), "1 Pier Ave" is a
+street, "Ste 1-10" is never "Ste 110" (`wrong_address`), and "Mtn View" is "Mountain View".

@@ -271,3 +271,24 @@ def test_round_4_formatting_is_correct(kw):
     if "name" in kw:
         rec["name"] = "J.R. Plumbing"
     assert ca.audit(_biz(rec, dict(_LIST, **kw)))[0].verdict == "correct"
+
+
+# ---------------------------------------------------------------- AEGIS round 4 (Inquisitor, 5c37e1d1)
+def test_a_lettered_street_after_a_lettered_number_is_never_correct():
+    rec = dict(_REC, street="100A South St")
+    assert ca.audit(_biz(rec, dict(_LIST, street="100A S St")))[0].verdict == "address_needs_review"
+
+
+def test_a_street_named_like_a_unit_is_formatting():
+    rec = dict(_REC, street="1 Pier Avenue")
+    assert ca.audit(_biz(rec, dict(_LIST, street="1 Pier Ave")))[0].verdict == "correct"
+
+
+def test_a_hyphenated_unit_is_another_unit():
+    rec = dict(_REC, street="12 Main St Ste 110")
+    assert ca.audit(_biz(rec, dict(_LIST, street="12 Main St Ste 1-10")))[0].verdict == "wrong_address"
+
+
+def test_a_city_abbreviation_is_formatting():
+    rec = dict(_REC, city="Mountain View", state="CA", zip="94041")
+    assert ca.audit(_biz(rec, dict(_LIST, city="Mtn View", state="CA", zip="94041")))[0].verdict == "correct"
