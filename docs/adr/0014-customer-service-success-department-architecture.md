@@ -581,17 +581,28 @@ review queue (who sees `unrecognised_reply`, how fast) is wiring, not built. Reg
 ## Amendment — RR-F2 missed-call text-back (Nov 26 2026; MVP spec v0.1, front-desk team)
 
 `services/service-py/src/textback.py`, one job: for each missed call decide `send_now` (with the 30 s deadline),
-`defer_until_0800` or `do_not_send` and the reason, and word the one informational text (a way to continue, and how
-to opt out; never an offer or a link). Not wired; nothing is sent from here.
+`defer_until_0800` (with the next 08:00 when a clock is known) or `do_not_send` and the reason, and word the one
+informational text (a way to continue, and how to opt out; never an offer, a link or a price). Not wired; nothing is
+sent from here.
 
 | Rule | Behaviour |
 |---|---|
 | Who can be texted | Mobile and VoIP only; a landline, a blocked or unreadable caller ID, or an unknown line type gets no text |
 | Consent | Asks the RR-F5 keeper with the normalised number (`opted_out(number)`), or uses the keeper's flag on the record; anything but a clear "not opted out" blocks (`consent_unknown`) |
-| One text per 5 minutes | Under 300 s since the last text: no text; exactly 300 s may text |
-| Quiet hours | The recipient's: 08:00 to before 21:00 local. Outside it the text waits for 08:00, when it is decided again. An unknown zone or a clock without a zone is never guessed (`unknown_local_time`) |
+| One text per 5 minutes | Under 300 s since the last text: no text; exactly 300 s may text. `TextBackGate` remembers every text it approved, so repeated calls through one gate never double-text even when the record says "never texted"; a record without the last-text field fails closed. The gate is in memory: a store that outlives a restart is the wiring's job |
+| Quiet hours | The recipient's: 08:00 to before 21:00 local. The zone must always be readable. With a real clock the clock decides, to the second, and a send-now needs its 30 s deadline to land before 21:00 (20:59:30 already waits); without one the record's HH:MM is used. An unknown zone or a clock with no UTC offset is never guessed (`unknown_local_time`). A deferral must be decided again at 08:00 by the caller (consent and the 5-minute rule are read then) |
+| The text | Always worded and always carries STOP (ALTO in Spanish). A business name with a link, offer, price or control character, or a callback number that is not a North American number, is left out rather than sent |
 
 Certification: `services/service-py/tests/test_textback.py` runs the shared MVP pool (F2, 300 missed calls per seed,
 boundaries at 07:59 / 08:00 / 20:59 / 21:00 and 299 / 300 s) for the three DEV seeds and three more: every action,
-deadline and message class matches the planted key. A grader self-test proves one wrong text is noticed. 10 of 10
-planted mutants killed.
+deadline and message class matches the planted key. Two seeds are graded again on the clock path (each record's
+local time turned into a real clock in its zone) with the reason and the text checked too. A grader self-test proves
+one wrong text is noticed.
+
+AEGIS round 1 (Nov 26 2026, Inquisitor on 81e0dc7f): High: a record's HH:MM stood in for an unreadable zone and beat
+the real clock; High: the 5-minute rule rested only on the record (three calls, three texts). Also: 20:59:59 plus the
+30 s deadline landed after 21:00; a business name could carry an offer or a link and a send could carry no text; a
+tzinfo with no offset was read in the server's zone; the certification never graded the clock path, the reason or
+the text. All fixed as above with regression tests ("AEGIS round 1" section of the test file). The earlier "10 of 10
+mutants" line is withdrawn here: mutation results now come from `services/service-py/devtools/frontdesk_mutants.py`
+(RR-F3 commit), which anyone can rerun.

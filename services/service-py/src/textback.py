@@ -5,20 +5,30 @@ not text at all, and word the one informational text. Deterministic; no LLM; not
 
 Rules (spec v0.1, the Nov 26 spec-freeze rulings, TCPA practice):
 - Never text a landline, a blocked or unreadable caller ID, or a number the consent keeper (RR-F5) blocks.
-- One text per number per 5 minutes: a text within the last 300 s means no new one (exactly 300 s may text).
-- Quiet hours are the RECIPIENT's: texting is allowed from 08:00 up to, not including, 21:00 in the caller's own time
-  zone. Outside that the text waits until the next 08:00 there. An unknown time zone is never guessed: no text, and
-  the reason says why. A deferred text is decided again at 08:00: consent and the 5-minute rule are read then.
-- The text is informational only (a way to continue the call), never marketing, and always says how to opt out.
+- One text per number per 5 minutes: a text within the last 300 s means no new one (exactly 300 s may text). The
+  record's own ``seconds_since_last_text_to_number`` is one source; ``TextBackGate`` also remembers every text it
+  approved, so repeated calls through one gate can never double-text even when the record says "never texted".
+  A record without that field at all fails closed.
+- Quiet hours are the RECIPIENT's: texting is allowed from 08:00 up to, not including, 21:00 in the caller's own
+  zone. The zone must always be readable. With a real clock (``now``, an aware time) the clock decides, in that
+  zone, to the second, and a send-now needs its whole 30 s deadline to land before 21:00. Without a clock the
+  record's ``recipient_local_time`` (HH:MM) is used. An unknown zone or a clock with no UTC offset is never guessed.
+  Outside the window the decision is ``defer_until_0800`` with the next 08:00 when the clock is known; the caller
+  must ask again then (consent and the 5-minute rule are read at that moment, not now).
+- The text is informational only (a way to continue the call), never marketing, and always says how to opt out. It
+  is always worded; a business name with a link, an offer, a price or control characters is left out, and a callback
+  number that is not a North American number is left out.
 - A send-now decision must reach the caller within 30 s (the bar); the deadline travels with the decision.
-- Anything this module cannot read (line type, consent state, local time) fails closed: no text, with the reason.
+- Anything this module cannot read (line type, consent state, zone, local time, last-text time) fails closed: no
+  text, with the reason.
 """
 
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Callable, Optional
 
 import channels
@@ -28,6 +38,9 @@ REPEAT_WINDOW_SECONDS = 300
 SEND_DEADLINE_SECONDS = 30
 TEXTABLE_LINES = ("mobile", "voip")
 _HHMM = re.compile(r"([01]\d|2[0-3]):([0-5]\d)")
+_PROMO = re.compile(r"https?://|www\.|\.[a-z]{2,}/|%|\$|\b(?:off|free|deal|sale|offer|discount|promo|coupon|win|"
+                    r"gratis|descuento|oferta|promoci[oó]n)\b", re.IGNORECASE)
+_SAFE_NAME = re.compile(r"[\w&'.,\- ()]{1,40}")
 
 
 @dataclass(frozen=True)
@@ -37,41 +50,65 @@ class TextBackDecision:
     reason: str                        # why (stable code)
     deadline_seconds: Optional[int]    # SEND_DEADLINE_SECONDS on send_now, else None
     message_class: str = "informational"
-    text: Optional[str] = None         # the one text, when there is one to send (now or at 08:00)
+    text: Optional[str] = None         # the one text, whenever there is one to send (now or at 08:00)
+    not_before: Optional[datetime] = None   # the next 08:00 in the recipient's zone, when deferring with a clock
 
 
-def message(business_name: str, callback_number: str, spanish: bool = False) -> str:
-    """The only text F2 ever sends: informational, a way to continue, and how to opt out. No offer, no link."""
-    if spanish:
-        return (f"{business_name}: perdimos su llamada. Responda a este mensaje o llamenos al {callback_number}. "
-                "Responda ALTO para no recibir mas mensajes.")
-    return (f"{business_name}: sorry we missed your call. Reply here or call us back at {callback_number}. "
-            "Reply STOP to opt out.")
-
-
-def _local_minutes(call: dict, now: Optional[datetime]) -> Optional[int]:
-    raw = call.get("recipient_local_time")
-    if raw is not None:
-        m = _HHMM.fullmatch(raw) if isinstance(raw, str) else None
-        return int(m.group(1)) * 60 + int(m.group(2)) if m else None
-    z = channels.zone(call.get("recipient_time_zone"))
-    if z is None or now is None or now.tzinfo is None:
+def _clean_name(name: object) -> Optional[str]:
+    if not isinstance(name, str) or any(unicodedata.category(c)[0] == "C" for c in name):
+        return None              # control or format characters (a line break, a zero-width space): left out
+    name = " ".join(name.split())
+    if not name or not _SAFE_NAME.fullmatch(name) or _PROMO.search(name):
         return None
-    local = now.astimezone(z)
-    return local.hour * 60 + local.minute
+    return name
+
+
+def message(business_name: Optional[str] = None, callback_number: Optional[str] = None,
+            spanish: bool = False) -> str:
+    """The only text F2 ever sends: informational, a way to continue, and how to opt out. No offer, no link, no
+    price. A name or number that fails its check is left out rather than sent."""
+    name = _clean_name(business_name)
+    number = normalise_number(callback_number) if callback_number is not None else None
+    if spanish:
+        who = f"{name}: perdimos su llamada." if name else "Perdimos su llamada."
+        back = f"Responda a este mensaje o llamenos al {number}." if number else "Responda a este mensaje."
+        return f"{who} {back} Responda ALTO para no recibir mas mensajes."
+    who = f"{name}: sorry we missed your call." if name else "Sorry we missed your call."
+    back = f"Reply here or call us back at {number}." if number else "Reply here and we will call you back."
+    return f"{who} {back} Reply STOP to opt out."
+
+
+def _local(call: dict, now: Optional[datetime]) -> tuple[Optional[int], Optional[datetime]]:
+    """(seconds after local midnight, the local datetime when a clock is known) or (None, None)."""
+    z = channels.zone(call.get("recipient_time_zone"))
+    if z is None:
+        return None, None
+    if now is not None:
+        if not isinstance(now, datetime) or now.utcoffset() is None:
+            return None, None
+        local = now.astimezone(z)
+        return local.hour * 3600 + local.minute * 60 + local.second, local
+    raw = call.get("recipient_local_time")
+    m = _HHMM.fullmatch(raw) if isinstance(raw, str) else None
+    return (int(m.group(1)) * 3600 + int(m.group(2)) * 60, None) if m else (None, None)
+
+
+def _next_0800(local: datetime) -> datetime:
+    target = local.replace(hour=channels.QUIET_START_HOUR, minute=0, second=0, microsecond=0)
+    return target if local < target else target + timedelta(days=1)
 
 
 def decide(call: dict, now: Optional[datetime] = None,
            opted_out: Optional[Callable[[str], Optional[bool]]] = None,
            business_name: Optional[str] = None, callback_number: Optional[str] = None,
-           spanish: bool = False) -> TextBackDecision:
+           spanish: bool = False, seconds_since_gate: Optional[int] = None) -> TextBackDecision:
     """Decide one missed call.
 
-    ``opted_out(number)`` asks the consent keeper (True blocks, False allows, None = unknown, which blocks). Without
-    it the record's own ``number_opted_out`` flag (the keeper's answer, carried on the record) is used; when neither
-    gives a boolean, no text goes out.
+    ``opted_out(number)`` asks the consent keeper (True blocks, False allows, anything else blocks). Without it the
+    record's own ``number_opted_out`` flag (the keeper's answer, carried on the record) is used. ``seconds_since_gate``
+    is the gate's own memory of the last text to this number (``TextBackGate`` passes it).
     """
-    mcid = call.get("missed_call_id")
+    mcid = call.get("missed_call_id") if isinstance(call, dict) else None
     if not isinstance(mcid, str) or not mcid:
         raise ValueError("missed_call_id is required")
 
@@ -91,16 +128,43 @@ def decide(call: dict, now: Optional[datetime] = None,
     blocked = opted_out(number) if opted_out is not None else call.get("number_opted_out")
     if blocked is not False:
         return no("opted_out" if blocked is True else "consent_unknown")
-    since = call.get("seconds_since_last_text_to_number")
-    if since is not None:
+    if "seconds_since_last_text_to_number" not in call:
+        return no("unreadable_last_text_time")
+    for since in (call.get("seconds_since_last_text_to_number"), seconds_since_gate):
+        if since is None:
+            continue
         if not isinstance(since, int) or isinstance(since, bool) or since < 0:
             return no("unreadable_last_text_time")
         if since < REPEAT_WINDOW_SECONDS:
             return no("texted_within_5_minutes")
-    minutes = _local_minutes(call, now)
-    if minutes is None:
+    seconds, local = _local(call, now)
+    if seconds is None:
         return no("unknown_local_time")
-    text = message(business_name, callback_number, spanish) if business_name and callback_number else None
-    if channels.QUIET_START_HOUR * 60 <= minutes < channels.QUIET_END_HOUR * 60:
+    text = message(business_name, callback_number, spanish)
+    start = channels.QUIET_START_HOUR * 3600
+    # with a clock, the whole 30 s deadline must land before 21:00; the minute-only record time is decided as given
+    end = channels.QUIET_END_HOUR * 3600 - (SEND_DEADLINE_SECONDS if local is not None else 0)
+    if start <= seconds < end:
         return TextBackDecision(mcid, "send_now", "ok", SEND_DEADLINE_SECONDS, text=text)
-    return TextBackDecision(mcid, "defer_until_0800", "quiet_hours", None, text=text)
+    return TextBackDecision(mcid, "defer_until_0800", "quiet_hours", None, text=text,
+                            not_before=_next_0800(local) if local is not None else None)
+
+
+class TextBackGate:
+    """Remembers every text it approved (number -> time) so the 5-minute rule holds across calls, even when the
+    record says the number was never texted. In-memory, single process; the store that outlives a restart is the
+    wiring's job (not built)."""
+
+    def __init__(self) -> None:
+        self._last: dict[str, datetime] = {}
+
+    def decide(self, call: dict, now: datetime, **kw) -> TextBackDecision:
+        if not isinstance(now, datetime) or now.utcoffset() is None:
+            raise ValueError("the gate needs an aware clock")
+        number = normalise_number(call.get("caller_id")) if isinstance(call, dict) else None
+        last = self._last.get(number) if number else None
+        since = int((now - last).total_seconds()) if last else None
+        d = decide(call, now=now, seconds_since_gate=since, **kw)
+        if d.action == "send_now" and number:
+            self._last[number] = now
+        return d
