@@ -181,3 +181,10 @@ module), so it is byte-identical on every Python version and platform.
    sets, and the app-store and docs page shapes for the CI watch corpus.
 6. **Not wired into CI:** these tests run with the command above. Adding a CI step needs a `.github/workflows` change,
    which builders don't make.
+
+## Change log
+- **Nov 27 2026 — F3 consent question (Andre's ruling, option a).** Every F3 transcript that captures a callback
+  now has the receptionist's fixed consent question ("Is <number> the best number to call you back?" / "¿Es el
+  <number> el mejor número para devolverle la llamada?") and the caller's "Yes." / "Sí." after the read-back. The F3
+  oracle requires it for the callback. Answer keys are unchanged; the three dev-seed `f3_transcripts.jsonl` pins
+  were regenerated. Generator version string kept at v0.2 (no other pool changed).

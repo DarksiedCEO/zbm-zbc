@@ -29,8 +29,10 @@ Rules (spec v0.1, the Nov 26 spec-freeze rulings, ADR 0014):
   AEGIS round 8 asked whether an unreviewed reply should outlast new consent).
 - A state-changing event (opt-in, inbound text, carrier opt-out, reassignment, staff review) for a number that cannot be read, a
   non-object event, or a send_id used twice refuses the whole replay (``ValueError``): an opt-out is never dropped.
-  Numbers are read after NFKC with any script's digits, dash look-alikes and invisibles folded, so one person never
-  becomes two records. Client ids are system ids, not names: ASCII letters, digits, ".", "_" and "-", read with
+  Numbers are read after NFKC with any script's digits, dash look-alikes and the common invisibles (soft hyphen,
+  zero-width space and joiners, word joiner, byte-order mark) folded, so one person never becomes two records; any
+  other format character in a number (bidi isolates, tags, variation selectors ...) makes it unreadable, which for a
+  state-changing event refuses the whole replay (fails closed). Client ids are system ids, not names: ASCII letters, digits, ".", "_" and "-", read with
   outer spaces and case aside; any other id refuses the replay (AEGIS round 11), so one client is never two records
   and two different ids never merge.
 - Every ``replay`` is the whole history: no state carries over between calls.

@@ -482,8 +482,7 @@ digits, non-object events raising `AttributeError`, duplicate send ids, unfolded
 test-verification: no High; 7 untested rules (new consent after START after STOP; a restart word from a consenting
 number; exchange digit; trailing junk; empty client id; duplicate send id; allow evidence). 200 fresh seeds (722,282
 sends) gave 0 wrong decisions. All fixed as above (commit "RR-F5 round-1 fixes"), each with a regression test
-(`tests/test_consent_keeper.py`, "AEGIS round 1" section). Mutation by hand, not committed as an artifact: 10 of 11
-targeted mutants on the fixes killed; the survivor (the opt-in time guard) cannot change a sorted single replay. The
+(`tests/test_consent_keeper.py`, "AEGIS round 1" section). Mutation: see the RR-F3 amendment (`devtools/frontdesk_mutants.py`). The
 certification seeds are dev-style (all five are in the repo); the held-out draw stays with the reviewer lane.
 
 AEGIS round 2 (Nov 26 2026, Inquisitor on e5f545e0): the round-1 fixes held (0 sends after an opt-out for every
@@ -774,3 +773,280 @@ AEGIS Inquisitor round 7b on 6ad32849 (RR-F4): only plain types count inside a c
 `list` or `tuple` (no subclass), an id a plain `str` or `int`, the ring timeout a plain `int`; anything else is
 unreadable and fails closed (nobody rung, 30 s). A late answer is now logged (`answered_after_hang_up:<id>`) also
 when someone else answered live. The round-7 fuzz (40,000 cases) and urgency grid replay clean.
+
+out of the whisper. Regression tests: "AEGIS round 3".
+
+## Amendment — RR-F3 call summarizer (Nov 26 2026; MVP spec v0.1, front-desk team)
+
+`services/service-py/src/call_summarizer.py`, one job: turn one call transcript into a short summary for the owner:
+name, callback number, one need label, urgency and the next action. Not wired; deterministic; no LLM.
+
+| Rule | Behaviour |
+|---|---|
+| Nothing invented | Facts come only from the caller's turns that speech recognition trusts (confidence >= 0.6). The receptionist's trusted fixed confirmation line (with a name, or "at" and a number only) is checked against the callback when one is reported; a low-confidence turn or another wording is not checked (`confirmation_disagrees_with_caller`), never used as the source |
+| Low confidence | A spoken turn below 0.6 is flagged and never used; a silent turn is not flagged (Nov 26 ruling); a confidence that is not a finite number from 0 to 1 (NaN, infinity, text) counts as low; 0.6 itself is trusted (read as written, not as the binary float) |
+| Callback number | Reported only when a trusted receptionist turn is the fixed consent question (a whole-turn match after NFKC, any case, the 10-digit number in the forms `_NUM_TEXT` reads, such as 602 555 0101, (602) 555-0101 or 6025550101, with its spacing; a +1 prefix gives no callback) ("Is 602 555 0101 the best number to call you back?" or the fixed Spanish form) for a number the caller gave in a trusted turn, the very next spoken turn is the caller's trusted yes, every later caller turn is a yes, and after it the receptionist says only a closing line from the fixed list (`_CLOSING`, any case) or one of the two fixed 911 lines exactly once read after NFKC (Andre's ruling, Nov 27 2026, option (a); AEGIS F3 rounds 16-23). Anything else is no callback (`callback_not_confirmed`) and the summary says to check the recording. The caller-side readings (rejections, correction cues, doubt words) still decide `ambiguous_number`, `rejected_number_not_used` and `caller_doubted_this_number_earlier` |
+| Names | Reported only when the receptionist confirmed exactly that pair in the fixed form ("Let me confirm: Ana Reyes, ...", no question, nothing taken back) and the caller then only affirmed; read only where the caller gives their own: after "I'm", "I am", "my name is", "soy", "me llamo", "mi nombre es"; after "this is", "it's", "habla" only before a number or a calling phrase; or as "First Last" opening a sentence before a number (not after "my ..." or a question in the same turn, not followed by "she / he / they ...", not inside reported speech). Never a city, landlord or business pair, a command, or a pair with a health word. Exactly one, or none (AEGIS rounds 3, 7-10) |
+| No health detail | The summary is built only from the name, the number, a fixed label and the urgency, never the caller's words. The health lexicon matches whole words and stems ("archive" is not "hiv"); a name with a health word is dropped and the summary is still returned (never an exception) |
+| Urgency | Emergency only when a trusted receptionist turn gave the 911 instruction in one of its fixed forms (AEGIS round 3); any caller wording that might describe one sets `possible_emergency` ("CHECK NOW", call back now) on purpose too broadly. Before round 3: emergency also when the caller described someone not breathing, collapsed, passed out or having a heart attack, gas, smoke or fire, a weapon, or someone threatening people; equipment and chores ("fire alarm inspection", "smoke detector", "caulk gun", "bleeding the radiator") are not. The next action claims the 911 instruction only when it was given |
+| Need | One label: the pack's own category (its booking category for a booking; `treatment_question` for a health matter; `pricing_question` for a service the pack prices, `pricing` for one it does not) or a fixed front-desk label (emergency, complaint, existing_customer, reschedule, hours, vendor, wrong_number, spam_call, long_silence); `unclear` when nothing matches, never a guess |
+
+Certification: `services/service-py/tests/test_call_summarizer.py` runs the shared MVP pool (F3, 300 transcripts per
+seed, 1,200 key facts) for the three DEV seeds and three more: every name, number, need and urgency matches the key,
+the low-confidence and correction flags match, and no forbidden health term reaches any summary. One disclosed
+equivalence: the pool labels a booking reached through an AI question or a prompt injection `booking`, a plain one
+with the pack's booking category; the summarizer always uses the pack's category. **Known limit:** the need rules
+are keyword rules written against the call bank's own wording (English and Spanish); their accuracy on real callers'
+wording is not measured yet. Name, number, urgency, the low-confidence rule and the health guard do not depend on
+that wording.
+
+### Mutation check for the front-desk agents (RR-F5, F2, F4, F3)
+
+`cd services/service-py && python3 devtools/frontdesk_mutants.py [agent]` plants single defects (the count is in the latest
+round note below), each in a fresh copy of `src/` and `tests/` (the checkout is never edited), and runs that agent's
+test file. A mutant whose text no longer exists fails the run (`NOT_APPLIED`), so the list cannot rot. A kill counts
+only when pytest exits 1 (tests ran and failed); any other exit code is `RUN_ERROR` and fails the run (AEGIS F3
+round 1: a mutant that breaks the import is not a test that caught it). Every survivor is listed in the harness as
+equivalent, with the reason (another rule that enforces the same thing and cannot be told apart from outside); the
+current counts are in the latest RR-F3 round note.
+The summarizer's 0.6 confidence line is the exact fraction 3/5: this service allows no float literals. This replaces the hand-run mutant counts in the RR-F5, F2 and F4 commit messages.
+
+AEGIS round 1 on RR-F3 (Nov 26 2026, Inquisitor on 0aaf8411): 6 High, all fixed as above. Any capitalised pair was
+read as a name (cities, "Dear John", a business, a landlord, "Approve Refund", a planted "Owner Must Wire Funds"); a
+rejected number ("not 602 ...") or a second number with no correction became the callback; NaN confidence dropped a
+spoken turn without flagging it; "hiv" matched inside "archive" and a health word in a referral raised instead of
+returning a summary; Crohn's and multiple sclerosis were missing from the lexicon; six emergencies were missed and
+seven chores or 911-in-a-number cases were called emergencies. Review: odd pack shapes and a non-object transcript
+raised the wrong error; the 0.6 boundary and the name stop-words had no killing test (and 0.6 written as a float
+read as 0.5999... and was not trusted: fixed by reading the written value); a mutant that broke the run counted as
+killed. Regression tests: "AEGIS round 1" section. Every reviewer repro replays clean.
+
+AEGIS round 2 on RR-F3 (Nov 26 2026, Inquisitor on 585ea682): the round-1 repros held; 8 new High, all fixed. Names:
+"It's Christmas Eve", "This is Long Beach", "Desert Bakery, 602 ..." were read as names; weak lead-ins ("this is",
+"it's", "habla") now need the name followed straight by a number or a calling phrase, and the non-name word list
+covers places, businesses, days, holidays and phone words. Numbers: "don't call 602 ...", "never use", "... is not my
+number anymore", "... that's disconnected" are now rejections (before or after the number). 911: a disclaimer,
+negation or question ("If this is ever an emergency, call 911", "No need to call 911", "Did you call 911?") is no
+longer the instruction; only a sentence with the instruction and no condition is. Emergencies are now read only in
+context (a fire burning, smoke filling, someone holding a weapon, someone fainted or having a seizure or stroke right
+now, gas leaking or smelt): "in flames", "fainted", "smell natural gas" are urgent, and "furnace won't fire up",
+"sharpen my knife", "gun safe", "shooting a video", "smoke-free", "fire my plumber", "had a seizure last month" are
+routine. Health: palsy, syndrome, pregnancy ("expecting twins"), diagnoses, chronic and psychiatric terms were added;
+stems that hit plumbing words ("derrame" alone, "diagnosed a cracked pipe", "depressurizing") were narrowed; a pack
+category that names a condition is reworded in the text. A huge integer confidence (10**400) raised OverflowError;
+it now counts as low. Review: "sorry" anywhere between two numbers read as a correction; a cue now counts only in the
+30 characters before the next number. **Known limit (unchanged):** these readings are wording rules on free speech;
+they are certified on the pool and on every reviewer paraphrase, not on real callers. The summary is advisory to the
+owner; nothing is sent or decided from it. Regression tests: "AEGIS round 2" section.
+
+AEGIS round 3 on RR-F3 (Nov 26 2026, Inquisitor on c184534b): the round-1 and round-2 repros held; 7 High, and the
+reviewer's note that another round of word lists would just bring a round 4. So three readings changed shape rather
+than grew. **Names** are reported only when the receptionist confirmed them (every name in the pool is confirmed);
+a landlord, a business, a mother or a city that nobody confirmed is never a name, and "her name's" is no longer a
+lead-in. **Urgency** is "emergency" only when a trusted receptionist turn (confidence >= 0.6) gave the 911 instruction
+in one of its fixed sentence forms; disclaimers ("For emergencies, please call 911"), negations and low-confidence
+turns are not the instruction. The receptionist decides an emergency on the call; the summary reports what it did.
+Caller wording that might describe an emergency now sets `possible_emergency` through a deliberately broad net
+(fire, smoke, gas, smell, sparks, weapons, blood, breathing, fainting, CO alarm ... English and Spanish): the text
+starts "CHECK NOW" and the owner is told to call back now. It over-flags ("gun safe", "armed forces discount") by
+design and never claims a 911 instruction. **Health** words with ordinary meanings ("due date", "kidney-shaped",
+"two-stroke", "chronic leak", "Dutch elm disease") count as a health need only as whole words right after a personal
+word ("I have depression", "my due date"); a pack category the shipped packs do not use is spoken as "appointment
+request". Also: apostrophe look-alikes are unified before reading; `[Silence]` in any case is silence; the greeting
+check is a linear word scan (the nested pattern backtracked for over 30 s on 20 "hello?"s). Review left open: digits
+the caller said that are not their callback (a landlord's number, an account number) can still be the callback.
+Regression tests: "AEGIS round 3".
+
+AEGIS round 4 on RR-F3 (Nov 27 2026, Inquisitor on 8319be2b): every earlier repro held under the new design; 3 High,
+all fixed. The CHECK NOW net missed falls, poisoning, break-ins, suicidal statements, stabbings, labour, shocks and
+"wildfire": it now covers them (English and Spanish), and "fire" matches inside a word. Any turn whose speaker was not
+exactly "caller" was read as the receptionist, so "Call 911!" from an unknown speaker made the call urgent: only
+"agent" turns are the receptionist now; other speakers are ignored and noted. A negated need word ("No complaints",
+"I'm not a vendor") set the need: a need word right after a negation no longer counts. Review, fixed: more rejected
+numbers ("don't ever call", "got disconnected", "is my old number", "No me llames al", "Ya no uso el"); a receptionist
+mention ("I'll note your landlord Ana Reyes") is no longer a confirmation, only a confirming turn is; a condition
+anywhere in the receptionist's turn ("If anyone is hurt, don't wait. Call 911.") means no instruction; the
+disagreement note reads only trusted receptionist turns; a Spanish gas pattern no longer scans to the end of the text.
+**For Andre:** the CHECK NOW net is still a word list and will always miss some wording; it can only add a flag, and
+urgency itself comes from the receptionist's instruction. The summary is advisory to the owner; nothing is decided or
+sent from it. Regression tests: "AEGIS round 4".
+
+AEGIS Inquisitor round 5 on 4c896304 (RR-F3): (1) a call whose spoken caller turns were all below 0.6 is no longer
+read as `long_silence` / "No follow-up needed": it is `unclear` and the action says part of the call could not be
+heard clearly and to review the recording; any flagged call without a usable outcome says the same. The CHECK NOW net
+now also reads low-confidence words (never as facts, only as a warning). (2) The 911 instruction counts only when the
+whole trusted receptionist turn is one of its fixed forms; anything said with it ("In an emergency. Call 911.", "When
+in doubt, call 911", "We are not an emergency line. Call 911.") is not the instruction; the separate condition word
+list is gone. Trade-off: a real instruction said together with other words ("Okay. Please hang up and dial 911.")
+is not read as URGENT; the caller's own emergency words still raise CHECK NOW. Review items fixed: a correction we
+cannot complete ("0110, no wait, 0101") is `ambiguous_number`; a possessive ("I'm Ana Reyes's husband") is never a
+name. Disclosed: the CHECK NOW net missed 38 of 55 emergency phrasings in that round's corpus; it is a net, not a
+detector. Mutation harness (all four agents, on the stack at this commit): 125 mutants, 119 killed, 6 equivalent.
+
+AEGIS Inquisitor round 6 on bd1b9be2 (RR-F3): the 911 instruction must end a sentence and follow a receptionist turn
+that ended one, so a sentence split across two turns ("There's no need to" / "call 911.") is not the instruction;
+commas, repeated end marks and digit spacing ("9 1 1") are formatting. A correction cue (now also "wait", "hold on",
+"no,", "ending in", "the last four", an ellipsis) followed by digits or spelled digits within the next 40 characters
+makes the number ambiguous, and the summary says to check the recording. "Yes", "Okay" and "Sí" are answers, not
+greetings, so a caller who only answered is never "nothing said". A confirmation cue that is refused ("I can't confirm
+anything for Ana Reyes") confirms nothing; a possessive split by the recogniser ("Reyes 's") is not a name. A
+"Caller" label in any case is the caller (the receptionist label stays exact); words inside a silence marker are
+speech. Spam and wrong-number words lose to a real need, and a caller who left a number is always called back.
+Mutation harness (whole stack at this commit): 136 mutants, 129 killed, 7 equivalent (each with its reason).
+
+AEGIS Inquisitor round 7 on 26f1be81 (RR-F3): the inverted default reaches the summary too. "No follow-up needed"
+is said only for a call where nothing was spoken; a spoken call that reads as spam or a wrong number says a person
+should confirm before closing it. After the caller's last number, any no / not / wrong / oops / sorry / digit makes
+the number ambiguous and the summary says to check the recording (fails closed: "602 555 0110. Sorry about the
+noise." loses its number). A name counts only when the receptionist confirmed exactly that pair in the fixed form
+right after the cue ("Let me confirm: Ana Reyes, at ..."); a refusal in any wording, or a third party named in the
+confirmation, confirms nothing. The 911 instruction is read with opening marks and quotes set aside; an empty
+receptionist turn is skipped; a turn before it that ends in an ellipsis did not end a sentence, but a 911 turn that
+opens with a capital starts one. Mutation harness (whole stack): 137 mutants, 125 killed, 12 equivalent, each with
+its reason.
+
+AEGIS Inquisitor round 8 on 58a42399 (RR-F3): a fixed 911 instruction after a receptionist turn that did not end a
+sentence ("There's no need to" / "Call 911.", or "Thanks for calling Desert Plumbing" with no end mark) is now
+**ambiguous**: it raises CHECK NOW ("call back now"), not URGENT, because neither reading is safe on its own (round 7
+counted the unpunctuated greeting case as a miss; round 8 counted the capitalised split as a false alarm; this is the
+middle, disclosed for Andre). Opening and closing marks in any order are formatting. Words under a speaker label it
+cannot read are never "nothing said" (the summary says to review the recording) and feed the CHECK NOW net. Any doubt
+after the last accepted number, even around a later rejected one, or that number rejected anywhere, makes it
+ambiguous. "Put it under" / "a nombre de" name whoever the booking is for, so they are no longer the caller's own
+name; a confirmation asked as a question confirms nothing; a caller who says no after the confirmation has no name
+reported (`name_denied`). Mutation harness (whole stack): 142 mutants, 128 killed, 14 equivalent with reasons.
+
+AEGIS Inquisitor round 9 on 64e53e41 (RR-F3): every quote mark (any Unicode opening or closing quote) and "¡" are
+formatting wherever they sit, and any dash between the digits of 911; any negation in a number's own sentence
+("Don't call my work number, 602 ...") rejects it, a correction cue set aside; a confirmation turn holding a question
+mark confirms nothing; after the confirmation the caller may only affirm (yes, that's right, correct, sí ...):
+anything else withholds the name; a weak or bare name after "my ..." or a question in the same turn, or followed by
+"she / he / they ..." in its sentence, is someone the caller spoke of, never their own; "the name is" is no longer a
+lead-in. Trade-off disclosed: "602 555 0101 is not my number anymore, it's 602 555 0202" now fails closed (no number).
+Mutation harness, summarizer: 55 mutants, 46 killed, 9 equivalent with reasons.
+
+AEGIS Inquisitor round 10 on 6cf8fa13 (RR-F3): **the inverted default reaches the callback number.** A callback is
+reported only after the receptionist's fixed read-back of a number the caller gave (and did not reject) and the
+caller's affirmation; otherwise there is no callback and the summary says to check the recording. The shared pool
+always reads back and the caller says yes, so certification is unchanged. A name now also needs that affirmation (no
+reply is not a yes), and a read-back that holds a question or takes itself back ("Actually no, I misheard") confirms
+nothing. Quote marks are set aside on the receptionist's previous turn too, so a finished quoted sentence is finished.
+A strong lead-in inside reported speech ("A lady said I'm ...") is not the caller's name. Mutation harness (whole stack):
+153 mutants, 132 killed, 21 equivalent with reasons. The Names and Callback rows
+above now say what the code does.
+
+AEGIS Inquisitor round 11 on 00e101c3 (RR-F3): the read-back and the name confirmation must each be the WHOLE turn
+in the fixed form ("Let me confirm: Ana Reyes, at 602 555 0101." / "Let me confirm: at 602 555 0101."); anything else
+in the turn ("you can't take calls at ...", "... for your landlord") is not a read-back. A low-confidence "Yes." affirms
+nothing. An affirmed read-back never overrides a caller-side doubt (an uncompletable correction or doubt after the
+number): no callback, check the recording. A strong lead-in counts only when its sentence opens with it (greetings
+and fillers aside), so reported speech in any wording ("A lady goes I'm ...") is not a name, and the name must end
+there ("I'm Ana Reyes daughter" is not a name). Quote marks, brackets, emphasis marks and invisible format characters
+are formatting around the 911 instruction and the turn before it. Mutation harness (whole stack): 156 mutants,
+134 killed, 22 equivalent with reasons.
+
+AEGIS Inquisitor round 12 on 5e05de29 (RR-F3): **the inverted default reaches rejections.** A read-back is accepted
+only for a number the caller gave in a sentence that holds nothing but plain words (how a number is given, the
+caller's own name, greetings, correction cues), so "602 555 0101 stopped working", "Stop calling ...", "Avoid ..."
+and "ya lo cancelé" are never taken on a yes. Trade-off disclosed: "I need my sink fixed, 602 555 0101" also fails
+closed to "check the recording". A name is never the caller's when the caller's turn up to the name speaks of
+someone else ("my landlord ...") or the receptionist's turn before asked about someone else ("What is her name?",
+"Who is the owner?"). Words under a speaker label it cannot read after the read-back are never a yes; a "Caller:"
+label is the caller. Emoji, symbols, HTML tags, the CJK full stop and the minus sign are formatting around the 911
+instruction and the turn before it. Mutation harness (whole stack): 160 mutants, 131 killed, 29 equivalent, each with
+its reason (most of the older caller-side rules are now second fences behind the read-back).
+
+AEGIS Inquisitor round 13 on 8ee0ba9d (RR-F3): **the plain-words rule covers the rest of the call.** Once the caller
+gives the number, every later caller sentence, in that turn and later ones, must be plain words too, so "My cell is
+602 555 0101. That phone doesn't work anymore." is never taken on a yes. Trade-off disclosed: a caller who describes
+the problem after giving the number ("602 555 0101. My sink is leaking.") also fails closed to "check the
+recording". A bare name ("Mark Diaz, 602 ...", no "I'm" / "my name is" / "this is") is the caller's only when the
+receptionist asked for the caller's own name ("What's your name?", "May I have your name?", "Who am I speaking
+with?") or it answers the opening greeting with nobody else spoken of before it; "your son's name", "the person
+you're calling for" and "Calling for the guy upstairs." withhold it. The 911 instruction with no final "." or "!"
+(possibly cut off) or with any angle bracket in the turn ("<no need to> call 911.", "<b>...</b>") is "ambiguous":
+CHECK NOW, never URGENT and never routine. Mutation harness (whole stack): 166 mutants, 137 killed, 29 equivalent, each with its reason.
+
+AEGIS Inquisitor round 14 on 2a797441 (RR-F3): **the same rules, read both ways.** A caller sentence before the
+number that speaks of a phone (phone, cell, number, line, text ...) in other than plain words ("Never call this
+number.", "My cell got shut off last week.") withholds the callback. Anyone else spoken of after a name, in that
+turn or later ("Mark Diaz, 602 ... He's my son."), withholds the name; trade-off disclosed: "I'm Ana Reyes. The owner
+..." also withholds it. Only a single "." or "!" (or "!!") ends the 911 instruction; "...", "..", a dash, ";", ":" or
+"!!!" make it "ambiguous" (CHECK NOW), like no end mark ("‼" folds to "!!"). Mutation harness (whole stack): 169
+mutants, 140 killed, 29 equivalent; call_summarizer 78 (57 killed, 21 equivalent).
+
+AEGIS Inquisitor round 15 on ef494ec6 (RR-F3): **after a name, only plain words.** Anything the caller says after a
+name other than plain words (a number, a correction, a yes) withholds the name, so "That's my nephew", "He is a
+client" or "Es mi sobrino" can never leave someone else's name in place; trade-off disclosed: "I'm Ana Reyes, 602 ...
+I need a repair." also withholds it (every pool call gives the name last). Before the number, the list of what a
+caller calls a phone or where it rings now holds "telephone", "home", "work", "office", "casa", "trabajo" ...; this
+side stays a word list, because every pool call describes the need before the number in free words, so a rejection
+phrased without any of these words ("Not that one. 602 ...") is a known residual (High by the kill criteria; open for Andre).
+The health lexicon adds gout, rehab, methadone, Ozempic and related terms. The harness now fails a mutant that is
+marked equivalent but killed (the RR-F5 "opt-in time guard removed" reason was wrong). Mutation harness (whole stack):
+170 mutants, 140 killed, 30 equivalent; call_summarizer 79 (57 killed, 22 equivalent).
+
+### RR-F3 — Andre's ruling, Nov 27 2026: the callback consent question (option a)
+
+After 15 Inquisitor rounds the one open High was structural: a caller can reject a number in free words *before*
+giving it ("Not that one. 602 555 0101.") and then say "Yes" to a read-back, and every shared-pool call describes its
+need in free words before the number, so no fail-closed word rule could close it without breaking certification.
+Andre ruled for option (a): the receptionist asks the fixed consent question ("Is 602 555 0101 the best number to
+call you back?" / "¿Es el 602 555 0101 el mejor número para devolverle la llamada?"), and only a trusted yes to it,
+with nothing else said by the caller afterwards, sets the callback. The explicit yes settles what came before or
+after; when this module's own rejection and correction rules (a word list) had marked that number, the note
+`caller_doubted_this_number_earlier` is added and the yes stands. The read-back line still confirms the name. The
+plain-words and phone-word fences around the callback are removed. The shared MVP F3 pool now has the consent
+question after every read-back (fixtures/mvp_pools: generator, oracle and the three dev-seed f3 transcript pins);
+the answer keys are unchanged.
+
+AEGIS F3 round 18 (Nov 27 2026): after the yes, "Thanks <or is work better?>" passed as a closing line (bracketed
+words were set aside before the match) and a 911 line read as "ambiguous" (brackets, a "?" or no end mark) passed as
+the instruction, so a yes to the question inside them set the callback. The closing line is now matched on the turn
+as said, and a 911 turn counts only when it reads as the instruction itself. Six mutants marked equivalent were
+killable: the doubt note, the ambiguous-number note and a low-confidence name confirmation now have tests, and the
+equivalence reasons that named the removed read-back are rewritten.
+
+AEGIS F3 round 19 (Nov 27 2026): the 911 line was still read with symbols and format characters set aside, so
+"Please hang up and dial 911 right now. ❓", flag letters or tag characters after it kept the callback; after the yes
+the 911 line now counts only as one of its two fixed forms, exactly once read after NFKC (as the pool oracle reads it).
+Ten more mutants marked equivalent were killable (eight name rules a second fence did not in fact cover, a
+correction window that cut words, a consent number with a no-break space): the name rules have tests, the redundant
+partial-correction pattern is removed (every digit word it read, the doubt rule reads over all the rest), and
+receptionist numbers are read after NFKC.
+
+AEGIS F3 round 20 (Nov 27 2026): `confirmation_disagrees_with_caller` compared the callback with the last receptionist
+number, which is always the consent question's, so it could never fire; it now flags any number the receptionist's
+fixed confirmation line names that is not the callback. The after-yes lines and the consent question are trimmed of
+spaces, tabs and line breaks only (str.strip() also dropped the controls U+001C-U+001F). The callback-number row of
+the rules table is rewritten for the consent rule.
+
+AEGIS F3 round 21 (Nov 27 2026): a receptionist turn made only of the controls U+001C-U+001F was dropped as silence
+before the fixed-line check, so it could sit after the yes (or before it) and the callback stood; such a turn now
+counts as a turn. The number-only confirmation ("Let me confirm: at 602 555 0101.") was listed as a fixed form but
+never matched, so a read-back of another number went unflagged; it is now checked. "Character for character" is
+corrected to what the code does: exactly, once read after NFKC, with closing lines matched without regard to case.
+Mutation harness (call_summarizer): 86 mutants, 83 killed, 3 equivalent.
+
+AEGIS F3 round 22 (Nov 27 2026): the round-21 turn filter kept a caller turn of controls as the next turn while the
+yes check still dropped it, so a "Yes." after the 911 line counted as the answer; both now use the same filter, and
+such a turn is no yes. The wording of the consent, closing and confirmation claims is narrowed to what the code
+matches. Mutation harness (call_summarizer): 87 mutants, 84 killed, 3 equivalent.
+
+AEGIS F3 round 23 (Nov 27 2026): a turn under a speaker label the module cannot read, made only of controls or other
+spaces, was still dropped as silence, so it could sit between the consent question and the yes; every filter the
+consent rules read (the ordered turns, the next-turn rule, the yes check) now trims only spaces, tabs and line
+breaks, and such a turn is a turn there (never a yes). The speech filters that decide the call's need and the
+low-confidence flag still read a caller turn of only controls or spaces as silence (it carries no words). Mutation harness (call_summarizer): 88 mutants, 85 killed, 3 equivalent.
+
+AEGIS Inquisitor round 16 on 84d856e2 (RR-F3): a yes to a later receptionist question ("Is that a no?", "Or should
+we use your work number?") was read as consent. Now the very next spoken turn after the consent question must be the
+caller's yes, and the receptionist may ask nothing after it (a closing statement is fine). The doubt note is described
+exactly: it fires when this module's own rejection and correction rules (a word list) marked the number. The pool
+oracle applies the same next-turn rule.
+
+AEGIS Inquisitor round 17 on 99fe68e8 (RR-F3): a later question with a look-alike question mark ("？", "؟") or with
+none ("Let me know if that's not right.") slipped past the "no question" check. The inverted default: after the
+consent question the receptionist may say only the fixed 911 instruction or a fixed closing line ("Thank you, we'll
+call you back soon.", "Thanks.", "Gracias, le llamaremos pronto."); anything else means no callback. The pool oracle
+allows only its 911 line after the consent question.
