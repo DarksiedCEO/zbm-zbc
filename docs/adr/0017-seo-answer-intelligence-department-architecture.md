@@ -1483,3 +1483,81 @@ AEGIS round 12 (Nov 27 2026, Inquisitor on L5 0ca6f5ad / L4 ae8e2b2c): a hyphena
 is "100 1/2", never the range "100-1"), and a spelled house number before a numbered street is its digit ("One Fifth
 Ave" is "1 5th Ave"). "100 A Main St" / "100A Main St", a unit written before the street, and "One, Main St" are still
 other addresses (disclosed).
+
+## Amendment — SEO-L4 citation audit (Nov 27 2026; MVP spec v0.1, Local / Business Profile)
+
+`services/seo-py/src/citation_audit.py`, one job: compare every directory listing of one business with the NAP record
+the owner confirmed and say, per listing, whether it is correct or which fault it carries, with the record's values
+proposed as the fix. Not wired to any directory; nothing is filed or edited from here, and every correction is a
+proposal the owner approves first.
+
+| Case | Verdict |
+|---|---|
+| Formatting only (name case, "&"/"and", punctuation, legal suffixes; street abbreviations and unit styles; phone punctuation, a leading 1, other scripts' digits; http/https/www; a full state name; ZIP+4), or the owner's own toll-free number | `correct` |
+| Listed closed (any status but "open", case aside; no status at all reads as open) while the business is open / listed open while it is closed | `closed_listing` / `wrong_status` |
+| Otherwise the first real difference, in this order | `wrong_name`, `wrong_address` (street, unit, city, state, ZIP), `wrong_phone` |
+| A different website | listed in `differences`, not a fault on its own; a missing website is not a fault |
+| A listing with no name, street or readable phone, or one that cannot be read at all | `unreadable` (never `correct`); the rest of the audit goes on |
+| A record that cannot be read | the whole audit refuses (ValueError): nothing is judged against an unknown truth |
+
+`differences` lists every field that differs, so a listing with two faults shows both. Certification:
+`services/seo-py/tests/test_citation_audit.py` runs the shared MVP pool (SEO-L4, 200 businesses per seed, 15-45
+listings each, about 5,400 listings per seed) for the three DEV seeds and three more: every listing's verdict matches
+the key. A grader self-test proves one missed fault is noticed. It uses the shared NAP keys (`nap.py`, hardened in SEO-L5
+AEGIS round 1: every script kept in names, trailing legal suffixes only, full state names, unit kinds).
+**Known limits:** a business that legitimately lists a second local number (a fax, a second line) shows `wrong_phone`
+unless the record carries it; names are compared exactly after formatting.
+
+AEGIS round 1 for SEO-L4 (Nov 27 2026, Inquisitor on L5+L4 at 4ce895db, shared with SEO-L5 round 2): the NAP fixes
+above apply here too ("Mt"/"Mount", "St." as Saint, numeric ZIPs, "D.C."/"Nev.", any-script digits), so a correct
+listing is not reported wrong. A record that carries a street line AND a suite field now uses both (a suite that names
+its kind, "Ste 4" or "Floor 2", is used as written; a bare one is a suite); a suite that is neither text nor a number
+refuses the audit. The docstring now says what the code does: a listing with no status reads as open.
+
+AEGIS round 2 for SEO-L4 (Nov 27 2026, Inquisitor on fa92b095, shared with SEO-L5 round 3): the SEO-L5 round-3 NAP
+fixes apply here (every script in street names, "Joe's" = "Joes", "Ste 4.", "4th Floor", "W.Va."). A suite field that
+names its kind anywhere ("4th Floor", "Ste 4.") is used as written; only a bare one becomes "Suite N". A record field
+that cannot be read as text now refuses the audit with ValueError, as documented. `proposed` is empty only when
+nothing differs: a correct listing whose website differs still proposes the record's website.
+
+AEGIS round 3 for SEO-L4 (Nov 27 2026, Inquisitor on 52231682, shared with SEO-L5 round 4): the USPS suffix and unit
+lists, lettered streets, city abbreviations and spaced initials of SEO-L5 round 4 apply here. A record's suite field
+counts even when its street line already names another unit ("Suite 400" + "Fl 4"). The confirmed record must carry
+a state and a ZIP, and a website that is text; an empty listing status reads as open; anything about the business
+that cannot be read refuses with ValueError. **The inverted default:** a listing with the record's house number, unit
+and city whose street words still differ is `address_needs_review` (a person checks), never `correct` and never
+`wrong_address` on a guess.
+
+AEGIS round 4 for SEO-L4 (Nov 27 2026, Inquisitor on 5c37e1d1, shared with SEO-L5 round 5): the SEO-L5 round-5 key
+fixes apply here: "100A S St" is never "100A South St" (`address_needs_review`, never `correct`), "1 Pier Ave" is a
+street, "Ste 1-10" is never "Ste 110" (`wrong_address`), and "Mtn View" is "Mountain View".
+
+AEGIS round 5 for SEO-L4 (Nov 27 2026, Inquisitor on e4dc6fa9, shared with SEO-L5 round 6): the SEO-L5 round-6 key
+fixes apply here ("1200-B" = "1200B", "100½" = "100 1/2", "A-1" = "A1", "Clinton Twp" = "Clinton Township"). The same
+street, state and ZIP with city words that still differ is `address_needs_review`, never `wrong_address` on a guess.
+
+AEGIS round 6 for SEO-L4 (Nov 27 2026, Inquisitor on 570b349a, shared with SEO-L5 round 7): the SEO-L5 round-7 key
+fixes apply here (dashed units, every vulgar fraction, dashed cities). A listing name with the record's letters and
+other spacing ("Mercedes-Benz" / "Mercedes Benz") is `name_needs_review`, never `wrong_name` on a guess.
+
+AEGIS round 7 for SEO-L4 (Nov 27 2026, Inquisitor on 8b4b2b4b): a review verdict never hides a real fault: a name
+review plus another street number is `wrong_address`; the review verdicts are only for listings whose only
+differences cannot be told from formatting. The module's Rules now describe both review verdicts.
+
+AEGIS round 8 for SEO-L4 (Nov 27 2026, Inquisitor on 1109b645, shared with SEO-L5 round 9): with the SEO-L5 round-9
+keys, "Suite E" against "Suite W", "Apt N" against "Apt S", "100 1/2" or "100-102" against "100", and "#E" against a
+street direction "E" are each `wrong_address` (or `correct` where only formatting differs), never hidden behind a review.
+
+AEGIS round 9 for SEO-L4 (Nov 27 2026, Inquisitor on 9c6c8349, shared with SEO-L5 round 10): with the SEO-L5
+round-10 keys, "Fifth Ave" / "5th Ave", "Twenty-First St" / "21st St" and "Interstate 5" / "I-5" are `correct`
+(formatting), "Suite NE" against "Suite NW" is `wrong_address`, and a listing with no city at all (missing, empty,
+spaces or a dash) is `wrong_address` with the record's city proposed: a review is only for other city words.
+
+AEGIS round 10 for SEO-L4 (Nov 27 2026, Inquisitor on 8b0c2224, shared with SEO-L5 round 11): with the SEO-L5
+round-11 keys, another spelling of a numbered street at the same house number ("100 2nd St" / "100 2d St", "I-35" /
+"IH-35") is `address_needs_review`, a spelled house number ("One Microsoft Way") is `correct`, and "100 1/2" or
+"100-102" against "100" stays `wrong_address`.
+
+AEGIS round 11 for SEO-L4 (Nov 27 2026, Inquisitor on ae8e2b2c, shared with SEO-L5 round 12): "100-1/2" is
+formatting of "100 1/2" (`correct`), and against "100-1/3", "100-1" or "100" it is `wrong_address`, never a review;
+"One Fifth Ave" is `correct` against "1 5th Ave".
