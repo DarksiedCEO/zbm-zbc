@@ -1561,3 +1561,47 @@ round-11 keys, another spelling of a numbered street at the same house number ("
 AEGIS round 11 for SEO-L4 (Nov 27 2026, Inquisitor on ae8e2b2c, shared with SEO-L5 round 12): "100-1/2" is
 formatting of "100 1/2" (`correct`), and against "100-1/3", "100-1" or "100" it is `wrong_address`, never a review;
 "One Fifth Ave" is `correct` against "1 5th Ave".
+
+## Amendment — SEO-L7 review response drafter (Nov 27 2026; MVP spec v0.1, Local / Business Profile)
+
+`services/seo-py/src/review_responder.py` drafts the business's reply to one public review and says what must happen
+before it is posted. Deterministic, no LLM, nothing posted. **The inverted default from the start:** the reply is one
+of six vetted wordings chosen only by star band (1-2, 3, 4-5) and whether the vertical is regulated; no word of the
+review, the reviewer's name, the service or any record text ever reaches the reply, so it cannot repeat a health or
+case detail, argue with the reviewer, or carry an injected instruction. Regulated verticals (med spa, dental,
+personal-injury law) and every vertical the module does not know get wordings with no relationship word ("visit",
+"patient", "treatment", "appointment", "case", "see you again" ...); the wordings are checked against the
+relationship and never-say lists at import and in the tests. A suspected fake (one review, account at most 7 days old,
+5 or more same-day reviews from new accounts) gets no reply and goes to the owner for a removal request. Any character
+outside printable ASCII, any ASCII digit or "$", or a listed money, price or legal stem appearing anywhere as a plain
+substring of the casefolded text routes the review to the owner, except the two exact non-request sentences in a
+4- or 5-star review; the list misses words it does not know (disclosed: the flag is advisory and every reply is
+owner-approved). An unreadable review gets no reply and goes to the owner; only a non-list batch
+raises ValueError.
+
+AEGIS L7 round 1 (Nov 27 2026, Inquisitor on 977df49e): money asks and claims were phrased past every list ("I want my
+$200 back", "see you in court", "make this right financially"), so **every reply now needs the owner's approval before
+posting** (the inverted default; the pool key's approval rule is a minimum and is always met). The money net is
+broad and over-routes (advisory: it costs an owner look, and the tests bound it below half of a normal review mix); the
+non-request exemption is the two exact sentences only; `draft` no longer touches a hostile object in its fallback, and
+`draft_all` takes exactly a list. The certification grader counts a missing fake flag, a genuine review flagged fake,
+or a missing route or approval the key asks for; an extra route or approval is allowed.
+
+Certified on the shared MVP L7 pool (300 reviews per seed; DEV seeds and three cert seeds): every fake flag matches the
+key and every route and approval the key asks for is there, no reply holds a detail term, a relationship word or a never-say word. Disclosed: the
+"approve as-is" rate from a blind human grader (spec bar >= 90%) is not measured here; the wordings are short and the
+same for every review of a band, which a human grader may rate below a tailored reply. Business voice is not applied
+(no per-client wording yet; a vetted per-client set in config would be the extension).
+
+AEGIS L7 rounds 2-5 (Nov 27 2026): the grader fails a reply to a flagged fake; every Unicode currency sign and
+number character routes (read before NFKC, which folds "₨" and "﷼" into letters); money and legal stems match anywhere
+in a word ("overcharged", "unpaid", "nonrefundable", "litigation"). Round 6 found look-alike letters and invisible
+or filler characters outside any fold table, so any character outside printable ASCII now routes, and every stem is a
+plain substring ("countersued", "impagada", "latefees"). The docstring and this note describe the route flag as an
+advisory word list with known misses.
+
+AEGIS L7 rounds 7-9 (Nov 27 2026): a newline routes like any other character outside printable ASCII; the
+non-request exemption ignores letter case and outer spaces; a review whose reviewer and pile-up fields meet the fake
+rule is flagged for removal even when its id, stars or text cannot be read (a review or reviewer object that is not
+exactly a dict, or holds a key that is not exactly a str, is unreadable as a whole and is not flagged; plain
+json.loads never produces one). Round 8 found no High.
