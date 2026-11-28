@@ -59,6 +59,11 @@ def generate(seed: str) -> tuple[list[dict], list[dict]]:
                           "text": (f"Confirmo: {cap['name']}, al {number}." if es else
                                    f"Let me confirm: {cap['name']}, at {number}.")})
             turns.append({"speaker": "caller", "confidence": 0.96, "text": "Sí." if es else "Yes."})
+            # the fixed consent question (Andre's ruling, Nov 27 2026): only a yes to it sets the callback number
+            turns.append({"speaker": "agent", "confidence": 0.97,
+                          "text": (f"¿Es el {number} el mejor número para devolverle la llamada?" if es else
+                                   f"Is {number} the best number to call you back?")})
+            turns.append({"speaker": "caller", "confidence": 0.96, "text": "Sí." if es else "Yes."})
         if k["emergency"]:
             turns.append({"speaker": "agent", "confidence": 0.98,
                           "text": ("Cuelgue y marque al 911 ahora mismo." if es else

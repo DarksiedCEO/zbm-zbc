@@ -159,6 +159,9 @@ def check_f4(cases: list[dict], key: list[dict]) -> list[str]:
 _CONFIRM = re.compile(r"^(?:Let me confirm|Confirmo): (?P<name>.+), (?:at|al) (?P<num>\d{3} \d{3} \d{4})\.$")
 _NUM = re.compile(r"\b(\d{3}) (\d{3}) (\d{4})\b")
 F3_LOW_CONFIDENCE = 0.6
+# the fixed consent question (Nov 27 2026 ruling): the callback is the number it names, when a caller "Yes."/"Sí." follows
+_CONSENT = re.compile(r"^(?:Is (?P<num>\d{3} \d{3} \d{4}) the best number to call you back\?|"
+                      r"¿Es el (?P<num2>\d{3} \d{3} \d{4}) el mejor número para devolverle la llamada\?)$")
 # The checker's own health-detail lexicon (EN/ES). A summarizer checker needs one anyway; it is not the generator's list.
 HEALTH_LEXICON = ("pregnant", "blood thinners", "diabetes", "seizure", "embarazada", "anticoagulantes", "convulsión")
 
@@ -171,6 +174,24 @@ CALL_PURPOSES = frozenset({"angry_caller", "asks_if_ai", "booking", "complaint",
 
 _CALLER_NAME = re.compile(r"(?:^|(?<=My name is )|(?<=Me llamo )|(?<=I'm )|(?<=[Ss]oy )|(?<=This is )|(?<=Habla )"
                           r"|(?<=It's )|(?<=\. ))([A-Z][a-z]+ [A-Z][a-z]+)(?=[.,])", re.MULTILINE)
+
+
+# all the agent may say after the consent question in this pool: the fixed 911 instruction
+_AFTER_CONSENT = frozenset({"Please hang up and dial 911 right now.", "Cuelgue y marque al 911 ahora mismo."})
+
+
+def _consented(t: dict, digits: str) -> bool:
+    """The agent asked the consent question for these digits and the caller's next turn was a yes."""
+    turns = t["turns"]
+    for i, x in enumerate(turns):
+        m = _CONSENT.match(x["text"]) if x["speaker"] == "agent" else None
+        if m and (m["num"] or m["num2"]).replace(" ", "") == digits:
+            later = [y for y in turns[i + 1:] if y["text"]]
+            # the very next spoken turn is the caller's yes, and the agent says nothing afterwards but the 911 line
+            if later and later[0]["speaker"] == "caller" and later[0]["text"] in ("Yes.", "Sí.") and \
+                    not any(y["speaker"] == "agent" and y["text"] not in _AFTER_CONSENT for y in later):
+                return True
+    return False
 
 
 def derive_f3(t: dict, need_label: str) -> dict:
@@ -186,7 +207,8 @@ def derive_f3(t: dict, need_label: str) -> dict:
     return {
         "transcript_id": t["transcript_id"],
         "key_facts": {"name": (names[0] if len(names) == 1 else f"AMBIGUOUS:{names}") if last else None,
-                      "callback_number": "+1" + trusted_seq[-1] if last and trusted_seq else None,
+                      "callback_number": "+1" + trusted_seq[-1]
+                      if last and trusted_seq and _consented(t, trusted_seq[-1]) else None,
                       "need": need_label,
                       "urgency": "emergency" if any("911" in x["text"] for x in t["turns"] if x["speaker"] == "agent")
                       else "routine"},
