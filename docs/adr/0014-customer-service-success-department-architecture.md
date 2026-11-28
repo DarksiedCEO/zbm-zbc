@@ -575,7 +575,42 @@ a plain `dict`, or a key or value that is not plain text, a number, a boolean or
 works on private copies, so nothing can change between the check and the use (a `str` subclass client id answered
 `strip()` one way when checked and another way when applied).
 
-review queue (who sees `unrecognised_reply`, how fast) is wiring, not built. Regression tests: "AEGIS round 5".
+**RR-F5 review queue (Nov 27 2026, Andre's approval).** `services/service-py/src/review_queue.py` lists the replies the
+keeper holds for `unrecognised_reply` and turns a named reviewer's ruling into the keeper's `staff_review` event. The
+queue reads the keeper itself (a probe send per record, replayed at the last event's time, after every other event at that time), never its own copy of the
+rules, so a record held for anything stronger is never queued. An item shows every unread reply for its record, and
+a ruling is accepted only while the item is exactly what was listed: a reply that arrived after the reviewer opened
+it makes the ruling stale (`StaleItem`), and the keeper's `seen` digest (below) makes sure a ruling never clears a
+reply its reviewer did not read. Rulings are
+`not_an_opt_out` (clears the hold) or `opt_out` (an opt-out that, as after STOP, only new express written consent
+lifts), each with an audit row. Fixture-only; nothing is sent.
+
+AEGIS review-queue round 1 (Nov 27 2026): a review timed after the newest event could still clear a reply recorded
+later with an earlier time, which the reviewer never saw. The consent keeper now keeps each record's unread replies
+(since the last clearing review or written consent) and a `not_an_opt_out` review clears the hold only when its
+`seen` field equals `seen_digest` of exactly those replies; a review without `seen`, or for other replies, clears
+nothing and leaves the unread replies for the next review. The queue takes its list of unread replies from the
+keeper and puts that digest in every review event. Digests use ASCII-escaped JSON, so any reply text has one; the
+reviewer, ruling and item id must be plain `str`. A reply timed before the record's latest written consent is not unread (the consent cleared it, as
+after STOP) and is not in the digest.
+
+AEGIS review-queue round 2 (Nov 27 2026): "stp", "sop", "sto" and "top" as the whole reply read as
+`possible_opt_out` (the classifier skips words under four letters, so a reviewer could have cleared a STOP typo);
+an `opt_out` ruling also resets the unread replies; a replay clears the keeper's state before it validates, so a
+refused replay leaves nothing from an earlier one.
+
+AEGIS review-queue round 3 (Nov 27 2026): an event time outside ±10^18 refuses the replay before anything is applied
+(a huge time had failed inside the digest, after the reset). The short-typo rule is now any whole reply one edit away
+from "stop" once invisibles and everything but letters and digits are removed and leet digits are read as letters
+("s\u200btp", "5tp", "s.t.p"); it over-blocks "top", "shop", "step" as the whole reply (disclosed: a person reads
+them anyway, and new written consent restores texting).
+
+AEGIS review-queue round 4 (Nov 27 2026): an accent on a letter ("s\u0301tp") had survived NFKC as one letter, so a
+review could clear a STOP typo; the short-typo rule now reads after NFKD with every accent removed, and reads the
+Cyrillic and Greek look-alikes of s, t, o and p as those letters (other look-alikes are not mapped: disclosed). A
+history with an event at the keeper's last time (10^18) is still listed: the queue's probes are timed at the last
+event, which the keeper reads after every other event at that time; a ruling on such a history refuses with a
+ValueError, since no review can be timed after it.
 
 ## Amendment — RR-F2 missed-call text-back (Nov 26 2026; MVP spec v0.1, front-desk team)
 
